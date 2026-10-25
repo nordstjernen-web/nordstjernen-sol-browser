@@ -1,7 +1,7 @@
 # Maintainer: Andreas Røsdal <andreas dot rosdal at gmail dot com>
 
 pkgname=nordstjernen-browser
-pkgver=1.0.35
+pkgver=1.0.36
 pkgrel=1
 pkgdesc='Small web browser written from scratch in C, with a GTK 4 interface'
 arch=(x86_64 aarch64)
@@ -50,7 +50,7 @@ optdepends=(
   'hunspell-en_us: English dictionary for spell checking'
 )
 source=("$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/$pkgver.tar.gz")
-sha256sums=('eb9f7b1d66ef204861001cc6c75fc96e6d9e482117209f181312520e08adcce0')
+sha256sums=('3b6f6c87ff2fe40fed905c0b88422d4f2d3e65d7cf9cd89a907b5038d3c5bf6a')
 
 _srcdir=nordstjernen-sol-browser-$pkgver
 

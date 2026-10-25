@@ -3,6 +3,8 @@ Changelog:
 
 1.0.37:
 ======
+* Packaging: the Arch Linux package (`packaging/arch/`) builds release
+  1.0.36. It was rebuilt in a clean Arch container and passes namcap.
 * Performance: appending children to an element that is not in the
   document no longer slows down with every child. Each append ran the
   incremental style invalidation, which checks every existing child of
