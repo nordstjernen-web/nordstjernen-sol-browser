@@ -56,7 +56,7 @@ git clone ssh://aur@aur.archlinux.org/nordstjernen-browser.git aur-nordstjernen-
 cp packaging/arch/PKGBUILD packaging/arch/.SRCINFO aur-nordstjernen-browser/
 cd aur-nordstjernen-browser
 git add PKGBUILD .SRCINFO
-git commit -m "Initial upload: nordstjernen-browser 1.0.35"
+git commit -m "Initial upload: nordstjernen-browser 1.0.36"
 git push
 ```
 
@@ -70,3 +70,12 @@ The package was verified on Arch Linux 2026.10.01 (linux 7.2, GCC 16,
 FFmpeg 9, GTK 4.24) in a VirtualBox VM installed unattended from the
 official ISO with a cloud-init seed. It built with no warnings in a clean
 `extra-x86_64-build` chroot, and the browser ran in a GNOME Wayland session.
+Release 1.0.36 was rebuilt with `makepkg -s` in a fresh
+`archlinux:base-devel` podman container (GCC 16, FFmpeg 9, GTK 4.24) and
+passes namcap with only the warning above.
+
+## The other editions
+
+Northstar and Southstar carry the same kind of recipe in their own
+`packaging/arch/`, as `northstar-browser` and `southstar-browser`. All three
+packages install side by side.
