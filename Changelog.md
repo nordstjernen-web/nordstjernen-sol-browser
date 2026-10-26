@@ -3,6 +3,13 @@ Changelog:
 
 1.0.37:
 ======
+* Packaging: Nordstjernen can be installed from npm as
+  `nordstjernen-browser` (`npm/`). On Linux, the BSDs and Intel macOS it
+  is built from the release source against the system's libraries, since
+  a single prebuilt binary cannot match every distribution's GTK and
+  FFmpeg. Apple silicon Macs get the notarised release build, checked
+  against `SHA256SUMS`. On Windows the `nordstjernen` command opens the
+  Microsoft Store page.
 * Packaging: the Arch Linux package (`packaging/arch/`) builds release
   1.0.36. It was rebuilt in a clean Arch container and passes namcap.
 * Performance: appending children to an element that is not in the
