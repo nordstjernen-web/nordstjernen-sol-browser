@@ -3,6 +3,8 @@
 [Nordstjernen Web Navigator](https://nordstjernen.org) is a minimal, secure
 web browser written from scratch in C with GTK 4.
 
+![Nordstjernen Web Navigator](https://raw.githubusercontent.com/nordstjernen-web/nordstjernen-sol-browser/main/docs/screenshot.png)
+
 ```sh
 npm install -g nordstjernen-browser
 nordstjernen https://example.com
