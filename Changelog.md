@@ -9,7 +9,12 @@ Changelog:
   a single prebuilt binary cannot match every distribution's GTK and
   FFmpeg. Apple silicon Macs get the notarised release build, checked
   against `SHA256SUMS`. On Windows the `nordstjernen` command opens the
-  Microsoft Store page.
+  Microsoft Store page. Before a source build downloads anything, the
+  installer checks every build tool and library and names whatever is
+  missing, or too old because the distribution predates the one
+  Nordstjernen needs. It shows the build's progress, keeps a log, and
+  checks the source tarball against a checksum recorded in the package.
+  Intel Macs get Homebrew instructions.
 * Packaging: the Arch Linux package (`packaging/arch/`) builds release
   1.0.36. It was rebuilt in a clean Arch container and passes namcap.
 * Performance: appending children to an element that is not in the

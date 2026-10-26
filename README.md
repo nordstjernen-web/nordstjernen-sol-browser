@@ -67,6 +67,7 @@ this browser rewritten in Rust.
 | Android | [Google Play](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser) |
 | macOS | notarised Apple Silicon `.dmg` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
 | Debian / Ubuntu | `.deb` packages (Debian 13, Ubuntu 24.04 and 26.04) and a portable Linux `.zip` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
+| npm (Linux, macOS, BSD) | [`nordstjernen-browser`](https://www.npmjs.com/package/nordstjernen-browser), see below |
 | Java/JVM | [`org.nordstjernen:nordstjernen-java`](https://github.com/nordstjernen-web/nordstjernen-sol-browser/packages) on GitHub Packages (Maven) |
 | Source | [release tags](https://github.com/nordstjernen-web/nordstjernen-sol-browser/tags) |
 
@@ -75,6 +76,18 @@ is required (arm64 and x86_64). Other platforms build from source — see
 "Build" below and the per-platform install notes in [docs/](docs/README.md);
 packaging scripts for AppImage, RPM, Alpine, the BSDs, MSIX and the Windows
 installer are in `scripts/`.
+
+### Install with npm
+
+```sh
+npm install -g nordstjernen-browser
+nordstjernen https://example.com
+```
+
+On Linux, the BSDs and Intel Macs the package builds Nordstjernen from the
+release source against your system's libraries, and first names any build
+dependency that is missing; Apple Silicon Macs get the notarised release
+build. See [npm/README.md](npm/README.md).
 
 ## Browser features
 

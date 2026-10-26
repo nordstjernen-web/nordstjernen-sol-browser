@@ -5,42 +5,42 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 const { version } = require('../package.json');
+const { preflight, capture } = require('./dependencies');
 
 const REPO = 'nordstjernen-web/nordstjernen-sol-browser';
 const RELEASE_URL = `https://github.com/${REPO}/releases/download/${version}`;
 const SOURCE_URL = `https://github.com/${REPO}/archive/refs/tags/${version}.tar.gz`;
+const SOURCE_CHECKSUM_FILE = path.join(__dirname, 'source.json');
 const STORE_URL = 'https://apps.microsoft.com/detail/9NW8T7W5Z4PL';
-
-const BUILD_DEPENDENCIES = [
-  'Nordstjernen is built from source on this system. Install the build dependencies first:',
-  '',
-  '  Debian/Ubuntu:',
-  '    sudo apt install build-essential pkg-config meson ninja-build \\',
-  '      libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \\',
-  '      libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev \\',
-  '      libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev',
-  '',
-  '  Fedora/RHEL (ffmpeg-devel from RPM Fusion):',
-  '    sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \\',
-  '      openssl-devel uchardet-devel libpsl-devel sqlite-devel \\',
-  '      libseccomp-devel libwebp-devel SDL2-devel ffmpeg-devel',
-  '',
-  '  openSUSE (ffmpeg-devel from Packman):',
-  '    sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \\',
-  '      libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel \\',
-  '      libseccomp-devel libwebp-devel libSDL2-devel ffmpeg-devel',
-  '',
-  'Then reinstall: npm install -g nordstjernen-browser',
-].join('\n');
-
 class InstallError extends Error {}
 
+let terminal;
+
+function terminalFd() {
+  if (terminal !== undefined) return terminal;
+  terminal = null;
+  if (!process.stderr.isTTY && process.platform !== 'win32') {
+    try {
+      terminal = fs.openSync('/dev/tty', 'w');
+    } catch {
+      terminal = null;
+    }
+  }
+  return terminal;
+}
+
+function write(text) {
+  const fd = terminalFd();
+  if (fd !== null) fs.writeSync(fd, text);
+  else process.stderr.write(text);
+}
+
 function log(message) {
-  process.stderr.write(`[nordstjernen-browser] ${message}\n`);
+  write(`[nordstjernen-browser] ${message}\n`);
 }
 
 function cacheBase() {
@@ -105,9 +105,18 @@ function run(command, args, options = {}) {
   if (result.status !== 0) throw new InstallError(`${command} ${args.join(' ')} exited with ${result.status}`);
 }
 
-function hasCommand(command) {
-  const result = spawnSync(command, ['--version'], { stdio: 'ignore' });
-  return !result.error && result.status === 0;
+function brewPrefix(formula) {
+  return process.platform === 'darwin' ? capture('brew', ['--prefix', formula]) : null;
+}
+
+function buildEnvironment() {
+  const extra = ['curl', 'openssl@3']
+    .map(brewPrefix)
+    .filter(Boolean)
+    .map((prefix) => path.join(prefix, 'lib', 'pkgconfig'));
+  if (!extra.length) return process.env;
+  const current = process.env.PKG_CONFIG_PATH ? [process.env.PKG_CONFIG_PATH] : [];
+  return { ...process.env, PKG_CONFIG_PATH: [...extra, ...current].join(path.delimiter) };
 }
 
 async function download(url, destination) {
@@ -117,7 +126,7 @@ async function download(url, destination) {
   await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(destination));
 }
 
-async function expectedChecksum(asset) {
+async function releaseChecksum(asset) {
   const response = await fetch(`${RELEASE_URL}/SHA256SUMS`);
   if (!response.ok) throw new InstallError(`GET ${RELEASE_URL}/SHA256SUMS: HTTP ${response.status}`);
   for (const line of (await response.text()).split('\n')) {
@@ -127,15 +136,31 @@ async function expectedChecksum(asset) {
   throw new InstallError(`${asset} is not listed in the ${version} SHA256SUMS`);
 }
 
+function sourceChecksum() {
+  try {
+    const recorded = JSON.parse(fs.readFileSync(SOURCE_CHECKSUM_FILE, 'utf8'));
+    if (recorded.version === version) return recorded.sha256;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+function verify(file, expected, name) {
+  const actual = sha256(file);
+  if (actual !== expected) {
+    throw new InstallError(`${name} has SHA-256 ${actual}, but ${expected} was expected; refusing to install it`);
+  }
 }
 
 async function installDmg(plan, staging, work) {
   const dmg = path.join(work, plan.asset);
   await download(`${RELEASE_URL}/${plan.asset}`, dmg);
-  const expected = await expectedChecksum(plan.asset);
-  if (sha256(dmg) !== expected) throw new InstallError(`${plan.asset} does not match its SHA256SUMS entry`);
+  verify(dmg, await releaseChecksum(plan.asset), plan.asset);
   const mountpoint = fs.mkdtempSync(path.join(work, 'mount-'));
   run('hdiutil', ['attach', '-nobrowse', '-readonly', '-quiet', '-mountpoint', mountpoint, dmg]);
   try {
@@ -145,25 +170,96 @@ async function installDmg(plan, staging, work) {
   }
 }
 
-async function installSource(staging, work) {
-  const missing = ['meson', 'ninja', 'pkg-config', 'tar'].filter((tool) => !hasCommand(tool));
-  if (!['cc', 'gcc', 'clang'].some(hasCommand)) missing.push('a C compiler');
-  if (missing.length) throw new InstallError(`Missing ${missing.join(', ')}.\n\n${BUILD_DEPENDENCIES}`);
+function buildLogPath() {
+  const directory = path.join(cacheBase(), 'nordstjernen-browser');
+  fs.mkdirSync(directory, { recursive: true });
+  return path.join(directory, `build-${version}.log`);
+}
 
+function logTail(file, count) {
+  try {
+    return fs.readFileSync(file, 'utf8').trimEnd().split('\n').slice(-count).join('\n');
+  } catch {
+    return '';
+  }
+}
+
+function progressReporter(label) {
+  let lastPercent = -1;
+  return (done, total) => {
+    const percent = Math.floor((done * 100) / total);
+    if (percent === lastPercent) return;
+    if (process.stderr.isTTY) {
+      write(`\r[nordstjernen-browser] ${label}: ${done}/${total} (${percent}%)\x1b[K`);
+      if (done === total) write('\n');
+    } else if (percent % 10 === 0) {
+      log(`${label}: ${percent}%`);
+    }
+    lastPercent = percent;
+  };
+}
+
+function runLogged(command, args, env, logFd, onProgress) {
+  fs.writeSync(logFd, `\n$ ${command} ${args.join(' ')}\n`);
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let pending = '';
+    child.stdout.on('data', (chunk) => {
+      fs.writeSync(logFd, chunk);
+      if (!onProgress) return;
+      pending += chunk.toString();
+      const lines = pending.split('\n');
+      pending = lines.pop();
+      for (const line of lines) {
+        const step = line.match(/^\[(\d+)\/(\d+)\]/);
+        if (step) onProgress(Number(step[1]), Number(step[2]));
+      }
+    });
+    child.stderr.on('data', (chunk) => fs.writeSync(logFd, chunk));
+    child.on('error', (error) => reject(new InstallError(`${command}: ${error.message}`)));
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new InstallError(`${command} ${args[0]} failed (exit ${code})`));
+    });
+  });
+}
+
+async function installSource(staging, work) {
+  const env = buildEnvironment();
+  preflight(env, {
+    onWarning: (message) => log(message),
+    onError: (message) => {
+      throw new InstallError(message);
+    },
+  });
+
+  const expected = sourceChecksum();
   const tarball = path.join(work, `nordstjernen-${version}.tar.gz`);
   await download(SOURCE_URL, tarball);
+  if (expected) verify(tarball, expected, `the ${version} source tarball`);
+  else log('this package records no source checksum (unpublished checkout); the tarball is trusted over HTTPS only');
   run('tar', ['-xzf', tarball, '-C', work]);
   const source = path.join(work, `nordstjernen-sol-browser-${version}`);
   const build = path.join(work, 'build');
 
+  const logFile = buildLogPath();
+  const logFd = fs.openSync(logFile, 'w');
   log(`building Nordstjernen ${version} from source; this takes several minutes`);
+  log(`full build output: ${logFile}`);
   try {
-    run('meson', ['setup', build, source, '--buildtype=release', `--prefix=${staging}`]);
+    log('configuring');
+    await runLogged('meson', ['setup', build, source, '--buildtype=release', `--prefix=${staging}`], env, logFd);
+    await runLogged('meson', ['compile', '-C', build], env, logFd, progressReporter('compiling'));
+    log('installing');
+    await runLogged('meson', ['install', '-C', build, '--quiet'], env, logFd);
   } catch (error) {
-    throw new InstallError(`${error.message}\n\n${BUILD_DEPENDENCIES}`);
+    fs.closeSync(logFd);
+    throw new InstallError(
+      `${error.message}\n\nLast lines of ${logFile}:\n\n${logTail(logFile, 25)}\n\nThe full output is in ${logFile}.`,
+    );
   }
-  run('meson', ['compile', '-C', build]);
-  run('meson', ['install', '-C', build, '--quiet']);
+  fs.closeSync(logFd);
+  fs.rmSync(logFile, { force: true });
 }
 
 async function install() {
@@ -193,4 +289,4 @@ async function install() {
   return path.join(root, plan.exe);
 }
 
-module.exports = { install, installPlan, storeMessage, STORE_URL, InstallError, log };
+module.exports = { install, installPlan, storeMessage, STORE_URL, SOURCE_URL, SOURCE_CHECKSUM_FILE, InstallError, log };

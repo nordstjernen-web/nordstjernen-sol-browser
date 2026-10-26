@@ -1,22 +1,36 @@
-// prepack.js: refuses to pack a version that has no release tag, and copies the licence files into the package.
+// prepack.js: checks the version names a release tag, records the release source tarball's SHA-256, and copies the licence files in.
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { version } = require('../package.json');
+const { SOURCE_URL, SOURCE_CHECKSUM_FILE } = require('./install');
 
-const repo = path.join(__dirname, '..', '..');
-const tagged = spawnSync('git', ['show', `refs/tags/${version}:meson.build`], { cwd: repo, encoding: 'utf8' });
-if (tagged.status !== 0) {
-  console.error(`package.json is ${version}, but there is no ${version} release tag; npm versions track published releases`);
+function fail(message) {
+  console.error(message);
   process.exit(1);
 }
-const taggedVersion = tagged.stdout.match(/^\s*version\s*:\s*'([^']+)'/m)[1];
-if (taggedVersion !== version) {
-  console.error(`tag ${version} builds Nordstjernen ${taggedVersion}`);
-  process.exit(1);
+
+async function main() {
+  const repo = path.join(__dirname, '..', '..');
+  const tagged = spawnSync('git', ['show', `refs/tags/${version}:meson.build`], { cwd: repo, encoding: 'utf8' });
+  if (tagged.status !== 0) {
+    fail(`package.json is ${version}, but there is no ${version} release tag; npm versions track published releases`);
+  }
+  const taggedVersion = tagged.stdout.match(/^\s*version\s*:\s*'([^']+)'/m)[1];
+  if (taggedVersion !== version) fail(`tag ${version} builds Nordstjernen ${taggedVersion}`);
+
+  const response = await fetch(SOURCE_URL);
+  if (!response.ok) fail(`GET ${SOURCE_URL}: HTTP ${response.status}`);
+  const sha256 = crypto.createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex');
+  fs.writeFileSync(SOURCE_CHECKSUM_FILE, `${JSON.stringify({ version, sha256 }, null, 2)}\n`);
+  console.error(`source tarball ${version}: sha256 ${sha256}`);
+
+  for (const file of ['License.md', 'COPYING']) {
+    fs.copyFileSync(path.join(repo, file), path.join(__dirname, '..', file));
+  }
 }
-for (const file of ['License.md', 'COPYING']) {
-  fs.copyFileSync(path.join(repo, file), path.join(__dirname, '..', file));
-}
+
+main().catch((error) => fail(error.stack));
