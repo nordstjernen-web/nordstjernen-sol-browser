@@ -1,0 +1,44 @@
+{
+  "name": "nordstjernen-browser",
+  "version": "1.0.36",
+  "description": "Nordstjernen Web Navigator: a minimal, secure web browser written from scratch in C with GTK 4",
+  "keywords": [
+    "browser",
+    "web-browser",
+    "gtk",
+    "gtk4"
+  ],
+  "homepage": "https://nordstjernen.org",
+  "bugs": "https://github.com/nordstjernen-web/nordstjernen-sol-browser/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nordstjernen-web/nordstjernen-sol-browser.git",
+    "directory": "npm"
+  },
+  "license": "(LicenseRef-NSL-1.0 OR GPL-3.0-or-later)",
+  "author": "Andreas Røsdal",
+  "bin": {
+    "nordstjernen": "bin/nordstjernen.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "License.md",
+    "COPYING"
+  ],
+  "scripts": {
+    "postinstall": "node lib/postinstall.js",
+    "prepack": "node lib/prepack.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "freebsd",
+    "openbsd",
+    "netbsd",
+    "win32"
+  ]
+}
