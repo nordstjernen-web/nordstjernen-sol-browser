@@ -60,6 +60,16 @@
   </branding>
 
   <releases>
+    <release version="1.0.37" date="2026-10-26">
+      <description>
+        <p>Performance and packaging release.</p>
+        <ul>
+          <li>Building a long list of elements outside the document is much faster: 20,000 items now take about 30 ms instead of 8 seconds.</li>
+          <li>Nordstjernen can be installed from npm as nordstjernen-browser.</li>
+          <li>The Arch Linux package builds the current release.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.33" date="2026-10-18">
       <description>
         <p>Rendering, performance and security release.</p>
