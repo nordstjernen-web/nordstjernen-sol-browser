@@ -26,6 +26,8 @@ const TOOLS = [
     apt: 'tar', dnf: 'tar', zypper: 'tar', pacman: 'tar', apk: 'tar' },
   { label: 'a C compiler (gcc or clang)', probe: ['cc', 'gcc', 'clang'],
     apt: 'build-essential', dnf: 'gcc', zypper: 'gcc', pacman: 'base-devel', apk: 'build-base' },
+  { label: 'a C++ compiler (g++ or clang++)', probe: ['c++', 'g++', 'clang++'],
+    apt: 'build-essential', dnf: 'gcc-c++', zypper: 'gcc-c++', pacman: 'base-devel', apk: 'build-base' },
 ];
 
 const REQUIRED = [
@@ -252,8 +254,8 @@ function uncheckedReport(tools, manager) {
 function preflight(env, { onWarning, onError }) {
   const manager = packageManager();
   const tools = checkTools(env);
-  if (process.platform === 'darwin' && tools.missing.some((tool) => tool.label.startsWith('a C compiler'))) {
-    onError('Nordstjernen is built from source on this Mac and needs a C compiler. Install the Xcode command line tools:\n\n  xcode-select --install\n\nThen reinstall: npm install -g nordstjernen-browser');
+  if (process.platform === 'darwin' && tools.missing.some((tool) => / compiler /.test(tool.label))) {
+    onError('Nordstjernen is built from source on this Mac and needs a C and C++ compiler. Install the Xcode command line tools:\n\n  xcode-select --install\n\nThen reinstall: npm install -g nordstjernen-browser');
     return;
   }
   if (tools.missing.some((tool) => tool.label === 'pkg-config')) {
