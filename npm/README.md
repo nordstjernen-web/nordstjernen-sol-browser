@@ -12,7 +12,7 @@ nordstjernen https://example.com
 
 | System | What happens |
 | --- | --- |
-| Linux, BSD, Intel macOS | Nordstjernen is built from the release source on your machine with meson and ninja, against your system's GTK 4, FFmpeg and other libraries. This takes several minutes. |
+| Linux, BSD, Intel macOS | Nordstjernen is built from the release source on your machine with meson and ninja, against your system's GTK 4, FFmpeg and other libraries. The source tarball is checked against the SHA-256 recorded in this package. The build takes several minutes and shows its progress in the terminal. |
 | macOS on Apple silicon | The Developer ID signed and notarised release build is downloaded from GitHub and checked against the release's `SHA256SUMS`. |
 | Windows | Nordstjernen is distributed through the [Microsoft Store](https://apps.microsoft.com/detail/9NW8T7W5Z4PL); the `nordstjernen` command opens its Store page. |
 
@@ -22,6 +22,14 @@ browser goes into `~/.cache/nordstjernen-browser` (`~/Library/Caches` on
 macOS) instead.
 
 ## Building from source
+
+The build needs Ubuntu 24.04, Debian 13, Fedora 40, openSUSE Tumbleweed or a
+newer distribution: older releases ship a GTK, FFmpeg, HarfBuzz or meson that
+is too old. Before downloading anything, the installer checks the build tools
+and every required library, and names whatever is missing or too old.
+
+If the build fails, the installer prints the end of the build output and the
+path of the full log, `~/.cache/nordstjernen-browser/build-<version>.log`.
 
 Install the build dependencies before you install the package.
 
@@ -50,7 +58,14 @@ sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-de
     libseccomp-devel libwebp-devel libSDL2-devel ffmpeg-devel
 ```
 
-FFmpeg 6.0 or newer is required.
+macOS on Intel ([Homebrew](https://brew.sh)):
+
+```sh
+brew install meson ninja pkg-config gtk4 libepoxy curl openssl@3 \
+    uchardet libpsl sqlite webp sdl2 ffmpeg
+```
+
+FFmpeg 6.0 or newer is required on Linux.
 
 ## Environment variables
 
