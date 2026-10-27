@@ -49776,6 +49776,95 @@ ns_media_token(JSContext *ctx, ns_node *node)
     return token;
 }
 
+#define NS_MEDIA_HELPER_MAX_BYTES (256u * 1024u * 1024u)
+
+typedef struct {
+    ns_js   *js;
+    JSValue  el;
+    char    *token;
+    char    *url;
+} ns_media_helper_fetch;
+
+static gboolean
+ns_media_helper_url_blocked(ns_js *js, const char *url)
+{
+    const char *page = js->current_url;
+    gboolean mixed = page &&
+        g_ascii_strncasecmp(page, "https://", 8) == 0 &&
+        g_ascii_strncasecmp(url, "http://", 7) == 0;
+    gboolean csp = js->csp &&
+        !ns_csp_allows(js->csp, NS_CSP_MEDIA, url, page);
+    return mixed || csp;
+}
+
+static char *
+ns_media_helper_store(const guint8 *data, gsize len)
+{
+    static unsigned counter;
+    char *dir = g_build_filename(g_get_user_cache_dir(), "nordstjernen",
+                                 "msaudio", NULL);
+    g_mkdir_with_parents(dir, 0700);
+    char *path = g_strdup_printf("%s/j%d-%u.dat", dir, (int)getpid(),
+                                 ++counter);
+    char *file_url = NULL;
+    if (g_file_set_contents_full(path, (const char *)data, (gssize)len,
+                                 G_FILE_SET_CONTENTS_CONSISTENT |
+                                 G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, NULL))
+        file_url = g_strdup_printf("file://%s", path);
+    g_free(path);
+    g_free(dir);
+    return file_url;
+}
+
+static void
+ns_media_helper_fetch_free(ns_media_helper_fetch *f)
+{
+    if (f->js && f->js->ctx) JS_FreeValue(f->js->ctx, f->el);
+    g_free(f->token);
+    g_free(f->url);
+    g_free(f);
+}
+
+static void
+ns_media_helper_fetched(GObject *source, GAsyncResult *result,
+                        gpointer user_data)
+{
+    (void)source;
+    ns_media_helper_fetch *f = user_data;
+    GError *err = NULL;
+    ns_response *resp = ns_net_fetch_finish(result, &err);
+    ns_js *js = f->js;
+    if (js) {
+        g_ptr_array_remove_fast(js->media_helper_fetches, f);
+        JSContext *ctx = js->ctx;
+        JSValue opened = JS_GetPropertyStr(ctx, f->el, "_nd_audio_url");
+        const char *opened_url = JS_ToCString(ctx, opened);
+        gboolean current = opened_url && strcmp(opened_url, f->url) == 0;
+        JS_FreeCString(ctx, opened_url);
+        JS_FreeValue(ctx, opened);
+        char *file_url = NULL;
+        if (current && resp && !resp->error && resp->body &&
+            resp->body->len > 0 &&
+            resp->body->len <= NS_MEDIA_HELPER_MAX_BYTES)
+            file_url = ns_media_helper_store(resp->body->data,
+                                             resp->body->len);
+        if (file_url) {
+            ns_js_emit_audio(js, "open %s %s", f->token, file_url);
+            JSValue playing = JS_GetPropertyStr(ctx, f->el, "_nd_playing");
+            if (JS_ToBool(ctx, playing) > 0)
+                ns_js_emit_audio(js, "play %s", f->token);
+            JS_FreeValue(ctx, playing);
+            g_free(file_url);
+        } else if (current) {
+            ns_node *el = ns_unwrap_element_mut(f->el);
+            if (el) ns_js_dispatch_event(js, el, "error", NULL);
+        }
+    }
+    g_clear_error(&err);
+    if (resp) ns_response_free(resp);
+    ns_media_helper_fetch_free(f);
+}
+
 static void
 ns_media_audio_open(JSContext *ctx, JSValueConst this_val, ns_node *el,
                     const char *url)
@@ -49789,9 +49878,22 @@ ns_media_audio_open(JSContext *ctx, JSValueConst this_val, ns_node *el,
     JS_FreeCString(ctx, opened_url);
     JS_FreeValue(ctx, opened);
     if (!same) {
-        ns_js_emit_audio(js, "open %s %s", token, url);
         JS_SetPropertyStr(ctx, this_val, "_nd_audio_url", JS_NewString(ctx, url));
         JS_SetPropertyStr(ctx, this_val, "_nd_audio_duration", JS_UNDEFINED);
+        if (ns_media_helper_url_blocked(js, url)) {
+            ns_js_dispatch_event(js, el, "error", NULL);
+        } else {
+            if (!js->media_helper_fetches)
+                js->media_helper_fetches = g_ptr_array_new();
+            ns_media_helper_fetch *f = g_new0(ns_media_helper_fetch, 1);
+            f->js = js;
+            f->el = JS_DupValue(ctx, this_val);
+            f->token = g_strdup(token);
+            f->url = g_strdup(url);
+            g_ptr_array_add(js->media_helper_fetches, f);
+            ns_net_fetch_async(url, js->current_url, NULL,
+                               ns_media_helper_fetched, f);
+        }
     }
     g_free(token);
 }
@@ -63895,6 +63997,16 @@ ns_js_free(ns_js *js)
             JS_FreeValue(js->ctx, g_array_index(js->font_ready_resolvers, JSValue, i));
         g_array_free(js->font_ready_resolvers, TRUE);
         js->font_ready_resolvers = NULL;
+    }
+    if (js->media_helper_fetches) {
+        for (guint i = 0; i < js->media_helper_fetches->len; i++) {
+            ns_media_helper_fetch *f =
+                g_ptr_array_index(js->media_helper_fetches, i);
+            JS_FreeValue(js->ctx, f->el);
+            f->js = NULL;
+        }
+        g_ptr_array_free(js->media_helper_fetches, TRUE);
+        js->media_helper_fetches = NULL;
     }
     if (js->audio_elements) {
         GHashTableIter it;

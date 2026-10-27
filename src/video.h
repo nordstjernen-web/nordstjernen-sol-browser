@@ -34,6 +34,7 @@ typedef struct ns_video {
     gboolean     muted;
     gboolean     has_audio;
     gboolean     audio_opened;
+    gboolean     audio_fetching;
     char        *audio_url;
     char        *audio_file;
     gsize        audio_file_len;

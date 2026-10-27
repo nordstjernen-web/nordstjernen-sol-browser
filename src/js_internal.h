@@ -103,6 +103,7 @@ struct ns_js {
     gpointer      media_volume_user_data;
     guint         next_audio_token;
     GHashTable   *audio_elements;
+    GPtrArray    *media_helper_fetches;
     ns_js_scroll_to_cb scroll_to_cb;
     gpointer      scroll_to_user_data;
     ns_js_fragment_nav_cb fragment_nav_cb;

@@ -170,8 +170,13 @@ socket, so it normally needs no `/dev/shm` name at all.
   bytes stay within the strongest sandbox — MSE streams included; audio
   decodes in the `nordstjernen-audio` helper process, which on Linux runs
   under the **same** Landlock + seccomp profile (`src/security.c`),
-  applied before the first byte is decoded. On macOS and Windows that
-  helper is not yet syscall-confined, so a
+  applied before the first byte is decoded. The helper never fetches
+  from the network: the renderer downloads helper-played media itself
+  through the normal fetch path (CSP `media-src`, mixed-content, cookie
+  partition, proxy and HSTS all apply), writes it under
+  `~/.cache/nordstjernen/msaudio/`, and the UI process only forwards
+  `open` commands whose URL is a `file://` inside that directory. On
+  macOS and Windows that helper is not yet syscall-confined, so a
   decoder memory-safety bug there runs with the helper's own privileges
   (a known gap). A media type outside the in-tree set is not played: the
   renderer shows a poster/overlay and only *resolves* the URL
