@@ -2920,6 +2920,7 @@ struct ns_net_stream {
     ns_net_chunk_fn fn;
     gpointer        user_data;
     GMainContext   *main_ctx;
+    gboolean        discard_body;
 };
 
 typedef struct {
@@ -2981,6 +2982,11 @@ ns_write_cb(char *data, size_t size, size_t nmemb, void *userdata)
         return 0;
     if (bytes > G_MAXUINT)
         return 0;
+    if (ctx->stream && ctx->stream->discard_body) {
+        ctx->total += bytes;
+        ns_net_stream_emit(ctx, (const guint8 *)data, bytes);
+        return bytes;
+    }
     if (ctx->total >= ctx->next_recheck) {
         ctx->budget = ns_net_response_budget();
         ctx->next_recheck = ctx->total + NS_NET_RESPONSE_RECHECK_BYTES;
@@ -6218,8 +6224,9 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     char *cookie_partition_path = cookies_allowed
         ? ns_net_cookie_path_for_partition(partition_key) : NULL;
 
+    gboolean streams_to_disk = g_hop_stream && g_hop_stream->discard_body;
     ns_cache_entry *cached = NULL;
-    if (request_http && is_simple_get(method)) {
+    if (request_http && is_simple_get(method) && !streams_to_disk) {
         cached = ns_cache_get(url, cache_partition, cache_request_headers);
         if (cached && !reload && ns_cache_is_fresh(cached)) {
             gboolean cache_has_cors =
@@ -7586,19 +7593,20 @@ ns_net_request_async(const char         *url,
                                    NULL, NULL, callback, user_data);
 }
 
-void
-ns_net_request_async_streaming(const char         *url,
-                               const char         *top_url,
-                               const char         *method,
-                               const void         *body,
-                               gsize               body_len,
-                               const char         *content_type,
-                               const char *const  *extra_headers,
-                               GCancellable       *cancellable,
-                               ns_net_chunk_fn     on_chunk,
-                               gpointer            chunk_data,
-                               GAsyncReadyCallback callback,
-                               gpointer            user_data)
+static void
+ns_net_request_async_streaming_full(const char         *url,
+                                    const char         *top_url,
+                                    const char         *method,
+                                    const void         *body,
+                                    gsize               body_len,
+                                    const char         *content_type,
+                                    const char *const  *extra_headers,
+                                    GCancellable       *cancellable,
+                                    ns_net_chunk_fn     on_chunk,
+                                    gpointer            chunk_data,
+                                    gboolean            discard_body,
+                                    GAsyncReadyCallback callback,
+                                    gpointer            user_data)
 {
     g_return_if_fail(url != NULL);
 
@@ -7647,12 +7655,48 @@ ns_net_request_async_streaming(const char         *url,
         ctx->stream->fn = on_chunk;
         ctx->stream->user_data = chunk_data;
         ctx->stream->main_ctx = g_main_context_ref_thread_default();
+        ctx->stream->discard_body = discard_body;
     }
 
     GTask *task = g_task_new(NULL, cancellable, callback, user_data);
     g_task_set_source_tag(task, ns_net_request_async);
     g_task_set_task_data(task, ctx, ns_fetch_ctx_free);
     ns_fetch_throttle_submit(task);
+}
+
+void
+ns_net_request_async_streaming(const char         *url,
+                               const char         *top_url,
+                               const char         *method,
+                               const void         *body,
+                               gsize               body_len,
+                               const char         *content_type,
+                               const char *const  *extra_headers,
+                               GCancellable       *cancellable,
+                               ns_net_chunk_fn     on_chunk,
+                               gpointer            chunk_data,
+                               GAsyncReadyCallback callback,
+                               gpointer            user_data)
+{
+    ns_net_request_async_streaming_full(url, top_url, method, body, body_len,
+                                        content_type, extra_headers,
+                                        cancellable, on_chunk, chunk_data,
+                                        FALSE, callback, user_data);
+}
+
+void
+ns_net_download_async(const char         *url,
+                      const char         *top_url,
+                      GCancellable       *cancellable,
+                      ns_net_chunk_fn     on_chunk,
+                      gpointer            chunk_data,
+                      GAsyncReadyCallback callback,
+                      gpointer            user_data)
+{
+    ns_net_request_async_streaming_full(url, top_url, "GET", NULL, 0, NULL,
+                                        NULL, cancellable, on_chunk,
+                                        chunk_data, TRUE, callback,
+                                        user_data);
 }
 
 ns_response *

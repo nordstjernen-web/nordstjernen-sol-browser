@@ -168,6 +168,9 @@ char *ns_rproc_http_focused_editable_value(ns_rproc_http *r,
 int   ns_rproc_http_set_focused_editable_selection(ns_rproc_http *r,
                                                    size_t caret,
                                                    size_t anchor);
+long  ns_rproc_http_download_start(ns_rproc_http *r, const char *url);
+char *ns_rproc_http_download_poll(ns_rproc_http *r, long id);
+int   ns_rproc_http_download_cancel(ns_rproc_http *r, long id);
 int   ns_rproc_http_find(ns_rproc_http *r, const char *query,
                          int case_sensitive, int direction, int from_y,
                          int *out_total, int *out_current, int *out_scroll_y);

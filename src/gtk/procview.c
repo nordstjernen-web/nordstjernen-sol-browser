@@ -64,7 +64,7 @@ typedef enum {
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
     REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLLBAR,
     REQ_WEBGL, REQ_CAMERA, REQ_COLOR_SCHEME, REQ_FAVICON,
-    REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_QUIT
+    REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_DOWNLOAD, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_CONTEXT } LinkAct;
 
@@ -118,13 +118,14 @@ typedef struct {
     char   *hold;
     NsProcViewTextFn remote_cb;
     gpointer remote_ud;
+    long    download_id;
 } Req;
 
 typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
     RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
     RES_CONSOLE, RES_EVAL, RES_DUMP, RES_FAVICON, RES_DROPFILES,
-    RES_SCROLLBAR, RES_TICK, RES_PRINT
+    RES_SCROLLBAR, RES_TICK, RES_PRINT, RES_DOWNLOAD
 } ResType;
 
 typedef struct {
@@ -1388,6 +1389,25 @@ worker_main(gpointer data)
             res->remote_cb = req->remote_cb;
             res->remote_ud = req->remote_ud;
             res->href = v->proc ? ns_rproc_http_eval(v->proc, req->query) : NULL;
+            post(res);
+        } else if (req->type == REQ_DOWNLOAD) {
+            Res *res = g_new0(Res, 1);
+            res->view = pv_ref(v);
+            res->type = RES_DOWNLOAD;
+            res->seq = req->seq;
+            res->remote_cb = req->remote_cb;
+            res->remote_ud = req->remote_ud;
+            if (v->proc && req->kind == 0) {
+                long id = ns_rproc_http_download_start(v->proc, req->query);
+                char idbuf[32];
+                snprintf(idbuf, sizeof idbuf, "%ld", id);
+                if (id > 0) res->href = strdup(idbuf);
+            } else if (v->proc && req->kind == 1) {
+                res->href = ns_rproc_http_download_poll(v->proc,
+                                                        req->download_id);
+            } else if (v->proc) {
+                ns_rproc_http_download_cancel(v->proc, req->download_id);
+            }
             post(res);
         } else if (req->type == REQ_DUMP) {
             Res *res = g_new0(Res, 1);
@@ -2936,6 +2956,11 @@ on_result(gpointer data)
         res->remote_cb(v->closed ? NULL : res->href, res->remote_ud);
         if (!v->closed)
             request_render(v);
+        goto done;
+    }
+    if (res->type == RES_DOWNLOAD) {
+        if (res->remote_cb)
+            res->remote_cb(v->closed ? NULL : res->href, res->remote_ud);
         goto done;
     }
 
@@ -4983,6 +5008,62 @@ ns_proc_view_remote_eval(NsProcView *v, const char *js, NsProcViewTextFn cb,
     req->remote_cb = cb;
     req->remote_ud = user_data;
     push_req(v, req);
+}
+
+NsProcView *
+ns_proc_view_ref(NsProcView *v)
+{
+    return v ? pv_ref(v) : NULL;
+}
+
+void
+ns_proc_view_unref(NsProcView *v)
+{
+    if (v) pv_unref(v);
+}
+
+gboolean
+ns_proc_view_is_closed(NsProcView *v)
+{
+    return !v || v->closed;
+}
+
+static void
+push_download_req(NsProcView *v, int kind, const char *url, long id,
+                  NsProcViewTextFn cb, gpointer user_data)
+{
+    if (!v || v->closed) {
+        if (cb) cb(NULL, user_data);
+        return;
+    }
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_DOWNLOAD;
+    req->kind = kind;
+    req->query = g_strdup(url ? url : "");
+    req->download_id = id;
+    req->remote_cb = cb;
+    req->remote_ud = user_data;
+    push_req(v, req);
+}
+
+void
+ns_proc_view_download_start(NsProcView *v, const char *url,
+                            NsProcViewTextFn cb, gpointer user_data)
+{
+    push_download_req(v, 0, url, 0, cb, user_data);
+}
+
+void
+ns_proc_view_download_poll(NsProcView *v, long id, NsProcViewTextFn cb,
+                           gpointer user_data)
+{
+    push_download_req(v, 1, NULL, id, cb, user_data);
+}
+
+void
+ns_proc_view_download_cancel(NsProcView *v, long id)
+{
+    push_download_req(v, 2, NULL, id, NULL, NULL);
 }
 
 static void

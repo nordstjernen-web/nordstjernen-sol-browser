@@ -453,6 +453,22 @@ A plain `<iframe>` with no `sandbox` attribute runs its scripts. Cross-
 document `postMessage` between a frame and its parent is currently limited
 (see Known gaps).
 
+### Downloads
+
+A download is fetched by the **renderer**, not the UI process: the shell
+asks the tab's renderer to start it (`src/download.c`), the renderer
+streams the body straight to a `.part` file under
+`~/.cache/nordstjernen/downloads/` (inside its sandbox, never buffered in
+memory, capped at 16 GiB, bypassing the HTTP cache) and the shell polls
+progress over the renderer protocol. Only when the renderer reports
+completion does the UI process move the finished file into the user's
+Downloads directory and stamp its origin (`com.apple.quarantine`,
+`user.xdg.origin.url`, or the Windows `Zone.Identifier` stream). The UI
+process therefore never parses a byte of the response. A file whose name
+ends in an executable or installer extension (`.exe`, `.msi`, `.sh`,
+`.desktop`, `.jar`, `.apk`, …) is saved only after the user confirms a
+dialog that names the file and the host it comes from.
+
 ### Cookies and the `document.cookie` surface
 
 Network cookies live in a per-site, Netscape-format cookie jar on disk.

@@ -17,6 +17,7 @@
 #include "history.h"
 #include "libnordstjernen.h"
 #include "net.h"
+#include "rjson.h"
 #include "security.h"
 #include "version.h"
 #include "image.h"
@@ -726,20 +727,25 @@ static void proc_window_add_tab_full(ProcWindow *pw, const char *url,
                                      gboolean private_mode);
 
 typedef struct {
-    char      *url;
-    char      *path;
-    char      *name;
-    GtkWidget *progress;
-    GtkWidget *status;
-    GtkWidget *open;
-    guint      pulse;
-    gboolean   ok;
-    gint64     size;
+    NsProcView *view;
+    char       *url;
+    char       *path;
+    char       *name;
+    long        id;
+    GtkWidget  *progress;
+    GtkWidget  *status;
+    GtkWidget  *open;
+    guint       pulse;
+    guint       poll;
+    gboolean    ok;
+    gint64      size;
 } NsDownload;
 
+#define NS_DOWNLOAD_POLL_MS 250
+
 static void show_downloads_window(ProcWindow *pw);
-static void pw_start_download(ProcWindow *pw, const char *url,
-                              const char *suggested);
+static void pw_start_download(ProcWindow *pw, NsProcView *view,
+                              const char *url, const char *suggested);
 
 static const char *
 downloads_dir(void)
@@ -792,11 +798,11 @@ download_pulse(gpointer ud)
     return G_SOURCE_CONTINUE;
 }
 
-static gboolean
-download_finish_idle(gpointer ud)
+static void
+download_finish(NsDownload *d, const char *why)
 {
-    NsDownload *d = ud;
     if (d->pulse) { g_source_remove(d->pulse); d->pulse = 0; }
+    if (d->poll) { g_source_remove(d->poll); d->poll = 0; }
     gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(d->progress),
                                   d->ok ? 1.0 : 0.0);
     if (d->ok) {
@@ -807,15 +813,138 @@ download_finish_idle(gpointer ud)
         g_free(sz);
         g_free(msg);
     } else {
-        char *msg = g_strdup_printf("%s — %s", d->name, ns_i18n("Failed"));
+        char *msg = g_strdup_printf("%s — %s", d->name,
+                                    why && *why ? why : ns_i18n("Failed"));
         gtk_label_set_text(GTK_LABEL(d->status), msg);
         g_free(msg);
     }
+    ns_proc_view_unref(d->view);
     g_free(d->url);
     g_free(d->path);
     g_free(d->name);
     g_free(d);
+}
+
+static gboolean
+download_move_into_place(NsDownload *d, const char *tmp_path,
+                         const char *final_url)
+{
+    GFile *src = g_file_new_for_path(tmp_path);
+    GFile *dst = g_file_new_for_path(d->path);
+    GError *err = NULL;
+    gboolean ok = g_file_move(src, dst, G_FILE_COPY_NONE, NULL, NULL, NULL,
+                              &err);
+    if (!ok) {
+        g_warning("download: cannot move %s to %s: %s", tmp_path, d->path,
+                  err ? err->message : "?");
+        g_clear_error(&err);
+        g_file_delete(src, NULL, NULL);
+    } else {
+        ns_security_mark_download_origin(
+            d->path, final_url && *final_url ? final_url : d->url);
+    }
+    g_object_unref(src);
+    g_object_unref(dst);
+    return ok;
+}
+
+static gboolean download_poll_tick(gpointer ud);
+
+static void
+on_download_polled(const char *text, gpointer ud)
+{
+    NsDownload *d = ud;
+    RjValue *info = text ? rj_parse(text, strlen(text)) : NULL;
+    if (!info) {
+        download_finish(d, ns_i18n("The tab was closed"));
+        return;
+    }
+    double state = 2, bytes = 0, total = 0;
+    rj_get_num(info, "state", &state);
+    rj_get_num(info, "bytes", &bytes);
+    rj_get_num(info, "total", &total);
+    const char *path = rj_get_str(info, "path");
+    const char *final_url = rj_get_str(info, "final_url");
+    const char *error = rj_get_str(info, "error");
+    if (state == 0) {
+        if (total > 0) {
+            if (d->pulse) { g_source_remove(d->pulse); d->pulse = 0; }
+            gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(d->progress),
+                                          CLAMP(bytes / total, 0.0, 1.0));
+            char *got = g_format_size((guint64)bytes);
+            char *all = g_format_size((guint64)total);
+            char *msg = g_strdup_printf("%s — %s / %s", d->name, got, all);
+            gtk_label_set_text(GTK_LABEL(d->status), msg);
+            g_free(got);
+            g_free(all);
+            g_free(msg);
+        }
+        d->poll = g_timeout_add(NS_DOWNLOAD_POLL_MS, download_poll_tick, d);
+    } else if (state == 1 && path && *path) {
+        d->size = (gint64)bytes;
+        d->ok = download_move_into_place(d, path, final_url);
+        download_finish(d, NULL);
+    } else {
+        download_finish(d, error);
+    }
+    rj_free(info);
+}
+
+static gboolean
+download_poll_tick(gpointer ud)
+{
+    NsDownload *d = ud;
+    d->poll = 0;
+    ns_proc_view_download_poll(d->view, d->id, on_download_polled, d);
     return G_SOURCE_REMOVE;
+}
+
+static void
+on_download_started(const char *text, gpointer ud)
+{
+    NsDownload *d = ud;
+    d->id = text ? strtol(text, NULL, 10) : 0;
+    if (d->id <= 0) {
+        download_finish(d, NULL);
+        return;
+    }
+    d->poll = g_timeout_add(NS_DOWNLOAD_POLL_MS, download_poll_tick, d);
+}
+
+static void
+download_begin(NsDownload *d)
+{
+    ns_proc_view_download_start(d->view, d->url, on_download_started, d);
+}
+
+static void
+download_confirmed(GObject *src, GAsyncResult *res, gpointer ud)
+{
+    NsDownload *d = ud;
+    int choice = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res,
+                                                NULL);
+    if (choice == 1)
+        download_begin(d);
+    else
+        download_finish(d, ns_i18n("Cancelled"));
+}
+
+static gboolean
+download_name_is_executable(const char *name)
+{
+    static const char *const exts[] = {
+        ".exe", ".msi", ".msix", ".bat", ".cmd", ".com", ".scr", ".pif",
+        ".ps1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta",
+        ".lnk", ".url", ".dll", ".sys", ".reg", ".inf", ".cpl", ".msc",
+        ".desktop", ".sh", ".bash", ".zsh", ".run", ".bin", ".appimage",
+        ".deb", ".rpm", ".flatpakref", ".dmg", ".pkg", ".app", ".command",
+        ".jar", ".py", ".pl", ".rb", ".php", ".apk", ".xpi", ".crx",
+    };
+    const char *dot = strrchr(name, '.');
+    if (!dot) return FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(exts); i++)
+        if (g_ascii_strcasecmp(dot, exts[i]) == 0) return TRUE;
+    return FALSE;
 }
 
 static gboolean
@@ -828,26 +957,6 @@ pw_download_scheme_allowed(const char *url)
         if (g_ascii_strncasecmp(url, schemes[i], strlen(schemes[i])) == 0)
             return TRUE;
     return FALSE;
-}
-
-static gpointer
-download_worker(gpointer ud)
-{
-    NsDownload *d = ud;
-    GError *err = NULL;
-    ns_response *resp = ns_net_fetch_blocking(d->url, NULL, &err);
-    if (resp && !resp->error && resp->body &&
-        g_file_set_contents(d->path, (const char *)resp->body->data,
-                            resp->body->len, NULL)) {
-        d->ok = TRUE;
-        d->size = resp->body->len;
-        ns_security_mark_download_origin(
-            d->path, resp->final_url ? resp->final_url : d->url);
-    }
-    if (resp) ns_response_free(resp);
-    g_clear_error(&err);
-    g_idle_add(download_finish_idle, d);
-    return NULL;
 }
 
 static GtkWidget *
@@ -973,9 +1082,10 @@ show_downloads_window(ProcWindow *pw)
 }
 
 static void
-pw_start_download(ProcWindow *pw, const char *url, const char *suggested)
+pw_start_download(ProcWindow *pw, NsProcView *view, const char *url,
+                  const char *suggested)
 {
-    if (!url || !*url) return;
+    if (!url || !*url || !view) return;
     char *name = NULL;
     if (suggested && *suggested)
         name = g_path_get_basename(suggested);
@@ -1000,14 +1110,35 @@ pw_start_download(ProcWindow *pw, const char *url, const char *suggested)
     show_downloads_window(pw);
 
     NsDownload *d = g_new0(NsDownload, 1);
+    d->view = ns_proc_view_ref(view);
     d->url = g_strdup(url);
     d->path = path;
     d->name = name;
     GtkWidget *row = download_row_new(name, FALSE, path, d);
     gtk_list_box_prepend(GTK_LIST_BOX(pw->downloads_list), row);
     d->pulse = g_timeout_add(120, download_pulse, d);
-    GThread *t = g_thread_new("ns-download", download_worker, d);
-    if (t) g_thread_unref(t);
+    if (!download_name_is_executable(name)) {
+        download_begin(d);
+        return;
+    }
+    char *host = ns_url_host_from(url);
+    GtkAlertDialog *dialog = gtk_alert_dialog_new(
+        "%s", ns_i18n("Save this program file?"));
+    char *detail = g_strdup_printf(
+        "\u201c%s\u201d \u2014 %s\n%s", name, host && *host ? host : url,
+        ns_i18n("This file can run programs on this computer when opened. "
+                "Only save it if you trust the site."));
+    gtk_alert_dialog_set_detail(dialog, detail);
+    const char *buttons[] = { ns_i18n("Cancel"), ns_i18n("Save"), NULL };
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_cancel_button(dialog, 0);
+    gtk_alert_dialog_set_default_button(dialog, 0);
+    gtk_alert_dialog_set_modal(dialog, TRUE);
+    gtk_alert_dialog_choose(dialog, GTK_WINDOW(pw->window), NULL,
+                            download_confirmed, d);
+    g_object_unref(dialog);
+    g_free(detail);
+    g_free(host);
 }
 
 static void
@@ -1261,7 +1392,7 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
             gboolean local_page =
                 page_url && g_ascii_strncasecmp(page_url, "file:", 5) == 0;
             if (local_target ? local_page : pw_download_scheme_allowed(parts[0]))
-                pw_start_download(pw, parts[0],
+                pw_start_download(pw, v, parts[0],
                                   parts[1] && *parts[1] ? parts[1] : NULL);
             g_strfreev(parts);
         }

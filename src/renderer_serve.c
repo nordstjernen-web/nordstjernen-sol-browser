@@ -3,6 +3,7 @@
 
 #define _GNU_SOURCE 1
 #include "renderer_serve.h"
+#include "download.h"
 #include "libnordstjernen.h"
 #include "renderer_tiles.h"
 #include "layers.h"
@@ -1148,6 +1149,58 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         http_write_response(ctrl_w, 200, "application/json", NULL, json,
                             (size_t)n);
         free(q);
+        return 0;
+    }
+
+    if (strcmp(head->path, "/download-start") == 0) {
+        char *url = json_get_str(body, "url");
+        long id = url && *url ? ns_download_start(url, url) : 0;
+        char json[48];
+        int n = snprintf(json, sizeof json, "{\"id\":%ld}", id);
+        http_write_response(ctrl_w, 200, "application/json", NULL, json,
+                            (size_t)n);
+        free(url);
+        return 0;
+    }
+
+    if (strcmp(head->path, "/download-poll") == 0) {
+        long id = 0;
+        json_get_long(body, "id", &id);
+        ns_download_status st;
+        gboolean known = ns_download_poll(id, &st);
+        char *path_e = json_escape(known && st.path ? st.path : "");
+        char *final_e = json_escape(known && st.final_url ? st.final_url : "");
+        char *type_e = json_escape(known && st.content_type ? st.content_type
+                                                            : "");
+        char *error_e = json_escape(known ? st.error : "unknown download");
+        char *json = NULL;
+        int n = asprintf(&json,
+                         "{\"known\":%d,\"state\":%d,\"bytes\":%llu,"
+                         "\"total\":%llu,\"path\":\"%s\",\"final_url\":\"%s\","
+                         "\"content_type\":\"%s\",\"error\":\"%s\"}",
+                         known ? 1 : 0, known ? st.state : NS_DOWNLOAD_FAILED,
+                         (unsigned long long)st.bytes,
+                         (unsigned long long)st.total,
+                         path_e ? path_e : "", final_e ? final_e : "",
+                         type_e ? type_e : "", error_e ? error_e : "");
+        if (n > 0)
+            http_write_response(ctrl_w, 200, "application/json", NULL, json,
+                                (size_t)n);
+        free(json);
+        free(path_e);
+        free(final_e);
+        free(type_e);
+        free(error_e);
+        if (known) ns_download_status_clear(&st);
+        return 0;
+    }
+
+    if (strcmp(head->path, "/download-cancel") == 0) {
+        long id = 0;
+        json_get_long(body, "id", &id);
+        ns_download_cancel(id);
+        http_write_response(ctrl_w, 200, "application/json", NULL,
+                            "{\"ok\":1}", 8);
         return 0;
     }
 
