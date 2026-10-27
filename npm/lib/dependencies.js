@@ -142,7 +142,7 @@ function heading(product) {
 }
 
 function reinstall(product) {
-  return ['', `Then reinstall: npm install -g ${product.packageName}`];
+  return ['', `Then reinstall: ${process.platform === 'win32' ? '' : 'sudo '}npm install -g ${product.packageName}`];
 }
 
 function report(product, tools, libraries, manager) {

@@ -6,9 +6,12 @@ web browser written from scratch in C with GTK 4.
 ![Nordstjernen Web Navigator](https://raw.githubusercontent.com/nordstjernen-web/nordstjernen-sol-browser/main/docs/screenshot.png)
 
 ```sh
-npm install -g nordstjernen-browser
+sudo npm install -g nordstjernen-browser
 nordstjernen https://nordstjernen.org
 ```
+
+On Linux, macOS and the BSDs, run the install with `sudo`, because npm's global
+directory belongs to root; on Windows, run it without `sudo`.
 
 ## What installing does
 
@@ -18,7 +21,7 @@ nordstjernen https://nordstjernen.org
 | macOS on Apple silicon | The Developer ID signed and notarised release build is downloaded from GitHub and checked against the release's `SHA256SUMS`. |
 | Windows | Nordstjernen is built from the release source with [MSYS2](https://www.msys2.org)'s UCRT64 clang, meson and ninja, against MSYS2's GTK 4 and FFmpeg. The signed build is in the [Microsoft Store](https://apps.microsoft.com/detail/9NW8T7W5Z4PL). |
 
-The browser is installed inside the npm package, so `npm uninstall -g
+The browser is installed inside the npm package, so `sudo npm uninstall -g
 nordstjernen-browser` removes it. If that directory is not writable, the
 browser goes into `~/.cache/nordstjernen-browser` (`~/Library/Caches` on
 macOS, `%LOCALAPPDATA%` on Windows) instead.

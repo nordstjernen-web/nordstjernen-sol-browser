@@ -80,9 +80,12 @@ installer are in `scripts/`.
 ### Install with npm
 
 ```sh
-npm install -g nordstjernen-browser
+sudo npm install -g nordstjernen-browser
 nordstjernen https://nordstjernen.org
 ```
+
+On Linux, macOS and the BSDs, run the install with `sudo`, because npm's global
+directory belongs to root; on Windows, run it without `sudo`.
 
 On Linux, the BSDs and Intel Macs the package builds Nordstjernen from the
 release source against your system's libraries, and first names any build
