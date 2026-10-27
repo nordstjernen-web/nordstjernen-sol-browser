@@ -3,6 +3,11 @@ Changelog:
 
 1.0.38:
 ======
+* Security: the UI process's JSON parser for renderer and remote-control
+  messages now rejects `\u0000`, which produced a string whose C length
+  differed from its parsed length. `SECURITY.md` drops the stale
+  "HttpOnly name collisions" known gap (the `document.cookie` setter has
+  refused such writes since the 2026-10-23 audit fixes).
 * Security: `document.cookie` on a `file:` page is now kept only in that
   document's memory. Every local HTML file used to share one persistent
   cookie jar, so a downloaded page opened from Downloads could read the

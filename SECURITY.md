@@ -543,7 +543,3 @@ The `document.cookie` setter:
   this; both require additional integration work (manifest /
   capability declarations / re-routed config paths) and are
   tracked as future work.
-- **`HttpOnly` name collisions from JS are not rejected.** Setting
-  `document.cookie` with the same name as an existing `HttpOnly`
-  cookie adds a second entry rather than being refused; the
-  `HttpOnly` line is preserved untouched.

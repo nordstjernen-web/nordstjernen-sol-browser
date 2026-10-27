@@ -104,7 +104,7 @@ rj_parse_string(RjParser *ps)
             }
             int cp = rj_hex4(ps->p);
             ps->p += 4;
-            if (cp < 0) {
+            if (cp <= 0) {
                 g_string_free(s, TRUE);
                 return NULL;
             }
