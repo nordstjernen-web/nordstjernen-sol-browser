@@ -3,6 +3,15 @@ Changelog:
 
 1.0.38:
 ======
+* Security: audio played through the `nordstjernen-audio` helper (`.mp3`,
+  and `.ogg`/`.opus`/`.wav`/`.webm` with FFmpeg) is now fetched by the
+  renderer through the normal network path — CSP `media-src`,
+  mixed-content blocking, the cookie partition, proxy settings and HSTS
+  all apply — and handed to the helper as a file under
+  `~/.cache/nordstjernen/msaudio/`. Before, the helper fetched the URL
+  itself with a bare libcurl handle, so an `https:` page could load
+  `http:` audio and CSP never saw the request. The UI process now refuses
+  to forward any helper `open` whose URL is not such a file.
 * Security: downloads are now fetched by the tab's sandboxed renderer and
   streamed straight to disk (`~/.cache/nordstjernen/downloads/*.part`, no
   memory buffering, 16 GiB cap), with the UI process only polling progress

@@ -745,9 +745,6 @@ pv_stream_url_allowed(const char *url, const char *subdir)
 static gboolean
 pv_audio_url_allowed(NsProcView *v, const char *url)
 {
-    if (g_str_has_prefix(url, "http://") || g_str_has_prefix(url, "https://") ||
-        g_str_has_prefix(url, "data:"))
-        return TRUE;
     if (!g_str_has_prefix(url, "file://")) return FALSE;
     if (v->current_url && g_str_has_prefix(v->current_url, "file:"))
         return TRUE;

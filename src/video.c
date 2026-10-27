@@ -451,7 +451,18 @@ ns_video_audio_start(ns_video_cache *cache, ns_video *v)
                    v->audio_file ? v->audio_file : "-", v->playing);
     if (!cache || !cache->audio_cb || !v || v->muted) return;
     if (!v->has_audio && !v->audio_file) return;
-    const char *src = v->audio_file ? v->audio_file : v->url;
+    if (!v->audio_file) {
+        if (v->audio_fetching || !v->url) return;
+        v->audio_fetching = TRUE;
+        ns_pending *pa = g_new0(ns_pending, 1);
+        pa->video = v;
+        pa->cache = cache;
+        g_ptr_array_add(cache->pending, pa);
+        ns_net_fetch_async(v->url, cache->base_url, NULL, on_msaudio_fetched,
+                           pa);
+        return;
+    }
+    const char *src = v->audio_file;
     if (!ns_video_url_audio_safe(src)) return;
     if (!v->token)
         v->token = g_strdup_printf("nv%u", ++cache->next_token);
