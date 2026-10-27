@@ -282,11 +282,13 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
     size_t size = (size_t)max_width * (size_t)max_height * 4u;
 
     HANDLE mapping = NULL;
+    HANDLE child_mapping = NULL;
+    HANDLE child_err = NULL;
+    LPPROC_THREAD_ATTRIBUTE_LIST attrs = NULL;
     unsigned char *map = NULL;
     unsigned char *rxbuf = NULL;
     if (shm) {
-        SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE };
-        mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE,
+        mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
                                      (DWORD)((uint64_t)size >> 32),
                                      (DWORD)(size & 0xffffffffu), NULL);
         if (!mapping)
@@ -312,31 +314,73 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
         !SetHandleInformation(parent_out, HANDLE_FLAG_INHERIT, 0))
         goto winfail;
 
+    if (shm &&
+        !DuplicateHandle(GetCurrentProcess(), mapping, GetCurrentProcess(),
+                         &child_mapping, 0, TRUE, DUPLICATE_SAME_ACCESS))
+        goto winfail;
+    HANDLE parent_err = GetStdHandle(STD_ERROR_HANDLE);
+    if (parent_err && parent_err != INVALID_HANDLE_VALUE &&
+        !DuplicateHandle(GetCurrentProcess(), parent_err, GetCurrentProcess(),
+                         &child_err, 0, TRUE, DUPLICATE_SAME_ACCESS))
+        child_err = NULL;
+
     char cmd[1024];
     const char *priv_arg = priv ? " private" : "";
+    int cmd_len;
     if (shm)
-        snprintf(cmd, sizeof cmd, "\"%s\" %d %d shm %llu%s", renderer_path,
-                 max_width, max_height,
-                 (unsigned long long)(uintptr_t)mapping, priv_arg);
+        cmd_len = snprintf(cmd, sizeof cmd, "\"%s\" %d %d shm %llu%s",
+                           renderer_path, max_width, max_height,
+                           (unsigned long long)(uintptr_t)child_mapping,
+                           priv_arg);
     else
-        snprintf(cmd, sizeof cmd, "\"%s\" %d %d%s", renderer_path, max_width,
-                 max_height, priv_arg);
+        cmd_len = snprintf(cmd, sizeof cmd, "\"%s\" %d %d%s", renderer_path,
+                           max_width, max_height, priv_arg);
+    if (cmd_len < 0 || (size_t)cmd_len >= sizeof cmd)
+        goto winfail;
 
-    STARTUPINFOA si;
+    HANDLE inherit[4];
+    DWORD inherit_count = 0;
+    inherit[inherit_count++] = child_in;
+    inherit[inherit_count++] = child_out;
+    if (child_err)
+        inherit[inherit_count++] = child_err;
+    if (child_mapping)
+        inherit[inherit_count++] = child_mapping;
+    SIZE_T attrs_size = 0;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &attrs_size);
+    attrs = malloc(attrs_size);
+    if (!attrs || !InitializeProcThreadAttributeList(attrs, 1, 0, &attrs_size)) {
+        free(attrs);
+        attrs = NULL;
+        goto winfail;
+    }
+    if (!UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                   inherit, inherit_count * sizeof inherit[0],
+                                   NULL, NULL))
+        goto winfail;
+
+    STARTUPINFOEXA si;
     PROCESS_INFORMATION pi;
     memset(&si, 0, sizeof si);
     memset(&pi, 0, sizeof pi);
-    si.cb = sizeof si;
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = child_in;
-    si.hStdOutput = child_out;
-    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    si.StartupInfo.cb = sizeof si;
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    si.StartupInfo.hStdInput = child_in;
+    si.StartupInfo.hStdOutput = child_out;
+    si.StartupInfo.hStdError = child_err;
+    si.lpAttributeList = attrs;
     char *workdir = win_dirname_dup(renderer_path);
     BOOL ok = CreateProcessA(renderer_path, cmd, NULL, NULL, TRUE,
-                             CREATE_NO_WINDOW, NULL, workdir, &si, &pi);
+                             CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
+                             NULL, workdir, &si.StartupInfo, &pi);
     free(workdir);
+    DeleteProcThreadAttributeList(attrs);
+    free(attrs);
+    attrs = NULL;
     CloseHandle(child_in);
     CloseHandle(child_out);
+    if (child_err) CloseHandle(child_err);
+    if (child_mapping) CloseHandle(child_mapping);
     if (!ok)
         goto winfail2;
     CloseHandle(pi.hThread);
@@ -370,6 +414,12 @@ winfail2:
         CloseHandle(parent_out);
     goto winfail_nomap;
 winfail:
+    if (attrs) {
+        DeleteProcThreadAttributeList(attrs);
+        free(attrs);
+    }
+    if (child_err) CloseHandle(child_err);
+    if (child_mapping) CloseHandle(child_mapping);
     if (child_in) CloseHandle(child_in);
     if (parent_in) CloseHandle(parent_in);
     if (parent_out) CloseHandle(parent_out);
