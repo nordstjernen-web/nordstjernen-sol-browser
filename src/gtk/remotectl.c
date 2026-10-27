@@ -86,7 +86,7 @@ static void rc_close_all(gboolean user_stopped);
 char *
 ns_remote_control_file_path(void)
 {
-    return g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME,
+    return g_build_filename(g_get_user_state_dir(), NS_APP_DIR_NAME,
                             NS_REMOTE_CONTROL_FILE, NULL);
 }
 

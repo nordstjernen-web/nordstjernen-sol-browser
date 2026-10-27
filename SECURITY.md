@@ -115,7 +115,11 @@ socket, so it normally needs no `/dev/shm` name at all.
   `~/.cache/nordstjernen`, and the user's download directory when it is
   a sub-directory of `$HOME` (never `$HOME` itself). `/proc`, `/sys` and
   `/run` are readable; the XDG runtime directory (`/run/user/$UID`) is
-  read+write for the UI process and read-only for renderers. The V4L2
+  read+write for the UI process and read-only for renderers. The XDG
+  state directory (`~/.local/state/nordstjernen`, where the remote-control
+  port and token live) is read+write for the UI process only — renderers
+  have no rule for it at all, so they can neither read the token nor
+  plant a forged control file. The V4L2
   camera nodes (`/dev/video*`) and `/dev/snd` are read+write. While
   WebGL or WebGPU is enabled, also
   read+write on the GPU device nodes `/dev/dri` and `/dev/nvidia*`, which
@@ -142,7 +146,9 @@ socket, so it normally needs no `/dev/shm` name at all.
   even if Landlock would have allowed reading it. `ptrace`, `bpf`,
   `keyctl`, `mount`, `unshare`, `userfaultfd`, the `io_uring_*` family,
   `perf_event_open`, `kexec_load`, and the module syscalls are likewise
-  absent from the allow-list. `clone` is allowed only without the
+  absent from the allow-list, as are `listen`, `accept` and `accept4`:
+  a renderer only ever opens outgoing connections, so it cannot run a
+  local server for other processes or pages to reach. `clone` is allowed only without the
   `CLONE_NEW*` namespace flags and `clone3` returns `ENOSYS` (so libc
   falls back to `clone`), and `socket` only creates `AF_INET`,
   `AF_INET6` and `AF_NETLINK` sockets in the renderer (the audio

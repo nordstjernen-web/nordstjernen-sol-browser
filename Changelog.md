@@ -3,6 +3,14 @@ Changelog:
 
 1.0.38:
 ======
+* Security: the remote-control port and token file (`remote-control.json`)
+  moved from the user data directory to the XDG state directory
+  (`~/.local/state/nordstjernen/`), which the sandboxed renderers can
+  neither read nor write, so a compromised page can no longer read the
+  token and drive other tabs, or plant a forged file that points an MCP
+  client at itself. The `--mcp` client also refuses a control file that is
+  not a regular file owned by the user with mode 0600, and the renderer
+  seccomp filter no longer allows `listen`, `accept` or `accept4`.
 * Packaging: the `nordstjernen-browser` npm package now builds Nordstjernen
   on Windows instead of opening the Microsoft Store page. Like the Northstar
   and Southstar packages, it finds MSYS2 (`C:\msys64` or `MSYS2_ROOT`),
