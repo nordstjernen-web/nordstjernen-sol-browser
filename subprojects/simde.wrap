@@ -1,0 +1,9 @@
+[wrap-file]
+directory = simde-0.8.2
+source_url = https://github.com/simd-everywhere/simde/archive/refs/tags/v0.8.2.tar.gz
+source_filename = simde-0.8.2.tar.gz
+source_hash = ed2a3268658f2f2a9b5367628a85ccd4cf9516460ed8604eed369653d49b25fb
+patch_directory = simde
+
+[provide]
+simde = simde_dep

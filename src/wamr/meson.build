@@ -109,6 +109,11 @@ wamr_sys_deps = [
   dependency('threads', required: false),
 ]
 
+if have_wasm_simd
+  wamr_c_args += ['-DWASM_ENABLE_SIMD=1', '-DWASM_ENABLE_SIMDE=1']
+  wamr_sys_deps += simde_dep
+endif
+
 wamr_lib = static_library(
   'wamr',
   wamr_srcs,

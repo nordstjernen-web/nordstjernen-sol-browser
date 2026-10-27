@@ -38,6 +38,7 @@ BuildRequires:  pkgconfig(libavutil) >= 58
 BuildRequires:  pkgconfig(libswresample) >= 4
 BuildRequires:  pkgconfig(libswscale) >= 7
 BuildRequires:  pkgconfig(libwebp)
+BuildRequires:  pkgconfig(simde)
 BuildRequires:  pkgconfig(sdl2)
 BuildRequires:  pkgconfig(sqlite3)
 BuildRequires:  pkgconfig(uchardet)
