@@ -1296,6 +1296,50 @@ ns_rproc_http_hover_buttons(ns_rproc_http *r, int x, int y, int mods,
     return changed != 0 ? 1 : animating != 0 ? 2 : 0;
 }
 
+long
+ns_rproc_http_download_start(ns_rproc_http *r, const char *url)
+{
+    if (!r || !url)
+        return 0;
+    char *ue = json_escape(url);
+    char *json = NULL;
+    if (asprintf(&json, "{\"url\":\"%s\"}", ue ? ue : "") < 0)
+        json = NULL;
+    free(ue);
+    char *body = json ? request(r, "/download-start", json) : NULL;
+    free(json);
+    if (!body)
+        return 0;
+    long id = 0;
+    json_get_long(body, "id", &id);
+    free(body);
+    return id;
+}
+
+char *
+ns_rproc_http_download_poll(ns_rproc_http *r, long id)
+{
+    if (!r || id <= 0)
+        return NULL;
+    char json[48];
+    snprintf(json, sizeof json, "{\"id\":%ld}", id);
+    return request(r, "/download-poll", json);
+}
+
+int
+ns_rproc_http_download_cancel(ns_rproc_http *r, long id)
+{
+    if (!r || id <= 0)
+        return 0;
+    char json[48];
+    snprintf(json, sizeof json, "{\"id\":%ld}", id);
+    char *body = request(r, "/download-cancel", json);
+    if (!body)
+        return 0;
+    free(body);
+    return 1;
+}
+
 int
 ns_rproc_http_scroll(ns_rproc_http *r, int x, int y, int dx, int dy)
 {

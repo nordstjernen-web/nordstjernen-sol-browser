@@ -174,6 +174,14 @@ void ns_net_request_async_streaming(const char         *url,
                                     GAsyncReadyCallback callback,
                                     gpointer            user_data);
 
+void ns_net_download_async(const char         *url,
+                           const char         *top_url,
+                           GCancellable       *cancellable,
+                           ns_net_chunk_fn     on_chunk,
+                           gpointer            chunk_data,
+                           GAsyncReadyCallback callback,
+                           gpointer            user_data);
+
 ns_response *ns_net_fetch_finish(GAsyncResult *result, GError **error);
 
 typedef enum {

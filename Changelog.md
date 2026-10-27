@@ -3,6 +3,16 @@ Changelog:
 
 1.0.38:
 ======
+* Security: downloads are now fetched by the tab's sandboxed renderer and
+  streamed straight to disk (`~/.cache/nordstjernen/downloads/*.part`, no
+  memory buffering, 16 GiB cap), with the UI process only polling progress
+  and moving the finished file into Downloads. Before, the UI process
+  fetched the whole body into memory itself — TLS, HTTP parsing and
+  decompression of attacker-controlled bytes outside the sandbox, with a
+  cap of half the machine's RAM. A download whose name ends in an
+  executable or installer extension (`.exe`, `.msi`, `.sh`, `.desktop`,
+  `.jar`, `.apk`, …) now asks for confirmation, naming the file and its
+  host. A download is tied to its tab and stops if that tab is closed.
 * Security: a settings change proposed by a renderer (the settings page is
   rendered in the sandboxed renderer) now needs the user's confirmation
   for every key except a short cosmetic allow-list (window size, layout
