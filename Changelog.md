@@ -3,6 +3,14 @@ Changelog:
 
 1.0.38:
 ======
+* Security (Windows): a renderer process now inherits only its own
+  framebuffer mapping, its two IPC pipe ends and stderr. The shell passes
+  that explicit handle list to `CreateProcess`
+  (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`) and creates the mapping
+  non-inheritable, duplicating it just for the spawn; before, every
+  renderer inherited the live read/write mapping of every tab opened
+  earlier and could read or overwrite their pixels. The renderer command
+  line is also checked for truncation instead of being silently cut.
 * Security: the remote-control port and token file (`remote-control.json`)
   moved from the user data directory to the XDG state directory
   (`~/.local/state/nordstjernen/`), which the sandboxed renderers can
