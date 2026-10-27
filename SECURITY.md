@@ -502,10 +502,18 @@ The `document.cookie` setter:
   code shares globals and prototypes with the page, so a hostile page
   can observe or tamper with what a content script does on it. An
   isolated world needs a second JavaScript context over the same DOM.
-- **The renderer can write the configuration file.** Settings pages are
-  served and saved by the renderer, so a compromised renderer can change
-  `nordstjernen.conf` (proxy, DNS-over-HTTPS, home page) for later
-  sessions. Moving settings into the UI process would close this.
+- **Settings pages are served by the renderer.** The renderer cannot
+  write `nordstjernen.conf` itself (the config directory is read-only
+  for it); it proposes the new text over the `X-Config` side channel and
+  the UI process writes the file. Every changed key except a short
+  cosmetic allow-list (`window_width_px`, `window_height_px`,
+  `layout_viewport_px`, `gsk_renderer`, `speculative_preload`,
+  `async_image_decode`, `images_enabled`, `cache_cap_mb`) is shown in a
+  confirmation dialog in the UI process before it is applied, with the
+  values sanitised and truncated for display. The residual gap is that
+  the dialog is the only barrier: a compromised renderer can keep asking,
+  and the settings page a user sees is rendered by the process that may
+  be compromised. Rendering settings in the UI process would close this.
 - **No per-path filesystem sandbox on Windows.** The mitigation
   suite restricts the *process* (no remote DLL loads, no dynamic
   code, no child processes, etc.) but does not allow-list the

@@ -496,11 +496,47 @@ config_free_strings(ns_config *c)
             g_clear_pointer((char **)(void *)((char *)c + cfg_fields[i].offset), g_free);
 }
 
-static const char *const sensitive_keys[] = {
-    "home_url", "search_engine", "ai_model_mirror", "http_proxy",
-    "https_proxy", "no_proxy", "doh_url", "cookie_policy", "https_first",
-    "harden_allocator", "tls_allow_insecure_override", "remote_control",
+static const char *const unprompted_keys[] = {
+    "gsk_renderer", "speculative_preload", "async_image_decode",
+    "images_enabled", "cache_cap_mb", "window_width_px", "window_height_px",
+    "layout_viewport_px",
 };
+
+static gboolean
+config_key_needs_prompt(const char *key)
+{
+    for (gsize k = 0; k < G_N_ELEMENTS(unprompted_keys); k++)
+        if (strcmp(key, unprompted_keys[k]) == 0) return FALSE;
+    return TRUE;
+}
+
+static gboolean
+config_char_is_display_safe(gunichar c)
+{
+    if (c < 0x20 || c == 0x7f) return FALSE;
+    if (c == 0x061c || c == 0x200e || c == 0x200f) return FALSE;
+    if (c >= 0x202a && c <= 0x202e) return FALSE;
+    if (c >= 0x2066 && c <= 0x2069) return FALSE;
+    return TRUE;
+}
+
+static char *
+config_display_value(const char *raw)
+{
+    enum { MAX_CHARS = 60 };
+    g_autofree char *valid = g_utf8_make_valid(raw, -1);
+    GString *out = g_string_new(NULL);
+    gsize n = 0;
+    for (const char *p = valid; *p; p = g_utf8_next_char(p)) {
+        if (n++ == MAX_CHARS) {
+            g_string_append(out, "\xe2\x80\xa6");
+            break;
+        }
+        gunichar c = g_utf8_get_char(p);
+        g_string_append_unichar(out, config_char_is_display_safe(c) ? c : 0xfffd);
+    }
+    return g_string_free(out, FALSE);
+}
 
 void
 ns_config_defer_saves(gboolean defer)
@@ -525,15 +561,14 @@ ns_config_sensitive_changes(const char *text)
     GString *out = g_string_new(NULL);
     for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++) {
         const cfg_field *f = &cfg_fields[i];
-        gboolean sensitive = FALSE;
-        for (gsize k = 0; k < G_N_ELEMENTS(sensitive_keys) && !sensitive; k++)
-            sensitive = strcmp(f->key, sensitive_keys[k]) == 0;
-        if (!sensitive) continue;
+        if (!config_key_needs_prompt(f->key)) continue;
         g_autofree char *was = field_string(&g_cfg, f);
         g_autofree char *now = field_string(&proposed, f);
-        if (strcmp(was, now) != 0)
-            g_string_append_printf(out, "%s: \u201c%s\u201d \u2192 \u201c%s\u201d\n",
-                                   f->key, was, now);
+        if (strcmp(was, now) == 0) continue;
+        g_autofree char *was_shown = config_display_value(was);
+        g_autofree char *now_shown = config_display_value(now);
+        g_string_append_printf(out, "%s: \u201c%s\u201d \u2192 \u201c%s\u201d\n",
+                               f->key, was_shown, now_shown);
     }
     config_free_strings(&proposed);
     if (out->len == 0) {
