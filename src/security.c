@@ -1252,9 +1252,21 @@ ns_win32_apply_mitigation(ns_smp_fn fn, PROCESS_MITIGATION_POLICY policy,
     (void)fn(policy, &m, sizeof m);
 }
 
+static void
+ns_win32_raise_timer_resolution(void)
+{
+    typedef UINT (WINAPI *ns_time_begin_period_fn)(UINT);
+    HMODULE winmm = LoadLibraryW(L"winmm.dll");
+    if (!winmm) return;
+    ns_time_begin_period_fn begin_period = (ns_time_begin_period_fn)(void *)
+        GetProcAddress(winmm, "timeBeginPeriod");
+    if (begin_period) begin_period(1);
+}
+
 void
 ns_security_win32_mitigations_init(gboolean allow_child_processes)
 {
+    ns_win32_raise_timer_resolution();
     if (ns_security_env_flag("NS_NO_WIN32_MITIGATIONS")) return;
 
     HMODULE k = GetModuleHandleW(L"kernel32.dll");

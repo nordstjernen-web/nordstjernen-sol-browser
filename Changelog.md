@@ -3,6 +3,13 @@ Changelog:
 
 1.0.38:
 ======
+* Windows: the browser and renderer processes now request a 1 ms system
+  timer resolution (`timeBeginPeriod(1)`), like other browsers do, so a
+  JavaScript `setTimeout` of a few milliseconds fires after a few
+  milliseconds instead of at the next 15.6 ms tick. A worker that yields
+  with `setTimeout(0)` between work slices — chess engines and other
+  compute-heavy scripts do — ran about 3× slower than it needed to: 300
+  chained zero-delay timers took 4.6 s and now take 1.4 s.
 * Layout: a column flex container's content height is now the sum of its
   items' hypothetical main sizes (flex-basis clamped by min/max) instead
   of max(flex-basis, content height), so a `flex: 1 1 0; overflow: auto`
