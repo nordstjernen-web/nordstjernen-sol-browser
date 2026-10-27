@@ -45429,6 +45429,9 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
         }
         next_x = MAX(0.0, next_x);
         next_y = MAX(0.0, next_y);
+        if (js->viewport_scroll_cb)
+            js->viewport_scroll_cb(&next_x, &next_y,
+                                   js->viewport_scroll_user_data);
         if (next_x != sx || next_y != sy) {
             ns_js_note_viewport_scroll(js, next_x, next_y);
             changed = TRUE;
