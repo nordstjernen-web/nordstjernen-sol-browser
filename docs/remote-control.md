@@ -90,7 +90,12 @@ navigation call `read_page` or `find` again.
   write, so a compromised page cannot learn the token or plant a forged
   file; the `--mcp` client also refuses a file that is not a regular file
   owned by the user with no group/other permission bits. The protocol is
-  newline-delimited JSON; every request carries the token. It drives tabs through `procwindow.c` and
+  newline-delimited JSON; every request carries the token. Besides the
+  tab, navigation, input, `eval` and `screenshot` commands the MCP tools
+  are built on, a `console` command drains the tab's console log (page
+  and worker `console.*` output, uncaught errors and unhandled
+  rejections, resource errors) as `{"text": ...}` — the quickest way to
+  see why a site's script or WebAssembly module stopped. It drives tabs through `procwindow.c` and
   pages through the same `NsProcView` input path the mouse and keyboard
   use (`ns_proc_view_remote_*` in `procview.c`), so clicks hit-test in the
   renderer, focus moves, and links navigate exactly as for the user.
