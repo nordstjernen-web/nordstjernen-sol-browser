@@ -3,6 +3,12 @@ Changelog:
 
 1.0.38:
 ======
+* `scrollIntoView()` now clamps the viewport scroll to the document's
+  scrollable range like `scrollTo()` does. A page whose content fit the
+  window could end up with `window.scrollY` at a few hundred pixels while
+  nothing had visibly moved, so every `getBoundingClientRect()` was offset
+  by that amount; on chess.com this put click-to-move on the wrong square
+  and left the consent banner's buttons unreachable by script.
 * Security: the UI process's JSON parser for renderer and remote-control
   messages now rejects `\u0000`, which produced a string whose C length
   differed from its parsed length. `SECURITY.md` drops the stale
