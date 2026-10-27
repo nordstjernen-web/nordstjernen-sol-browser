@@ -56,8 +56,10 @@
 #include <bcrypt.h>
 #endif
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 static gboolean ns_runtime_dir_writable = TRUE;
+#endif
+#ifdef __linux__
 static gboolean ns_config_dir_writable = TRUE;
 #endif
 
@@ -72,7 +74,7 @@ ns_security_config_dir_read_only(void)
 void
 ns_security_runtime_dir_read_only(void)
 {
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
     ns_runtime_dir_writable = FALSE;
 #endif
 }
@@ -610,6 +612,15 @@ ns_security_sandbox_init(const char *self_exe)
     add_path_rw(rfd, fs_rw, ns_data_root);
     g_free(ns_data_root);
 
+    if (ns_runtime_dir_writable) {
+        char *ns_state_root =
+            g_build_filename(g_get_user_state_dir(), "nordstjernen", NULL);
+        g_mkdir_with_parents(ns_state_root, 0700);
+        chmod(ns_state_root, 0700);
+        add_path_rw(rfd, fs_rw, ns_state_root);
+        g_free(ns_state_root);
+    }
+
     char *ns_cache_top =
         g_build_filename(g_get_user_cache_dir(), "nordstjernen", NULL);
     g_mkdir_with_parents(ns_cache_top, 0700);
@@ -722,8 +733,6 @@ ns_security_sandbox_init(const char *self_exe)
 
 #ifdef NS_HAVE_SECCOMP
 static const char *const ns_seccomp_allowed_names[] = {
-    "accept",
-    "accept4",
     "access",
     "arch_prctl",
     "bind",
@@ -823,7 +832,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "lgetxattr",
     "link",
     "linkat",
-    "listen",
     "listxattr",
     "_llseek",
     "llistxattr",
@@ -1171,6 +1179,8 @@ ns_security_sandbox_init(const char *self_exe)
     sb_append_own_dir(prof, g_get_user_config_dir());
     sb_append_own_dir(prof, g_get_user_data_dir());
     sb_append_own_dir(prof, g_get_user_cache_dir());
+    if (ns_runtime_dir_writable)
+        sb_append_own_dir(prof, g_get_user_state_dir());
 
     const char *dl = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD);
     sb_append_subpath(prof, dl);

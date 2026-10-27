@@ -15,6 +15,7 @@
 #else
 #include <errno.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -192,12 +193,26 @@ ctl_stopped_by_user(void)
 }
 
 static gboolean
+ctl_file_is_private_to_user(const char *path)
+{
+#ifdef G_OS_WIN32
+    (void)path;
+    return TRUE;
+#else
+    struct stat st;
+    return lstat(path, &st) == 0 && S_ISREG(st.st_mode) &&
+           st.st_uid == getuid() && (st.st_mode & 077) == 0;
+#endif
+}
+
+static gboolean
 ctl_try_file(void)
 {
     char *path = ns_remote_control_file_path();
     char *contents = NULL;
     gsize len = 0;
-    gboolean read = g_file_get_contents(path, &contents, &len, NULL);
+    gboolean read = ctl_file_is_private_to_user(path) &&
+                    g_file_get_contents(path, &contents, &len, NULL);
     g_free(path);
     if (!read)
         return FALSE;

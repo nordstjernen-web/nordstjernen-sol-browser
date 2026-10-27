@@ -83,10 +83,14 @@ navigation call `read_page` or `find` again.
 - **`src/gtk/remotectl.c`** runs inside the GUI. When allowed it binds a
   TCP listener to `127.0.0.1` on a random port and writes
   `remote-control.json` (port, a 256-bit random token from OpenSSL's
-  `RAND_bytes`, pid, version) to the user data directory
-  (`g_get_user_data_dir()`: `~/.local/share/nordstjernen/` on Linux and
-  macOS, `%LOCALAPPDATA%\nordstjernen\` on Windows) with mode `0600`. The protocol is newline-delimited JSON; every
-  request carries the token. It drives tabs through `procwindow.c` and
+  `RAND_bytes`, pid, version) to the user state directory
+  (`g_get_user_state_dir()`: `~/.local/state/nordstjernen/` on Linux and
+  macOS, `%LOCALAPPDATA%\nordstjernen\` on Windows) with mode `0600`. That
+  directory is outside every path the sandboxed renderers may read or
+  write, so a compromised page cannot learn the token or plant a forged
+  file; the `--mcp` client also refuses a file that is not a regular file
+  owned by the user with no group/other permission bits. The protocol is
+  newline-delimited JSON; every request carries the token. It drives tabs through `procwindow.c` and
   pages through the same `NsProcView` input path the mouse and keyboard
   use (`ns_proc_view_remote_*` in `procview.c`), so clicks hit-test in the
   renderer, focus moves, and links navigate exactly as for the user.
