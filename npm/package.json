@@ -6,7 +6,10 @@
     "browser",
     "web-browser",
     "gtk",
-    "gtk4"
+    "gtk4",
+    "html",
+    "javascript",
+    "css"
   ],
   "homepage": "https://nordstjernen.org",
   "bugs": "https://github.com/nordstjernen-web/nordstjernen-sol-browser/issues",
