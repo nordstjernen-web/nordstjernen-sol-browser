@@ -3,6 +3,11 @@ Changelog:
 
 1.0.38:
 ======
+* Remote control: a new `console` command drains the tab's console log
+  (page and worker `console.*` output, uncaught errors, unhandled
+  rejections, resource errors) over the control channel, so a script or
+  MCP client can see why a site's JavaScript or WebAssembly stopped
+  without opening the developer console.
 * WebAssembly SIMD: `v128` and the full SIMD opcode set now run in the
   WAMR fast interpreter through the header-only SIMDe library
   (`-Dwasm_simd`, auto: the system `simde` package or the pinned

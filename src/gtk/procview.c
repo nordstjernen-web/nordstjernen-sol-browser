@@ -1374,6 +1374,8 @@ worker_main(gpointer data)
             res->view = pv_ref(v);
             res->type = RES_CONSOLE;
             res->seq = req->seq;
+            res->remote_cb = req->remote_cb;
+            res->remote_ud = req->remote_ud;
             res->href = v->proc ? ns_rproc_http_console_poll(v->proc) : NULL;
             post(res);
         } else if (req->type == REQ_EVAL) {
@@ -2958,6 +2960,13 @@ on_result(gpointer data)
     if (res->type == RES_DOWNLOAD) {
         if (res->remote_cb)
             res->remote_cb(v->closed ? NULL : res->href, res->remote_ud);
+        goto done;
+    }
+    if (res->type == RES_CONSOLE && res->remote_cb) {
+        if (res->href && *res->href)
+            console_append(v, res->href);
+        res->remote_cb(v->closed ? NULL : res->href ? res->href : "",
+                       res->remote_ud);
         goto done;
     }
 
@@ -5061,6 +5070,21 @@ void
 ns_proc_view_download_cancel(NsProcView *v, long id)
 {
     push_download_req(v, 2, NULL, id, NULL, NULL);
+}
+
+void
+ns_proc_view_remote_console(NsProcView *v, NsProcViewTextFn cb,
+                            gpointer user_data)
+{
+    if (!v || v->closed) {
+        cb(NULL, user_data);
+        return;
+    }
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_CONSOLE;
+    req->remote_cb = cb;
+    req->remote_ud = user_data;
+    push_req(v, req);
 }
 
 static void

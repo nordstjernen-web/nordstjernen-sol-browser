@@ -633,6 +633,11 @@ rc_dispatch(RcOp *op)
         ns_proc_view_remote_eval(v, js, rc_eval_done, rc_op_ref(op));
         return;
     }
+    if (!g_strcmp0(cmd, "console")) {
+        op->timeout = g_timeout_add(RC_EVAL_TIMEOUT_MS, rc_op_timeout, op);
+        ns_proc_view_remote_console(v, rc_eval_done, rc_op_ref(op));
+        return;
+    }
     if (!g_strcmp0(cmd, "wait_load")) {
         double ms = RC_LOAD_TIMEOUT_MS;
         rj_get_num(req, "ms", &ms);
