@@ -1703,6 +1703,8 @@ ns_cookie_collect(const char *url, const char *jar_path, const char *js_path,
 static char *
 ns_cookie_js_partition(const char *url, const char *top_url)
 {
+    if (!ns_url_is_http_or_https(url))
+        return NULL;
     if (!top_url || !*top_url || ns_url_is_same_site(url, top_url))
         return ns_url_site_from(url);
     const ns_config *cfg = ns_config_get();
