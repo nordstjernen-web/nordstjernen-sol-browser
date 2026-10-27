@@ -3,6 +3,16 @@ Changelog:
 
 1.0.38:
 ======
+* Security: a settings change proposed by a renderer (the settings page is
+  rendered in the sandboxed renderer) now needs the user's confirmation
+  for every key except a short cosmetic allow-list (window size, layout
+  viewport, GSK renderer, preload, async image decode, images, cache
+  size). Before, only proxy/DNS/home-page-type keys prompted, so a
+  compromised renderer could silently switch on WebGL and WebGPU (which
+  widens the sandbox of every renderer started afterwards), the camera
+  and microphone master switches, or disable JavaScript limits. The
+  dialog also truncates and strips control and bidi characters from the
+  values it shows.
 * Security (Windows): a renderer process now inherits only its own
   framebuffer mapping, its two IPC pipe ends and stderr. The shell passes
   that explicit handle list to `CreateProcess`
