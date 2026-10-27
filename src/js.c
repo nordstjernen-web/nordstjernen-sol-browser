@@ -61973,8 +61973,10 @@ ns_document_refresh_cookie(ns_js *js)
         version == js->cookie_version)
         return;
     char *visible = ns_net_cookies_for_js(js->current_url, ns_js_top_url(js));
-    g_free(js->cookie_value);
-    js->cookie_value = visible ? visible : g_strdup("");
+    if (visible) {
+        g_free(js->cookie_value);
+        js->cookie_value = visible;
+    }
     js->cookie_version = version;
 }
 
@@ -62136,8 +62138,10 @@ ns_document_set_cookie(JSContext *ctx, JSValueConst this_val, JSValueConst val)
                                   &js->cookie_version);
         char *visible = ns_net_cookies_for_js(js->current_url,
                                               ns_js_top_url(js));
-        g_free(js->cookie_value);
-        js->cookie_value = visible ? visible : g_strdup("");
+        if (visible) {
+            g_free(js->cookie_value);
+            js->cookie_value = visible;
+        }
     }
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;

@@ -3,6 +3,10 @@ Changelog:
 
 1.0.38:
 ======
+* Security: `document.cookie` on a `file:` page is now kept only in that
+  document's memory. Every local HTML file used to share one persistent
+  cookie jar, so a downloaded page opened from Downloads could read the
+  cookies set by any other local page and leave cookies behind for them.
 * Security: audio played through the `nordstjernen-audio` helper (`.mp3`,
   and `.ogg`/`.opus`/`.wav`/`.webm` with FFmpeg) is now fetched by the
   renderer through the normal network path — CSP `media-src`,
