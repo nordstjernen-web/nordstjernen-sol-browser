@@ -3,6 +3,16 @@ Changelog:
 
 1.0.38:
 ======
+* Layout: a column flex container's content height is now the sum of its
+  items' hypothetical main sizes (flex-basis clamped by min/max) instead
+  of max(flex-basis, content height), so a `flex: 1 1 0; overflow: auto`
+  child no longer forces its parent to its full scroll height and the
+  parent can shrink as a flex item itself. A grid item with an explicit
+  `min-height: 0` in a `0fr` row now collapses to 0 (the hide/show
+  `grid-template-rows: 0fr` → `1fr` animation pattern). Both matched
+  Chromium on the new `flex-column-hypothetical-size` render fixture; on
+  chess.com the bot panel now fits the window, so its New Game / Play
+  button is reachable and a game against a bot can be started and played.
 * `scrollIntoView()` now clamps the viewport scroll to the document's
   scrollable range like `scrollTo()` does. A page whose content fit the
   window could end up with `window.scrollY` at a few hundred pixels while
