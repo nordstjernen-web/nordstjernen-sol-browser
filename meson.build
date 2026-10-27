@@ -575,7 +575,21 @@ if get_option('wasm').enabled() and wasm_unsupported_cpu
 endif
 wasm_feature = get_option('wasm').disable_auto_if(wasm_unsupported_cpu)
 have_wasm = false
+have_wasm_simd = false
+simde_dep = declare_dependency()
 if wasm_feature.allowed()
+  wasm_simd_feature = get_option('wasm_simd')
+  if wasm_simd_feature.allowed()
+    simde_dep = dependency('simde', required: false)
+    if not simde_dep.found() and cc.has_header('simde/wasm/simd128.h')
+      simde_dep = declare_dependency()
+    endif
+    if not simde_dep.found()
+      simde_dep = dependency('simde', required: wasm_simd_feature,
+                             fallback: ['simde', 'simde_dep'])
+    endif
+    have_wasm_simd = simde_dep.found()
+  endif
   subdir('src/wamr')
   have_wasm = true
 else
@@ -682,7 +696,8 @@ install_data(
   install_dir: get_option('datadir') / 'metainfo',
 )
 
-summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
+summary({'WebAssembly (WAMR)': have_wasm,
+         'WebAssembly SIMD (SIMDe)': have_wasm_simd}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
 summary({'H.264/AAC OS decoders': media_os_backend}, section: 'Features')
 summary({'JPEG XL images (libjxl)': have_jxl}, section: 'Features')

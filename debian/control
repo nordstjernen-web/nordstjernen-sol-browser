@@ -15,6 +15,7 @@ Build-Depends:
  libpsl-dev,
  libsqlite3-dev,
  libseccomp-dev [linux-any],
+ libsimde-dev,
  libwebp-dev,
  libavif-dev,
  libjxl-dev,

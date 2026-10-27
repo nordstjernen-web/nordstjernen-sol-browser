@@ -54,6 +54,7 @@ compile_commands.json
 /subprojects/packagecache/
 /subprojects/quickjs/
 /subprojects/wgpu-native-*/
+/subprojects/simde-*/
 
 # CMake (in case)
 CMakeCache.txt

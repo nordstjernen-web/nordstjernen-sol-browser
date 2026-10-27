@@ -53,9 +53,24 @@ Marshalling at the JS ↔ wasm boundary:
 - **Ref-typed (`externref`/`funcref`) imported globals** — standalone
   `Global`s of these types work from JS, but linking one as a module
   import is skipped.
-- **Threads/atomics, SIMD, GC, exception handling, memory64** — off in
+- **Threads/atomics, GC, exception handling, memory64** — off in
   the WAMR build. Pages that feature-detect get a clean
   `CompileError` and fall back.
+
+## SIMD
+
+`v128` and the whole SIMD opcode set are supported (`WebAssembly.validate`
+on a SIMD module returns `true`) when the build has the header-only
+[SIMDe](https://github.com/simd-everywhere/simde) library, which WAMR's
+fast interpreter uses to execute each `v128` operation as one native SSE/
+NEON operation instead of eight to sixteen scalar ones. `meson` takes
+the system `simde` package (Debian/Ubuntu `libsimde-dev`, Fedora
+`simde-devel`, Homebrew `simde`) or else fetches the pinned release
+through `subprojects/simde.wrap` (never committed); `-Dwasm_simd=disabled`
+drops it, and the configure summary shows `WebAssembly SIMD (SIMDe)`.
+Sites that ship a SIMD and a scalar build of the same module — chess
+engines, codecs, image processing — then pick the SIMD build, which under
+an interpreter is several times faster than the scalar one.
 
 ## Vendored runtime
 

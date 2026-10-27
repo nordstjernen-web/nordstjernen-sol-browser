@@ -41,7 +41,7 @@ depends=(
   uchardet
   zlib
 )
-makedepends=(meson)
+makedepends=(meson simde)
 optdepends=(
   'gst-libav: H.264 and AAC playback'
   'gst-plugins-good: H.264 and AAC playback'

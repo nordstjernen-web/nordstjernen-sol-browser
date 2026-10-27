@@ -3,6 +3,18 @@ Changelog:
 
 1.0.38:
 ======
+* WebAssembly SIMD: `v128` and the full SIMD opcode set now run in the
+  WAMR fast interpreter through the header-only SIMDe library
+  (`-Dwasm_simd`, auto: the system `simde` package or the pinned
+  release fetched by `subprojects/simde.wrap`; the configure summary
+  shows `WebAssembly SIMD (SIMDe)`). `WebAssembly.validate()` accepts
+  SIMD modules, so sites that feature-detect load their SIMD build
+  instead of a scalar fallback — chess.com's bot engine now loads its
+  default build. A WAMR bug that made `local.set`/`local.tee` on a `v128`
+  local in a function with many locals trap with "invalid local type"
+  (which aborted that engine on first use) is fixed in the vendored
+  interpreter. Debian, RPM and Arch packaging gain the simde build
+  dependency.
 * Windows: the browser and renderer processes now request a 1 ms system
   timer resolution (`timeBeginPeriod(1)`), like other browsers do, so a
   JavaScript `setTimeout` of a few milliseconds fires after a few
