@@ -1,6 +1,21 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.38:
+======
+* Packaging: the `nordstjernen-browser` npm package now builds Nordstjernen
+  on Windows instead of opening the Microsoft Store page. Like the Northstar
+  and Southstar packages, it finds MSYS2 (`C:\msys64` or `MSYS2_ROOT`),
+  checks for the UCRT64 clang, meson, GTK 4, FFmpeg and the other build
+  dependencies and names the `pacman` command for whatever is missing, builds
+  the release source with that environment's programs, and starts the
+  browser with the MSYS2 DLLs on `PATH`. The installer's `install.js`,
+  `system.js` and `dependencies.js` are now the same files in all three
+  packages, with the Nordstjernen specifics in `lib/product.js`.
+* Packaging: on Linux, macOS and the BSDs the npm installer sets the
+  executable bits on the installed programs, and restores them on an
+  existing install when `nordstjernen` starts.
+
 1.0.37:
 ======
 * Packaging: Nordstjernen can be installed from npm as

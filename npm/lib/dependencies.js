@@ -2,87 +2,17 @@
 'use strict';
 
 const fs = require('fs');
-const { spawnSync } = require('child_process');
-
-const SUPPORTED_DISTRIBUTIONS = 'Ubuntu 24.04, Debian 13, Fedora 40, openSUSE Tumbleweed, Arch Linux, Alpine 3.21 or newer';
+const { capture, locateMsys2 } = require('./system');
 
 const MANAGERS = {
-  apt: { name: 'Debian/Ubuntu', install: 'sudo apt install' },
-  dnf: { name: 'Fedora/RHEL', install: 'sudo dnf install', pkgconfig: (module) => `'pkgconfig(${module})'` },
-  zypper: { name: 'openSUSE', install: 'sudo zypper install', pkgconfig: (module) => `'pkgconfig(${module})'` },
-  pacman: { name: 'Arch Linux', install: 'sudo pacman -S --needed' },
-  apk: { name: 'Alpine', install: 'sudo apk add', pkgconfig: (module) => `pc:${module}` },
-  brew: { name: 'Homebrew', install: 'brew install' },
+  apt: { install: 'sudo apt install' },
+  dnf: { install: 'sudo dnf install', pkgconfig: (module) => `'pkgconfig(${module})'` },
+  zypper: { install: 'sudo zypper install', pkgconfig: (module) => `'pkgconfig(${module})'` },
+  pacman: { install: 'sudo pacman -S --needed' },
+  apk: { install: 'sudo apk add', pkgconfig: (module) => `pc:${module}` },
+  brew: { install: 'brew install' },
+  msys: { install: 'pacman -S --needed' },
 };
-
-const TOOLS = [
-  { label: 'meson', probe: ['meson'], minimum: '1.0',
-    apt: 'meson', dnf: 'meson', zypper: 'meson', pacman: 'meson', apk: 'meson', brew: 'meson' },
-  { label: 'ninja', probe: ['ninja', 'samu'],
-    apt: 'ninja-build', dnf: 'ninja-build', zypper: 'ninja', pacman: 'ninja', apk: 'samurai', brew: 'ninja' },
-  { label: 'pkg-config', probe: ['pkg-config', 'pkgconf'],
-    apt: 'pkgconf', dnf: 'pkgconf', zypper: 'pkgconf', pacman: 'pkgconf', apk: 'pkgconf', brew: 'pkgconf' },
-  { label: 'tar', probe: ['tar'],
-    apt: 'tar', dnf: 'tar', zypper: 'tar', pacman: 'tar', apk: 'tar' },
-  { label: 'a C compiler (gcc or clang)', probe: ['cc', 'gcc', 'clang'],
-    apt: 'build-essential', dnf: 'gcc', zypper: 'gcc', pacman: 'base-devel', apk: 'build-base' },
-  { label: 'a C++ compiler (g++ or clang++)', probe: ['c++', 'g++', 'clang++'],
-    apt: 'build-essential', dnf: 'gcc-c++', zypper: 'gcc-c++', pacman: 'base-devel', apk: 'build-base' },
-];
-
-const REQUIRED = [
-  { module: 'glib-2.0', minimum: '2.80', apt: 'libglib2.0-dev', pacman: 'glib2', brew: 'glib' },
-  { module: 'gtk4', minimum: '4.14', apt: 'libgtk-4-dev', pacman: 'gtk4', brew: 'gtk4' },
-  { module: 'epoxy', apt: 'libepoxy-dev', pacman: 'libepoxy', brew: 'libepoxy' },
-  { module: 'libcurl', minimum: '8.5', apt: 'libcurl4-openssl-dev', pacman: 'curl', brew: 'curl' },
-  { module: 'libcrypto', apt: 'libssl-dev', pacman: 'openssl', brew: 'openssl@3' },
-  { module: 'libssl', apt: 'libssl-dev', pacman: 'openssl', brew: 'openssl@3' },
-  { module: 'uchardet', apt: 'libuchardet-dev', pacman: 'uchardet', brew: 'uchardet' },
-  { module: 'libpsl', apt: 'libpsl-dev', pacman: 'libpsl', brew: 'libpsl' },
-  { module: 'sqlite3', apt: 'libsqlite3-dev', pacman: 'sqlite', brew: 'sqlite' },
-  { module: 'libwebp', apt: 'libwebp-dev', pacman: 'libwebp', brew: 'webp' },
-  { module: 'libwebpdemux', apt: 'libwebp-dev', pacman: 'libwebp', brew: 'webp' },
-  { module: 'zlib', apt: 'zlib1g-dev', pacman: 'zlib', brew: 'zlib' },
-  { module: 'fribidi', minimum: '1.0.6', apt: 'libfribidi-dev', pacman: 'fribidi', brew: 'fribidi' },
-  { module: 'harfbuzz', minimum: '8.3.0', apt: 'libharfbuzz-dev', pacman: 'harfbuzz', brew: 'harfbuzz' },
-  { module: 'fontconfig', minimum: '2.15.0', apt: 'libfontconfig-dev', pacman: 'fontconfig', brew: 'fontconfig' },
-  { module: 'freetype2', apt: 'libfreetype-dev', pacman: 'freetype2', brew: 'freetype' },
-  { module: 'cairo', minimum: '1.18.0', apt: 'libcairo2-dev', pacman: 'cairo', brew: 'cairo' },
-  { module: 'cairo-ft', minimum: '1.18.0', apt: 'libcairo2-dev', pacman: 'cairo', brew: 'cairo' },
-  { module: 'libseccomp', linux: true, apt: 'libseccomp-dev', pacman: 'libseccomp' },
-  ...[
-    ['libavformat', '60'],
-    ['libavcodec', '60'],
-    ['libavutil', '58'],
-    ['libswscale', '7'],
-    ['libswresample', '4'],
-  ].map(([module, minimum]) => ({
-    module, minimum, linux: true, apt: `${module}-dev`, pacman: 'ffmpeg', brew: 'ffmpeg',
-    note: 'FFmpeg 6.0 or newer; on Fedora/RHEL from RPM Fusion, on openSUSE from Packman',
-  })),
-];
-
-const OPTIONAL = [
-  { module: 'sdl2', feature: 'audio playback', apt: 'libsdl2-dev', pacman: 'sdl2', brew: 'sdl2' },
-  { module: 'gstreamer-1.0', minimum: '1.20', unix: true, feature: 'H.264 video and AAC audio',
-    apt: 'libgstreamer1.0-dev', pacman: 'gstreamer' },
-  { module: 'gstreamer-app-1.0', minimum: '1.20', unix: true, feature: 'H.264 video and AAC audio',
-    apt: 'libgstreamer-plugins-base1.0-dev', pacman: 'gst-plugins-base-libs' },
-  { module: 'gstreamer-video-1.0', minimum: '1.20', unix: true, feature: 'H.264 video and AAC audio',
-    apt: 'libgstreamer-plugins-base1.0-dev', pacman: 'gst-plugins-base-libs' },
-  { module: 'poppler-glib', feature: 'viewing PDF files', apt: 'libpoppler-glib-dev', pacman: 'poppler-glib', brew: 'poppler' },
-  { module: 'libbrotlidec', feature: 'WOFF2 web fonts', apt: 'libbrotli-dev', pacman: 'brotli', brew: 'brotli' },
-  { module: 'enchant-2', feature: 'spell-checking', apt: 'libenchant-2-dev', pacman: 'enchant', brew: 'enchant' },
-  { module: 'libavif', feature: 'AVIF images', apt: 'libavif-dev', pacman: 'libavif', brew: 'libavif' },
-  { module: 'libjxl', feature: 'JPEG XL images', apt: 'libjxl-dev', pacman: 'libjxl', brew: 'jpeg-xl' },
-  { module: 'libavcodec', minimum: '60', mac: true, feature: 'WebM video', brew: 'ffmpeg' },
-];
-
-function capture(command, args, env = process.env) {
-  const result = spawnSync(command, args, { encoding: 'utf8', env });
-  if (result.error || result.status !== 0) return null;
-  return result.stdout.trim();
-}
 
 function versionAtLeast(found, minimum) {
   const a = found.split(/[.+~-]/).map((part) => parseInt(part, 10) || 0);
@@ -103,7 +33,16 @@ function osRelease() {
   }
 }
 
+function systemName() {
+  if (process.platform === 'win32') {
+    const msys2 = locateMsys2();
+    return msys2 ? `MSYS2 ${msys2.msystem} (${msys2.root})` : '';
+  }
+  return osRelease().name;
+}
+
 function packageManager() {
+  if (process.platform === 'win32') return 'msys';
   if (process.platform === 'darwin') return 'brew';
   const { ids } = osRelease();
   if (/debian|ubuntu/.test(ids)) return 'apt';
@@ -115,14 +54,21 @@ function packageManager() {
 }
 
 function applies(entry) {
+  if (entry.platforms) return entry.platforms.includes(process.platform);
   if (entry.linux) return process.platform === 'linux';
-  if (entry.unix) return process.platform !== 'darwin';
+  if (entry.unix) return process.platform !== 'darwin' && process.platform !== 'win32';
   if (entry.mac) return process.platform === 'darwin';
+  if (entry.windows) return process.platform === 'win32';
   return true;
 }
 
 function packageFor(entry, manager) {
   if (!manager) return null;
+  if (manager === 'msys') {
+    if (entry.msysBase) return entry.msysBase;
+    const msys2 = locateMsys2();
+    return entry.msys && msys2 ? `${msys2.packagePrefix}${entry.msys}` : null;
+  }
   if (entry.module && MANAGERS[manager].pkgconfig) return MANAGERS[manager].pkgconfig(entry.module);
   return entry[manager] || null;
 }
@@ -143,14 +89,31 @@ function installCommand(entries, manager) {
   return lines;
 }
 
-function checkTools(env) {
+function installInstructions(entries, manager, purpose) {
+  const system = systemName();
+  if (manager === 'msys') {
+    return ['', `${purpose}, open the MSYS2 ${locateMsys2().msystem} terminal${system ? ` of ${locateMsys2().root}` : ''} and run:`, '', ...installCommand(entries, manager)];
+  }
+  if (!manager) {
+    return ['', 'Install the packages that provide these pkg-config modules and programs with your system\'s package manager.'];
+  }
+  return ['', `${purpose}${system ? ` on ${system}` : ''}, run:`, '', ...installCommand(entries, manager)];
+}
+
+function reportedVersion(output) {
+  const match = output.match(/\d+\.\d+(\.\d+)?/);
+  return match ? match[0] : output.split('\n')[0].trim();
+}
+
+function checkTools(tools, env) {
   const missing = [];
   const outdated = [];
-  for (const tool of TOOLS) {
+  for (const tool of tools.filter(applies)) {
+    if ((tool.satisfiedBy || []).some((command) => capture(command, ['--version'], env) !== null)) continue;
     const found = tool.probe.map((command) => capture(command, ['--version'], env)).find((out) => out !== null);
     if (found === undefined) missing.push(tool);
     else if (tool.minimum) {
-      const version = found.split('\n')[0].trim();
+      const version = reportedVersion(found);
       if (!versionAtLeast(version, tool.minimum)) outdated.push({ ...tool, found: version });
     }
   }
@@ -174,10 +137,17 @@ function describe(entry) {
   return entry.found ? `${name} ${entry.found} (${name}${wanted} is needed)` : `${name}${wanted}`;
 }
 
-function report(tools, libraries, manager) {
-  const lines = ['Nordstjernen is built from source on this system, and the build cannot start yet.'];
+function heading(product) {
+  return `${product.name} is built from source on this system, and the build cannot start yet.`;
+}
+
+function reinstall(product) {
+  return ['', `Then reinstall: ${process.platform === 'win32' ? '' : 'sudo '}npm install -g ${product.packageName}`];
+}
+
+function report(product, tools, libraries, manager) {
+  const lines = [heading(product)];
   const missing = [...tools.missing, ...libraries.missing];
-  const system = osRelease().name;
 
   if (missing.length) {
     lines.push('', 'Not installed:');
@@ -187,35 +157,77 @@ function report(tools, libraries, manager) {
     }
     const notes = [...new Set(missing.map((entry) => entry.note).filter(Boolean))];
     for (const note of notes) lines.push(`    ${note}`);
-    if (manager) {
-      lines.push('', `Install them${system ? ` on ${system}` : ''} with:`, '', ...installCommand(missing, manager));
-    } else {
-      lines.push('', 'Install the packages that provide these pkg-config modules and programs with your system\'s package manager.');
-    }
+    lines.push(...installInstructions(missing, manager, 'To install them'));
   }
 
   if (tools.outdated.length) {
-    lines.push('', 'Older than Nordstjernen needs:', ...tools.outdated.map((entry) => `  - ${describe(entry)}`));
-    lines.push('', 'A newer meson can be installed for your user with:', '', '  pipx install meson', '', 'or: python3 -m pip install --user meson');
+    lines.push('', 'Older than the build needs:', ...tools.outdated.map((entry) => `  - ${describe(entry)}`));
+    if (manager === 'msys' || manager === 'brew') {
+      lines.push('', manager === 'msys' ? 'Update MSYS2 with: pacman -Syu' : 'Update them with: brew update && brew upgrade');
+    } else {
+      for (const hint of new Set(tools.outdated.map((entry) => entry.upgrade).filter(Boolean))) lines.push('', ...hint);
+    }
   }
 
   if (libraries.outdated.length) {
-    lines.push('', `Libraries older than Nordstjernen needs${system ? ` on ${system}` : ''}:`);
+    const system = systemName();
+    lines.push('', `Libraries older than the build needs${system ? ` on ${system}` : ''}:`);
     lines.push(...libraries.outdated.map((entry) => `  - ${describe(entry)}`));
-    if (process.platform === 'darwin') {
+    if (manager === 'msys') {
+      lines.push('', 'Update MSYS2 with: pacman -Syu');
+    } else if (manager === 'brew') {
       lines.push('', 'Update them with: brew update && brew upgrade');
     } else {
       lines.push(
         '',
         'These versions come with your distribution release, so installing packages will not fix them.',
-        `Nordstjernen builds on ${SUPPORTED_DISTRIBUTIONS}.`,
+        `${product.name} builds on ${product.supportedDistributions}.`,
       );
     }
   }
 
-  if (missing.length || tools.outdated.length || process.platform === 'darwin') {
-    lines.push('', 'Then reinstall: npm install -g nordstjernen-browser');
+  if (missing.length || tools.outdated.length || manager === 'brew' || manager === 'msys') {
+    lines.push(...reinstall(product));
   }
+  return lines.join('\n');
+}
+
+function missingMsys2Report(product) {
+  const prefix = 'mingw-w64-ucrt-x86_64-';
+  const packages = [...product.tools, ...product.required]
+    .filter(applies)
+    .map((entry) => entry.msysBase || (entry.msys && `${prefix}${entry.msys}`))
+    .filter(Boolean);
+  const lines = [
+    `On Windows, ${product.name} is built from source with MSYS2, which is not installed.`,
+    '',
+    'Install MSYS2 from https://www.msys2.org (the default location is C:\\msys64; set',
+    'MSYS2_ROOT if you choose another), then open its UCRT64 terminal and run:',
+    '',
+  ];
+  let line = '  pacman -S --needed';
+  for (const name of [...new Set(packages)]) {
+    if (line.length + name.length > 76) {
+      lines.push(`${line} \\`);
+      line = '     ';
+    }
+    line += ` ${name}`;
+  }
+  lines.push(line, ...reinstall(product));
+  return lines.join('\n');
+}
+
+function uncheckedReport(product, tools, manager) {
+  const lines = [heading(product), '', 'Not installed:', ...tools.missing.map((entry) => `  - ${describe(entry)}`)];
+  lines.push('', 'Without pkg-config the libraries cannot be checked.');
+  if (manager) {
+    lines.push(...installInstructions(
+      [...tools.missing, ...product.required.filter(applies)],
+      manager,
+      'To install the build tools and every library the build needs',
+    ));
+  }
+  lines.push(...reinstall(product));
   return lines.join('\n');
 }
 
@@ -223,52 +235,34 @@ function optionalReport(libraries, manager) {
   const absent = [...libraries.missing, ...libraries.outdated];
   if (!absent.length) return null;
   const features = [...new Set(absent.map((entry) => entry.feature))];
-  const lines = [
-    `Building without ${features.join(', ')}: ${absent.map((entry) => entry.module).join(', ')} not found.`,
-  ];
+  const lines = [`Building without ${features.join(', ')}: ${absent.map((entry) => entry.module).join(', ')} not found.`];
   const command = manager ? installCommand(absent, manager) : [];
   if (command.length) lines.push('To include them, install these first and reinstall:', ...command);
   return lines.join('\n');
 }
 
-function uncheckedReport(tools, manager) {
-  const lines = [
-    'Nordstjernen is built from source on this system, and the build cannot start yet.',
-    '',
-    'Not installed:',
-    ...tools.missing.map((entry) => `  - ${describe(entry)}`),
-    '',
-    'Without pkg-config the libraries cannot be checked.',
-  ];
-  if (manager) {
-    lines.push(
-      `This installs the build tools and every library the build needs${osRelease().name ? ` on ${osRelease().name}` : ''}:`,
-      '',
-      ...installCommand([...tools.missing, ...REQUIRED.filter(applies)], manager),
-    );
+function preflight(product, env, { onWarning, onError }) {
+  if (process.platform === 'win32' && !locateMsys2()) {
+    onError(missingMsys2Report(product));
+    return;
   }
-  lines.push('', 'Then reinstall: npm install -g nordstjernen-browser');
-  return lines.join('\n');
-}
-
-function preflight(env, { onWarning, onError }) {
   const manager = packageManager();
-  const tools = checkTools(env);
-  if (process.platform === 'darwin' && tools.missing.some((tool) => / compiler /.test(tool.label))) {
-    onError('Nordstjernen is built from source on this Mac and needs a C and C++ compiler. Install the Xcode command line tools:\n\n  xcode-select --install\n\nThen reinstall: npm install -g nordstjernen-browser');
+  const tools = checkTools(product.tools, env);
+  if (process.platform === 'darwin' && tools.missing.some((tool) => tool.compiler)) {
+    onError(`${product.name} is built from source on this Mac and needs a C and C++ compiler. Install the Xcode command line tools:\n\n  xcode-select --install\n${reinstall(product).join('\n')}`);
     return;
   }
   if (tools.missing.some((tool) => tool.label === 'pkg-config')) {
-    onError(uncheckedReport(tools, manager));
+    onError(uncheckedReport(product, tools, manager));
     return;
   }
-  const libraries = checkLibraries(REQUIRED, env);
+  const libraries = checkLibraries(product.required, env);
   if (tools.missing.length || tools.outdated.length || libraries.missing.length || libraries.outdated.length) {
-    onError(report(tools, libraries, manager));
+    onError(report(product, tools, libraries, manager));
     return;
   }
-  const optional = optionalReport(checkLibraries(OPTIONAL, env), manager);
+  const optional = optionalReport(checkLibraries(product.optional, env), manager);
   if (optional) onWarning(optional);
 }
 
-module.exports = { preflight, capture };
+module.exports = { preflight };

@@ -1,12 +1,12 @@
-// postinstall.js: installs the browser binary when the npm package is installed, so the first launch is immediate.
+// postinstall.js: builds the browser when the npm package is installed, so the first launch is immediate.
 'use strict';
 
-const { install, installPlan, storeMessage, InstallError, log } = require('./install');
+const { install, product, InstallError, log } = require('./install');
 
-if (process.env.NORDSTJERNEN_SKIP_INSTALL === '1') {
-  log('NORDSTJERNEN_SKIP_INSTALL=1: the browser is installed on first launch instead');
-} else if (installPlan().kind === 'store') {
-  log(storeMessage());
+const skip = `${product.envPrefix}_SKIP_INSTALL`;
+
+if (process.env[skip] === '1') {
+  log(`${skip}=1: the browser is built on first launch instead`);
 } else {
   install().catch((error) => {
     log(error instanceof InstallError ? error.message : error.stack);
