@@ -1,0 +1,88 @@
+// product.js: what this package installs: the Nordstjernen release, its build tools and the libraries its build requires.
+'use strict';
+
+const { version } = require('../package.json');
+
+module.exports = {
+  name: 'Nordstjernen',
+  packageName: 'nordstjernen-browser',
+  envPrefix: 'NORDSTJERNEN',
+  licenseFiles: ['License.md', 'COPYING'],
+  version,
+  repo: 'nordstjernen-web/nordstjernen-sol-browser',
+  sourceDirectory: `nordstjernen-sol-browser-${version}`,
+  executable: process.platform === 'win32' ? 'bin/nordstjernen.exe' : 'bin/nordstjernen',
+  mesonOptions: ['--buildtype=release'],
+  windowsEnv: { CC: 'clang', CXX: 'clang++' },
+  supportedDistributions: 'Ubuntu 24.04, Debian 13, Fedora 40, openSUSE Tumbleweed, Arch Linux, Alpine 3.21 or newer',
+  macRelease: {
+    asset: `nordstjernen-${version}-macos-arm64.dmg`,
+    app: 'Nordstjernen.app',
+    executable: 'Nordstjernen.app/Contents/MacOS/Nordstjernen',
+  },
+
+  tools: [
+    { label: 'meson', probe: ['meson'], minimum: '1.0',
+      upgrade: ['A newer meson can be installed for your user with:', '', '  pipx install meson', '', 'or: python3 -m pip install --user meson'],
+      apt: 'meson', dnf: 'meson', zypper: 'meson', pacman: 'meson', apk: 'meson', brew: 'meson', msys: 'meson' },
+    { label: 'ninja', probe: ['ninja', 'samu'],
+      apt: 'ninja-build', dnf: 'ninja-build', zypper: 'ninja', pacman: 'ninja', apk: 'samurai', brew: 'ninja', msys: 'ninja' },
+    { label: 'pkg-config', probe: ['pkg-config', 'pkgconf'],
+      apt: 'pkgconf', dnf: 'pkgconf', zypper: 'pkgconf', pacman: 'pkgconf', apk: 'pkgconf', brew: 'pkgconf', msys: 'pkgconf' },
+    { label: 'tar', probe: ['tar'],
+      apt: 'tar', dnf: 'tar', zypper: 'tar', pacman: 'tar', apk: 'tar', msysBase: 'tar' },
+    { label: 'a C compiler (gcc or clang)', probe: ['cc', 'gcc', 'clang'], compiler: true,
+      apt: 'build-essential', dnf: 'gcc', zypper: 'gcc', pacman: 'base-devel', apk: 'build-base', msys: 'clang' },
+    { label: 'a C++ compiler (g++ or clang++)', probe: ['c++', 'g++', 'clang++'], compiler: true,
+      apt: 'build-essential', dnf: 'gcc-c++', zypper: 'gcc-c++', pacman: 'base-devel', apk: 'build-base', msys: 'clang' },
+  ],
+
+  required: [
+    { module: 'glib-2.0', minimum: '2.80', apt: 'libglib2.0-dev', pacman: 'glib2', brew: 'glib', msys: 'glib2' },
+    { module: 'gtk4', minimum: process.platform === 'win32' ? '4.22.1' : '4.14',
+      apt: 'libgtk-4-dev', pacman: 'gtk4', brew: 'gtk4', msys: 'gtk4' },
+    { module: 'epoxy', apt: 'libepoxy-dev', pacman: 'libepoxy', brew: 'libepoxy', msys: 'libepoxy' },
+    { module: 'libcurl', minimum: '8.5', apt: 'libcurl4-openssl-dev', pacman: 'curl', brew: 'curl', msys: 'curl' },
+    { module: 'libcrypto', apt: 'libssl-dev', pacman: 'openssl', brew: 'openssl@3', msys: 'openssl' },
+    { module: 'libssl', apt: 'libssl-dev', pacman: 'openssl', brew: 'openssl@3', msys: 'openssl' },
+    { module: 'uchardet', apt: 'libuchardet-dev', pacman: 'uchardet', brew: 'uchardet', msys: 'uchardet' },
+    { module: 'libpsl', apt: 'libpsl-dev', pacman: 'libpsl', brew: 'libpsl', msys: 'libpsl' },
+    { module: 'sqlite3', apt: 'libsqlite3-dev', pacman: 'sqlite', brew: 'sqlite', msys: 'sqlite3' },
+    { module: 'libwebp', apt: 'libwebp-dev', pacman: 'libwebp', brew: 'webp', msys: 'libwebp' },
+    { module: 'libwebpdemux', apt: 'libwebp-dev', pacman: 'libwebp', brew: 'webp', msys: 'libwebp' },
+    { module: 'zlib', apt: 'zlib1g-dev', pacman: 'zlib', brew: 'zlib', msys: 'zlib' },
+    { module: 'fribidi', minimum: '1.0.6', apt: 'libfribidi-dev', pacman: 'fribidi', brew: 'fribidi', msys: 'fribidi' },
+    { module: 'harfbuzz', minimum: '8.3.0', apt: 'libharfbuzz-dev', pacman: 'harfbuzz', brew: 'harfbuzz', msys: 'harfbuzz' },
+    { module: 'fontconfig', minimum: '2.15.0', apt: 'libfontconfig-dev', pacman: 'fontconfig', brew: 'fontconfig', msys: 'fontconfig' },
+    { module: 'freetype2', apt: 'libfreetype-dev', pacman: 'freetype2', brew: 'freetype', msys: 'freetype' },
+    { module: 'cairo', minimum: '1.18.0', apt: 'libcairo2-dev', pacman: 'cairo', brew: 'cairo', msys: 'cairo' },
+    { module: 'cairo-ft', minimum: '1.18.0', apt: 'libcairo2-dev', pacman: 'cairo', brew: 'cairo', msys: 'cairo' },
+    { module: 'libseccomp', linux: true, apt: 'libseccomp-dev', pacman: 'libseccomp' },
+    ...[
+      ['libavformat', '60'],
+      ['libavcodec', '60'],
+      ['libavutil', '58'],
+      ['libswscale', '7'],
+      ['libswresample', '4'],
+    ].map(([module, minimum]) => ({
+      module, minimum, platforms: ['linux', 'win32'], apt: `${module}-dev`, pacman: 'ffmpeg', msys: 'ffmpeg',
+      note: 'FFmpeg 6.0 or newer; on Fedora/RHEL from RPM Fusion, on openSUSE from Packman',
+    })),
+  ],
+
+  optional: [
+    { module: 'sdl2', feature: 'audio playback', apt: 'libsdl2-dev', pacman: 'sdl2', brew: 'sdl2', msys: 'SDL2' },
+    { module: 'gstreamer-1.0', minimum: '1.20', unix: true, feature: 'H.264 video and AAC audio',
+      apt: 'libgstreamer1.0-dev', pacman: 'gstreamer' },
+    { module: 'gstreamer-app-1.0', minimum: '1.20', unix: true, feature: 'H.264 video and AAC audio',
+      apt: 'libgstreamer-plugins-base1.0-dev', pacman: 'gst-plugins-base-libs' },
+    { module: 'gstreamer-video-1.0', minimum: '1.20', unix: true, feature: 'H.264 video and AAC audio',
+      apt: 'libgstreamer-plugins-base1.0-dev', pacman: 'gst-plugins-base-libs' },
+    { module: 'poppler-glib', feature: 'viewing PDF files', apt: 'libpoppler-glib-dev', pacman: 'poppler-glib', brew: 'poppler', msys: 'poppler' },
+    { module: 'libbrotlidec', feature: 'WOFF2 web fonts', apt: 'libbrotli-dev', pacman: 'brotli', brew: 'brotli', msys: 'brotli' },
+    { module: 'enchant-2', feature: 'spell-checking', apt: 'libenchant-2-dev', pacman: 'enchant', brew: 'enchant', msys: 'enchant' },
+    { module: 'libavif', feature: 'AVIF images', apt: 'libavif-dev', pacman: 'libavif', brew: 'libavif', msys: 'libavif' },
+    { module: 'libjxl', feature: 'JPEG XL images', apt: 'libjxl-dev', pacman: 'libjxl', brew: 'jpeg-xl', msys: 'libjxl' },
+    { module: 'libavcodec', minimum: '60', mac: true, feature: 'WebM video', brew: 'ffmpeg' },
+  ],
+};

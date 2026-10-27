@@ -16,12 +16,12 @@ nordstjernen https://example.com
 | --- | --- |
 | Linux, BSD, Intel macOS | Nordstjernen is built from the release source on your machine with meson and ninja, against your system's GTK 4, FFmpeg and other libraries. The source tarball is checked against the SHA-256 recorded in this package. The build takes several minutes and shows its progress in the terminal. |
 | macOS on Apple silicon | The Developer ID signed and notarised release build is downloaded from GitHub and checked against the release's `SHA256SUMS`. |
-| Windows | Nordstjernen is distributed through the [Microsoft Store](https://apps.microsoft.com/detail/9NW8T7W5Z4PL); the `nordstjernen` command opens its Store page. |
+| Windows | Nordstjernen is built from the release source with [MSYS2](https://www.msys2.org)'s UCRT64 clang, meson and ninja, against MSYS2's GTK 4 and FFmpeg. The signed build is in the [Microsoft Store](https://apps.microsoft.com/detail/9NW8T7W5Z4PL). |
 
 The browser is installed inside the npm package, so `npm uninstall -g
 nordstjernen-browser` removes it. If that directory is not writable, the
 browser goes into `~/.cache/nordstjernen-browser` (`~/Library/Caches` on
-macOS) instead.
+macOS, `%LOCALAPPDATA%` on Windows) instead.
 
 ## Building from source
 
@@ -31,7 +31,8 @@ is too old. Before downloading anything, the installer checks the build tools
 and every required library, and names whatever is missing or too old.
 
 If the build fails, the installer prints the end of the build output and the
-path of the full log, `~/.cache/nordstjernen-browser/build-<version>.log`.
+path of the full log, `build-<version>.log` in `~/.cache/nordstjernen-browser`
+(`%LOCALAPPDATA%\nordstjernen-browser` on Windows).
 
 Install the build dependencies before you install the package.
 
@@ -67,7 +68,19 @@ brew install meson ninja pkg-config gtk4 libepoxy curl openssl@3 \
     uchardet libpsl sqlite webp sdl2 ffmpeg
 ```
 
-FFmpeg 6.0 or newer is required on Linux.
+Windows: install [MSYS2](https://www.msys2.org) in `C:\msys64` (or set
+`MSYS2_ROOT`), then in its UCRT64 terminal:
+
+```sh
+pacman -S --needed tar mingw-w64-ucrt-x86_64-{clang,pkgconf,meson,ninja,gtk4,libepoxy,curl,uchardet,libpsl,sqlite3,libwebp,SDL2,ffmpeg}
+```
+
+The browser runs against the MSYS2 libraries it was built with, so keep MSYS2
+installed. It is built on your machine and unsigned: if Windows Smart App
+Control is on, it blocks the browser, and the Microsoft Store build is the one
+to use.
+
+FFmpeg 6.0 or newer is required on Linux and Windows.
 
 ## Environment variables
 
