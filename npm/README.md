@@ -7,7 +7,7 @@ web browser written from scratch in C with GTK 4.
 
 ```sh
 npm install -g nordstjernen-browser
-nordstjernen https://example.com
+nordstjernen https://nordstjernen.org
 ```
 
 ## What installing does

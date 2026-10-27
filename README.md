@@ -81,7 +81,7 @@ installer are in `scripts/`.
 
 ```sh
 npm install -g nordstjernen-browser
-nordstjernen https://example.com
+nordstjernen https://nordstjernen.org
 ```
 
 On Linux, the BSDs and Intel Macs the package builds Nordstjernen from the
@@ -254,7 +254,7 @@ Windows, Fedora, openSUSE, Arch Linux and macOS instructions are in
 
 `meson install` puts `open-browser-nordstjernen` beside `nordstjernen` in the
 binary directory, a symbolic link to it, so
-`open-browser-nordstjernen https://example.com` starts Nordstjernen. The
+`open-browser-nordstjernen https://nordstjernen.org` starts Nordstjernen. The
 `.deb` and `.rpm` packages register it with `update-alternatives` instead of
 shipping the link, and the Alpine package creates the link at install time.
 On Windows the installer registers `open-browser-nordstjernen` as an App
