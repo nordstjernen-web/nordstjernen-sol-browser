@@ -1,0 +1,29 @@
+<!doctype html>
+<title>column flex container content height and 0fr grid rows</title>
+<style>
+  body { margin: 8px; font: 14px sans-serif; }
+  .case { margin-bottom: 8px; }
+  .label { height: 18px; }
+</style>
+<div class="label">grid 0fr with min-height:0 item collapses (no red):</div>
+<div class="case" style="display:grid;grid-template-rows:0fr;background:#f33"><div style="min-height:0"><div style="height:52px"></div></div></div>
+<div class="label">grid 0fr with auto-min item keeps its content (52px green):</div>
+<div class="case" style="display:grid;grid-template-rows:0fr;background:#3c3"><div><div style="height:52px"></div></div></div>
+<div class="label">column flex: scroll child with flex-basis 0 lets the parent shrink (blue 300, yellow 237, pink 63):</div>
+<div class="case" style="display:flex;flex-direction:column;height:300px;overflow:clip;background:#36f">
+  <div style="display:flex;flex-direction:column;height:100%;background:#fe3;margin:0 40px">
+    <div style="height:100px"></div>
+    <div style="flex:1 1 0;overflow:auto"><div style="height:1000px"></div></div>
+  </div>
+  <div style="height:80px;background:#f6c;margin:0 80px"></div>
+</div>
+<div class="label">auto-height column flex with a flex-basis 0 scroll child is 100px tall (grey):</div>
+<div class="case" style="display:flex;flex-direction:column;background:#999">
+  <div style="height:100px"></div>
+  <div style="flex:1 1 0;overflow:auto"><div style="height:1000px"></div></div>
+</div>
+<div class="label">same without overflow keeps its content (1100px, clipped here):</div>
+<div class="case" style="display:flex;flex-direction:column;background:#ccc;max-height:60px;overflow:hidden">
+  <div style="height:100px"></div>
+  <div style="flex:1 1 0"><div style="height:1000px"></div></div>
+</div>

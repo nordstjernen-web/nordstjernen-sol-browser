@@ -235,10 +235,13 @@ static double
 grid_item_min_block_contribution(const ns_box *c, double item_outer,
                                  double cb_height)
 {
-    if (!c->style || !overflow_establishes_bfc(c->style)) return item_outer;
+    if (!c->style) return item_outer;
     const ns_css_value *mnh = c->style->values[NS_CSS_MIN_HEIGHT];
-    double min_h = mnh && (mnh->kind == NS_CSS_V_LENGTH ||
-                           mnh->kind == NS_CSS_V_CALC)
+    gboolean explicit_min = mnh && (mnh->kind == NS_CSS_V_LENGTH ||
+                                    mnh->kind == NS_CSS_V_CALC);
+    if (!explicit_min && !overflow_establishes_bfc(c->style))
+        return item_outer;
+    double min_h = explicit_min
         ? length_resolve(mnh, cb_height > 0 ? cb_height : 0, 0) : 0;
     if (min_h < 0) min_h = 0;
     double extras = c->padding.top + c->padding.bottom +
@@ -13412,7 +13415,7 @@ flex_column_item_lens(ns_box *c, double cw, double pct_basis, ns_flex_len *l)
     l->grow = flex_grow_of(c);
     l->shrink = flex_shrink_of(c);
     double contrib = c->content_height + vex;
-    return contrib < b && exp ? b : contrib;
+    return exp ? flex_clamp_main(b, l->min, l->max) : contrib;
 }
 
 static double
