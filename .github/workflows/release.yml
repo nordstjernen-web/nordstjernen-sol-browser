@@ -36,10 +36,10 @@ jobs:
 
     # A package depends on the SONAME-numbered FFmpeg libraries of the release
     # it was built on (libavcodec60 on Ubuntu 24.04, libavcodec61 on Debian 13,
-    # libavcodec.so.62 on Fedora 44, libavcodec.so.63 on Fedora 45, …), so each
-    # supported release gets its own package, built and verified against that
-    # release's own archive: the Fedora RPM is installed with dnf, which
-    # resolves its Requires against the real Fedora repositories.
+    # libavcodec.so.63 on Fedora 45, …), so each supported release gets its
+    # own package, built and verified against that release's own archive: the
+    # Fedora RPM is installed with dnf, which resolves its Requires against the
+    # real Fedora repositories. Fedora is packaged for its current release only.
     strategy:
       fail-fast: false
       matrix:
@@ -60,11 +60,6 @@ jobs:
             slug: debian-13
             package: deb
             portable_zip: true
-          - name: Fedora 44
-            image: fedora:44
-            distro: fedora
-            slug: fedora-44
-            package: rpm
           - name: Fedora 45
             image: fedora:45
             distro: fedora
