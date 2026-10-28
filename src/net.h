@@ -269,6 +269,8 @@ gboolean ns_net_cookie_jar_version(const char *url, const char *top_url,
 void  ns_net_cookie_store_from_js(const char *url, const char *top_url,
                                   const char *cookie);
 void  ns_net_cookies_clear(void);
+void  ns_net_curl_apply_cookies(void *curl_handle, const char *url,
+                                const char *origin);
 void  ns_net_site_storage_clear(void);
 
 void  ns_net_set_proxy_override(const char *proxy_url);

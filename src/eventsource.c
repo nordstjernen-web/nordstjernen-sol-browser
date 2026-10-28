@@ -369,6 +369,7 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
 
     curl_easy_setopt(curl, CURLOPT_URL, es->url);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, NS_USER_AGENT);
+    ns_net_curl_apply_cookies(curl, es->url, es->origin);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     ns_net_apply_curl_tls(curl);
     ns_net_apply_curl_proxy(curl, es->url);

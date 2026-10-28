@@ -444,6 +444,7 @@ ns_ws_worker_curl(gpointer data)
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     ns_net_apply_curl_tls(curl);
     ns_net_apply_curl_proxy(curl, ws->url);
+    ns_net_curl_apply_cookies(curl, ws->url, ws->origin);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);

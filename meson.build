@@ -219,6 +219,14 @@ if not is_mobile and gtk_feature.allowed()
 endif
 gmodule = dependency('gmodule-2.0')
 libcurl = dependency('libcurl', version: '>=8.5')
+if cc.has_header_symbol('curl/curl.h', 'CURLOPT_COOKIE_SITE', dependencies: libcurl)
+  add_project_arguments('-DNS_CURL_HAVE_COOKIE_SITE=1', language: 'c')
+  message('libcurl: SameSite and Partitioned cookies decided by libcurl')
+endif
+if cc.has_header_symbol('curl/curl.h', 'CURLOPT_PRIORITY_URGENCY', dependencies: libcurl)
+  add_project_arguments('-DNS_CURL_HAVE_PRIORITY=1', language: 'c')
+  message('libcurl: RFC 9218 request priorities')
+endif
 if libcurl.version().version_compare('<8.11')
   warning('libcurl @0@ predates stable WebSocket support (curl 8.11): WebSocket will be unavailable at runtime unless this libcurl was built with the ws/wss protocols.'.format(libcurl.version()))
 endif

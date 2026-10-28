@@ -60,6 +60,10 @@ typedef struct ns_hop_req {
     const char        *cookie_jar_path;
     const char        *cookie_js_path;
     int                samesite_cross;
+    const char        *cookie_site;        /* site for cookies, or NULL */
+    gboolean           cookie_navigation;  /* top-level navigation */
+    int                priority_urgency;   /* RFC 9218 urgency, -1 none */
+    gboolean           priority_incremental;
     gboolean           follow_redirects;
     long               max_redirs;
     gboolean           request_ftp;
