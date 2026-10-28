@@ -1,7 +1,7 @@
 project(
   'nordstjernen',
   ['c', 'cpp'],
-  version: '1.0.38-dev',
+  version: '1.0.38',
   license: 'LicenseRef-NSL-1.0 OR GPL-3.0-or-later',
   default_options: [
     'c_std=gnu2x,c2x,gnu11,c11',
@@ -231,62 +231,7 @@ if libcurl.version().version_compare('<8.11')
   warning('libcurl @0@ predates stable WebSocket support (curl 8.11): WebSocket will be unavailable at runtime unless this libcurl was built with the ws/wss protocols.'.format(libcurl.version()))
 endif
 libcrypto = dependency('libcrypto')
-libssl = dependency('libssl')
 libm = cc.find_library('m', required: false)
-
-# HTTP transport backend. 'curl' (default) drives libcurl for page fetches;
-# 'nghttp2' swaps in the in-tree src/net_http2.c client (libnghttp2 over
-# OpenSSL, HTTP/1.1 fallback, zlib/brotli decompression). libcurl stays a hard
-# dependency in either case — WebSocket, Server-Sent Events and the audio
-# helper use it directly, and the nghttp2 backend falls back to it
-# for proxied and FTP hops. So the switch only changes which library performs
-# the document/subresource transfer, not what is linked.
-http_backend = get_option('http_backend')
-http_backend_deps = []
-if http_backend == 'nghttp2'
-  libnghttp2  = dependency('libnghttp2')
-  zlib_http   = dependency('zlib')
-  libbrotlidec = dependency('libbrotlidec', required: false)
-  libzstd_http = dependency('libzstd', required: false)
-  http_backend_deps += [libnghttp2, libssl, libcrypto, zlib_http]
-  if host_machine.system() == 'windows'
-    http_backend_deps += cc.find_library('ws2_32')
-  endif
-  add_project_arguments('-DNS_HTTP_BACKEND_NGHTTP2=1', language: 'c')
-  if libbrotlidec.found()
-    http_backend_deps += [libbrotlidec]
-    add_project_arguments('-DNS_HTTP_HAVE_BROTLI=1', language: 'c')
-  endif
-  if libzstd_http.found()
-    http_backend_deps += [libzstd_http]
-    add_project_arguments('-DNS_HTTP_HAVE_ZSTD=1', language: 'c')
-  endif
-  # HTTP/3 over QUIC is an auto-detected sub-feature of the nghttp2 backend:
-  # built only when ngtcp2 + its gnutls crypto binding + libnghttp3 + gnutls are
-  # all present. libnghttp3 is the HTTP/3 application layer, ngtcp2 the QUIC
-  # transport, and gnutls the QUIC-capable TLS stack (system OpenSSL 3.0 has no
-  # QUIC API). A machine without these gets an HTTP/2-only nghttp2 backend.
-  libngtcp2 = dependency('libngtcp2', required: false)
-  libngtcp2_gnutls = dependency('libngtcp2_crypto_gnutls', required: false)
-  libnghttp3 = dependency('libnghttp3', required: false)
-  libgnutls = dependency('gnutls', required: false)
-  if host_machine.system() != 'windows' and libngtcp2.found() \
-     and libngtcp2_gnutls.found() and libnghttp3.found() and libgnutls.found()
-    http_backend_deps += [libngtcp2, libngtcp2_gnutls, libnghttp3, libgnutls]
-    add_project_arguments('-DNS_HTTP_HAVE_HTTP3=1', language: 'c')
-    message('HTTP backend: nghttp2 + HTTP/3 (ngtcp2 + nghttp3 + gnutls)')
-  else
-    if host_machine.system() == 'windows'
-      message('HTTP backend: nghttp2 (HTTP/2 over Winsock; HTTP/3 disabled)')
-    else
-      message('HTTP backend: nghttp2 (HTTP/2 only; ngtcp2/nghttp3/gnutls absent)')
-    endif
-  endif
-  message('HTTP backend: nghttp2 (libnghttp2 + OpenSSL; HTTP/1.1 fallback; ' +
-          'libcurl retained for WebSocket/SSE/audio and proxied/FTP hops)')
-else
-  message('HTTP backend: curl (libcurl)')
-endif
 
 libuchardet = dependency('uchardet')
 

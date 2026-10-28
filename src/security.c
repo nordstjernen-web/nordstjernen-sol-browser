@@ -63,6 +63,8 @@ static gboolean ns_runtime_dir_writable = TRUE;
 static gboolean ns_config_dir_writable = TRUE;
 #endif
 
+static ns_security_status ns_status = { .landlock_abi = -1 };
+
 void
 ns_security_config_dir_read_only(void)
 {
@@ -489,6 +491,54 @@ add_gpu_devices(int rfd, guint64 fs_read)
     g_dir_close(dev);
 }
 
+int
+ns_security_landlock_abi(void)
+{
+    int abi = landlock_create_ruleset_(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION);
+    return abi > 0 ? abi : -1;
+}
+
+#ifndef __ANDROID__
+static void
+ns_landlock_missing_message(int err)
+{
+    if (err != ENOSYS && err != EOPNOTSUPP) {
+        g_printerr("nordstjernen: refusing to run: the Landlock filesystem "
+                   "sandbox could not be enforced: %s.\n", g_strerror(err));
+        return;
+    }
+    g_printerr(
+        "nordstjernen: refusing to run: the Landlock filesystem sandbox is %s.\n"
+        "  Nordstjernen confines every process that handles web content with\n"
+        "  Landlock (Linux 5.13 or newer).\n"
+        "  %s\n"
+        "  The active security modules are listed in /sys/kernel/security/lsm.\n",
+        err == EOPNOTSUPP ? "disabled in this kernel"
+                          : "not supported by this kernel",
+        err == EOPNOTSUPP
+            ? "Add \"landlock\" to the lsm= kernel boot parameter."
+            : "Use a kernel built with CONFIG_SECURITY_LANDLOCK=y and with\n"
+              "  \"landlock\" in its lsm= boot parameter.");
+}
+#endif
+
+gboolean
+ns_security_require_landlock(void)
+{
+#ifdef __ANDROID__
+    return TRUE;
+#else
+    if (ns_security_env_flag("NS_NO_SANDBOX")) {
+        g_warning("nordstjernen: NS_NO_SANDBOX is set; running without the "
+                  "Landlock filesystem sandbox");
+        return TRUE;
+    }
+    if (ns_security_landlock_abi() > 0) return TRUE;
+    ns_landlock_missing_message(errno);
+    return FALSE;
+#endif
+}
+
 static void
 ns_sandbox_require_or_die(const char *what)
 {
@@ -499,10 +549,26 @@ ns_sandbox_require_or_die(const char *what)
     _exit(70);
 }
 
+static void
+ns_landlock_unavailable(const char *what, int err)
+{
+#ifndef __ANDROID__
+    (void)what;
+    ns_landlock_missing_message(err);
+    _exit(78);
+#else
+    (void)err;
+    ns_sandbox_require_or_die(what);
+#endif
+}
+
 void
 ns_security_sandbox_init(const char *self_exe)
 {
-    if (ns_security_env_flag("NS_NO_SANDBOX")) return;
+    if (ns_security_env_flag("NS_NO_SANDBOX")) {
+        ns_status.sandbox_disabled = TRUE;
+        return;
+    }
 
     guint64 fs_read =
         LANDLOCK_ACCESS_FS_READ_FILE |
@@ -520,6 +586,7 @@ ns_security_sandbox_init(const char *self_exe)
         LANDLOCK_ACCESS_FS_MAKE_BLOCK |
         LANDLOCK_ACCESS_FS_REFER;
     int abi = landlock_create_ruleset_(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION);
+    ns_status.landlock_abi = abi > 0 ? abi : -1;
     if (abi < 2)
         fs_write &= ~LANDLOCK_ACCESS_FS_REFER;
     if (abi >= 3)
@@ -531,9 +598,11 @@ ns_security_sandbox_init(const char *self_exe)
     struct landlock_ruleset_attr attr = { .handled_access_fs = fs_all };
     int rfd = landlock_create_ruleset_(&attr, sizeof(attr), 0);
     if (rfd < 0) {
-        if (errno != ENOSYS && errno != EOPNOTSUPP)
-            g_info("landlock: create_ruleset failed: %s", g_strerror(errno));
-        ns_sandbox_require_or_die("Landlock filesystem sandbox is unavailable");
+        int err = errno;
+        if (err != ENOSYS && err != EOPNOTSUPP)
+            g_info("landlock: create_ruleset failed: %s", g_strerror(err));
+        ns_landlock_unavailable("Landlock filesystem sandbox is unavailable",
+                                err);
         return;
     }
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
@@ -717,16 +786,22 @@ ns_security_sandbox_init(const char *self_exe)
     }
 
     int restricted = landlock_restrict_self_(rfd, LANDLOCK_RESTRICT_SELF_TSYNC);
+    ns_status.landlock_all_threads = restricted == 0;
     if (restricted != 0) {
         restricted = landlock_restrict_self_(rfd, 0);
         if (restricted == 0 && ns_security_thread_count() > 1)
             g_info("landlock: kernel lacks TSYNC; %d threads that predate the "
                    "sandbox are not filesystem-confined",
                    ns_security_thread_count() - 1);
+        else if (restricted == 0)
+            ns_status.landlock_all_threads = TRUE;
     }
+    ns_status.landlock_enforced = restricted == 0;
     if (restricted != 0) {
-        g_info("landlock: restrict_self failed: %s", g_strerror(errno));
-        ns_sandbox_require_or_die("Landlock enforcement (restrict_self) failed");
+        int err = errno;
+        g_info("landlock: restrict_self failed: %s", g_strerror(err));
+        ns_landlock_unavailable("Landlock enforcement (restrict_self) failed",
+                                err);
     }
     close(rfd);
 }
@@ -1077,7 +1152,10 @@ void
 ns_security_seccomp_init(void)
 {
     if (ns_security_env_flag("NS_NO_SANDBOX")) return;
-    if (ns_security_env_flag("NS_NO_SECCOMP")) return;
+    if (ns_security_env_flag("NS_NO_SECCOMP")) {
+        ns_status.seccomp_disabled = TRUE;
+        return;
+    }
 
 #ifdef NS_HAVE_SECCOMP
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
@@ -1161,8 +1239,10 @@ void
 ns_security_sandbox_init(const char *self_exe)
 {
     (void)self_exe;
-    if (ns_security_env_flag("NS_NO_SANDBOX"))
+    if (ns_security_env_flag("NS_NO_SANDBOX")) {
+        ns_status.sandbox_disabled = TRUE;
         return;
+    }
 
     GString *prof = g_string_new(
         "(version 1)\n"
@@ -1207,6 +1287,7 @@ ns_security_sandbox_init(const char *self_exe)
             sandbox_free_error(err);
 #pragma clang diagnostic pop
     } else {
+        ns_status.seatbelt_enforced = TRUE;
         g_info("sandbox: macOS Seatbelt filesystem write-confinement active");
     }
     g_string_free(prof, TRUE);
@@ -1230,6 +1311,20 @@ ns_security_seccomp_init(void)
 {
 }
 
+#endif
+
+#ifndef __linux__
+int
+ns_security_landlock_abi(void)
+{
+    return -1;
+}
+
+gboolean
+ns_security_require_landlock(void)
+{
+    return TRUE;
+}
 #endif
 
 #ifdef G_OS_WIN32
@@ -1274,6 +1369,8 @@ ns_security_win32_mitigations_init(gboolean allow_child_processes)
     ns_smp_fn fn = (ns_smp_fn)(void *)GetProcAddress(k, "SetProcessMitigationPolicy");
     if (!fn) return;
 
+    ns_status.win32_mitigations = TRUE;
+    ns_status.win32_child_processes_blocked = !allow_child_processes;
     ns_win32_apply_mitigation(fn, ProcessASLRPolicy,
                               NS_ASLR_FORCE_RELOCATE_IMAGES);
     ns_win32_apply_mitigation(fn, ProcessStrictHandleCheckPolicy,
@@ -1355,5 +1452,34 @@ ns_security_harden_allocator(void)
 {
 #ifdef __GLIBC__
     mallopt(M_PERTURB, 0xAA);
+    ns_status.allocator_hardened = TRUE;
+#endif
+}
+
+#ifdef __linux__
+static int
+ns_proc_status_field(const char *contents, const char *key)
+{
+    const char *line = strstr(contents, key);
+    while (line && line != contents && line[-1] != '\n')
+        line = strstr(line + 1, key);
+    if (!line) return -1;
+    return (int)g_ascii_strtoll(line + strlen(key), NULL, 10);
+}
+#endif
+
+void
+ns_security_get_status(ns_security_status *out)
+{
+    *out = ns_status;
+#ifdef __linux__
+    char *contents = NULL;
+    if (g_file_get_contents("/proc/self/status", &contents, NULL, NULL)) {
+        out->seccomp_enforced = ns_proc_status_field(contents, "Seccomp:") == 2;
+        out->no_new_privs = ns_proc_status_field(contents, "NoNewPrivs:") == 1;
+        g_free(contents);
+    }
+    if (out->landlock_abi < 0)
+        out->landlock_abi = ns_security_landlock_abi();
 #endif
 }

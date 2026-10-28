@@ -14,6 +14,24 @@ gboolean ns_security_env_flag(const char *name);
 void ns_security_runtime_dir_read_only(void);
 void ns_security_config_dir_read_only(void);
 gboolean ns_security_refuse_root(void);
+gboolean ns_security_require_landlock(void);
+int ns_security_landlock_abi(void);
+
+typedef struct {
+    int      landlock_abi;
+    gboolean landlock_enforced;
+    gboolean landlock_all_threads;
+    gboolean seccomp_enforced;
+    gboolean seccomp_disabled;
+    gboolean no_new_privs;
+    gboolean seatbelt_enforced;
+    gboolean win32_mitigations;
+    gboolean win32_child_processes_blocked;
+    gboolean allocator_hardened;
+    gboolean sandbox_disabled;
+} ns_security_status;
+
+void ns_security_get_status(ns_security_status *out);
 
 void ns_security_sandbox_init(const char *self_exe);
 

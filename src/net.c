@@ -5,7 +5,6 @@
 
 #include "net.h"
 #include "about_style.h"
-#include "net_backend.h"
 #include "cache.h"
 #include "config.h"
 #include "history.h"
@@ -56,6 +55,89 @@
 #include <stdlib.h>
 #include <sys/sysctl.h>
 #endif
+
+struct ns_header_ctx;
+struct ns_net_stream;
+
+typedef struct ns_write_ctx {
+    GByteArray *body;
+    guint64     total;
+    guint64     budget;
+    guint64     next_recheck;
+    gboolean    exceeded;
+    const struct ns_net_stream *stream;
+    const struct ns_header_ctx *stream_headers;
+} ns_write_ctx;
+
+typedef struct ns_header_ctx {
+    char   **content_type_out;
+    char   **content_disposition_out;
+    char   **csp_out;
+    char   **xframe_options_out;
+    char   **x_content_type_options_out;
+    char   **cors_allow_origin_out;
+    char   **refresh_out;
+    char   **content_language_out;
+    char    *etag;
+    char    *last_modified;
+    char    *cache_control;
+    char    *vary;
+    char    *expires;
+    char    *location;
+    GString *raw;
+    long     status;
+    gboolean set_cookie_seen;
+    CURL    *cookie_curl;
+    const char *cookie_jar_path;
+} ns_header_ctx;
+
+typedef struct ns_hop_req {
+    const char        *url;
+    const char        *method;
+    const void        *body;
+    gsize              body_len;
+    struct curl_slist *headers;
+    const char        *user_agent;
+    const char        *referer;
+    int                referer_policy;
+    const char        *accept_encoding;
+    long               timeout_s;
+    long               connect_timeout_s;
+    const char        *proxy;
+    const char        *no_proxy;
+    const char        *cookie_jar_path;
+    const char        *cookie_js_path;
+    int                samesite_cross;
+    const char        *cookie_site;
+    gboolean           cookie_navigation;
+    int                priority_urgency;
+    gboolean           priority_incremental;
+    gboolean           follow_redirects;
+    long               max_redirs;
+    gboolean           request_ftp;
+    gboolean           initial_https;
+    long               http_version_pref;
+} ns_hop_req;
+
+typedef struct ns_hop_out {
+    long     status;
+    char    *effective_url;
+    char    *remote_ip;
+    long     http_version;
+    long     num_connects;
+    double   t_namelookup_ms;
+    double   t_connect_ms;
+    double   t_appconnect_ms;
+    double   t_pretransfer_ms;
+    double   t_starttransfer_ms;
+    double   t_total_ms;
+    gboolean ok;
+    gboolean cancelled;
+    gboolean tls_verify_failed;
+    gboolean connect_failed;
+    char    *tls_warning;
+    char    *error_message;
+} ns_hop_out;
 
 static char *g_cookie_dir;
 static char *g_private_root;
@@ -1276,90 +1358,6 @@ ns_net_hsts_should_upgrade(const char *host)
     return hit;
 }
 
-static gboolean
-ns_hsts_parse_header(const char *value, gint64 *max_age, gboolean *subdomains)
-{
-    gboolean have_age = FALSE;
-    *subdomains = FALSE;
-    g_auto(GStrv) parts = g_strsplit(value ? value : "", ";", -1);
-    for (int i = 0; parts[i]; i++) {
-        char *d = g_strstrip(parts[i]);
-        if (g_ascii_strcasecmp(d, "includeSubDomains") == 0) {
-            *subdomains = TRUE;
-        } else if (g_ascii_strncasecmp(d, "max-age", 7) == 0) {
-            const char *v = d + 7;
-            while (*v == ' ' || *v == '\t') v++;
-            if (*v++ != '=') return FALSE;
-            while (*v == ' ' || *v == '\t') v++;
-            gboolean quoted = *v == '"';
-            if (quoted) v++;
-            if (!g_ascii_isdigit(*v)) return FALSE;
-            char *end = NULL;
-            guint64 n = g_ascii_strtoull(v, &end, 10);
-            if (quoted && *end == '"') end++;
-            if (*end) return FALSE;
-            *max_age = (gint64)MIN(n, (guint64)(400 * 24 * 3600));
-            have_age = TRUE;
-        }
-    }
-    return have_age;
-}
-
-void
-ns_net_hsts_note(const char *url, const char *header_value)
-{
-    if (!url || !g_str_has_prefix(url, "https://")) return;
-    gint64 max_age = 0;
-    gboolean subdomains = FALSE;
-    if (!ns_hsts_parse_header(header_value, &max_age, &subdomains)) return;
-    g_autofree char *host = ns_url_host_from(url);
-    if (!host || !*host || g_hostname_is_ip_address(host)) return;
-    g_autofree char *lower = g_ascii_strdown(host, -1);
-    const char *path = ns_net_hsts_curl_path();
-    if (!path) return;
-
-    g_mutex_lock(&g_hsts_lock);
-    char *content = NULL;
-    g_file_get_contents(path, &content, NULL, NULL);
-    GString *out = g_string_new(NULL);
-    g_auto(GStrv) lines = g_strsplit(content ? content : "", "\n", -1);
-    g_free(content);
-    for (int i = 0; lines[i]; i++) {
-        const char *line = lines[i];
-        if (!*line) continue;
-        const char *name = *line == '.' ? line + 1 : line;
-        gsize hl = strlen(lower);
-        if (g_ascii_strncasecmp(name, lower, hl) == 0 && name[hl] == ' ')
-            continue;
-        g_string_append(out, line);
-        g_string_append_c(out, '\n');
-    }
-    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
-    if (max_age > 0) {
-        g_autoptr(GDateTime) expires =
-            g_date_time_new_from_unix_utc(now + max_age);
-        g_autofree char *stamp = expires
-            ? g_date_time_format(expires, "%Y%m%d %H:%M:%S") : NULL;
-        if (stamp)
-            g_string_append_printf(out, "%s%s \"%s\"\n",
-                                   subdomains ? "." : "", lower, stamp);
-    }
-    if (g_file_set_contents_full(path, out->str, (gssize)out->len,
-                                 G_FILE_SET_CONTENTS_CONSISTENT, 0600, NULL) &&
-        g_hsts_cache) {
-        if (max_age > 0) {
-            ns_hsts_entry *e = g_new(ns_hsts_entry, 1);
-            e->expires = now + max_age;
-            e->subdomains = subdomains;
-            g_hash_table_replace(g_hsts_cache, g_strdup(lower), e);
-        } else
-            g_hash_table_remove(g_hsts_cache, lower);
-        g_hsts_cache_mtime_us = file_mtime_us(path);
-    }
-    g_string_free(out, TRUE);
-    g_mutex_unlock(&g_hsts_lock);
-}
-
 char *
 ns_net_hsts_upgrade(const char *url)
 {
@@ -1752,6 +1750,11 @@ ns_net_curl_apply_cookies(void *curl_handle, const char *url,
                           const char *origin)
 {
     CURL *curl = curl_handle;
+    g_autofree char *http_url = NULL;
+    if (url && g_str_has_prefix(url, "wss://"))
+        url = http_url = g_strconcat("https://", url + 6, NULL);
+    else if (url && g_str_has_prefix(url, "ws://"))
+        url = http_url = g_strconcat("http://", url + 5, NULL);
     const ns_config *cfg = ns_config_get();
     ns_cookie_policy policy = cfg ? cfg->cookie_policy : NS_COOKIE_FIRST_PARTY;
     if (!curl || !url || !origin || !*origin || policy == NS_COOKIE_NEVER ||
@@ -1781,7 +1784,7 @@ ns_net_curl_apply_cookies(void *curl_handle, const char *url,
 #endif
 }
 
-char *
+static char *
 ns_net_cookies_for_request(const char *url, const char *jar_path,
                            const char *js_path, int samesite_cross)
 {
@@ -2142,14 +2145,6 @@ ns_net_cookie_store_from_js(const char *url, const char *top_url,
     ns_cookie_store_impl(url, site, cookie, FALSE, NULL);
 }
 
-void
-ns_net_store_set_cookie(const char *url, const char *set_cookie_value,
-                        const char *jar_path)
-{
-    if (!jar_path) return;
-    ns_cookie_store_impl(url, NULL, set_cookie_value, TRUE, jar_path);
-}
-
 static const char *
 ns_net_altsvc_path(void)
 {
@@ -2496,7 +2491,6 @@ ns_net_shutdown(void)
     ns_net_multi_shutdown();
     if (!ns_net_drain(3000))
         return;
-    ns_net_backend_shutdown();
     if (g_conn_stats) {
         g_hash_table_destroy(g_conn_stats);
         g_conn_stats = NULL;
@@ -2701,18 +2695,6 @@ const char *
 ns_net_ca_bundle_path(void)
 {
     return g_ca_bundle;
-}
-
-const char *
-ns_net_ec_curves(void)
-{
-    return g_ec_curves;
-}
-
-gboolean
-ns_net_aborting(void)
-{
-    return g_atomic_int_get(&g_net_aborting) != 0;
 }
 
 void
@@ -3086,7 +3068,7 @@ ns_write_cb(char *data, size_t size, size_t nmemb, void *userdata)
     return bytes;
 }
 
-void
+static void
 ns_body_sink_init(ns_write_ctx *ctx, GByteArray *body)
 {
     ctx->body = body;
@@ -3094,14 +3076,6 @@ ns_body_sink_init(ns_write_ctx *ctx, GByteArray *body)
     ctx->budget = ns_net_response_budget();
     ctx->next_recheck = NS_NET_RESPONSE_RECHECK_BYTES;
     ctx->exceeded = FALSE;
-}
-
-gboolean
-ns_body_sink_write(ns_write_ctx *ctx, const void *data, size_t len)
-{
-    if (len == 0)
-        return TRUE;
-    return ns_write_cb((char *)data, 1, len, ctx) == len;
 }
 
 static char *
@@ -3218,13 +3192,6 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
     return bytes;
 }
 
-void
-ns_header_sink_feed(ns_header_ctx *ctx, const char *line, size_t len)
-{
-    if (line && len)
-        ns_header_cb((char *)line, 1, len, ctx);
-}
-
 static char *
 about_read_first(const char *const *rel_paths, gsize *out_len)
 {
@@ -3321,6 +3288,104 @@ diag_feature(GString *s, const char *key, gboolean on)
         "<div class=\"drow\"><span class=\"dk\">%s</span>"
         "<span class=\"dv %s\">%s</span></div>",
         key, on ? "on" : "off", on ? "Enabled" : "Not built");
+}
+
+static void
+diag_state(GString *s, const char *key, gboolean on, const char *text)
+{
+    char *et = g_markup_escape_text(text, -1);
+    g_string_append_printf(s,
+        "<div class=\"drow\"><span class=\"dk\">%s</span>"
+        "<span class=\"dv %s\">%s</span></div>", key, on ? "on" : "off", et);
+    g_free(et);
+}
+
+static char *
+about_security_html(void)
+{
+    ns_security_status st;
+    ns_security_get_status(&st);
+    const ns_config *cfg = ns_config_get();
+    GString *s = g_string_new("<div class=\"diag\">");
+
+    g_string_append(s, "<h3>Process sandbox</h3>");
+#if defined(__linux__)
+    if (st.landlock_abi > 0) {
+        char *abi = g_strdup_printf("Supported (ABI v%d)", st.landlock_abi);
+        diag_state(s, "Kernel Landlock support", TRUE, abi);
+        g_free(abi);
+    } else {
+        diag_state(s, "Kernel Landlock support", FALSE, "Unavailable");
+    }
+    if (st.sandbox_disabled)
+        diag_state(s, "Filesystem sandbox (Landlock)", FALSE,
+                   "Disabled by NS_NO_SANDBOX");
+    else if (st.landlock_enforced && st.landlock_all_threads)
+        diag_state(s, "Filesystem sandbox (Landlock)", TRUE,
+                   "Enforced on all threads");
+    else if (st.landlock_enforced)
+        diag_state(s, "Filesystem sandbox (Landlock)", TRUE,
+                   "Enforced on new threads only");
+    else
+        diag_state(s, "Filesystem sandbox (Landlock)", FALSE,
+                   "Not enforced in this process");
+#ifdef NS_HAVE_SECCOMP
+    if (st.seccomp_enforced)
+        diag_state(s, "Syscall filter (seccomp)", TRUE, "Enforced");
+    else if (st.sandbox_disabled || st.seccomp_disabled)
+        diag_state(s, "Syscall filter (seccomp)", FALSE,
+                   st.sandbox_disabled ? "Disabled by NS_NO_SANDBOX"
+                                       : "Disabled by NS_NO_SECCOMP");
+    else
+        diag_state(s, "Syscall filter (seccomp)", FALSE,
+                   "Not enforced in this process");
+#else
+    diag_feature(s, "Syscall filter (seccomp)", FALSE);
+#endif
+    diag_state(s, "No new privileges", st.no_new_privs,
+               st.no_new_privs ? "Set" : "Not set");
+#elif defined(__APPLE__)
+    if (st.sandbox_disabled)
+        diag_state(s, "Filesystem sandbox (Seatbelt)", FALSE,
+                   "Disabled by NS_NO_SANDBOX");
+    else
+        diag_state(s, "Filesystem sandbox (Seatbelt)", st.seatbelt_enforced,
+                   st.seatbelt_enforced ? "Write-confined"
+                                        : "Not enforced in this process");
+#elif defined(G_OS_WIN32)
+    diag_state(s, "Process mitigations", st.win32_mitigations,
+               st.win32_mitigations
+                   ? "ASLR, strict handles, no extension points, "
+                     "no remote images"
+                   : "Not applied");
+    diag_state(s, "Child process creation", st.win32_child_processes_blocked,
+               st.win32_child_processes_blocked ? "Blocked" : "Allowed");
+#endif
+#if defined(__linux__) || defined(__APPLE__)
+    gboolean root = geteuid() == 0 || getuid() == 0;
+    diag_state(s, "Running as root", !root,
+               root ? "Yes (NS_ALLOW_ROOT)" : "No");
+#endif
+#ifdef __GLIBC__
+    diag_state(s, "Hardened allocator", st.allocator_hardened,
+               st.allocator_hardened ? "Freed memory is poisoned" : "Off");
+#endif
+
+    g_string_append(s, "<h3>Browsing</h3>");
+    gboolean https_first = cfg && cfg->https_first;
+    diag_state(s, "HTTPS-First", https_first, https_first ? "On" : "Off");
+    gboolean js_on = !cfg || cfg->javascript_enabled;
+    diag_state(s, "JavaScript", js_on, js_on ? "Enabled" : "Disabled");
+    gboolean gpc = cfg && cfg->global_privacy_control;
+    diag_state(s, "Global Privacy Control", gpc, gpc ? "Sent" : "Off");
+    gboolean dnt = cfg && cfg->do_not_track;
+    diag_state(s, "Do Not Track", dnt, dnt ? "Sent" : "Off");
+    gboolean strip = cfg && cfg->strip_tracking_params;
+    diag_state(s, "Tracking parameter removal", strip, strip ? "On" : "Off");
+    diag_state(s, "Telemetry", TRUE, "None \xe2\x80\x94 never phones home");
+
+    g_string_append(s, "</div>");
+    return g_string_free(s, FALSE);
 }
 
 static char *
@@ -3434,11 +3499,6 @@ about_diagnostics_html(void)
     diag_feature(s, "Spell checking", TRUE);
 #else
     diag_feature(s, "Spell checking", FALSE);
-#endif
-#ifdef NS_HAVE_SECCOMP
-    diag_feature(s, "Seccomp sandbox", TRUE);
-#else
-    diag_feature(s, "Seccomp sandbox", FALSE);
 #endif
 
     g_string_append(s, "</div>");
@@ -4905,6 +4965,7 @@ static const char k_about_nordstjernen_template[] =
     "<a class=\"btn\" href=\"about:third-party\">Third-party notices</a>"
     "</div>"
     "</section>"
+    "<section class=\"card\"><h2>Security</h2>__ND_SECURITY__</section>"
     "<section class=\"card\">__ND_DIAG__</section>"
     "<div class=\"foot\"><span>Nordstjernen Web Browser \xc2\xa9 2026 "
     "Andreas R\xc3\xb8sdal</span><span>"
@@ -5333,10 +5394,15 @@ synthesize_about_response(const char *url, const char *top_url,
         char *with_logo = about_substitute(k_about_nordstjernen_template,
                                            "__ND_LOGO_MARK__", logo_markup);
         g_free(logo_markup);
-        char *diag = about_diagnostics_html();
-        char *body = about_substitute(with_logo, "__ND_DIAG__", diag);
-        g_free(diag);
+        char *security = about_security_html();
+        char *with_security = about_substitute(with_logo, "__ND_SECURITY__",
+                                               security);
+        g_free(security);
         g_free(with_logo);
+        char *diag = about_diagnostics_html();
+        char *body = about_substitute(with_security, "__ND_DIAG__", diag);
+        g_free(diag);
+        g_free(with_security);
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "mozilla")) {
@@ -5697,7 +5763,7 @@ ns_fetch_is_reload(GPtrArray *extra_headers)
     return FALSE;
 }
 
-void
+static void
 ns_hop_out_clear(ns_hop_out *out)
 {
     if (!out) return;
@@ -5711,10 +5777,10 @@ ns_hop_out_clear(ns_hop_out *out)
     out->error_message = NULL;
 }
 
-gboolean
-ns_hop_transport_curl(const ns_hop_req *req, ns_write_ctx *wctx,
-                      ns_header_ctx *hctx, ns_hop_out *out,
-                      GCancellable *cancellable)
+static gboolean
+ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
+                 ns_header_ctx *hctx, ns_hop_out *out,
+                 GCancellable *cancellable)
 {
     CURL *curl = curl_easy_init();
     if (!curl) {
@@ -5950,21 +6016,6 @@ ns_hop_transport_curl(const ns_hop_req *req, ns_write_ctx *wctx,
     curl_easy_cleanup(curl);
     return TRUE;
 }
-
-#ifndef NS_HTTP_BACKEND_NGHTTP2
-gboolean
-ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
-                 ns_header_ctx *hctx, ns_hop_out *out,
-                 GCancellable *cancellable)
-{
-    return ns_hop_transport_curl(req, wctx, hctx, out, cancellable);
-}
-
-void
-ns_net_backend_shutdown(void)
-{
-}
-#endif
 
 static const char *const ns_script_accept_headers[] = {
     "Accept: text/javascript, application/javascript, application/ecmascript, application/x-javascript, */*;q=0.8",

@@ -173,7 +173,8 @@ if [ "$WEBM" = 1 ]; then
   are installed:
 
       sudo apt    install ffmpeg         # Debian/Ubuntu
-      sudo dnf    install ffmpeg-libs    # Fedora/RHEL (RPM Fusion)
+      sudo dnf    install libavcodec-free libavformat-free libswscale-free \
+                          libswresample-free   # Fedora (ffmpeg-free; or RPM Fusion ffmpeg-libs)
       sudo zypper install ffmpeg         # openSUSE (Packman)
       sudo apk add ffmpeg-libs           # Alpine (musl)
 '

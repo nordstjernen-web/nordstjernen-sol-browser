@@ -187,12 +187,20 @@ socket, so it normally needs no `/dev/shm` name at all.
   scraping, hardcoded hostnames, or private-API spoofing.
 
 Both layers can be disabled for debugging with `NS_NO_SANDBOX=1` /
-`NS_NO_SECCOMP=1`. Don't use those in normal operation. By default the
-sandbox is best-effort: on a kernel without Landlock or seccomp the
-renderer logs a warning and continues **unconfined**. Set
-`NS_REQUIRE_SANDBOX=1` to make that fail-closed — a renderer (or media
-helper) that cannot install its filesystem and syscall confinement then
-refuses to run rather than process untrusted content unsandboxed. These
+`NS_NO_SECCOMP=1`. Don't use those in normal operation. Landlock is
+**mandatory** on desktop Linux: the browser refuses to start (exit code 78)
+on a kernel without it — older than Linux 5.13, built without
+`CONFIG_SECURITY_LANDLOCK`, or booted without `landlock` in its `lsm=`
+parameter — and a renderer or media helper whose Landlock ruleset cannot be
+created or enforced exits the same way instead of running unconfined. Only
+`NS_NO_SANDBOX=1` overrides this. Android keeps the best-effort behaviour.
+The seccomp filter stays best-effort: a process that cannot load it logs a
+warning and continues. Set `NS_REQUIRE_SANDBOX=1` to make that fail-closed
+too. `about:nordstjernen` shows, in its Security section, the kernel's
+Landlock ABI and whether Landlock, seccomp and `no_new_privs` are actually
+in force in the renderer that drew the page (read from
+`/proc/self/status`), along with the macOS Seatbelt or Windows mitigation
+state on those platforms. These
 switches, and the `NS_NO_*` settings switches below, count as set only
 for a value other than empty, `0`, `false`, `no` or `off`.
 

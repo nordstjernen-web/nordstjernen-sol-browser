@@ -1,7 +1,5 @@
 option('build_date', type: 'string', value: '',
        description: 'Build date stamp shown in the About dialog (defaults to the configure-time date).')
-option('http_backend', type: 'combo', choices: ['curl', 'nghttp2'], value: 'curl',
-       description: 'HTTP client used for page and subresource fetches. "curl" (default) drives libcurl. "nghttp2" swaps in an in-tree client built on libnghttp2 (HTTP/2) + OpenSSL TLS with an HTTP/1.1 fallback and zlib/brotli decompression, plus auto-detected HTTP/3 over QUIC (ngtcp2 + nghttp3 + gnutls) when those packages are present; libcurl stays linked for WebSocket/SSE/audio and is the fallback for proxied and FTP hops.')
 option('quickjs', type: 'combo', choices: ['quickjs-ng', 'quickjs'], value: 'quickjs-ng',
        description: 'Which QuickJS the JavaScript binding runs on. "quickjs-ng" (default) builds the in-tree quickjs-ng fork in src/quickjs/, which carries the browser hooks. "quickjs" builds Fabrice Bellard\'s original QuickJS (https://github.com/bellard/quickjs), fetched at configure time through subprojects/quickjs.wrap and never vendored; src/ns_quickjs.h adapts the binding to its API and the few fork-only hooks fall back to portable approximations (see docs/quickjs.md).')
 option('gtk', type: 'feature', value: 'auto',

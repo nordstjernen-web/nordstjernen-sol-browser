@@ -3,6 +3,37 @@ Changelog:
 
 1.0.38:
 ======
+* Security: Nordstjernen no longer runs on a Linux kernel without the
+  Landlock filesystem sandbox. It refuses to start, with exit code 78 and a
+  message saying whether Landlock is missing from the kernel or only
+  absent from its `lsm=` boot parameter, instead of continuing with the
+  renderer unconfined. A renderer or media helper whose Landlock ruleset
+  cannot be enforced exits the same way. `NS_NO_SANDBOX=1` remains the
+  debugging override; Android is unaffected.
+* `about:nordstjernen` has a Security section: the kernel's Landlock ABI,
+  whether the Landlock filesystem sandbox, the seccomp syscall filter and
+  `no_new_privs` are in force in the renderer process, root status and
+  allocator hardening on Linux; the Seatbelt sandbox on macOS; the process
+  mitigations on Windows; and the HTTPS-First, Global Privacy Control, Do
+  Not Track and tracking-parameter settings. The seccomp row moved there
+  from the feature list.
+* The Fedora RPM is built for Fedora 45 and verified by the release
+  workflow. Fedora 44 ships FFmpeg 8 (`libavcodec.so.62`) and Fedora 45
+  ships FFmpeg 9 (`libavcodec.so.63`), so the 1.0.36 RPM built on Fedora 44
+  would not install on Fedora 45 ("nothing provides libavcodec.so.62"). The
+  RPM is now built in a Fedora 45 container against Fedora's `ffmpeg-free`
+  libraries and installed there with `dnf` before it is published, the way
+  the Ubuntu and Debian `.deb`s already were. The Fedora build compiles in
+  GStreamer for H.264/AAC, which `ffmpeg-free` does not decode, and
+  `nightly-distro-build.sh fedora` / `nightly.sh` build it locally too.
+* Build: the alternate libnghttp2 HTTP client backend
+  (`-Dhttp_backend=nghttp2`, `src/net_http2.c`) is removed, together with
+  its HTTP/3-over-QUIC sub-feature (ngtcp2 + nghttp3 + gnutls). Page and
+  subresource fetches always go through libcurl, which still negotiates
+  HTTP/2, and HTTP/3 through the alt-svc cache when the linked libcurl was
+  built with it. The `http_backend` meson option is gone, so a configure
+  that still passes it fails, and the build no longer looks for libnghttp2,
+  ngtcp2, nghttp3, gnutls or libssl.
 * Security: `window.confirm()` now returns `false` and `window.prompt()`
   returns `null`, the cancel outcomes the HTML standard prescribes when
   no dialog can be shown, instead of silently approving the action;

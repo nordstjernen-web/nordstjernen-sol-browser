@@ -28,7 +28,6 @@ reporting in [SECURITY.md](../SECURITY.md), and licensing in
 - [Debian.md](Debian.md) ([inclusion tracker](Debian-inclusion.md)) · [Ubuntu.md](Ubuntu.md) · [opensuse.md](opensuse.md) · [Arch.md](Arch.md) · [Alpine.md](Alpine.md) — per-distro packaging.
 - [Nightly.md](Nightly.md) — the nightly build server and artifact matrix.
 - [Embedding.md](Embedding.md) — embedding the engine in a C application.
-- [http-backends.md](http-backends.md) — the curl vs nghttp2 HTTP client backends (`-Dhttp_backend`), including HTTP/3 over QUIC.
 - [quickjs.md](quickjs.md) — building on Fabrice Bellard's original QuickJS instead of the in-tree quickjs-ng fork (`-Dquickjs=quickjs`).
 - [vendored-engine-updates.md](vendored-engine-updates.md) — pulling upstream into the in-tree QuickJS and lexbor forks.
 

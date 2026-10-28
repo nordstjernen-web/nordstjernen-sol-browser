@@ -60,6 +60,17 @@
   </branding>
 
   <releases>
+    <release version="1.0.38" date="2026-10-28">
+      <description>
+        <p>Security and compatibility release.</p>
+        <ul>
+          <li>On Linux the renderer now requires the Landlock filesystem sandbox, and about:nordstjernen reports the sandbox state.</li>
+          <li>Downloads are fetched by the sandboxed renderer, their file names are sanitised, and they are only moved into Downloads after a path check.</li>
+          <li>WebAssembly SIMD is supported.</li>
+          <li>Column flex layout and scrollIntoView fixes, and 1 ms timers on Windows.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.37" date="2026-10-26">
       <description>
         <p>Performance and packaging release.</p>

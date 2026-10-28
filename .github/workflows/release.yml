@@ -34,10 +34,12 @@ jobs:
     container: ${{ matrix.image }}
     timeout-minutes: 90
 
-    # A .deb depends on the SONAME-numbered FFmpeg packages of the release it
-    # was built on (libavcodec60 on Ubuntu 24.04, libavcodec61 on Debian 13,
-    # …), so each supported release gets its own package, built and verified
-    # against that release's own archive.
+    # A package depends on the SONAME-numbered FFmpeg libraries of the release
+    # it was built on (libavcodec60 on Ubuntu 24.04, libavcodec61 on Debian 13,
+    # libavcodec.so.63 on Fedora 45, …), so each supported release gets its
+    # own package, built and verified against that release's own archive: the
+    # Fedora RPM is installed with dnf, which resolves its Requires against the
+    # real Fedora repositories. Fedora is packaged for its current release only.
     strategy:
       fail-fast: false
       matrix:
@@ -46,38 +48,53 @@ jobs:
             image: ubuntu:24.04
             distro: ubuntu
             slug: ubuntu-24.04
+            package: deb
           - name: Ubuntu 26.04
             image: ubuntu:26.04
             distro: ubuntu
             slug: ubuntu-26.04
+            package: deb
           - name: Debian 13
             image: debian:trixie
             distro: debian
             slug: debian-13
+            package: deb
             portable_zip: true
+          - name: Fedora 45
+            image: fedora:45
+            distro: fedora
+            slug: fedora-45
+            package: rpm
 
     steps:
       - name: Install git
         run: |
-          apt-get update -qq
-          apt-get install -y --no-install-recommends git ca-certificates
+          if command -v apt-get >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y --no-install-recommends git ca-certificates
+          else
+            dnf install -y git ca-certificates
+          fi
 
       - name: Checkout
         uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
 
-      # Installs the build dependencies, builds, packs the zip and the .deb,
-      # then installs the .deb in this container and runs it headless.
+      # Installs the build dependencies, builds, packs the zip and the native
+      # package, then installs that package in this container and runs it
+      # headless.
       - name: Build, package and verify
         run: bash scripts/nightly-distro-build.sh ${{ matrix.distro }}
 
       # A tag that predates per-release file names packs every job's .deb as
       # nordstjernen_<version>_<arch>.deb; give it the release it was built
       # on, the way scripts/pack-deb.sh names it now, so the jobs' packages
-      # don't overwrite each other on the release.
+      # don't overwrite each other on the release. An RPM already carries its
+      # release in %{?dist} (nordstjernen-<version>-1.fc45.x86_64.rpm).
       - name: Name the package for its distro release
         run: |
+          shopt -s nullglob
           tag=$(. /etc/os-release && printf '%s%s' "$ID" "$VERSION_ID")
           for deb in dist/*.deb; do
             case "$deb" in
@@ -89,8 +106,8 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v7
         with:
-          name: linux-deb-${{ matrix.slug }}
-          path: dist/*.deb
+          name: linux-${{ matrix.package }}-${{ matrix.slug }}
+          path: dist/*.${{ matrix.package }}
           if-no-files-found: error
           retention-days: 7
 
@@ -166,7 +183,7 @@ jobs:
         run: |
           cd dist
           shopt -s nullglob
-          packages=(*.deb *.zip *.dmg)
+          packages=(*.deb *.rpm *.zip *.dmg)
           sha256sum -- "${packages[@]}" > SHA256SUMS
           cat SHA256SUMS
           if state=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \

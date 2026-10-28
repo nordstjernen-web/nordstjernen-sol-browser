@@ -415,13 +415,10 @@ Networking is built on **libcurl** (`src/net.c`, ~7,000 lines):
 
 - **HTTP/2 by default** (`CURL_HTTP_VERSION_2TLS`); curl's **HTTP/3** is
   opt-in (`NS_FORCE_HTTP3`, when libcurl is built with it).
-- **Swappable transport.** A single hop goes through `ns_hop_transport()`
-  (`src/net_backend.h`). `-Dhttp_backend=nghttp2` replaces the curl hop
-  with an in-tree libnghttp2 + OpenSSL client (`src/net_http2.c`) that
-  multiplexes streams per connection and upgrades to HTTP/3 over QUIC
-  after `Alt-Svc` when ngtcp2/nghttp3/gnutls are present. Redirects,
-  HSTS, cache, and cookies stay above the hop and are shared. See
-  [http-backends.md](http-backends.md).
+- **One hop at a time.** A single hop goes through `ns_hop_transport()`,
+  which drives a libcurl easy handle on the shared multi-handle thread.
+  Redirects, HSTS, referer, cache, and cookie partitioning stay above the
+  hop in `src/net.c`.
 - **WHATWG URL** parsing, resolution, origin/host/site extraction all
   route through lexbor's URL module (`ns_url_*`), so there is no separate
   URL library.
@@ -558,7 +555,7 @@ See [webgl.md](webgl.md), [webgpu.md](webgpu.md).
 
 - **Build system:** meson + ninja. Optional features (`gtk`, `wasm`,
   `audio`, `webgpu`, `avif`, `jxl`, `web-text-lib`) are meson feature flags,
-  and `http_backend` and `quickjs` are combo options; ccache is picked up
+  and `quickjs` is a combo option; ccache is picked up
   automatically. The vendored lexbor, QuickJS, WAMR, and web-text-lib trees are loaded
   via `subdir()` and expose declared dependencies directly, not as
   subprojects.
