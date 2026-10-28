@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Nordstjernen nightly build orchestrator. Builds, from a single Linux host,
-# a source tarball, per-distro Linux packages (debian/ubuntu/opensuse/alpine
-# via containers, in parallel), and Windows, macOS and BSD (FreeBSD/NetBSD)
+# a source tarball, per-distro Linux packages (debian/ubuntu/fedora/opensuse/
+# alpine via containers, in parallel), and Windows, macOS and BSD (FreeBSD/NetBSD)
 # builds (by driving the GitHub Actions runners, dispatched up front so
 # they run while the local container builds proceed), then collects everything
 # into $NIGHTLY_ROOT with
@@ -30,6 +30,7 @@ NIGHTLY_GH_RETRIES=${NIGHTLY_GH_RETRIES:-4}
 
 NIGHTLY_DEBIAN_IMAGE=${NIGHTLY_DEBIAN_IMAGE:-debian:trixie}
 NIGHTLY_UBUNTU_IMAGE=${NIGHTLY_UBUNTU_IMAGE:-ubuntu:26.04}
+NIGHTLY_FEDORA_IMAGE=${NIGHTLY_FEDORA_IMAGE:-fedora:latest}
 NIGHTLY_OPENSUSE_IMAGE=${NIGHTLY_OPENSUSE_IMAGE:-opensuse/tumbleweed}
 NIGHTLY_ALPINE_IMAGE=${NIGHTLY_ALPINE_IMAGE:-alpine:edge}
 
@@ -43,8 +44,8 @@ usage() {
     cat <<EOF
 Usage: ./scripts/nightly.sh [options]
 
-Builds nightly artifacts for source, Linux (debian/ubuntu/opensuse/alpine via
-containers, in parallel), Windows and macOS (via GitHub Actions) into
+Builds nightly artifacts for source, Linux (debian/ubuntu/fedora/opensuse/alpine
+via containers, in parallel), Windows and macOS (via GitHub Actions) into
 \$NIGHTLY_ROOT.
 
 Options:
@@ -76,7 +77,7 @@ Environment overrides: NIGHTLY_ROOT, NIGHTLY_REF, NIGHTLY_PULL,
 NIGHTLY_PULL_BRANCH, NIGHTLY_PARALLEL, NIGHTLY_GHA_TIMEOUT,
 NIGHTLY_GHA_BRANCH, NIGHTLY_GHA_DISPATCH, NIGHTLY_DOCKER_PULL_RETRIES,
 NIGHTLY_GH_RETRIES, NS_DOCKER, the
-NIGHTLY_{DEBIAN,UBUNTU,OPENSUSE,ALPINE}_IMAGE image tags, and the WebGPU
+NIGHTLY_{DEBIAN,UBUNTU,FEDORA,OPENSUSE,ALPINE}_IMAGE image tags, and the WebGPU
 knobs NS_WEBGPU (0/1/auto) and WGPU_NATIVE_VERSION forwarded to the
 container builds.
 EOF
@@ -293,6 +294,7 @@ run_distro_builds() {
     local specs=(
         "debian:$NIGHTLY_DEBIAN_IMAGE"
         "ubuntu:$NIGHTLY_UBUNTU_IMAGE"
+        "fedora:$NIGHTLY_FEDORA_IMAGE"
         "opensuse:$NIGHTLY_OPENSUSE_IMAGE"
         "alpine:$NIGHTLY_ALPINE_IMAGE"
     )
@@ -598,6 +600,7 @@ stage_stable_links() {
     link_stable nordstjernen-macos-arm64         'macos/*/nordstjernen'
     link_stable nordstjernen-debian-amd64.deb    'linux/debian/*.deb'
     link_stable nordstjernen-ubuntu-amd64.deb    'linux/ubuntu/*.deb'
+    link_stable nordstjernen-fedora-x86_64.rpm   'linux/fedora/*.rpm'
     link_stable nordstjernen-opensuse-x86_64.rpm 'linux/opensuse/*.rpm'
     link_stable nordstjernen-linux-x86_64.zip    'linux/ubuntu/*-linux-x86_64.zip' \
                                                  'linux/debian/*-linux-x86_64.zip' \
@@ -632,12 +635,13 @@ if [ "$DO_DOCKER" = 1 ]; then
     else
         fail "linux-debian" "$DOCKER not found"
         fail "linux-ubuntu" "$DOCKER not found"
+        fail "linux-fedora" "$DOCKER not found"
         fail "linux-opensuse" "$DOCKER not found"
         fail "linux-alpine" "$DOCKER not found"
     fi
 else
-    skip "linux-debian"; skip "linux-ubuntu"; skip "linux-opensuse"
-    skip "linux-alpine"
+    skip "linux-debian"; skip "linux-ubuntu"; skip "linux-fedora"
+    skip "linux-opensuse"; skip "linux-alpine"
 fi
 
 if [ "$DO_GHA" = 1 ]; then
