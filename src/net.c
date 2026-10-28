@@ -3202,6 +3202,104 @@ diag_feature(GString *s, const char *key, gboolean on)
         key, on ? "on" : "off", on ? "Enabled" : "Not built");
 }
 
+static void
+diag_state(GString *s, const char *key, gboolean on, const char *text)
+{
+    char *et = g_markup_escape_text(text, -1);
+    g_string_append_printf(s,
+        "<div class=\"drow\"><span class=\"dk\">%s</span>"
+        "<span class=\"dv %s\">%s</span></div>", key, on ? "on" : "off", et);
+    g_free(et);
+}
+
+static char *
+about_security_html(void)
+{
+    ns_security_status st;
+    ns_security_get_status(&st);
+    const ns_config *cfg = ns_config_get();
+    GString *s = g_string_new("<div class=\"diag\">");
+
+    g_string_append(s, "<h3>Process sandbox</h3>");
+#if defined(__linux__)
+    if (st.landlock_abi > 0) {
+        char *abi = g_strdup_printf("Supported (ABI v%d)", st.landlock_abi);
+        diag_state(s, "Kernel Landlock support", TRUE, abi);
+        g_free(abi);
+    } else {
+        diag_state(s, "Kernel Landlock support", FALSE, "Unavailable");
+    }
+    if (st.sandbox_disabled)
+        diag_state(s, "Filesystem sandbox (Landlock)", FALSE,
+                   "Disabled by NS_NO_SANDBOX");
+    else if (st.landlock_enforced && st.landlock_all_threads)
+        diag_state(s, "Filesystem sandbox (Landlock)", TRUE,
+                   "Enforced on all threads");
+    else if (st.landlock_enforced)
+        diag_state(s, "Filesystem sandbox (Landlock)", TRUE,
+                   "Enforced on new threads only");
+    else
+        diag_state(s, "Filesystem sandbox (Landlock)", FALSE,
+                   "Not enforced in this process");
+#ifdef NS_HAVE_SECCOMP
+    if (st.seccomp_enforced)
+        diag_state(s, "Syscall filter (seccomp)", TRUE, "Enforced");
+    else if (st.sandbox_disabled || st.seccomp_disabled)
+        diag_state(s, "Syscall filter (seccomp)", FALSE,
+                   st.sandbox_disabled ? "Disabled by NS_NO_SANDBOX"
+                                       : "Disabled by NS_NO_SECCOMP");
+    else
+        diag_state(s, "Syscall filter (seccomp)", FALSE,
+                   "Not enforced in this process");
+#else
+    diag_feature(s, "Syscall filter (seccomp)", FALSE);
+#endif
+    diag_state(s, "No new privileges", st.no_new_privs,
+               st.no_new_privs ? "Set" : "Not set");
+#elif defined(__APPLE__)
+    if (st.sandbox_disabled)
+        diag_state(s, "Filesystem sandbox (Seatbelt)", FALSE,
+                   "Disabled by NS_NO_SANDBOX");
+    else
+        diag_state(s, "Filesystem sandbox (Seatbelt)", st.seatbelt_enforced,
+                   st.seatbelt_enforced ? "Write-confined"
+                                        : "Not enforced in this process");
+#elif defined(G_OS_WIN32)
+    diag_state(s, "Process mitigations", st.win32_mitigations,
+               st.win32_mitigations
+                   ? "ASLR, strict handles, no extension points, "
+                     "no remote images"
+                   : "Not applied");
+    diag_state(s, "Child process creation", st.win32_child_processes_blocked,
+               st.win32_child_processes_blocked ? "Blocked" : "Allowed");
+#endif
+#if defined(__linux__) || defined(__APPLE__)
+    gboolean root = geteuid() == 0 || getuid() == 0;
+    diag_state(s, "Running as root", !root,
+               root ? "Yes (NS_ALLOW_ROOT)" : "No");
+#endif
+#ifdef __GLIBC__
+    diag_state(s, "Hardened allocator", st.allocator_hardened,
+               st.allocator_hardened ? "Freed memory is poisoned" : "Off");
+#endif
+
+    g_string_append(s, "<h3>Browsing</h3>");
+    gboolean https_first = cfg && cfg->https_first;
+    diag_state(s, "HTTPS-First", https_first, https_first ? "On" : "Off");
+    gboolean js_on = !cfg || cfg->javascript_enabled;
+    diag_state(s, "JavaScript", js_on, js_on ? "Enabled" : "Disabled");
+    gboolean gpc = cfg && cfg->global_privacy_control;
+    diag_state(s, "Global Privacy Control", gpc, gpc ? "Sent" : "Off");
+    gboolean dnt = cfg && cfg->do_not_track;
+    diag_state(s, "Do Not Track", dnt, dnt ? "Sent" : "Off");
+    gboolean strip = cfg && cfg->strip_tracking_params;
+    diag_state(s, "Tracking parameter removal", strip, strip ? "On" : "Off");
+    diag_state(s, "Telemetry", TRUE, "None \xe2\x80\x94 never phones home");
+
+    g_string_append(s, "</div>");
+    return g_string_free(s, FALSE);
+}
+
 static char *
 about_diagnostics_html(void)
 {
@@ -3313,11 +3411,6 @@ about_diagnostics_html(void)
     diag_feature(s, "Spell checking", TRUE);
 #else
     diag_feature(s, "Spell checking", FALSE);
-#endif
-#ifdef NS_HAVE_SECCOMP
-    diag_feature(s, "Seccomp sandbox", TRUE);
-#else
-    diag_feature(s, "Seccomp sandbox", FALSE);
 #endif
 
     g_string_append(s, "</div>");
@@ -4784,6 +4877,7 @@ static const char k_about_nordstjernen_template[] =
     "<a class=\"btn\" href=\"about:third-party\">Third-party notices</a>"
     "</div>"
     "</section>"
+    "<section class=\"card\"><h2>Security</h2>__ND_SECURITY__</section>"
     "<section class=\"card\">__ND_DIAG__</section>"
     "<div class=\"foot\"><span>Nordstjernen Web Browser \xc2\xa9 2026 "
     "Andreas R\xc3\xb8sdal</span><span>"
@@ -5212,10 +5306,15 @@ synthesize_about_response(const char *url, const char *top_url,
         char *with_logo = about_substitute(k_about_nordstjernen_template,
                                            "__ND_LOGO_MARK__", logo_markup);
         g_free(logo_markup);
-        char *diag = about_diagnostics_html();
-        char *body = about_substitute(with_logo, "__ND_DIAG__", diag);
-        g_free(diag);
+        char *security = about_security_html();
+        char *with_security = about_substitute(with_logo, "__ND_SECURITY__",
+                                               security);
+        g_free(security);
         g_free(with_logo);
+        char *diag = about_diagnostics_html();
+        char *body = about_substitute(with_security, "__ND_DIAG__", diag);
+        g_free(diag);
+        g_free(with_security);
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "mozilla")) {
