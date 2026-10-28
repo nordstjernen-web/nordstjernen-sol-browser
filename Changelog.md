@@ -3,6 +3,15 @@ Changelog:
 
 1.0.38:
 ======
+* CSS: `rem` inside nested math functions (`max(26.4rem, min(…))`,
+  `round(down, …, .8rem)`) reached through `var()` now uses the root
+  element's font size instead of 16px. chess.com's board, sized this way
+  on a `font-size: 62.5%` root, came out at the minimum width instead of
+  filling the window height.
+* WebSocket: the opening handshake now carries the page's cookies, under
+  the same cookie policy and SameSite rules as a subresource request.
+  Servers that authenticate the socket by session cookie (chess.com's
+  live updates) no longer reject every subscription with 401.
 * Security: Nordstjernen no longer runs on a Linux kernel without the
   Landlock filesystem sandbox. It refuses to start, with exit code 78 and a
   message saying whether Landlock is missing from the kernel or only
