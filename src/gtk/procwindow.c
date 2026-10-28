@@ -826,14 +826,39 @@ download_finish(NsDownload *d, const char *why)
 }
 
 static gboolean
+download_staging_path_ok(const char *tmp_path)
+{
+    if (!tmp_path || !*tmp_path || !g_path_is_absolute(tmp_path))
+        return FALSE;
+    g_autofree char *staging = g_build_filename(g_get_user_cache_dir(),
+                                                "nordstjernen", "downloads",
+                                                NULL);
+    g_autofree char *staging_canon = g_canonicalize_filename(staging, NULL);
+    g_autofree char *path_canon = g_canonicalize_filename(tmp_path, NULL);
+    g_autofree char *parent = g_path_get_dirname(path_canon);
+    if (g_strcmp0(parent, staging_canon) != 0)
+        return FALSE;
+    GFile *f = g_file_new_for_path(path_canon);
+    GFileType type = g_file_query_file_type(
+        f, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL);
+    g_object_unref(f);
+    return type == G_FILE_TYPE_REGULAR;
+}
+
+static gboolean
 download_move_into_place(NsDownload *d, const char *tmp_path,
                          const char *final_url)
 {
+    if (!download_staging_path_ok(tmp_path)) {
+        g_warning("download: renderer reported a path outside the staging "
+                  "directory, refusing to move it");
+        return FALSE;
+    }
     GFile *src = g_file_new_for_path(tmp_path);
     GFile *dst = g_file_new_for_path(d->path);
     GError *err = NULL;
-    gboolean ok = g_file_move(src, dst, G_FILE_COPY_NONE, NULL, NULL, NULL,
-                              &err);
+    gboolean ok = g_file_move(src, dst, G_FILE_COPY_NOFOLLOW_SYMLINKS, NULL,
+                              NULL, NULL, &err);
     if (!ok) {
         g_warning("download: cannot move %s to %s: %s", tmp_path, d->path,
                   err ? err->message : "?");

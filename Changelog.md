@@ -3,6 +3,11 @@ Changelog:
 
 1.0.38:
 ======
+* Security: a finished download is moved into Downloads only when the
+  renderer's reported path is a regular file directly inside the
+  download staging directory (`~/.cache/nordstjernen/downloads/`), and
+  the move no longer follows symlinks. The origin recorded on the saved
+  file is written only for clean http(s) URLs.
 * Remote control: a new `console` command drains the tab's console log
   (page and worker `console.*` output, uncaught errors, unhandled
   rejections, resource errors) over the control channel, so a script or
