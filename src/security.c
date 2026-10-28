@@ -1297,11 +1297,25 @@ ns_security_win32_mitigations_init(gboolean allow_child_processes)
 
 #endif
 
+static gboolean
+ns_security_origin_url_is_clean(const char *url)
+{
+    if (!url || (!g_str_has_prefix(url, "http://") &&
+                 !g_str_has_prefix(url, "https://")))
+        return FALSE;
+    for (const unsigned char *p = (const unsigned char *)url; *p; p++)
+        if (*p < 0x20 || *p == 0x7f)
+            return FALSE;
+    return TRUE;
+}
+
 void
 ns_security_mark_download_origin(const char *path, const char *url)
 {
     if (!path || !*path)
         return;
+    if (!ns_security_origin_url_is_clean(url))
+        url = NULL;
 #if defined(__APPLE__)
     (void)url;
     char value[96];
