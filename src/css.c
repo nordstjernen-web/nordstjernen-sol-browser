@@ -21,6 +21,7 @@
 
 static double g_viewport_w = 1000;
 static double g_viewport_h = 800;
+static __thread double g_root_font_px = 16.0;
 
 static GHashTable *g_defined_elements;
 static GHashTable *g_defined_since_restyle;
@@ -1195,7 +1196,8 @@ ns_css_calc_math_fn_px(const ns_css_value *v, double basis)
     double k[4] = {0, 0, 0, 0};
     for (int i = 0; i < n; i++)
         k[i] = v->u.calc.args[i].px + v->u.calc.args[i].pct * 0.01 * basis +
-               (v->u.calc.args[i].em + v->u.calc.args[i].rem) * 16.0;
+               v->u.calc.args[i].em * 16.0 +
+               v->u.calc.args[i].rem * g_root_font_px;
     if (v->u.calc.fn >= NS_CALC_FN_ROUND)
         return calc_stepped_eval(v->u.calc.fn, k);
     if (v->u.calc.fn == 3) return calc_clamp_eval(v, k);
@@ -1214,8 +1216,8 @@ column_len_px(const ns_css_value *v, double basis, double fallback)
     switch (v->u.length.unit) {
     case NS_CSS_UNIT_PX:
     case NS_CSS_UNIT_NUMBER: return v->u.length.v;
-    case NS_CSS_UNIT_EM:
-    case NS_CSS_UNIT_REM:    return v->u.length.v * 16.0;
+    case NS_CSS_UNIT_EM:     return v->u.length.v * 16.0;
+    case NS_CSS_UNIT_REM:    return v->u.length.v * g_root_font_px;
     case NS_CSS_UNIT_PERCENT: return v->u.length.v * basis / 100.0;
     case NS_CSS_UNIT_VW:     return v->u.length.v * ns_css_viewport_w() / 100.0;
     case NS_CSS_UNIT_VH:     return v->u.length.v * ns_css_viewport_h() / 100.0;
@@ -1243,7 +1245,7 @@ ns_css_dimension_px(const ns_css_value *v, double font_size, double basis)
     case NS_CSS_UNIT_PX:
     case NS_CSS_UNIT_NUMBER: return n;
     case NS_CSS_UNIT_EM:     return n * font_size;
-    case NS_CSS_UNIT_REM:    return n * 16.0;
+    case NS_CSS_UNIT_REM:    return n * g_root_font_px;
     case NS_CSS_UNIT_PERCENT: return basis > 0 ? n * basis / 100.0 : 0;
     case NS_CSS_UNIT_EX:
     case NS_CSS_UNIT_CH:
@@ -3219,7 +3221,7 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
             *out_rem = v->u.calc.rem;
             *out_px = v->u.calc.px;
         } else {
-            double rel = (v->u.calc.em + v->u.calc.rem) * 16.0;
+            double rel = v->u.calc.em * 16.0 + v->u.calc.rem * g_root_font_px;
             *out_px = rel == 0 ? v->u.calc.px : v->u.calc.px + rel;
         }
         *out_pct = v->u.calc.pct;
@@ -3541,7 +3543,8 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
                 out->arg_none = v->u.calc.arg_none;
                 for (int k = 0; k < out->n_args; k++) {
                     out->args[k].px = v->u.calc.args[k].px +
-                        (v->u.calc.args[k].em + v->u.calc.args[k].rem) * 16.0;
+                        v->u.calc.args[k].em * 16.0 +
+                        v->u.calc.args[k].rem * g_root_font_px;
                     out->args[k].pct = v->u.calc.args[k].pct;
                 }
             }
@@ -3786,7 +3789,8 @@ progress_operand(const char *text, double *out)
             }
         } else if (v->kind == NS_CSS_V_CALC) {
             ty = PT_LENGTHPCT;
-            *out = v->u.calc.px + (v->u.calc.em + v->u.calc.rem) * 16.0 +
+            *out = v->u.calc.px + v->u.calc.em * 16.0 +
+                   v->u.calc.rem * g_root_font_px +
                    v->u.calc.pct * 0.01 * g_viewport_w;
         }
         ns_css_value_free(v);
@@ -4574,7 +4578,8 @@ parse_calc_inner(const char *text)
         double keys[8] = {0};
         gboolean font_relative = FALSE;
         for (int i = 0; i < n; i++) {
-            keys[i] = values_px[i] + (values_em[i] + values_rem[i]) * 16.0 +
+            keys[i] = values_px[i] + values_em[i] * 16.0 +
+                      values_rem[i] * g_root_font_px +
                       values_pct[i] * 0.01 * g_viewport_w;
             if (values_em[i] != 0 || values_rem[i] != 0) font_relative = TRUE;
         }
@@ -4647,7 +4652,8 @@ parse_calc_inner(const char *text)
     ns_css_value *v = g_new0(ns_css_value, 1);
     v->kind = NS_CSS_V_CALC;
     if (term.fn) {
-        v->u.calc.px = px + (em + rem) * 16.0 + pct * 0.01 * g_viewport_w;
+        v->u.calc.px = px + em * 16.0 + rem * g_root_font_px +
+                       pct * 0.01 * g_viewport_w;
         v->u.calc.fn = term.fn;
         v->u.calc.n_args = term.n_args;
         v->u.calc.arg_none = term.arg_none;
@@ -4688,8 +4694,8 @@ parse_bg_size_component(const char *tok, double *out_v, ns_css_unit *out_unit)
             *out_v = cv->u.calc.pct;
             *out_unit = NS_CSS_UNIT_PERCENT;
         } else {
-            *out_v = cv->u.calc.px +
-                     (cv->u.calc.em + cv->u.calc.rem) * 16.0;
+            *out_v = cv->u.calc.px + cv->u.calc.em * 16.0 +
+                     cv->u.calc.rem * g_root_font_px;
             *out_unit = NS_CSS_UNIT_PX;
         }
     } else {
@@ -15462,8 +15468,8 @@ parse_value_for(ns_css_prop prop, const char *text)
         ns_css_value *cv = parse_calc(t);
         if (cv) {
             if (cv->kind == NS_CSS_V_CALC && cv->u.calc.pct == 0) {
-                double px = cv->u.calc.px +
-                            (cv->u.calc.em + cv->u.calc.rem) * 16.0;
+                double px = cv->u.calc.px + cv->u.calc.em * 16.0 +
+                            cv->u.calc.rem * g_root_font_px;
                 ns_css_value_free(cv);
                 cv = calc_px_value(px);
             }
@@ -31496,6 +31502,7 @@ pending_uses_attr(const GArray *pending_matches)
 
 static __thread GHashTable *g_pending_parse_cache;
 static __thread int g_pending_parse_vw, g_pending_parse_vh;
+static __thread double g_pending_parse_rem = 16.0;
 
 static void
 pending_parse_entry_free(gpointer data)
@@ -31549,6 +31556,10 @@ pending_parse_cached(const char *pname, const char *value_text)
             g_str_hash, g_str_equal, g_free, pending_parse_entry_free);
         g_pending_parse_vw = g_viewport_w;
         g_pending_parse_vh = g_viewport_h;
+    }
+    if (g_pending_parse_rem != g_root_font_px) {
+        g_hash_table_remove_all(g_pending_parse_cache);
+        g_pending_parse_rem = g_root_font_px;
     }
     char *synth = g_strdup_printf("%s: %s;}", pname, value_text);
     GArray *hit = g_hash_table_lookup(g_pending_parse_cache, synth);
@@ -31634,10 +31645,12 @@ resolve_pending_into_matches(GArray *pending_matches,
                              const ns_var_map *vars,
                              GArray *matches,
                              GPtrArray *owned_values,
-                             const ns_node *node)
+                             const ns_node *node,
+                             double root_px)
 {
     if (!pending_matches || pending_matches->len == 0) return;
     g_array_sort(pending_matches, pending_match_cmp);
+    g_root_font_px = root_px > 0 ? root_px : 16.0;
     for (guint pmi = 0; pmi < pending_matches->len; pmi++) {
         pending_match *pm = &g_array_index(pending_matches, pending_match, pmi);
         if (!pm->pd || !pm->pd->pname || !pm->pd->raw_vtext) continue;
@@ -31648,6 +31661,7 @@ resolve_pending_into_matches(GArray *pending_matches,
         if (!applied && !(pm->pd->pname[0] == '-' && pm->pd->pname[1] == '-'))
             append_pending_decls(pm, "unset", matches, owned_values);
     }
+    g_root_font_px = 16.0;
 }
 
 static const char *kUa =
@@ -36927,7 +36941,8 @@ cascade_walk(ns_node *node,
             s->share_id = ++g_style_share_next_id;
             s->vars = build_vars_for_element(parent_style, var_matches);
             resolve_pending_into_matches(pending_matches, s->vars,
-                                         matches, owned_values, node);
+                                         matches, owned_values, node,
+                                         *root_px);
 
             cascade_for(matches, s, parent_style, layout_parent,
                     node->parent &&
@@ -36952,7 +36967,8 @@ cascade_walk(ns_node *node,
                         (GDestroyNotify)ns_css_value_free);
                 ns_style *ps = ns_style_alloc();
                 ps->vars = build_vars_for_element(s, pe_vars);
-                resolve_pending_into_matches(pe_pending, ps->vars, pm, pe_owned, node);
+                resolve_pending_into_matches(pe_pending, ps->vars, pm, pe_owned,
+                                             node, *root_px);
                 cascade_for(pm, ps, s,
                             pe == NS_CSS_PE_BEFORE || pe == NS_CSS_PE_AFTER
                                 ? s : NULL,
