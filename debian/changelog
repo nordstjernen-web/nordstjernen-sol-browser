@@ -1,8 +1,8 @@
-nordstjernen-browser (1.0.38~dev-1) UNRELEASED; urgency=medium
+nordstjernen-browser (1.0.38-1) UNRELEASED; urgency=medium
 
-  * Development snapshot of 1.0.38, matching the meson project version.
+  * New upstream release 1.0.38.
 
- -- Andreas Røsdal <andreas.rosdal@gmail.com>  Mon, 26 Oct 2026 22:45:00 +0100
+ -- Andreas Røsdal <andreas.rosdal@gmail.com>  Wed, 28 Oct 2026 12:00:00 +0100
 
 nordstjernen-browser (1.0.37-1) UNRELEASED; urgency=medium
 
