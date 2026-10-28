@@ -444,6 +444,7 @@ ns_ws_worker_curl(gpointer data)
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     ns_net_apply_curl_tls(curl);
     ns_net_apply_curl_proxy(curl, ws->url);
+    ns_net_curl_apply_cookies(curl, ws->url, ws->origin);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
@@ -455,11 +456,6 @@ ns_ws_worker_curl(gpointer data)
         char *h = g_strconcat("Origin: ", ws->origin, NULL);
         headers = curl_slist_append(headers, h);
         g_free(h);
-    }
-    g_autofree char *cookie = ns_net_cookies_for_websocket(ws->url, ws->origin);
-    if (cookie && *cookie) {
-        g_autofree char *h = g_strconcat("Cookie: ", cookie, NULL);
-        headers = curl_slist_append(headers, h);
     }
     if (ws->protocols && ws->protocols->len > 0) {
         GString *s = g_string_new("Sec-WebSocket-Protocol: ");
