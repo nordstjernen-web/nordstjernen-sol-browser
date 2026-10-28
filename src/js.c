@@ -19849,8 +19849,9 @@ static JSValue
 ns_window_confirm(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
-    return JS_TRUE;
+    (void)this_val;
+    ns_js_emit(js_from_ctx(ctx), "[confirm]", ctx, argc, argv);
+    return JS_FALSE;
 }
 
 static JSValue
@@ -19858,8 +19859,8 @@ ns_window_prompt(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
     (void)this_val;
-    if (argc >= 2) return JS_DupValue(ctx, argv[1]);
-    return JS_NewString(ctx, "");
+    ns_js_emit(js_from_ctx(ctx), "[prompt]", ctx, argc > 1 ? 1 : argc, argv);
+    return JS_NULL;
 }
 
 static JSValue ns_event_prevent_default(JSContext *ctx, JSValueConst this_val,
