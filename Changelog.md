@@ -3,16 +3,15 @@ Changelog:
 
 1.0.38:
 ======
-* Fedora gets one RPM per release, built and verified by the release
+* The Fedora RPM is built for Fedora 45 and verified by the release
   workflow. Fedora 44 ships FFmpeg 8 (`libavcodec.so.62`) and Fedora 45
-  ships FFmpeg 9 (`libavcodec.so.63`), so the single 1.0.36 RPM built on
-  Fedora 44 would not install on Fedora 45 ("nothing provides
-  libavcodec.so.62"). Each RPM is now built in that release's own
-  container against Fedora's `ffmpeg-free` libraries and installed there
-  with `dnf` before it is published, the way the Ubuntu and Debian `.deb`s
-  already were. The Fedora build compiles in GStreamer for H.264/AAC, which
-  `ffmpeg-free` does not decode, and `nightly-distro-build.sh fedora` /
-  `nightly.sh` build it locally too.
+  ships FFmpeg 9 (`libavcodec.so.63`), so the 1.0.36 RPM built on Fedora 44
+  would not install on Fedora 45 ("nothing provides libavcodec.so.62"). The
+  RPM is now built in a Fedora 45 container against Fedora's `ffmpeg-free`
+  libraries and installed there with `dnf` before it is published, the way
+  the Ubuntu and Debian `.deb`s already were. The Fedora build compiles in
+  GStreamer for H.264/AAC, which `ffmpeg-free` does not decode, and
+  `nightly-distro-build.sh fedora` / `nightly.sh` build it locally too.
 * Build: the alternate libnghttp2 HTTP client backend
   (`-Dhttp_backend=nghttp2`, `src/net_http2.c`) is removed, together with
   its HTTP/3-over-QUIC sub-feature (ngtcp2 + nghttp3 + gnutls). Page and
