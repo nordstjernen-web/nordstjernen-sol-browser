@@ -52,15 +52,6 @@ That is necessary for `Vary: Accept` but not sufficient on its own: the
 HTTP cache underneath has to select the right variant too. It does —
 see *Vary and cache variants* below.
 
-## Independent of the HTTP backend
-
-Everything in this document sits above the transport. The `nghttp2`
-backend selected with `-Dhttp_backend=nghttp2` replaces `ns_hop_transport`
-*inside* a single hop; the request key, the coalescer, the preload map
-and the cache partition are all computed above that call, so preloading
-and deduplication behave identically on either backend. See
-[http-backends.md](http-backends.md).
-
 ## The four layers
 
 Every subresource fetch passes through these in order. The first one that
@@ -71,7 +62,7 @@ can answer does.
 | Preload map | a preload for this exact key already finished | `src/net.c` |
 | In-flight coalescer | a fetch with this exact key is running right now | `src/net.c` |
 | HTTP cache | a fresh entry exists on disk for this partition and this `Vary` variant | `src/cache.c` |
-| Network | otherwise | the HTTP backend (libcurl, or nghttp2) |
+| Network | otherwise | libcurl, through `ns_hop_transport` in `src/net.c` |
 
 The first two share one mutex (`g_fetch_mutex`) and one decision
 function, `ns_fetch_claim_locked`. That matters: it means a resource is

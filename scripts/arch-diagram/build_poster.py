@@ -278,11 +278,6 @@ L.append(node("net", "net.c  (~6 k loc)",
               "HTTPS-first, Sec-Fetch-*/client hints, referer,\n"
               "per-site partitioned cookies; WHATWG URL via lexbor",
               "libcurl, libpsl, zlib"))
-L.append(node("net_http2", "net_http2.c",
-              "alternate transport backend (http_backend=nghttp2):\n"
-              "in-tree h2 client, per-origin multiplexing; HTTP/3\n"
-              "sub-feature via ngtcp2 + nghttp3 + gnutls",
-              "libnghttp2, OpenSSL (optional)"))
 L.append(node("netutil", "netutil.c",
               "curl-free helpers: Accept-Language,\nsearch URLs, proxy masking"))
 L.append(node("cache", "cache.c",
@@ -402,8 +397,6 @@ L.append(E("webgl", "paint", "FBO readback composited", "thin",
 L.append(E("net", "cache", "store / revalidate", "thin"))
 L.append(E("net", "csp", "policy gate", "thin"))
 L.append(E("net", "safebrowsing", "host blocklist gate", "thin"))
-L.append(E("net", "net_http2",
-           "http_backend=nghttp2:\nalternate transport hop", "mode"))
 L.append(E("ws", "net", None, "thin", constraint="false"))
 L.append(E("eventsource", "net", None, "thin", constraint="false"))
 L.append(E("net", "video", "media bytes\n(range requests)", "thin"))
@@ -435,7 +428,7 @@ for a, b in [
     ("js", "js_realm"),
     ("js", "js_perf"),
     ("image_dec", "pdf"), ("texture", "spellcheck"),
-    ("net", "netutil"), ("cache", "safebrowsing"), ("net_http2", "csp"),
+    ("net", "netutil"), ("cache", "safebrowsing"),
     ("libns", "embed_shim"),
     ("lexbor", "polyfills"), ("quickjs", "minimp3"),
 ]:
@@ -522,8 +515,7 @@ L.append('syslibs [shape=none, margin=0, label=<'
          'GTK 4, GLib/GIO, Cairo, Pango, gdk-pixbuf, libepoxy, '
          'FreeType, Fontconfig</td></tr>'
          '<tr><td align="left"><b>network / crypto</b></td><td align="left">'
-         'libcurl, OpenSSL, libpsl, zlib, brotli &#183; optional: libnghttp2, '
-         'ngtcp2 + nghttp3 + gnutls (HTTP/3)</td></tr>'
+         'libcurl, OpenSSL, libpsl, zlib, brotli</td></tr>'
          '<tr><td align="left"><b>data / text</b></td><td align="left">'
          'SQLite, uchardet, Enchant (optional)</td></tr>'
          '<tr><td align="left"><b>media</b></td><td align="left">'

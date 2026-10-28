@@ -2,9 +2,7 @@
 
 Nordstjernen ("Nordstjernen Web Navigator") is a web
 browser written from scratch in **C**, using **GTK 4** for the UI and
-**libcurl** for networking (with an optional in-tree **libnghttp2**
-transport backend — see "HTTP client backend" below). Targets Linux,
-macOS, and Windows.
+**libcurl** for networking. Targets Linux, macOS, and Windows.
 
 See `README.md` for the product vision. Nordstjernen is a fresh
 implementation — there is no upstream browser engine, no fork,
@@ -171,39 +169,6 @@ extraction, and host extraction through `lxb_url_parse` /
 `lxb_url_serialize` from lexbor's WHATWG URL module. No separate URL
 library or build option — it's part of the same `liblexbor_static.a`
 that the HTML parser uses.
-
-### HTTP client backend: curl (default) or nghttp2
-
-Page and subresource fetches go through a build-time-selectable transport
-seam, `ns_hop_transport()` (`src/net_backend.h`). The `http_backend` meson
-combo option picks the implementation: `curl` (default) drives a libcurl
-easy handle on the shared multi-handle thread; `nghttp2` compiles
-`src/net_http2.c`, an in-tree single-hop client over **libnghttp2** +
-OpenSSL (ALPN `h2`, HTTP/1.1 fallback, zlib/brotli decompression, the shared
-cookie jar). Everything above one hop — redirects, HSTS, referer, cache,
-cookie partitioning — lives in `src/net.c` and is shared by both backends,
-so they fetch through identical browser policy.
-
-`libcurl` stays a hard dependency either way (WebSocket, SSE and audio
-use it directly), and the nghttp2 backend delegates proxied and FTP hops
-back to `ns_hop_transport_curl()`. It pools HTTP/2 connections per
-`scheme://host:port` and **multiplexes concurrent requests over a single
-connection** (a per-connection I/O thread drives the nghttp2 session;
-workers submit a stream and block until it completes), with per-host
-TLS-session resumption and per-origin connect serialization, all torn down
-by `ns_net_backend_shutdown()`. **HTTP/3 over QUIC is an auto-detected
-sub-feature** of this backend (`NS_HTTP_HAVE_HTTP3`): when **ngtcp2** (QUIC
-transport) + its **gnutls** crypto binding + **libnghttp3** (the HTTP/3
-application layer) + **gnutls** are all present it upgrades a hop to HTTP/3
-after the origin advertises `Alt-Svc: h3=…`, connecting QUIC to the origin's
-port and falling back to HTTP/2 if QUIC can't connect (`NS_FORCE_HTTP3=1`
-forces the first hop for testing). gnutls is the QUIC TLS stack because
-system OpenSSL 3.0 has no QUIC API; the HTTP/2 path keeps using OpenSSL.
-Like the `webgpu`/`libav` features, the QUIC stack is never vendored and a
-build without those packages carries no ngtcp2/nghttp3/gnutls symbol and is
-HTTP/2-only. Keep the curl path the default and behaviour-identical; extend
-`src/net_http2.c` for the alternate backend. See `docs/http-backends.md` for
-the full comparison.
 
 ### Charset detection: uchardet
 

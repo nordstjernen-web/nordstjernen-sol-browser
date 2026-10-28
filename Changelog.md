@@ -3,6 +3,14 @@ Changelog:
 
 1.0.38:
 ======
+* Build: the alternate libnghttp2 HTTP client backend
+  (`-Dhttp_backend=nghttp2`, `src/net_http2.c`) is removed, together with
+  its HTTP/3-over-QUIC sub-feature (ngtcp2 + nghttp3 + gnutls). Page and
+  subresource fetches always go through libcurl, which still negotiates
+  HTTP/2, and HTTP/3 through the alt-svc cache when the linked libcurl was
+  built with it. The `http_backend` meson option is gone, so a configure
+  that still passes it fails, and the build no longer looks for libnghttp2,
+  ngtcp2, nghttp3, gnutls or libssl.
 * Security: `window.confirm()` now returns `false` and `window.prompt()`
   returns `null`, the cancel outcomes the HTML standard prescribes when
   no dialog can be shown, instead of silently approving the action;
