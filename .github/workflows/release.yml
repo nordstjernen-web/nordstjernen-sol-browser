@@ -93,6 +93,7 @@ jobs:
       # don't overwrite each other on the release. An RPM already carries its
       # release in %{?dist} (nordstjernen-<version>-1.fc45.x86_64.rpm).
       - name: Name the package for its distro release
+        shell: bash
         run: |
           shopt -s nullglob
           tag=$(. /etc/os-release && printf '%s%s' "$ID" "$VERSION_ID")
