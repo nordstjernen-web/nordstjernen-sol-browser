@@ -3,6 +3,10 @@ Changelog:
 
 1.0.38:
 ======
+* Security: `window.confirm()` now returns `false` and `window.prompt()`
+  returns `null`, the cancel outcomes the HTML standard prescribes when
+  no dialog can be shown, instead of silently approving the action;
+  both log their message to the console like `alert()`.
 * Security: the file name a page suggests for a download is sanitised
   before it is checked, shown or saved: control and bidi-override
   characters are dropped, Windows-reserved characters replaced,
