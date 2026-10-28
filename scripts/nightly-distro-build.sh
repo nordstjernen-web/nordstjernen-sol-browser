@@ -3,10 +3,11 @@
 # nightly.sh via `docker run` with the source tree at the current
 # directory; installs that distro's deps, builds a release binary, and
 # emits a portable tarball plus a native package (.deb or .rpm) under
-# dist/. Argument 1 selects the distro: debian | ubuntu | opensuse.
+# dist/. Argument 1 selects the distro: debian | ubuntu | fedora | opensuse |
+# alpine.
 set -euo pipefail
 
-DISTRO=${1:?usage: nightly-distro-build.sh <debian|ubuntu|opensuse>}
+DISTRO=${1:?usage: nightly-distro-build.sh <debian|ubuntu|fedora|opensuse|alpine>}
 export VERSION=${VERSION:-}
 export DEBIAN_FRONTEND=noninteractive
 export CC=${CC:-cc}
@@ -69,6 +70,27 @@ install_zypper() {
         libavformat-devel libavcodec-devel libavutil-devel libswscale-devel libswresample-devel
 }
 
+install_dnf() {
+    # curl replaces the image's curl-minimal, hence --allowerasing.
+    dnf install -y --setopt=install_weak_deps=False --allowerasing \
+        gcc gcc-c++ clang pkgconf-pkg-config meson ninja-build cmake git zip unzip curl \
+        gawk findutils diffutils which rpm-build patchelf ca-certificates \
+        gtk4-devel libepoxy-devel libcurl-devel openssl-devel uchardet-devel libpsl-devel \
+        sqlite-devel libseccomp-devel libwebp-devel libavif-devel SDL2-devel
+    # Fedora's FFmpeg is ffmpeg-free, which carries no H.264/AAC decoder, so
+    # GStreamer is what plays MP4 there.
+    dnf install -y --setopt=install_weak_deps=False \
+        poppler-glib-devel gstreamer1-devel gstreamer1-plugins-base-devel \
+        fontconfig-devel pango-devel libjxl-devel enchant2-devel || true
+    # FFmpeg libav* (inline WebM: VP9/VP8 + Opus/Vorbis) from Fedora's own
+    # ffmpeg-free packages. The SONAMEs the RPM then requires are the ones this
+    # Fedora release ships (FFmpeg 8 on 44, FFmpeg 9 on 45), which is why each
+    # release gets its own RPM. meson requires them on Linux, so this is fatal.
+    dnf install -y --setopt=install_weak_deps=False \
+        'pkgconfig(libavformat)' 'pkgconfig(libavcodec)' 'pkgconfig(libavutil)' \
+        'pkgconfig(libswscale)' 'pkgconfig(libswresample)'
+}
+
 install_apk() {
     apk update -q
     apk add --no-cache \
@@ -87,6 +109,7 @@ install_apk() {
 
 case "$DISTRO" in
     debian|ubuntu) install_apt ;;
+    fedora)        install_dnf ;;
     opensuse)      install_zypper ;;
     alpine)        install_apk ;;
     *) echo "unknown distro: $DISTRO" >&2; exit 2 ;;
@@ -108,9 +131,9 @@ echo "nightly-distro-build($DISTRO): building with -j${NS_BUILD_JOBS} lto=${NS_B
 ./scripts/pack-linux.sh
 
 case "$DISTRO" in
-    debian|ubuntu) ./scripts/pack-deb.sh ;;
-    opensuse)      ./scripts/pack-rpm.sh ;;
-    alpine)        ./scripts/pack-apk.sh ;;
+    debian|ubuntu)   ./scripts/pack-deb.sh ;;
+    fedora|opensuse) ./scripts/pack-rpm.sh ;;
+    alpine)          ./scripts/pack-apk.sh ;;
 esac
 
 # Install the native package into this same container and run the installed
@@ -128,6 +151,13 @@ verify_package() {
         debian|ubuntu)
             dpkg -i "$pkg"
             dpkg-deb -f "$pkg" Depends | sed 's/^/  Depends: /'
+            ;;
+        fedora)
+            # dnf resolves the Requires against the real Fedora repositories,
+            # so an RPM that would fail to install on a user's machine of this
+            # release fails here.
+            dnf install -y --setopt=install_weak_deps=False "$pkg"
+            rpm -qp --requires "$pkg" | sed 's/^/  Requires: /'
             ;;
         opensuse)
             rpm -Uvh --replacepkgs "$pkg"
