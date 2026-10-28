@@ -3,6 +3,20 @@ Changelog:
 
 1.0.38:
 ======
+* Security: Nordstjernen no longer runs on a Linux kernel without the
+  Landlock filesystem sandbox. It refuses to start, with exit code 78 and a
+  message saying whether Landlock is missing from the kernel or only
+  absent from its `lsm=` boot parameter, instead of continuing with the
+  renderer unconfined. A renderer or media helper whose Landlock ruleset
+  cannot be enforced exits the same way. `NS_NO_SANDBOX=1` remains the
+  debugging override; Android is unaffected.
+* `about:nordstjernen` has a Security section: the kernel's Landlock ABI,
+  whether the Landlock filesystem sandbox, the seccomp syscall filter and
+  `no_new_privs` are in force in the renderer process, root status and
+  allocator hardening on Linux; the Seatbelt sandbox on macOS; the process
+  mitigations on Windows; and the HTTPS-First, Global Privacy Control, Do
+  Not Track and tracking-parameter settings. The seccomp row moved there
+  from the feature list.
 * The Fedora RPM is built for Fedora 45 and verified by the release
   workflow. Fedora 44 ships FFmpeg 8 (`libavcodec.so.62`) and Fedora 45
   ships FFmpeg 9 (`libavcodec.so.63`), so the 1.0.36 RPM built on Fedora 44

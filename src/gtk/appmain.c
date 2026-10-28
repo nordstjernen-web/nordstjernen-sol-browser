@@ -580,6 +580,7 @@ main(int argc, char **argv)
     int info_rc = ns_print_version_or_help(argc, argv);
     if (info_rc >= 0) return info_rc;
     if (!ns_security_refuse_root()) return 77;
+    if (!ns_security_require_landlock()) return 78;
     init_self_exe(argc > 0 ? argv[0] : NULL);
     ns_i18n_init(g_self_exe);
     if (ns_private_mode_wanted(argc, argv))
