@@ -498,6 +498,7 @@ ns_security_landlock_abi(void)
     return abi > 0 ? abi : -1;
 }
 
+#ifndef __ANDROID__
 static void
 ns_landlock_missing_message(int err)
 {
@@ -519,6 +520,7 @@ ns_landlock_missing_message(int err)
             : "Use a kernel built with CONFIG_SECURITY_LANDLOCK=y and with\n"
               "  \"landlock\" in its lsm= boot parameter.");
 }
+#endif
 
 gboolean
 ns_security_require_landlock(void)
