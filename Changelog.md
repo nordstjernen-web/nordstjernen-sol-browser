@@ -3,6 +3,11 @@ Changelog:
 
 1.0.38:
 ======
+* Security: the file name a page suggests for a download is sanitised
+  before it is checked, shown or saved: control and bidi-override
+  characters are dropped, Windows-reserved characters replaced,
+  trailing dots and spaces trimmed and reserved device names prefixed,
+  so `evil.exe ` can no longer skip the program-file confirmation.
 * Security: a finished download is moved into Downloads only when the
   renderer's reported path is a regular file directly inside the
   download staging directory (`~/.cache/nordstjernen/downloads/`), and
