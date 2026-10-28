@@ -955,6 +955,69 @@ download_confirmed(GObject *src, GAsyncResult *res, gpointer ud)
 }
 
 static gboolean
+download_name_char_dropped(gunichar c)
+{
+    if (c < 0x20 || c == 0x7f || (c >= 0x80 && c < 0xa0)) return TRUE;
+    if (c == 0x200e || c == 0x200f) return TRUE;
+    if (c >= 0x202a && c <= 0x202e) return TRUE;
+    if (c >= 0x2066 && c <= 0x2069) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+download_name_is_reserved_device(const char *name)
+{
+    static const char *const devices[] = {
+        "con", "prn", "aux", "nul",
+        "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+        "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+    };
+    gsize stem = strcspn(name, ".");
+    for (gsize i = 0; i < G_N_ELEMENTS(devices); i++)
+        if (strlen(devices[i]) == stem &&
+            g_ascii_strncasecmp(name, devices[i], stem) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static char *
+download_sanitize_name(const char *raw)
+{
+    if (!raw || !*raw) return NULL;
+    const char *leaf = raw;
+    for (const char *p = raw; *p; p++)
+        if (*p == '/' || *p == '\\') leaf = p + 1;
+    g_autofree char *valid = g_utf8_make_valid(leaf, -1);
+    GString *out = g_string_new(NULL);
+    for (const char *p = valid; *p; p = g_utf8_next_char(p)) {
+        gunichar c = g_utf8_get_char(p);
+        if (download_name_char_dropped(c)) continue;
+        if (c == '<' || c == '>' || c == ':' || c == '"' || c == '|' ||
+            c == '?' || c == '*')
+            c = '_';
+        g_string_append_unichar(out, c);
+    }
+    while (out->len && (out->str[out->len - 1] == '.' ||
+                        out->str[out->len - 1] == ' '))
+        g_string_truncate(out, out->len - 1);
+    gsize lead = 0;
+    while (out->str[lead] == ' ') lead++;
+    if (lead) g_string_erase(out, 0, (gssize)lead);
+    if (out->len > 200) {
+        const char *end = out->str + 200;
+        while (end > out->str && (*end & 0xc0) == 0x80) end--;
+        g_string_truncate(out, (gsize)(end - out->str));
+    }
+    if (!out->len || strcmp(out->str, ".") == 0 || strcmp(out->str, "..") == 0) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    if (download_name_is_reserved_device(out->str))
+        g_string_prepend_c(out, '_');
+    return g_string_free(out, FALSE);
+}
+
+static gboolean
 download_name_is_executable(const char *name)
 {
     static const char *const exts[] = {
@@ -1111,18 +1174,16 @@ pw_start_download(ProcWindow *pw, NsProcView *view, const char *url,
                   const char *suggested)
 {
     if (!url || !*url || !view) return;
-    char *name = NULL;
-    if (suggested && *suggested)
-        name = g_path_get_basename(suggested);
-    if (!name || !*name || strcmp(name, ".") == 0 || strcmp(name, "/") == 0) {
-        g_free(name);
-        char *base = g_path_get_basename(url);
-        char *q = base ? strchr(base, '?') : NULL;
+    char *name = download_sanitize_name(suggested);
+    if (!name) {
+        g_autofree char *base = g_strdup(url);
+        char *q = strchr(base, '?');
         if (q) *q = '\0';
-        if (base && *base && strcmp(base, ".") != 0 && strcmp(base, "/") != 0)
-            name = base;
-        else { g_free(base); name = g_strdup("download"); }
+        char *frag = strchr(base, '#');
+        if (frag) *frag = '\0';
+        name = download_sanitize_name(base);
     }
+    if (!name) name = g_strdup("download");
     const char *dir = downloads_dir();
     char *path = g_build_filename(dir, name, NULL);
     for (int n = 1; g_file_test(path, G_FILE_TEST_EXISTS) && n < 1000; n++) {
