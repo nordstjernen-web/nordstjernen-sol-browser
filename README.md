@@ -138,12 +138,7 @@ build. See [npm/README.md](npm/README.md).
   partitioned by top-level site with third-party cookies blocked by default,
   speculative subresource loading, request coalescing and a `Vary`-aware
   HTTP cache. HTTP, HTTPS and SOCKS proxies ([docs/Proxy.md](docs/Proxy.md))
-  and DNS-over-HTTPS are configurable. An in-tree **libnghttp2** transport
-  backend is selectable at build time (`-Dhttp_backend=nghttp2`), with
-  **HTTP/3 over QUIC** via ngtcp2 + nghttp3 + gnutls when present. Both
-  backends fetch through the same browser policy (redirects, HSTS, referer,
-  cache, cookies), so the independent transports cross-check each other. See
-  [docs/http-backends.md](docs/http-backends.md).
+  and DNS-over-HTTPS are configurable.
 - **Images and graphics** — Wuffs decodes PNG/APNG, GIF, BMP, JPEG and simple
   lossy and lossless WebP; libwebp handles extended WebP (alpha and
   animation); ICO and SVG are rendered in-engine, with optional AVIF (still
@@ -290,12 +285,12 @@ linked statically; `-Dwebgpu=disabled` drops WebGPU and needs no network.
 | GLib / GModule, Pango, cairo, HarfBuzz, FriBidi, fontconfig | (ship with GTK; web-text-lib needs GLib ≥ 2.80, cairo ≥ 1.18, HarfBuzz ≥ 8.3, FriBidi ≥ 1.0.6, fontconfig ≥ 2.15) | core types, dynamic module loading, text shaping, 2D drawing |
 | libepoxy | — (with EGL on Linux) | OpenGL/ES function dispatch for WebGL |
 | libcurl | ≥ 8.5 (≥ 8.11 for WebSocket) | HTTP/2 networking, HSTS, cookies, native WebSocket |
-| OpenSSL (libcrypto, libssl) | — | WebCrypto (`crypto.subtle`), TLS for the nghttp2 backend |
+| OpenSSL (libcrypto) | — | WebCrypto (`crypto.subtle`) |
 | uchardet | — | charset detection |
 | libpsl | — | public-suffix list for cookie scoping |
 | SQLite | — | IndexedDB persistent storage |
 | libwebp, libwebpdemux | — | extended (alpha and animated) WebP decoding |
-| zlib | — | `CompressionStream` / `DecompressionStream`, and gzip/deflate in the nghttp2 backend |
+| zlib | — | `CompressionStream` / `DecompressionStream` |
 | FFmpeg libav\* | ≥ 6.0 (Linux, Windows; optional on macOS and the BSDs) | inline WebM/Ogg (VP9/VP8/Theora video, Opus/Vorbis audio) |
 | libseccomp | — (Linux only) | renderer syscall sandbox |
 
@@ -303,13 +298,9 @@ linked statically; `-Dwebgpu=disabled` drops WebGPU and needs no network.
 SDL2 (audio output and microphone capture, `-Daudio`),
 [FFmpeg](https://github.com/FFmpeg/FFmpeg) libav\* on macOS and the BSDs (inline WebM),
 GStreamer ≥ 1.20 (H.264/AAC on Linux and the BSDs, `-Dgstreamer`),
-vorbisfile / opusfile (Ogg audio without FFmpeg), brotli (WOFF2 fonts and
-HTTP content encoding), zstd (HTTP content encoding in the nghttp2 backend),
+vorbisfile / opusfile (Ogg audio without FFmpeg), brotli (WOFF2 fonts),
 poppler-glib (inline PDF), libavif (AVIF images), libjxl (JPEG XL images),
-Enchant (spell checking), FreeType (extra font backend), [libnghttp2](https://github.com/nghttp2/nghttp2) (the
-in-tree HTTP/2 backend), [ngtcp2](https://github.com/ngtcp2/ngtcp2) +
-[nghttp3](https://github.com/ngtcp2/nghttp3) + GnuTLS (HTTP/3 over QUIC inside
-it), wgpu-native on platforms it publishes no release for (the BSDs, musl,
+Enchant (spell checking), FreeType (extra font backend), wgpu-native on platforms it publishes no release for (the BSDs, musl,
 Windows on Arm; WebGPU is not built for Android and iOS) and Fabrice
 Bellard's original
 [QuickJS](https://github.com/bellard/quickjs) (`-Dquickjs=quickjs`, fetched

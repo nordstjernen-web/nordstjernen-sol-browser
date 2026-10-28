@@ -29,7 +29,6 @@ outputs (a response, decoded pixels) that are transferred by ownership.
 | **Main** | `renderer_http.c` | whole process | yes — owns the DOM, layout, paint, page JS |
 | **Fetch pool** (≤32) | `net.c`, GLib `GTask` thread pool | per request | no |
 | **Network I/O** (1) | `net.c`, owns the shared `CURLM` | first fetch → shutdown | no |
-| **HTTP/2 connection I/O** (1 per connection, `-Dhttp_backend=nghttp2` only) | `net_http2.c` | connection lifetime | no |
 | **Image decode** (`async_image_decode`, on by default) | `image.c`, GLib `GTask` thread pool | per image | no |
 | **Web Worker** (1 per `Worker`) | `js.c` | until terminated | no (own `JSContext`) |
 | **Service Worker** (1 per registered worker) | `js.c` | until terminated | no (own `JSContext`) |
