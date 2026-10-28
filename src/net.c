@@ -1725,6 +1725,32 @@ ns_net_cookies_for_request(const char *url, const char *jar_path,
     return ns_cookie_collect(url, jar_path, js_path, TRUE, samesite_cross);
 }
 
+char *
+ns_net_cookies_for_websocket(const char *url, const char *document_origin)
+{
+    g_autofree char *http_url = NULL;
+    if (g_str_has_prefix(url, "wss://"))
+        http_url = g_strconcat("https://", url + 6, NULL);
+    else if (g_str_has_prefix(url, "ws://"))
+        http_url = g_strconcat("http://", url + 5, NULL);
+    else
+        return NULL;
+    const char *top_url = document_origin && *document_origin
+                              ? document_origin : http_url;
+    const ns_config *cfg = ns_config_get();
+    ns_cookie_policy policy = cfg ? cfg->cookie_policy : NS_COOKIE_FIRST_PARTY;
+    gboolean same_site = ns_url_is_same_site(http_url, top_url);
+    if (policy == NS_COOKIE_NEVER ||
+        (policy == NS_COOKIE_FIRST_PARTY && !same_site))
+        return NULL;
+    g_autofree char *site = ns_url_site_from(top_url);
+    if (!site || !*site) return NULL;
+    g_autofree char *jar_path = ns_net_cookie_path_for_partition(site);
+    g_autofree char *js_path  = ns_net_cookie_js_path_for_partition(site);
+    return ns_cookie_collect(http_url, jar_path, js_path, TRUE,
+                             same_site ? 0 : 2);
+}
+
 static gboolean
 ns_cookie_jar_has_httponly(const char *jar_path, const char *domain,
                            const char *path, const char *name, gint64 now)

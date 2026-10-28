@@ -456,6 +456,11 @@ ns_ws_worker_curl(gpointer data)
         headers = curl_slist_append(headers, h);
         g_free(h);
     }
+    g_autofree char *cookie = ns_net_cookies_for_websocket(ws->url, ws->origin);
+    if (cookie && *cookie) {
+        g_autofree char *h = g_strconcat("Cookie: ", cookie, NULL);
+        headers = curl_slist_append(headers, h);
+    }
     if (ws->protocols && ws->protocols->len > 0) {
         GString *s = g_string_new("Sec-WebSocket-Protocol: ");
         for (guint i = 0; i < ws->protocols->len; i++) {
