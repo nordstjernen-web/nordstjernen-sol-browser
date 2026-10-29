@@ -110,6 +110,7 @@ typedef struct ns_hop_req {
     int                samesite_cross;
     const char        *cookie_site;
     gboolean           cookie_navigation;
+    gboolean           top_level_navigation;
     int                priority_urgency;
     gboolean           priority_incremental;
     gboolean           follow_redirects;
@@ -5933,7 +5934,7 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
         gboolean opt_in = cfg && cfg->tls_allow_insecure_override;
         char *fb_host = ns_url_host_from(req->url);
         gboolean hsts_pinned = ns_net_hsts_should_upgrade(fb_host);
-        if (opt_in && !hsts_pinned) {
+        if (opt_in && !hsts_pinned && req->top_level_navigation) {
             char *warn = g_strdup_printf(
                 "Insecure: TLS certificate not trusted (%s)",
                 errbuf[0] ? errbuf : curl_easy_strerror(rc));
@@ -6667,6 +6668,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         .samesite_cross = samesite_cross,
         .cookie_site = cookie_site,
         .cookie_navigation = is_navigation,
+        .top_level_navigation = is_navigation,
         .priority_urgency = priority_urgency,
         .priority_incremental = priority_incremental,
         .follow_redirects = follow_redirects,
