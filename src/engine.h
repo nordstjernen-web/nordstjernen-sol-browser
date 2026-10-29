@@ -69,6 +69,8 @@ GPtrArray *ns_engine_take_resource_timings(const char *top_url);
 void ns_engine_speculative_preload(ns_node *doc, const char *base_url,
                                    gboolean include_images);
 void ns_engine_preload_script(const char *url, const char *top_url);
+#define NS_ENGINE_EARLY_HINTS_MAX 64
+void ns_engine_early_hints(const char *document_url, GPtrArray *hints);
 
 ns_js_navigation_timing ns_engine_navigation_timing(const ns_response *resp);
 

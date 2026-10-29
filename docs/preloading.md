@@ -164,6 +164,35 @@ Image preloading is a parameter of the scan, not a setting: both callers,
 today. The branch is kept because the scan is
 the right place for it if that changes.
 
+## Early Hints
+
+A server may answer a navigation with a `103 Early Hints` interim
+response carrying `Link` headers before it has the final response ready.
+`ns_header_cb` in `src/net.c` collects the `Link` entries of a 103 and,
+when the interim block ends, hands them to the handler registered with
+`ns_net_set_early_hints_handler` on the main loop. The handler is
+`ns_engine_early_hints`, which resolves each `rel=preload` or
+`rel=modulepreload` entry, classifies it with
+`ns_engine_preload_destination`, checks CSP, reserves a preload-map slot
+for script and style destinations and starts the fetch — the same path
+the scan takes, only earlier. `rel=preconnect` and `rel=dns-prefetch`
+open a connection.
+
+Hints are honoured only for top-level GET navigations over HTTP/2 or
+HTTP/3; a 103 on HTTP/1.1 is ignored, as the other browsers do, because
+HTTP/1.1 intermediaries mishandle interim responses often enough to make
+them unsafe to act on. At most 32 links per interim response and 64 per
+navigation are taken.
+
+The scan runs after the hints. It would normally clear the preload map
+before issuing its own fetches, which would discard a hinted response
+that had already landed. When the hints belong to the same site as the
+document being scanned, `ns_engine_speculative_preload` instead calls
+`ns_net_preload_clear_except` with the hinted keys and seeds its
+deduplication set with the hinted (URL, destination) pairs, so hinted
+resources are neither dropped nor fetched twice. The record is forgotten
+once the scan has used it.
+
 ## Vary and cache variants
 
 `cache.c` stores the response's `Vary` header alongside the entry and

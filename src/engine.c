@@ -518,6 +518,115 @@ preload_flight_new(const char *url)
     return flight;
 }
 
+static ns_csp_kind
+preload_csp_kind(ns_fetch_destination dest)
+{
+    return dest == NS_FETCH_DEST_SCRIPT ? NS_CSP_SCRIPT
+         : dest == NS_FETCH_DEST_STYLE ? NS_CSP_STYLE
+         : dest == NS_FETCH_DEST_IMAGE ? NS_CSP_IMG
+         : dest == NS_FETCH_DEST_FONT ? NS_CSP_FONT
+         : NS_CSP_CONNECT;
+}
+
+static GPtrArray  *g_early_hint_keys;
+static GHashTable *g_early_hint_slots;
+static char       *g_early_hint_document;
+
+static void
+early_hints_forget(void)
+{
+    if (g_early_hint_keys) g_ptr_array_set_size(g_early_hint_keys, 0);
+    if (g_early_hint_slots) g_hash_table_remove_all(g_early_hint_slots);
+    g_clear_pointer(&g_early_hint_document, g_free);
+}
+
+static gboolean
+early_hints_cover(const char *document_url)
+{
+    return g_early_hint_document && document_url &&
+           g_early_hint_slots && g_hash_table_size(g_early_hint_slots) > 0 &&
+           ns_url_is_same_site(g_early_hint_document, document_url);
+}
+
+void
+ns_engine_early_hints(const char *document_url, GPtrArray *hints)
+{
+    if (!document_url || !hints || !ns_url_is_http_or_https(document_url))
+        return;
+    if (!early_hints_cover(document_url)) {
+        early_hints_forget();
+        g_early_hint_document = g_strdup(document_url);
+    }
+    if (!g_early_hint_keys)
+        g_early_hint_keys = g_ptr_array_new_with_free_func(g_free);
+    if (!g_early_hint_slots)
+        g_early_hint_slots = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                   g_free, NULL);
+    for (guint i = 0; i < hints->len; i++) {
+        const ns_net_link_hint *hint = g_ptr_array_index(hints, i);
+        if (!hint->url || !hint->rel) continue;
+        if (rel_has_token(hint->rel, "preconnect") ||
+            rel_has_token(hint->rel, "dns-prefetch")) {
+            g_autofree char *origin = ns_url_origin_from(hint->url);
+            if (origin && ns_url_is_http_or_https(origin))
+                ns_net_preconnect_async(origin);
+            continue;
+        }
+        if (!rel_has_token(hint->rel, "preload") &&
+            !rel_has_token(hint->rel, "modulepreload"))
+            continue;
+        ns_fetch_destination dest =
+            ns_engine_preload_destination(hint->rel, hint->as);
+        char *slot = g_strdup_printf("%d\x1f%s", (int)dest, hint->url);
+        if (g_hash_table_contains(g_early_hint_slots, slot) ||
+            g_hash_table_size(g_early_hint_slots) >= NS_ENGINE_EARLY_HINTS_MAX) {
+            g_free(slot);
+            continue;
+        }
+        if (!ns_net_csp_allows(document_url, preload_csp_kind(dest), hint->url,
+                               NULL, TRUE)) {
+            g_free(slot);
+            continue;
+        }
+        g_hash_table_add(g_early_hint_slots, slot);
+        const char *const *headers = ns_net_accept_headers_for(dest);
+        if (dest != NS_FETCH_DEST_DEFAULT) {
+            char *key = ns_net_request_key(hint->url, document_url, "GET",
+                                           headers);
+            if (key) {
+                ns_net_preload_expect(key);
+                g_ptr_array_add(g_early_hint_keys, key);
+            }
+        }
+        ns_net_request_async(hint->url, document_url, "GET", NULL, 0, NULL,
+                             headers, NULL, on_preload_fetched,
+                             preload_flight_new(hint->url));
+    }
+}
+
+static void
+early_hints_adopt(const char *document_url, GHashTable *seen)
+{
+    if (!early_hints_cover(document_url)) {
+        early_hints_forget();
+        ns_net_preload_clear();
+        preload_results_clear();
+        return;
+    }
+    GPtrArray *keep = g_ptr_array_new();
+    for (guint i = 0; i < g_early_hint_keys->len; i++)
+        g_ptr_array_add(keep, g_ptr_array_index(g_early_hint_keys, i));
+    g_ptr_array_add(keep, NULL);
+    ns_net_preload_clear_except((const char *const *)keep->pdata);
+    g_ptr_array_free(keep, TRUE);
+    GHashTableIter it;
+    gpointer slot;
+    g_hash_table_iter_init(&it, g_early_hint_slots);
+    while (g_hash_table_iter_next(&it, &slot, NULL))
+        g_hash_table_add(seen, g_strdup(slot));
+    early_hints_forget();
+}
+
 void
 ns_engine_preload_script(const char *url, const char *top_url)
 {
@@ -544,22 +653,17 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
     GHashTable *connect_seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                      g_free, NULL);
     g_autofree char *doc_base = ns_js_base_url_for_document(NULL, doc, base_url);
+    early_hints_adopt(base_url, seen);
     preload_collect(doc, doc_base ? doc_base : base_url, include_images, urls,
                     seen, connects, connect_seen, 0);
     g_hash_table_destroy(seen);
     g_hash_table_destroy(connect_seen);
-    ns_net_preload_clear();
-    preload_results_clear();
     for (guint i = 0; i < connects->len; i++)
         ns_net_preconnect_async(g_ptr_array_index(connects, i));
     for (guint i = 0; i < urls->len; i++) {
         const preload_target *target = g_ptr_array_index(urls, i);
-        ns_csp_kind kind = target->dest == NS_FETCH_DEST_SCRIPT ? NS_CSP_SCRIPT
-                         : target->dest == NS_FETCH_DEST_STYLE ? NS_CSP_STYLE
-                         : target->dest == NS_FETCH_DEST_IMAGE ? NS_CSP_IMG
-                         : target->dest == NS_FETCH_DEST_FONT ? NS_CSP_FONT
-                         : NS_CSP_CONNECT;
-        if (!ns_net_csp_allows(base_url, kind, target->url, NULL, TRUE))
+        if (!ns_net_csp_allows(base_url, preload_csp_kind(target->dest),
+                               target->url, NULL, TRUE))
             continue;
         const char *const *headers = ns_net_accept_headers_for(target->dest);
         if (target->dest != NS_FETCH_DEST_DEFAULT) {

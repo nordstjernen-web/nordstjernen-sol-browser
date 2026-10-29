@@ -43,6 +43,8 @@ void   ns_cache_put(const char *url,
                     const char *last_modified,
                     const char *cache_control,
                     const char *expires_header,
+                    const char *date_header,
+                    const char *age_header,
                     const char *vary,
                     const char *const *request_headers,
                     const void *body, gsize body_len);
@@ -51,7 +53,10 @@ void   ns_cache_promote_304(const char *url,
                             const char *partition,
                             const char *const *request_headers,
                             const char *cache_control,
-                            const char *expires_header);
+                            const char *expires_header,
+                            const char *date_header,
+                            const char *age_header,
+                            const char *last_modified);
 
 
 G_END_DECLS
