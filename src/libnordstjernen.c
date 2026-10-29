@@ -1541,6 +1541,24 @@ static char *g_pending_initiator;
 static int g_pending_user_activated = -1;
 static gboolean g_pending_reload;
 
+ns_session_storage *
+ns_session_storage_new(void)
+{
+    return (ns_session_storage *)ns_js_session_storage_area_new();
+}
+
+void
+ns_session_storage_free(ns_session_storage *storage)
+{
+    if (storage) g_hash_table_unref((GHashTable *)storage);
+}
+
+void
+ns_browser_set_next_session_storage(ns_session_storage *storage)
+{
+    ns_js_set_next_session_storage_area((GHashTable *)storage);
+}
+
 void
 ns_browser_set_next_referrer(const char *url)
 {

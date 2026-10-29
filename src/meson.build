@@ -93,6 +93,7 @@ nordstjernen_engine_sources = files(
   'mathml.c',
   'net.c',
   'netutil.c',
+  'content_decode.c',
   'paint.c',
   'print.c',
   'pdf.c',
@@ -252,6 +253,10 @@ endif
 
 if have_woff2
   nordstjernen_deps += [libbrotlidec_fonts]
+endif
+
+if libzstd.found()
+  nordstjernen_deps += [libzstd]
 endif
 
 nordstjernen_deps += [libpsl]

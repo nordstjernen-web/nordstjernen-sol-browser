@@ -203,6 +203,8 @@ typedef struct ns_anim ns_anim;
 void ns_js_dispatch_anim_events(ns_js *js, ns_anim *anim);
 
 void     ns_js_set_style_table(ns_js *js, GHashTable *styles);
+GHashTable *ns_js_session_storage_area_new(void);
+void     ns_js_set_next_session_storage_area(GHashTable *area);
 void     ns_js_sync_window_metrics(ns_js *js);
 void     ns_js_dispatch_resize(ns_js *js);
 void     ns_js_reeval_media_queries(ns_js *js);

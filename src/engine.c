@@ -682,7 +682,8 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
 static void
 append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
                            const char *base_url, const char *top_url,
-                           GHashTable *seen, GHashTable *cache, int depth,
+                           const char *csp_url, GHashTable *seen,
+                           GHashTable *cache, int depth,
                            gboolean render_blocking, gboolean in_frame)
 {
     if (!out || !sh) return;
@@ -695,7 +696,7 @@ append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
                 continue;
             char *abs = ns_url_resolve(base_url, im->url);
             if (!abs) continue;
-            if (!ns_net_csp_allows(top_url, NS_CSP_STYLE, abs, NULL, TRUE)) {
+            if (!ns_net_csp_allows(csp_url, NS_CSP_STYLE, abs, NULL, TRUE)) {
                 g_free(abs);
                 continue;
             }
@@ -711,8 +712,8 @@ append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
                     ns_css_stylesheet_parse_import_cached(abs, im->layer_name,
                                                           bytes);
                 if (child)
-                    append_stylesheet_expanded(out, child, abs, top_url, seen,
-                                               cache, depth + 1,
+                    append_stylesheet_expanded(out, child, abs, top_url, csp_url,
+                                               seen, cache, depth + 1,
                                                render_blocking, in_frame);
                 g_bytes_unref(bytes);
             }
@@ -729,6 +730,7 @@ typedef struct {
     GArray     *run_chunks;
     const char *run_base;
     const char *top_url;
+    const char *csp_url;
     gboolean    strict_css_mime;
     gboolean    media_seen;
     int         frame_depth;
@@ -851,8 +853,9 @@ sheet_run_emit(sheet_collect_ctx *cc, const sheet_run_chunk *chunks,
     if (!sh) return;
     GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, NULL);
-    append_stylesheet_expanded(cc->out, sh, cc->run_base, cc->top_url, seen,
-                               cc->cache, 0, FALSE, cc->frame_depth > 0);
+    append_stylesheet_expanded(cc->out, sh, cc->run_base, cc->top_url,
+                               cc->csp_url, seen, cc->cache, 0, FALSE,
+                               cc->frame_depth > 0);
     g_hash_table_destroy(seen);
 }
 
@@ -1369,8 +1372,9 @@ collect_large_style(ns_node *style, const char *base_url, sheet_collect_ctx *cc,
     sheet_run_flush(cc);
     GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, NULL);
-    append_stylesheet_expanded(cc->out, e->sheet, base_url, cc->top_url, seen,
-                               cc->cache, 0, engine_node_in_head(style), FALSE);
+    append_stylesheet_expanded(cc->out, e->sheet, base_url, cc->top_url,
+                               cc->csp_url, seen, cc->cache, 0,
+                               engine_node_in_head(style), FALSE);
     g_hash_table_destroy(seen);
     return TRUE;
 }
@@ -1435,8 +1439,9 @@ collect_adopted_css(ns_node *root, const char *base_url, sheet_collect_ctx *cc)
     sheet_run_flush(cc);
     GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, NULL);
-    append_stylesheet_expanded(cc->out, sh, base_url, cc->top_url, seen,
-                               cc->cache, 0, FALSE, cc->frame_depth > 0);
+    append_stylesheet_expanded(cc->out, sh, base_url, cc->top_url,
+                               cc->csp_url, seen, cc->cache, 0, FALSE,
+                               cc->frame_depth > 0);
     g_hash_table_destroy(seen);
 }
 
@@ -1492,10 +1497,13 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             gboolean outer_media = cc->media_seen;
             cc->media_seen = FALSE;
             ns_css_media_viewport_push(fw, fh);
+            const char *outer_csp_url = cc->csp_url;
+            if (furl && *furl) cc->csp_url = furl;
             cc->frame_depth++;
             collect_frame_children(n, base_url, cc, depth);
             sheet_run_flush(cc);
             cc->frame_depth--;
+            cc->csp_url = outer_csp_url;
             gboolean frame_media = cc->media_seen;
             ns_css_media_viewport_pop();
             cc->media_seen = outer_media || frame_media;
@@ -1527,6 +1535,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                         g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
                     append_stylesheet_expanded(out, sh, base_url, cc->top_url,
+                                               cc->csp_url,
                                                seen, cache, 0,
                                                engine_node_in_head(n),
                                                cc->frame_depth > 0);
@@ -1547,7 +1556,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             link_sheet_enabled(n) &&
             (!media || !*media || ns_css_media_query_matches(media))) {
             char *abs = ns_url_resolve(base_url, href);
-            if (abs && !ns_net_csp_allows(cc->top_url, NS_CSP_STYLE, abs,
+            if (abs && !ns_net_csp_allows(cc->csp_url, NS_CSP_STYLE, abs,
                                           ns_element_get_attr(n, "nonce"),
                                           TRUE))
                 g_clear_pointer(&abs, g_free);
@@ -1575,8 +1584,9 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                         g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
                     if (abs) g_hash_table_add(seen, g_strdup(abs));
-                    append_stylesheet_expanded(out, sh, abs, cc->top_url, seen,
-                                               cache, 0, blocking,
+                    append_stylesheet_expanded(out, sh, abs, cc->top_url,
+                                               cc->csp_url, seen, cache, 0,
+                                               blocking,
                                                cc->frame_depth > 0);
                     g_hash_table_destroy(seen);
                 }
@@ -1621,6 +1631,7 @@ engine_collect_stylesheets(ns_node *doc, const char *page_url, ns_js *js,
         .run_chunks = sheet_run_chunks_new(),
         .run_base = NULL,
         .top_url = page_url,
+        .csp_url = page_url,
         .strict_css_mime = doc && !(doc->flags & NS_NODE_QUIRKS),
         .docs = out_docs, .doc = doc,
     };

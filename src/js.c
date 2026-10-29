@@ -1512,14 +1512,50 @@ ns_js_realm_url(ns_js *js, JSContext *realm)
     return url && *url ? url : NULL;
 }
 
+static ns_node *ns_js_node_frame(const ns_node *node);
+
+static const ns_csp *
+ns_js_frame_csp(const ns_js *js, const ns_node *frame)
+{
+    if (!js) return NULL;
+    for (const ns_node *f = frame; f; f = ns_js_node_frame(f->parent)) {
+        gpointer csp = NULL;
+        if (js->frame_csps &&
+            g_hash_table_lookup_extended(js->frame_csps, f, NULL, &csp))
+            return csp;
+    }
+    return js->csp;
+}
+
+static const ns_csp *
+ns_js_realm_csp(ns_js *js, JSContext *realm)
+{
+    if (!js) return NULL;
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    if (!realm || realm == main_ctx) return js->csp;
+    return ns_js_frame_csp(js, ns_js_frame_of_realm(js, realm));
+}
+
+static const ns_csp *
+ns_js_node_csp(const ns_js *js, const ns_node *node)
+{
+    return ns_js_frame_csp(js, node ? ns_js_node_frame(node->parent) : NULL);
+}
+
+static const char *
+ns_js_realm_url_or_current(ns_js *js, JSContext *realm)
+{
+    const char *url = ns_js_realm_url(js, realm);
+    return url ? url : js->current_url;
+}
+
 static bool
 ns_js_string_compile_allowed(JSContext *ctx, gboolean wasm)
 {
     ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->csp) return true;
-    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
-    if (ctx != main_ctx && ns_js_realm_url(js, ctx)) return true;
-    if (ns_csp_eval_allowed(js->csp, wasm)) return true;
+    const ns_csp *csp = ns_js_realm_csp(js, ctx);
+    if (!csp) return true;
+    if (ns_csp_eval_allowed(csp, wasm)) return true;
     if (js->log_cb) {
         char *line = g_strdup_printf("CSP blocked: %s on %s",
                                      wasm ? "WebAssembly compile" : "eval",
@@ -3634,6 +3670,41 @@ ns_session_bucket_lookup(ns_js *js, const char *key)
     return g_hash_table_lookup(js->session_storage_buckets, key);
 }
 
+static GHashTable *g_next_session_storage_area;
+
+GHashTable *
+ns_js_session_storage_area_new(void)
+{
+    return g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                 (GDestroyNotify)g_hash_table_destroy);
+}
+
+void
+ns_js_set_next_session_storage_area(GHashTable *area)
+{
+    if (area) g_hash_table_ref(area);
+    g_clear_pointer(&g_next_session_storage_area, g_hash_table_unref);
+    g_next_session_storage_area = area;
+}
+
+static void
+ns_session_bucket_save(ns_js *js)
+{
+    if (!js->partition_key || !js->session_storage_buckets) return;
+    GHashTable *bucket = ns_session_bucket_lookup(js, js->partition_key);
+    if (!bucket) {
+        bucket = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                       g_free, g_free);
+        g_hash_table_replace(js->session_storage_buckets,
+                             g_strdup(js->partition_key), bucket);
+    }
+    g_hash_table_remove_all(bucket);
+    GHashTableIter it; gpointer k, v;
+    g_hash_table_iter_init(&it, js->session_storage);
+    while (g_hash_table_iter_next(&it, &k, &v))
+        g_hash_table_replace(bucket, g_strdup(k), g_strdup(v));
+}
+
 static void
 ns_partition_apply(ns_js *js, const char *new_url)
 {
@@ -3654,18 +3725,7 @@ ns_partition_apply(ns_js *js, const char *new_url)
     }
 
     if (js->partition_key && js->session_storage_buckets) {
-        GHashTable *bucket = ns_session_bucket_lookup(js, js->partition_key);
-        if (!bucket) {
-            bucket = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                           g_free, g_free);
-            g_hash_table_replace(js->session_storage_buckets,
-                                 g_strdup(js->partition_key), bucket);
-        }
-        g_hash_table_remove_all(bucket);
-        GHashTableIter it; gpointer k, v;
-        g_hash_table_iter_init(&it, js->session_storage);
-        while (g_hash_table_iter_next(&it, &k, &v))
-            g_hash_table_replace(bucket, g_strdup(k), g_strdup(v));
+        ns_session_bucket_save(js);
         if (js->cookie_buckets) {
             g_hash_table_replace(js->cookie_buckets,
                                  g_strdup(js->partition_key),
@@ -4029,6 +4089,8 @@ ns_storage_maybe_dirty(JSContext *ctx, GHashTable *store)
     ns_js *js = js_from_ctx(ctx);
     if (js && store == js->local_storage)
         js->local_storage_dirty = TRUE;
+    else if (js && store == js->session_storage)
+        ns_session_bucket_save(js);
 }
 
 static JSValue ns_make_event(JSContext *ctx, const char *type,
@@ -4657,6 +4719,7 @@ ns_invalidate_wrapper(ns_node *n)
     if (js) ns_focus_guard_forget(js, n);
     if (js) ns_parser_hold_forget(js, n);
     if (js && js->frame_urls) g_hash_table_remove(js->frame_urls, n);
+    if (js && js->frame_csps) g_hash_table_remove(js->frame_csps, n);
     if (js && js->frame_referrers) g_hash_table_remove(js->frame_referrers, n);
     ns_popover_forget_node(js, n);
     n->js_invalidate = NULL;
@@ -9662,15 +9725,17 @@ ns_headers_init_add_raw(JSContext *ctx, JSValueConst init, const char *raw)
 }
 
 static gboolean
-ns_final_url_connect_blocked(ns_js *js, const char *final_url)
+ns_final_url_connect_blocked(ns_js *js, JSContext *realm,
+                             const char *final_url)
 {
     if (!js || !final_url || !*final_url) return FALSE;
-    const char *page = js->current_url;
+    const char *page = ns_js_realm_url_or_current(js, realm);
     gboolean mixed = page &&
         g_ascii_strncasecmp(page, "https://", 8) == 0 &&
         g_ascii_strncasecmp(final_url, "http://", 7) == 0;
-    gboolean csp = js->csp &&
-        !ns_csp_allows(js->csp, NS_CSP_CONNECT, final_url, page);
+    const ns_csp *realm_csp = ns_js_realm_csp(js, realm);
+    gboolean csp = realm_csp &&
+        !ns_csp_allows(realm_csp, NS_CSP_CONNECT, final_url, page);
     return mixed || csp;
 }
 
@@ -9712,7 +9777,7 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
         g_free(abs);
     }
     if (resp && !resp->error &&
-        ns_final_url_connect_blocked(st->js, resp->final_url))
+        ns_final_url_connect_blocked(st->js, st->ctx, resp->final_url))
         resp->error = g_strdup(
             "blocked after redirect (mixed content or connect-src CSP)");
     if (!resp || resp->error) {
@@ -10363,8 +10428,9 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     gboolean blocked_mixed = top &&
         g_ascii_strncasecmp(top, "https://", 8) == 0 &&
         g_ascii_strncasecmp(send_url, "http://", 7) == 0;
-    gboolean blocked_csp = st->js && st->js->csp &&
-        !ns_csp_allows(st->js->csp, NS_CSP_CONNECT, send_url, top);
+    const ns_csp *fetch_csp = ns_js_realm_csp(st->js, ctx);
+    gboolean blocked_csp = fetch_csp &&
+        !ns_csp_allows(fetch_csp, NS_CSP_CONNECT, send_url, top);
     if (blocked_mixed || blocked_csp) {
         ns_response *resp = g_new0(ns_response, 1);
         resp->error = g_strdup(blocked_mixed
@@ -21386,7 +21452,7 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
     if (resp && !err) {
         gboolean allow = cors_allows(st->origin_url, resp->final_url,
                                      resp->cors_allow_origin)
-                         && !ns_final_url_connect_blocked(js_from_ctx(ctx),
+                         && !ns_final_url_connect_blocked(js_from_ctx(ctx), ctx,
                                                           resp->final_url);
         response_allowed = allow;
         int code = allow ? (int)resp->status : 0;
@@ -22224,9 +22290,10 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     gboolean blocked_mixed = st->js && st->js->current_url &&
         g_ascii_strncasecmp(st->js->current_url, "https://", 8) == 0 &&
         g_ascii_strncasecmp(st->url, "http://", 7) == 0;
-    gboolean blocked_csp = st->js && st->js->csp &&
-        !ns_csp_allows(st->js->csp, NS_CSP_CONNECT, st->url,
-                       st->js->current_url);
+    const ns_csp *xhr_csp = ns_js_realm_csp(st->js, ctx);
+    gboolean blocked_csp = xhr_csp &&
+        !ns_csp_allows(xhr_csp, NS_CSP_CONNECT, st->url,
+                       ns_js_realm_url_or_current(st->js, ctx));
     JS_SetPropertyStr(ctx, this_val, "_sendFlag", JS_TRUE);
     ns_xhr_fire_progress_event(ctx, this_val, "loadstart", 0, 0, FALSE);
     if (send_body && body) {
@@ -25320,8 +25387,9 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
             "WebSocket: mixed content (ws:// not allowed from https://)");
     }
 
-    if (js && js->csp &&
-        !ns_csp_allows(js->csp, NS_CSP_CONNECT, target, js->current_url)) {
+    if (js && ns_js_realm_csp(js, ctx) &&
+        !ns_csp_allows(ns_js_realm_csp(js, ctx), NS_CSP_CONNECT, target,
+                       ns_js_realm_url_or_current(js, ctx))) {
         g_free(target);
         return JS_ThrowTypeError(ctx,
             "WebSocket: blocked by Content-Security-Policy connect-src");
@@ -25572,8 +25640,9 @@ ns_window_eventsource_ctor(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowTypeError(ctx,
             "EventSource: mixed content (http:// not allowed from https://)");
     }
-    if (js && js->csp &&
-        !ns_csp_allows(js->csp, NS_CSP_CONNECT, target, js->current_url)) {
+    if (js && ns_js_realm_csp(js, ctx) &&
+        !ns_csp_allows(ns_js_realm_csp(js, ctx), NS_CSP_CONNECT, target,
+                       ns_js_realm_url_or_current(js, ctx))) {
         g_free(target);
         return JS_ThrowTypeError(ctx,
             "EventSource: blocked by Content-Security-Policy connect-src");
@@ -29076,8 +29145,9 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         }
         g_free(policy_error);
     }
-    if (!fails && js->csp &&
-        !ns_csp_allows(js->csp, NS_CSP_WORKER, abs_url, js->current_url))
+    if (!fails && ns_js_realm_csp(js, ctx) &&
+        !ns_csp_allows(ns_js_realm_csp(js, ctx), NS_CSP_WORKER, abs_url,
+                       ns_js_realm_url_or_current(js, ctx)))
         fails = TRUE;
 
     ns_new_class_id(&ns_worker_class_id);
@@ -29257,7 +29327,9 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         g_free(scope);
         return ret;
     }
-    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_WORKER, abs_url, js->current_url)) {
+    if (ns_js_realm_csp(js, ctx) &&
+        !ns_csp_allows(ns_js_realm_csp(js, ctx), NS_CSP_WORKER, abs_url,
+                       ns_js_realm_url_or_current(js, ctx))) {
         g_free(abs_url);
         g_free(scope);
         return ns_sw_reject(ctx, "SecurityError",
@@ -32983,7 +33055,7 @@ ns_fire_inline_on_handler_in_realm(ns_js *js, const ns_node *target,
     const char *body = ns_element_get_attr(target, attr_name);
     if (!body || !*body) return FALSE;
 
-    if (!ns_csp_inline_event_handler_allowed(js->csp)) {
+    if (!ns_csp_inline_event_handler_allowed(ns_js_node_csp(js, target))) {
         if (js->log_cb) {
             char *line = g_strdup_printf(
                 "CSP blocked: inline event handler %s", attr_name);
@@ -57107,7 +57179,8 @@ ns_element_on_get(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, v);
     if (cleared || !body) return JS_NULL;
     ns_js *js = js_from_ctx(ctx);
-    if (js && !ns_csp_inline_event_handler_allowed(js->csp)) return JS_NULL;
+    if (js && !ns_csp_inline_event_handler_allowed(ns_js_realm_csp(js, ctx)))
+        return JS_NULL;
     JSValue fn = ns_compile_inline_handler(ctx, body);
     if (JS_IsException(fn)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -60271,6 +60344,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->workers = g_ptr_array_new();
     js->frame_ctxs = g_ptr_array_new();
     js->frame_contexts = g_hash_table_new(g_direct_hash, g_direct_equal);
+    js->frame_csps = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                           NULL, (GDestroyNotify)ns_csp_free);
     js->frame_urls = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                            NULL, g_free);
     js->frame_referrers = g_hash_table_new_full(g_direct_hash, g_direct_equal,
@@ -60292,8 +60367,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->pending_aborts  = g_ptr_array_new();
     js->local_storage   = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
     js->session_storage = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
-    js->session_storage_buckets = g_hash_table_new_full(
-        g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_hash_table_destroy);
+    js->session_storage_buckets = g_next_session_storage_area
+        ? g_hash_table_ref(g_next_session_storage_area)
+        : ns_js_session_storage_area_new();
     js->cookie_buckets = g_hash_table_new_full(
         g_str_hash, g_str_equal, g_free, g_free);
     {
@@ -63373,6 +63449,8 @@ ns_js_reset_runtime_state(ns_js *js)
     ns_js_clear_frame_clocks(js, FALSE);
     if (js->frame_contexts)
         g_hash_table_remove_all(js->frame_contexts);
+    if (js->frame_csps)
+        g_hash_table_remove_all(js->frame_csps);
     if (js->frame_urls)
         g_hash_table_remove_all(js->frame_urls);
     if (js->frame_referrers)
@@ -64356,7 +64434,7 @@ ns_js_free(ns_js *js)
     if (js->session_storage) g_hash_table_destroy(js->session_storage);
     if (js->frame_storages) g_ptr_array_free(js->frame_storages, TRUE);
     if (js->session_storage_buckets)
-        g_hash_table_destroy(js->session_storage_buckets);
+        g_hash_table_unref(js->session_storage_buckets);
     if (js->cookie_buckets)
         g_hash_table_destroy(js->cookie_buckets);
     g_free(js->partition_key);
@@ -64429,6 +64507,10 @@ ns_js_free(ns_js *js)
     if (js->frame_contexts) {
         g_hash_table_destroy(js->frame_contexts);
         js->frame_contexts = NULL;
+    }
+    if (js->frame_csps) {
+        g_hash_table_destroy(js->frame_csps);
+        js->frame_csps = NULL;
     }
     if (js->frame_urls) {
         g_hash_table_destroy(js->frame_urls);
@@ -66319,9 +66401,10 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
             return;
         }
         gboolean parser_inserted = !(n->flags & NS_NODE_NOT_PARSER_INSERTED);
-        if (js->csp &&
-            !ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs_url, origin,
-                                      nonce, parser_inserted)) {
+        if (ns_js_node_csp(js, n) &&
+            !ns_csp_allows_with_nonce(ns_js_node_csp(js, n), NS_CSP_SCRIPT,
+                                      abs_url, origin, nonce,
+                                      parser_inserted)) {
             if (js->log_cb) {
                 char *line = g_strdup_printf("CSP blocked: script %s", abs_url);
                 js->log_cb(line, js->log_user_data);
@@ -66341,9 +66424,10 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         if (resp && resp->final_url && strcmp(resp->final_url, abs_url) != 0 &&
             ((g_str_has_prefix(origin, "https://") &&
               g_str_has_prefix(resp->final_url, "http://")) ||
-             (js->csp &&
-              !ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, resp->final_url,
-                                        origin, nonce, parser_inserted)))) {
+             (ns_js_node_csp(js, n) &&
+              !ns_csp_allows_with_nonce(ns_js_node_csp(js, n), NS_CSP_SCRIPT,
+                                        resp->final_url, origin, nonce,
+                                        parser_inserted)))) {
             if (js->log_cb) {
                 char *line = g_strdup_printf(
                     "blocked after redirect: script %s -> %s", abs_url,
@@ -66421,10 +66505,12 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_TEXT || !c->text) continue;
         gsize tlen = strlen(c->text);
-        if (!ns_csp_inline_script_allowed(js->csp, c->text, tlen, nonce)) {
+        if (!ns_csp_inline_script_allowed(ns_js_node_csp(js, n), c->text,
+                                          tlen, nonce)) {
             if (js->log_cb) {
                 char *line = g_strdup_printf(
-                    "CSP blocked: inline <script> on %s", origin);
+                    "CSP blocked: inline <script> on %s: %.120s", origin,
+                    c->text);
                 js->log_cb(line, js->log_user_data);
                 g_free(line);
             }
@@ -66571,8 +66657,9 @@ ns_js_module_script_fetch_allowed(const ns_js *js, const ns_node *n,
     if (g_str_has_prefix(origin, "https://") &&
         g_str_has_prefix(abs_url, "http://"))
         return FALSE;
-    return !js->csp ||
-           ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs_url, origin,
+    const ns_csp *csp = ns_js_node_csp(js, n);
+    return !csp ||
+           ns_csp_allows_with_nonce(csp, NS_CSP_SCRIPT, abs_url, origin,
                                     ns_element_get_attr(n, "nonce"),
                                     !(n->flags & NS_NODE_NOT_PARSER_INSERTED));
 }
@@ -66988,8 +67075,9 @@ ns_link_fetch_allowed(ns_js *js, const ns_node *n, const char *abs_url,
 {
     gboolean mixed = origin && g_str_has_prefix(origin, "https://") &&
                      g_str_has_prefix(abs_url, "http://");
-    gboolean csp = !mixed && js->csp &&
-        !ns_csp_allows_with_nonce(js->csp, ns_link_csp_kind(n), abs_url,
+    const ns_csp *link_csp = ns_js_node_csp(js, n);
+    gboolean csp = !mixed && link_csp &&
+        !ns_csp_allows_with_nonce(link_csp, ns_link_csp_kind(n), abs_url,
                                   origin, ns_element_get_attr(n, "nonce"),
                                   !(n->flags & NS_NODE_NOT_PARSER_INSERTED));
     if ((mixed || csp) && js->log_cb) {
@@ -67222,8 +67310,9 @@ ns_js_preload_inserted_script(ns_js *js, const ns_node *script,
     if (!abs_url || (g_str_has_prefix(origin, "https://") &&
                      !g_str_has_prefix(abs_url, "https://")))
         return;
-    if (js->csp &&
-        !ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs_url, origin,
+    const ns_csp *csp = ns_js_node_csp(js, script);
+    if (csp &&
+        !ns_csp_allows_with_nonce(csp, NS_CSP_SCRIPT, abs_url, origin,
                                   ns_element_get_attr(script, "nonce"),
                                   FALSE))
         return;
@@ -68091,13 +68180,14 @@ ns_iframe_inline_script_allowed(ns_js *js, const ns_csp *frame_csp,
         if (c->kind == NS_NODE_TEXT && c->text) g_string_append(text, c->text);
     gboolean ok = ns_csp_inline_script_allowed(frame_csp, text->str, text->len,
                                                nonce);
-    g_string_free(text, TRUE);
     if (!ok && js->log_cb) {
-        char *line = g_strdup_printf("CSP blocked: inline <script> in frame %s",
-                                     origin);
+        char *line = g_strdup_printf(
+            "CSP blocked: inline <script> in frame %s: %.120s", origin,
+            text->str);
         js->log_cb(line, js->log_user_data);
         g_free(line);
     }
+    g_string_free(text, TRUE);
     return ok;
 }
 
@@ -68603,8 +68693,9 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         abs_url = ns_url_resolve(origin, src);
         gboolean is_object = ns_node_is_element_named(iframe, "object");
         ns_csp_kind frame_kind = is_object ? NS_CSP_OBJECT : NS_CSP_FRAME;
-        if (abs_url && js->csp &&
-            !ns_csp_allows(js->csp, frame_kind, abs_url, origin)) {
+        if (abs_url && ns_js_node_csp(js, iframe) &&
+            !ns_csp_allows(ns_js_node_csp(js, iframe), frame_kind, abs_url,
+                           origin)) {
             if (js->log_cb) {
                 char *line = g_strdup_printf(
                     "Blocked %s %s by Content-Security-Policy %s",
@@ -68667,8 +68758,9 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                 strcmp(resp->final_url, abs_url) != 0) {
                 g_free(abs_url);
                 abs_url = g_strdup(resp->final_url);
-                if (js->csp &&
-                    !ns_csp_allows(js->csp, frame_kind, abs_url, origin)) {
+                if (ns_js_node_csp(js, iframe) &&
+                    !ns_csp_allows(ns_js_node_csp(js, iframe), frame_kind,
+                                   abs_url, origin)) {
                     if (js->log_cb) {
                         char *line = g_strdup_printf(
                             "Blocked %s redirected to %s by "
@@ -68937,12 +69029,16 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                 g_free(line);
             }
         } else if (JS_IsObject(realm_doc)) {
-            ns_csp *own_csp = resp && resp->csp_header && *resp->csp_header
-                ? ns_csp_parse(resp->csp_header) : NULL;
-            const ns_csp *frame_csp = resp ? own_csp : js->csp;
+            if (resp) {
+                ns_csp *own_csp = resp->csp_header && *resp->csp_header
+                    ? ns_csp_parse(resp->csp_header) : NULL;
+                g_hash_table_replace(js->frame_csps, iframe, own_csp);
+            } else {
+                g_hash_table_remove(js->frame_csps, iframe);
+            }
             ns_js_run_iframe_scripts(js, content_root, iorigin, realm_doc,
-                                     realm_scope, sandbox, iframe, frame_csp);
-            if (own_csp) ns_csp_free(own_csp);
+                                     realm_scope, sandbox, iframe,
+                                     ns_js_frame_csp(js, iframe));
         } else {
             GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
             ns_js_collect_script_tasks(content_root, tasks);

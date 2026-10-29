@@ -3,6 +3,35 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Web Storage: `sessionStorage` lives for the tab, per origin, as the
+  standard requires. Every navigation used to start with an empty
+  store, so a login that saves its OIDC state on one origin, visits
+  another and comes back (BankID's app.bankid.no callback) found its
+  state gone and rejected the sign-in.
+* Networking: response bodies are decoded by the browser instead of
+  libcurl (gzip and multi-member gzip, zlib-wrapped and raw deflate,
+  Brotli, zstd and stacked codings). A `Content-Encoding` value the
+  browser does not know now passes the body through unchanged, as other
+  browsers do; libcurl failed the whole request with "Unrecognized
+  content encoding type", which broke BankID's callback server that
+  sends `Content-Encoding: ISO-8859-1`. Decoded output is held to the
+  response budget, `Accept-Encoding` advertises only what can be
+  decoded, and libzstd is a new optional dependency.
+* Content-Security-Policy: stylesheets and `@import`s inside an iframe are
+  checked against the frame document's policy instead of the top page's,
+  so a cross-origin frame's own stylesheet is no longer dropped when the
+  embedding page restricts `style-src` (BankID's password step rendered
+  unstyled and hid its input below the frame).
+* Content-Security-Policy: an iframe now runs under its own policy. Its
+  `fetch`, XHR, WebSocket and EventSource requests, redirects, `eval`,
+  inserted scripts, preloads, inline handlers, workers and nested frames
+  are checked against the CSP its document was served with (about:blank
+  and srcdoc frames inherit their parent's). Until now every frame was
+  judged by the top page's policy with `'self'` resolved to the frame's
+  own origin, so a cross-origin frame was refused requests its own policy
+  allowed, and the restrictions its policy did set were never enforced.
+  The BankID client frame on login.bankid.no failed with a
+  "kommunikasjonsfeil" because of this.
 * HTTP cache: `stale-while-revalidate` (RFC 5861) is honoured. A cached
   response whose `max-age` has lapsed but that is still inside the window
   the server granted is served from disk at once, and a conditional
