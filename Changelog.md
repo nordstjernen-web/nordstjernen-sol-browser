@@ -3,6 +3,11 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Content-Security-Policy: stylesheets and `@import`s inside an iframe are
+  checked against the frame document's policy instead of the top page's,
+  so a cross-origin frame's own stylesheet is no longer dropped when the
+  embedding page restricts `style-src` (BankID's password step rendered
+  unstyled and hid its input below the frame).
 * Content-Security-Policy: an iframe now runs under its own policy. Its
   `fetch`, XHR, WebSocket and EventSource requests, redirects, `eval`,
   inserted scripts, preloads, inline handlers, workers and nested frames
