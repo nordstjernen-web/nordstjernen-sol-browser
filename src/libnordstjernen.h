@@ -153,6 +153,11 @@ void ns_browser_set_next_initiator(const char *url);
 void ns_browser_set_next_user_activated(int user_activated);
 void ns_browser_set_next_reload(int reload);
 
+typedef struct ns_session_storage ns_session_storage;
+ns_session_storage *ns_session_storage_new(void);
+void ns_session_storage_free(ns_session_storage *storage);
+void ns_browser_set_next_session_storage(ns_session_storage *storage);
+
 void ns_browser_set_color_scheme(int dark);
 void ns_browser_set_reduced_motion(int reduce);
 

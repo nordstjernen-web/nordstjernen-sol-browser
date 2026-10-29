@@ -29,6 +29,7 @@ struct ns_renderer_session {
     int            max_h;
     int            shm_mode;
     ns_browser    *cur;
+    ns_session_storage *session_storage;
     ns_browser    *bf[NS_BFCACHE_MAX];
     int            bf_n;
     int            tick_budget_ms;
@@ -312,6 +313,7 @@ ns_renderer_session_free(ns_renderer_session *s)
     if (s->cur)
         ns_browser_close(s->cur);
     ns_tiles_free(s->tiles);
+    ns_session_storage_free(s->session_storage);
     free(s);
 }
 
@@ -724,6 +726,8 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             ns_browser_set_next_initiator(referrer);
         ns_browser_set_next_user_activated(user_activated != 0);
         ns_browser_set_next_reload(reload != 0 && url && *url);
+        if (!s->session_storage) s->session_storage = ns_session_storage_new();
+        ns_browser_set_next_session_storage(s->session_storage);
         g_free(referrer);
         s->frame_valid = 0;
         ns_net_log_clear();
