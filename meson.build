@@ -344,6 +344,13 @@ libbrotlidec_fonts = dependency('libbrotlidec', required: false)
 have_woff2 = libbrotlidec_fonts.found()
 if have_woff2
   add_project_arguments('-DNS_HAVE_WOFF2=1', language: 'c')
+  add_project_arguments('-DNS_HAVE_BROTLI_DEC=1', language: 'c')
+endif
+
+# zstd Content-Encoding; without it the browser stops advertising zstd.
+libzstd = dependency('libzstd', required: false)
+if libzstd.found()
+  add_project_arguments('-DNS_HAVE_ZSTD=1', language: 'c')
 endif
 
 libwebp = dependency('libwebp')

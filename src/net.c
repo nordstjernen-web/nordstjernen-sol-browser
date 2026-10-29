@@ -7,6 +7,7 @@
 #include "about_style.h"
 #include "cache.h"
 #include "config.h"
+#include "content_decode.h"
 #include "history.h"
 #include "csp.h"
 #include "debuglog.h"
@@ -67,6 +68,10 @@ typedef struct ns_write_ctx {
     gboolean    exceeded;
     const struct ns_net_stream *stream;
     const struct ns_header_ctx *stream_headers;
+    ns_content_decoder *decoder;
+    guint       decoder_seq;
+    gboolean    decode_failed;
+    GByteArray *decoded;
 } ns_write_ctx;
 
 typedef struct ns_header_ctx {
@@ -86,6 +91,8 @@ typedef struct ns_header_ctx {
     char    *date;
     char    *age;
     char    *location;
+    char    *content_encoding;
+    guint    response_seq;
     GString *raw;
     long     status;
     gboolean http1;
@@ -2409,23 +2416,8 @@ ns_net_init(void)
         (ossl_major > 3 || (ossl_major == 3 && ossl_minor >= 5)))
         g_ec_curves = "X25519MLKEM768:X25519:P-256:P-384";
 
-    GString *enc = g_string_new(NULL);
-    if (vi && (vi->features & CURL_VERSION_LIBZ) != 0)
-        g_string_append(enc, "gzip, deflate");
-#ifdef CURL_VERSION_BROTLI
-    if (vi && (vi->features & CURL_VERSION_BROTLI) != 0) {
-        if (enc->len) g_string_append(enc, ", ");
-        g_string_append(enc, "br");
-    }
-#endif
-#ifdef CURL_VERSION_ZSTD
-    if (vi && (vi->features & CURL_VERSION_ZSTD) != 0) {
-        if (enc->len) g_string_append(enc, ", ");
-        g_string_append(enc, "zstd");
-    }
-#endif
     g_free(g_accept_encoding);
-    g_accept_encoding = g_string_free(enc, FALSE);
+    g_accept_encoding = g_strdup(ns_content_decode_accept_encoding());
 
     g_share = curl_share_init();
     if (g_share) {
@@ -3040,6 +3032,42 @@ ns_net_stream_emit(const ns_write_ctx *ctx, const guint8 *data, gsize len)
     g_source_unref(source);
 }
 
+static gboolean
+ns_write_body(ns_write_ctx *ctx, const guint8 *data, size_t bytes)
+{
+    if (ctx->stream && ctx->stream->discard_body) {
+        ctx->total += bytes;
+        ns_net_stream_emit(ctx, data, bytes);
+        return TRUE;
+    }
+    if (ctx->total >= ctx->next_recheck) {
+        ctx->budget = ns_net_response_budget();
+        ctx->next_recheck = ctx->total + NS_NET_RESPONSE_RECHECK_BYTES;
+    }
+    if (ctx->total + bytes > ctx->budget) {
+        ctx->exceeded = TRUE;
+        return FALSE;
+    }
+    if (ctx->total + bytes > G_MAXUINT) {
+        ctx->exceeded = TRUE;
+        return FALSE;
+    }
+    g_byte_array_append(ctx->body, data, bytes);
+    ctx->total += bytes;
+    if (ctx->stream) ns_net_stream_emit(ctx, data, bytes);
+    return TRUE;
+}
+
+static void
+ns_write_sync_decoder(ns_write_ctx *ctx)
+{
+    const struct ns_header_ctx *hc = ctx->stream_headers;
+    if (!hc || ctx->decoder_seq == hc->response_seq) return;
+    ctx->decoder_seq = hc->response_seq;
+    g_clear_pointer(&ctx->decoder, ns_content_decoder_free);
+    ctx->decoder = ns_content_decoder_new(hc->content_encoding);
+}
+
 static size_t
 ns_write_cb(char *data, size_t size, size_t nmemb, void *userdata)
 {
@@ -3052,27 +3080,31 @@ ns_write_cb(char *data, size_t size, size_t nmemb, void *userdata)
         return 0;
     if (bytes > G_MAXUINT)
         return 0;
-    if (ctx->stream && ctx->stream->discard_body) {
-        ctx->total += bytes;
-        ns_net_stream_emit(ctx, (const guint8 *)data, bytes);
-        return bytes;
-    }
-    if (ctx->total >= ctx->next_recheck) {
-        ctx->budget = ns_net_response_budget();
-        ctx->next_recheck = ctx->total + NS_NET_RESPONSE_RECHECK_BYTES;
-    }
-    if (ctx->total + bytes > ctx->budget) {
-        ctx->exceeded = TRUE;
+    ns_write_sync_decoder(ctx);
+    if (!ctx->decoder)
+        return ns_write_body(ctx, (const guint8 *)data, bytes) ? bytes : 0;
+    if (!ctx->decoded) ctx->decoded = g_byte_array_new();
+    g_byte_array_set_size(ctx->decoded, 0);
+    guint64 room = MIN(ctx->budget, (guint64)G_MAXUINT);
+    room = room > ctx->total ? room - ctx->total : 0;
+    if (!ns_content_decoder_feed(ctx->decoder, (const guint8 *)data, bytes,
+                                 (gsize)room, ctx->decoded)) {
+        if (ns_content_decoder_over_limit(ctx->decoder)) ctx->exceeded = TRUE;
+        else ctx->decode_failed = TRUE;
         return 0;
     }
-    if (ctx->total + bytes > G_MAXUINT) {
-        ctx->exceeded = TRUE;
+    if (ctx->decoded->len &&
+        !ns_write_body(ctx, ctx->decoded->data, ctx->decoded->len))
         return 0;
-    }
-    g_byte_array_append(ctx->body, (const guint8 *)data, bytes);
-    ctx->total += bytes;
-    if (ctx->stream) ns_net_stream_emit(ctx, (const guint8 *)data, bytes);
     return bytes;
+}
+
+static void
+ns_write_ctx_clear(ns_write_ctx *ctx)
+{
+    g_clear_pointer(&ctx->decoder, ns_content_decoder_free);
+    if (ctx->decoded) g_byte_array_free(ctx->decoded, TRUE);
+    ctx->decoded = NULL;
 }
 
 static void
@@ -3083,6 +3115,12 @@ ns_body_sink_init(ns_write_ctx *ctx, GByteArray *body)
     ctx->budget = ns_net_response_budget();
     ctx->next_recheck = NS_NET_RESPONSE_RECHECK_BYTES;
     ctx->exceeded = FALSE;
+    ctx->stream = NULL;
+    ctx->stream_headers = NULL;
+    ctx->decoder = NULL;
+    ctx->decoder_seq = 0;
+    ctx->decode_failed = FALSE;
+    ctx->decoded = NULL;
 }
 
 static char *
@@ -3288,6 +3326,8 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
 
     if (bytes >= 5 && g_ascii_strncasecmp(buffer, "HTTP/", 5) == 0) {
         if (hc->raw) g_string_set_size(hc->raw, 0);
+        g_clear_pointer(&hc->content_encoding, g_free);
+        hc->response_seq++;
         const char *sp = memchr(buffer, ' ', bytes);
         hc->status = sp ? (long)g_ascii_strtoll(sp + 1, NULL, 10) : 0;
         hc->http1 = bytes >= 7 && g_ascii_strncasecmp(buffer, "HTTP/1.", 7) == 0;
@@ -3328,6 +3368,7 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
     else if (header_capture(buffer, bytes, "Content-Language:", hc->content_language_out))      {}
     else if (header_capture(buffer, bytes, "Refresh:", hc->refresh_out))                       {}
     else if (header_capture(buffer, bytes, "Location:", &hc->location))                        {}
+    else if (header_capture(buffer, bytes, "Content-Encoding:", &hc->content_encoding))        {}
     else if (header_capture(buffer, bytes, "Set-Cookie:", NULL)) {
         hc->set_cookie_seen = TRUE;
         ns_header_store_cookie(hc, buffer, bytes);
@@ -5990,6 +6031,7 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
     curl_easy_setopt(curl, CURLOPT_USERAGENT, req->user_agent);
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING,
                      req->accept_encoding ? req->accept_encoding : "");
+    curl_easy_setopt(curl, CURLOPT_HTTP_CONTENT_DECODING, 0L);
     switch (req->referer_policy) {
     case NS_REFERER_NO_REFERRER:
         curl_easy_setopt(curl, CURLOPT_AUTOREFERER, 0L);
@@ -6191,7 +6233,9 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
     if (rc == CURLE_FILESIZE_EXCEEDED)
         wctx->exceeded = TRUE;
     out->ok = (rc == CURLE_OK);
-    if (rc != CURLE_OK && !wctx->exceeded)
+    if (rc != CURLE_OK && wctx->decode_failed)
+        out->error_message = g_strdup("content decoding failed");
+    else if (rc != CURLE_OK && !wctx->exceeded)
         out->error_message =
             g_strdup(errbuf[0] ? errbuf : curl_easy_strerror(rc));
 
@@ -7019,6 +7063,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         g_free(resp->raw_headers);
         resp->raw_headers = g_string_free(header_ctx.raw, FALSE);
     }
+    g_free(header_ctx.content_encoding);
+    ns_write_ctx_clear(&write_ctx);
     ns_cache_entry_free(cached);
 
     {

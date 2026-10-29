@@ -3,6 +3,15 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Networking: response bodies are decoded by the browser instead of
+  libcurl (gzip and multi-member gzip, zlib-wrapped and raw deflate,
+  Brotli, zstd and stacked codings). A `Content-Encoding` value the
+  browser does not know now passes the body through unchanged, as other
+  browsers do; libcurl failed the whole request with "Unrecognized
+  content encoding type", which broke BankID's callback server that
+  sends `Content-Encoding: ISO-8859-1`. Decoded output is held to the
+  response budget, `Accept-Encoding` advertises only what can be
+  decoded, and libzstd is a new optional dependency.
 * Content-Security-Policy: stylesheets and `@import`s inside an iframe are
   checked against the frame document's policy instead of the top page's,
   so a cross-origin frame's own stylesheet is no longer dropped when the
