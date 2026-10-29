@@ -104,7 +104,9 @@ read+write on the GPU device nodes `/dev/dri` and `/dev/nvidia*` that GTK's
 OpenGL / Vulkan drivers open to draw the window) and
 **no seccomp** — the real syscall confinement lives in the renderers. The
 renderer framebuffer itself is an anonymous `memfd` passed over the control
-socket, so it normally needs no `/dev/shm` name at all.
+socket, so it normally needs no `/dev/shm` name at all; it is sealed
+against shrinking and growing before the renderer receives it, so a
+compromised renderer cannot truncate the shell's mapping from under it.
 
 - **Landlock (filesystem).** Read-only access to system libraries
   (`/usr`, `/lib`, `/lib64`), `/etc`, the CA bundle, font caches,
@@ -334,7 +336,13 @@ as the only allowed protocols, redirects clamped to HTTPS once the
 initial scheme is HTTPS, max ten redirects, an explicit response-size
 cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
 `CURLOPT_HSTS`; Alt-Svc is honoured. Mixed-content sub-resources
-(http inside an https document) are blocked.
+(http inside an https document) are blocked. The
+`tls_allow_insecure_override` setting, off by default, lets the user
+proceed past a certificate error only for the top-level navigation
+itself, never for an HSTS host; that retried navigation sends and stores
+no cookies, and the address bar marks the page as not secure. A
+subresource, frame, `fetch()`, worker or media request that fails
+verification is never retried without it.
 
 ### Origin isolation
 

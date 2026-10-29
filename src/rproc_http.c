@@ -30,12 +30,15 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #if !defined(__ANDROID__)
+#if defined(__linux__) && !defined(MFD_ALLOW_SEALING)
+#define MFD_ALLOW_SEALING 0x0002U
+#endif
 static int
 open_fb_fd(size_t size)
 {
     int fd = -1;
 #if defined(__linux__)
-    fd = memfd_create("nshttp-fb", MFD_CLOEXEC);
+    fd = memfd_create("nshttp-fb", MFD_CLOEXEC | MFD_ALLOW_SEALING);
 #endif
     if (fd < 0) {
         static unsigned counter = 0;
@@ -59,6 +62,11 @@ open_fb_fd(size_t size)
         close(fd);
         return -1;
     }
+#if defined(F_ADD_SEALS)
+    if (fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0)
+        fprintf(stderr, "nordstjernen: renderer framebuffer is not sealed: %s\n",
+                strerror(errno));
+#endif
     return fd;
 }
 

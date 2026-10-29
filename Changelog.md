@@ -1,6 +1,21 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.39-dev:
+======
+* Security: the `tls_allow_insecure_override` setting now lets only the
+  page being navigated to proceed past a certificate error. Every other
+  HTTPS request that failed verification — scripts, stylesheets, frames,
+  `fetch()`, workers and media — was retried with verification off as
+  well, so a user who turned the setting on for one broken intranet host
+  handed an on-path attacker every script on every site. Those requests
+  now keep failing; the retried navigation still sends and stores no
+  cookies and is marked as not secure in the address bar.
+* Security: the framebuffer the shell shares with each renderer is sealed
+  against shrinking and growing before the renderer receives it. A
+  compromised renderer could truncate the memory file it paints into and
+  make the shell's next read of the mapping fault, taking down every tab.
+
 1.0.38:
 ======
 * CSS: `rem` inside nested math functions (`max(26.4rem, min(…))`,
