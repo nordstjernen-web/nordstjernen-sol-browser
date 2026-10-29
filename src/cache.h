@@ -19,6 +19,7 @@ typedef struct ns_cache_entry {
     char       *etag;
     char       *last_modified;
     gint64      expires_at;
+    gint64      stale_until;
     gint64      fetched_at;
     GByteArray *body;
 } ns_cache_entry;
@@ -30,6 +31,7 @@ void   ns_cache_clear(void);
 ns_cache_entry *ns_cache_get(const char *url, const char *partition,
                              const char *const *request_headers);
 gboolean        ns_cache_is_fresh(const ns_cache_entry *e);
+gboolean        ns_cache_may_serve_stale(const ns_cache_entry *e);
 void   ns_cache_entry_free(ns_cache_entry *e);
 
 void   ns_cache_put(const char *url,
