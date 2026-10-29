@@ -5907,6 +5907,44 @@ ns_fetch_is_reload(GPtrArray *extra_headers)
     return FALSE;
 }
 
+static gboolean
+ns_fetch_is_revalidation(GPtrArray *extra_headers)
+{
+    if (!extra_headers) return FALSE;
+    for (guint i = 0; i < extra_headers->len; i++) {
+        const char *header = g_ptr_array_index(extra_headers, i);
+        if (header && g_ascii_strncasecmp(header, "X-ND-Revalidate:", 16) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+ns_revalidate_done(GObject *src, GAsyncResult *res, gpointer user_data)
+{
+    (void)src;
+    (void)user_data;
+    ns_response *resp = ns_net_fetch_finish(res, NULL);
+    if (resp) ns_response_free(resp);
+}
+
+static void
+ns_revalidate_in_background(const char *url, const char *top_url,
+                            GPtrArray *extra_headers)
+{
+    GPtrArray *headers = g_ptr_array_new();
+    for (guint i = 0; extra_headers && i < extra_headers->len; i++)
+        g_ptr_array_add(headers, g_ptr_array_index(extra_headers, i));
+    g_ptr_array_add(headers, (gpointer)"X-ND-Revalidate: 1");
+    g_ptr_array_add(headers, NULL);
+    if (g_log_fetches)
+        fprintf(stderr, "[net cache] stale-while-revalidate %s\n", url);
+    ns_net_request_async(url, top_url, "GET", NULL, 0, NULL,
+                         (const char *const *)headers->pdata, NULL,
+                         ns_revalidate_done, NULL);
+    g_ptr_array_free(headers, TRUE);
+}
+
 static void
 ns_hop_out_clear(ns_hop_out *out)
 {
@@ -6425,7 +6463,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     if (location_out) *location_out = NULL;
     gboolean is_navigation = ns_fetch_is_navigation(top_url, extra_headers);
     gboolean user_activated = ns_fetch_has_user_activation(extra_headers);
-    gboolean reload = is_navigation && ns_fetch_is_reload(extra_headers);
+    gboolean reload = (is_navigation && ns_fetch_is_reload(extra_headers)) ||
+                      ns_fetch_is_revalidation(extra_headers);
     const char *initiator = is_navigation && !top_url
         ? ns_fetch_initiator(extra_headers) : NULL;
     const char *request_site_url = initiator ? initiator : top_url;
@@ -6557,7 +6596,9 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     ns_cache_entry *cached = NULL;
     if (request_http && is_simple_get(method) && !streams_to_disk) {
         cached = ns_cache_get(url, cache_partition, cache_request_headers);
-        if (cached && !reload && ns_cache_is_fresh(cached)) {
+        gboolean serve_stale = cached && !reload &&
+                               ns_cache_may_serve_stale(cached);
+        if (cached && !reload && (ns_cache_is_fresh(cached) || serve_stale)) {
             gboolean cache_has_cors =
                 cached->cors_allow_origin ||
                 ns_url_same_origin(effective_top_url, cached->final_url);
@@ -6565,6 +6606,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                 ns_cache_entry_free(cached);
                 cached = NULL;
             } else {
+                if (serve_stale)
+                    ns_revalidate_in_background(url, top_url, extra_headers);
                 ns_response_free(resp);
                 ns_response *from_cache = response_from_cache_entry(cached);
                 ns_cache_entry_free(cached);

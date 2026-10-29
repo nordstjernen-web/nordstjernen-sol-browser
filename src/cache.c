@@ -82,6 +82,7 @@ restrict_to_owner(const char *path, gboolean is_dir)
 
 #define NS_CACHE_MAX_AGE_SECONDS (30 * 24 * 60 * 60)
 #define NS_CACHE_HEURISTIC_MAX_SECONDS (24 * 60 * 60)
+#define NS_CACHE_STALE_WHILE_REVALIDATE_MAX_SECONDS (7 * 24 * 60 * 60)
 
 static void delete_key(const char *key);
 static void cache_rmrf(const char *path);
@@ -213,7 +214,7 @@ cache_drop_if_legacy(void)
         cache_exec("DROP TABLE entries");
 }
 
-#define NS_CACHE_SCHEMA_VERSION 3
+#define NS_CACHE_SCHEMA_VERSION 4
 
 static int
 cache_user_version(void)
@@ -257,7 +258,8 @@ cache_schema(void)
                       "expires_at INTEGER NOT NULL,"
                       "fetched_at INTEGER NOT NULL,"
                       "last_used INTEGER NOT NULL,"
-                      "body_size INTEGER NOT NULL DEFAULT 0)") &&
+                      "body_size INTEGER NOT NULL DEFAULT 0,"
+                      "stale_until INTEGER NOT NULL DEFAULT 0)") &&
            cache_exec("CREATE INDEX IF NOT EXISTS idx_entries_last_used "
                       "ON entries(last_used)") &&
            cache_exec("CREATE INDEX IF NOT EXISTS idx_entries_base_key "
@@ -500,6 +502,19 @@ freshness_lifetime(const char *cache_control, const char *expires_header,
 }
 
 static gint64
+stale_until_from_headers(const char *cache_control, gint64 expires_at)
+{
+    gint64 window = -1;
+    if (expires_at <= 0 ||
+        cache_control_directive(cache_control, "must-revalidate", NULL) ||
+        !cache_control_directive(cache_control, "stale-while-revalidate",
+                                 &window) ||
+        window <= 0)
+        return 0;
+    return expires_at + MIN(window, NS_CACHE_STALE_WHILE_REVALIDATE_MAX_SECONDS);
+}
+
+static gint64
 freshness_from_headers(const char *cache_control, const char *expires_header,
                        const char *date_header, const char *age_header,
                        const char *last_modified, long status)
@@ -585,7 +600,7 @@ ns_cache_get(const char *url, const char *partition,
     if (sqlite3_prepare_v2(g_cache_db,
             "SELECT final_url,status,content_type,cors_allow_origin,"
             "etag,last_modified,expires_at,fetched_at,body_size,"
-            "policy_headers FROM entries WHERE key=?",
+            "policy_headers,stale_until FROM entries WHERE key=?",
             -1, &st, NULL) != SQLITE_OK)
         return NULL;
     sqlite3_bind_text(st, 1, key, -1, SQLITE_TRANSIENT);
@@ -616,6 +631,7 @@ ns_cache_get(const char *url, const char *partition,
     e->expires_at       = sqlite3_column_int64(st, 6);
     e->fetched_at       = sqlite3_column_int64(st, 7);
     e->policy_headers   = column_dup(st, 9);
+    e->stale_until      = sqlite3_column_int64(st, 10);
     if (!e->final_url) e->final_url = g_strdup(url);
     sqlite3_finalize(st);
 
@@ -656,6 +672,14 @@ ns_cache_is_fresh(const ns_cache_entry *e)
     return e->expires_at > now_seconds();
 }
 
+gboolean
+ns_cache_may_serve_stale(const ns_cache_entry *e)
+{
+    if (!e) return FALSE;
+    gint64 now = now_seconds();
+    return e->expires_at <= now && e->stale_until > now;
+}
+
 static gboolean
 url_should_cache(const char *url)
 {
@@ -692,6 +716,7 @@ ns_cache_put(const char *url,
                                                date_header, age_header,
                                                last_modified, status);
     if (expires_at < 0) return;
+    gint64 stale_until = stale_until_from_headers(cache_control, expires_at);
     g_autofree char *selector = NULL;
     if (!vary_selector(vary, request_headers, &selector)) return;
     g_autofree char *base = base_key_for_url(url, partition);
@@ -701,8 +726,8 @@ ns_cache_put(const char *url,
     if (sqlite3_prepare_v2(g_cache_db,
             "INSERT INTO entries(key,base_key,url,final_url,status,content_type,"
             "cors_allow_origin,etag,last_modified,vary,expires_at,fetched_at,"
-            "last_used,body_size,policy_headers) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "last_used,body_size,policy_headers,stale_until) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(key) DO UPDATE SET "
             "url=excluded.url,final_url=excluded.final_url,status=excluded.status,"
             "content_type=excluded.content_type,"
@@ -711,7 +736,8 @@ ns_cache_put(const char *url,
             "expires_at=excluded.expires_at,"
             "fetched_at=excluded.fetched_at,last_used=excluded.last_used,"
             "body_size=excluded.body_size,"
-            "policy_headers=excluded.policy_headers",
+            "policy_headers=excluded.policy_headers,"
+            "stale_until=excluded.stale_until",
             -1, &st, NULL) != SQLITE_OK)
         return;
     gint64 now = now_seconds();
@@ -730,6 +756,7 @@ ns_cache_put(const char *url,
     sqlite3_bind_int64(st, 13, now);
     sqlite3_bind_int64(st, 14, (gint64)body_len);
     sqlite3_bind_text (st, 15, policy_headers,   -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 16, stale_until);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     if (rc != SQLITE_DONE) return;
@@ -786,18 +813,20 @@ ns_cache_promote_304(const char *url,
         delete_key(key);
         return;
     }
+    gint64 stale_until = stale_until_from_headers(cache_control, expires_at);
 
     if (sqlite3_prepare_v2(g_cache_db,
-            "UPDATE entries SET expires_at=?,fetched_at=?,last_used=?,"
-            "last_modified=COALESCE(?,last_modified) WHERE key=?",
+            "UPDATE entries SET expires_at=?,stale_until=?,fetched_at=?,"
+            "last_used=?,last_modified=COALESCE(?,last_modified) WHERE key=?",
             -1, &st, NULL) != SQLITE_OK)
         return;
     gint64 now = now_seconds();
     sqlite3_bind_int64(st, 1, expires_at);
-    sqlite3_bind_int64(st, 2, now);
+    sqlite3_bind_int64(st, 2, stale_until);
     sqlite3_bind_int64(st, 3, now);
-    sqlite3_bind_text (st, 4, last_modified, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text (st, 5, key, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 4, now);
+    sqlite3_bind_text (st, 5, last_modified, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (st, 6, key, -1, SQLITE_TRANSIENT);
     sqlite3_step(st);
     sqlite3_finalize(st);
 }

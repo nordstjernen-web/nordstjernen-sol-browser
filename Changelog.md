@@ -3,6 +3,13 @@ Changelog:
 
 1.0.39-dev:
 ======
+* HTTP cache: `stale-while-revalidate` (RFC 5861) is honoured. A cached
+  response whose `max-age` has lapsed but that is still inside the window
+  the server granted is served from disk at once, and a conditional
+  request refreshes the entry in the background, so a page's CDN assets
+  no longer block on a round trip every time their lifetime runs out.
+  `must-revalidate` disables the window, and a reload bypasses it. The
+  cache schema gains a column, so the on-disk cache is rebuilt once.
 * Networking: `103 Early Hints` are honoured on HTTP/2 and HTTP/3
   navigations. `Link: <…>; rel=preload` entries start the stylesheet,
   script, font or image fetch the moment the interim response arrives,
