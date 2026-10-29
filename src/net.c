@@ -83,12 +83,18 @@ typedef struct ns_header_ctx {
     char    *cache_control;
     char    *vary;
     char    *expires;
+    char    *date;
+    char    *age;
     char    *location;
     GString *raw;
     long     status;
+    gboolean http1;
     gboolean set_cookie_seen;
     CURL    *cookie_curl;
     const char *cookie_jar_path;
+    const char *url;
+    gboolean   early_hints;
+    GPtrArray *early_links;
 } ns_header_ctx;
 
 typedef struct ns_hop_req {
@@ -1145,7 +1151,7 @@ ns_net_curl_site_from(const char *url)
     return g_strdup_printf("%.*s://%s", (int)plen, p->protocol, site_host);
 }
 
-static gboolean
+gboolean
 ns_url_is_same_site(const char *a, const char *b)
 {
     if (!a || !b) return FALSE;
@@ -3144,6 +3150,134 @@ ns_header_store_cookie(ns_header_ctx *hc, const char *line, size_t len)
                          hc->cookie_jar_path);
 }
 
+#define NS_EARLY_HINTS_MAX_LINKS 32
+
+static ns_net_early_hints_fn g_early_hints_handler;
+
+void
+ns_net_set_early_hints_handler(ns_net_early_hints_fn handler)
+{
+    g_early_hints_handler = handler;
+}
+
+static void
+ns_net_link_hint_free(gpointer p)
+{
+    ns_net_link_hint *hint = p;
+    if (!hint) return;
+    g_free(hint->url);
+    g_free(hint->rel);
+    g_free(hint->as);
+    g_free(hint);
+}
+
+static const char *
+link_param_value(const char *p, const char *end, char **out)
+{
+    while (p < end && (*p == ' ' || *p == '\t')) p++;
+    const char *start = p;
+    if (p < end && *p == '"') {
+        GString *val = g_string_new(NULL);
+        for (p++; p < end && *p != '"'; p++) {
+            if (*p == '\\' && p + 1 < end) p++;
+            g_string_append_c(val, *p);
+        }
+        if (p < end) p++;
+        *out = g_string_free(val, FALSE);
+        return p;
+    }
+    while (p < end && *p != ';' && *p != ',') p++;
+    const char *stop = p;
+    while (stop > start && (stop[-1] == ' ' || stop[-1] == '\t')) stop--;
+    *out = g_strndup(start, (gsize)(stop - start));
+    return p;
+}
+
+static void
+link_header_collect(const char *value, const char *base_url, GPtrArray *out)
+{
+    const char *p = value;
+    const char *end = value + strlen(value);
+    while (p < end && out->len < NS_EARLY_HINTS_MAX_LINKS) {
+        while (p < end && (*p == ' ' || *p == '\t' || *p == ',')) p++;
+        if (p >= end || *p != '<') break;
+        const char *close = memchr(p, '>', (size_t)(end - p));
+        if (!close) break;
+        g_autofree char *href = g_strndup(p + 1, (gsize)(close - p - 1));
+        p = close + 1;
+        g_autofree char *rel = NULL;
+        g_autofree char *as = NULL;
+        while (p < end && *p != ',') {
+            while (p < end && (*p == ' ' || *p == '\t' || *p == ';')) p++;
+            const char *name = p;
+            while (p < end && *p != '=' && *p != ';' && *p != ',') p++;
+            const char *name_end = p;
+            while (name_end > name &&
+                   (name_end[-1] == ' ' || name_end[-1] == '\t')) name_end--;
+            char *param = NULL;
+            if (p < end && *p == '=')
+                p = link_param_value(p + 1, end, &param);
+            gsize nlen = (gsize)(name_end - name);
+            if (nlen == 3 && g_ascii_strncasecmp(name, "rel", 3) == 0 && !rel)
+                rel = g_steal_pointer(&param);
+            else if (nlen == 2 && g_ascii_strncasecmp(name, "as", 2) == 0 && !as)
+                as = g_steal_pointer(&param);
+            g_free(param);
+        }
+        if (!rel || !*href || g_str_has_prefix(href, "data:")) continue;
+        char *abs = ns_url_resolve(base_url, href);
+        if (!abs) continue;
+        if (!ns_url_is_http_or_https(abs)) {
+            g_free(abs);
+            continue;
+        }
+        ns_net_link_hint *hint = g_new0(ns_net_link_hint, 1);
+        hint->url = abs;
+        hint->rel = g_steal_pointer(&rel);
+        hint->as  = g_steal_pointer(&as);
+        g_ptr_array_add(out, hint);
+    }
+}
+
+typedef struct {
+    char      *document_url;
+    GPtrArray *hints;
+} ns_early_hints_batch;
+
+static gboolean
+ns_early_hints_dispatch(gpointer data)
+{
+    ns_early_hints_batch *batch = data;
+    if (g_early_hints_handler)
+        g_early_hints_handler(batch->document_url, batch->hints);
+    g_ptr_array_free(batch->hints, TRUE);
+    g_free(batch->document_url);
+    g_free(batch);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+ns_header_early_hint(ns_header_ctx *hc, const char *buffer, size_t bytes)
+{
+    if (!hc->early_hints || hc->http1 || hc->status != 103 ||
+        !g_early_hints_handler)
+        return;
+    if (bytes == 2) {
+        if (!hc->early_links || hc->early_links->len == 0) return;
+        ns_early_hints_batch *batch = g_new0(ns_early_hints_batch, 1);
+        batch->document_url = g_strdup(hc->url);
+        batch->hints = g_steal_pointer(&hc->early_links);
+        g_idle_add_full(G_PRIORITY_HIGH_IDLE, ns_early_hints_dispatch,
+                        batch, NULL);
+        return;
+    }
+    if (bytes < 5 || g_ascii_strncasecmp(buffer, "Link:", 5) != 0) return;
+    if (!hc->early_links)
+        hc->early_links = g_ptr_array_new_with_free_func(ns_net_link_hint_free);
+    g_autofree char *value = header_value_dup(buffer, bytes, 5);
+    if (value && *value) link_header_collect(value, hc->url, hc->early_links);
+}
+
 static size_t
 ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
 {
@@ -3156,7 +3290,14 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
         if (hc->raw) g_string_set_size(hc->raw, 0);
         const char *sp = memchr(buffer, ' ', bytes);
         hc->status = sp ? (long)g_ascii_strtoll(sp + 1, NULL, 10) : 0;
-    } else if (bytes > 2) {
+        hc->http1 = bytes >= 7 && g_ascii_strncasecmp(buffer, "HTTP/1.", 7) == 0;
+        return bytes;
+    }
+    if (hc->status >= 100 && hc->status < 200) {
+        ns_header_early_hint(hc, buffer, bytes);
+        return bytes;
+    }
+    if (bytes > 2) {
         gboolean set_cookie =
             (bytes >= 11 && g_ascii_strncasecmp(buffer, "Set-Cookie:", 11) == 0) ||
             (bytes >= 12 && g_ascii_strncasecmp(buffer, "Set-Cookie2:", 12) == 0);
@@ -3173,6 +3314,8 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
     else if (header_capture(buffer, bytes, "Cache-Control:",   &hc->cache_control))           {}
     else if (header_capture(buffer, bytes, "Vary:",            &hc->vary))                    {}
     else if (header_capture(buffer, bytes, "Expires:",         &hc->expires))                 {}
+    else if (header_capture(buffer, bytes, "Date:",            &hc->date))                    {}
+    else if (header_capture(buffer, bytes, "Age:",             &hc->age))                     {}
     else if (header_append(buffer, bytes, "Content-Security-Policy:",
                             hc->csp_out))                                                     {}
     else if (header_capture(buffer, bytes, "X-Frame-Options:", hc->xframe_options_out))       {}
@@ -6643,6 +6786,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     header_ctx.cors_allow_origin_out = &resp->cors_allow_origin;
     header_ctx.refresh_out = &resp->refresh;
     header_ctx.content_language_out = &resp->content_language;
+    header_ctx.url = url;
+    header_ctx.early_hints = is_navigation && request_http && is_simple_get(method);
 
     gboolean initial_https = g_str_has_prefix(url, "https://");
     char *cookie_js_path = cookie_partition_path
@@ -6700,8 +6845,11 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         g_free(header_ctx.cache_control);
         g_free(header_ctx.vary);
         g_free(header_ctx.expires);
+        g_free(header_ctx.date);
+        g_free(header_ctx.age);
         g_free(header_ctx.location);
         if (header_ctx.raw) g_string_free(header_ctx.raw, TRUE);
+        if (header_ctx.early_links) g_ptr_array_free(header_ctx.early_links, TRUE);
         ns_cache_entry_free(cached);
         ns_response_free(resp);
         if (origin_held) ns_net_release_origin_slot(origin_slot);
@@ -6780,7 +6928,9 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         !resp->tls_warning) {
         if (resp->status == 304 && cached && cached->body) {
             ns_cache_promote_304(url, cache_partition, cache_request_headers,
-                                 header_ctx.cache_control, header_ctx.expires);
+                                 header_ctx.cache_control, header_ctx.expires,
+                                 header_ctx.date, header_ctx.age,
+                                 header_ctx.last_modified);
             g_byte_array_set_size(resp->body, 0);
             g_byte_array_append(resp->body, cached->body->data, cached->body->len);
             resp->status = cached->status;
@@ -6799,6 +6949,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                          policy_headers,
                          header_ctx.etag, header_ctx.last_modified,
                          header_ctx.cache_control, header_ctx.expires,
+                         header_ctx.date, header_ctx.age,
                          header_ctx.vary, cache_request_headers,
                          resp->body->data, resp->body->len);
         }
@@ -6814,6 +6965,9 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     g_free(header_ctx.cache_control);
     g_free(header_ctx.vary);
     g_free(header_ctx.expires);
+    g_free(header_ctx.date);
+    g_free(header_ctx.age);
+    if (header_ctx.early_links) g_ptr_array_free(header_ctx.early_links, TRUE);
     if (location_out)
         *location_out = header_ctx.location;
     else
@@ -7333,6 +7487,31 @@ ns_net_preload_expect(const char *key)
     if (g_hash_table_size(g_preload_expected) < NS_PRELOAD_MAX_ENTRIES)
         g_hash_table_add(g_preload_expected, g_strdup(key));
     g_mutex_unlock(&g_fetch_mutex);
+}
+
+static gboolean
+preload_key_not_kept(gpointer key, gpointer value, gpointer user_data)
+{
+    (void)value;
+    GHashTable *keep = user_data;
+    return !g_hash_table_contains(keep, key);
+}
+
+void
+ns_net_preload_clear_except(const char *const *keep_keys)
+{
+    GHashTable *keep = g_hash_table_new(g_str_hash, g_str_equal);
+    for (guint i = 0; keep_keys && keep_keys[i]; i++)
+        g_hash_table_add(keep, (gpointer)keep_keys[i]);
+    g_mutex_lock(&g_fetch_mutex);
+    if (g_preload_expected)
+        g_hash_table_foreach_remove(g_preload_expected, preload_key_not_kept,
+                                    keep);
+    if (g_preload_store)
+        g_hash_table_foreach_remove(g_preload_store, preload_key_not_kept,
+                                    keep);
+    g_mutex_unlock(&g_fetch_mutex);
+    g_hash_table_destroy(keep);
 }
 
 void

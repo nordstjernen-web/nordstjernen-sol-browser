@@ -3,6 +3,25 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Networking: `103 Early Hints` are honoured on HTTP/2 and HTTP/3
+  navigations. `Link: <…>; rel=preload` entries start the stylesheet,
+  script, font or image fetch the moment the interim response arrives,
+  and `rel=preconnect` opens the connection, so a server that hints its
+  critical assets while it is still rendering the page no longer waits
+  for the HTML to parse before the browser asks for them. The hinted
+  fetches land in the same preload map the document scan uses, so the
+  scan does not request them a second time.
+* HTTP cache: responses marked `Cache-Control: private` are now stored.
+  The browser is a private cache, so the directive only excludes shared
+  proxies; refusing it refetched every logged-in page's assets on every
+  visit. The directive list is parsed as tokens instead of substring
+  matches, and `no-store` on a `304` evicts the stale entry.
+* HTTP cache: freshness follows RFC 9111. The `Age` header and the gap
+  between the `Date` header and arrival are subtracted from the
+  lifetime, `Expires` is measured from `Date` rather than from arrival,
+  and a response with only a `Last-Modified` header gets the heuristic
+  lifetime of a tenth of its age, capped at one day, instead of being
+  revalidated on every use.
 * Security: the `tls_allow_insecure_override` setting now lets only the
   page being navigated to proceed past a certificate error. Every other
   HTTPS request that failed verification — scripts, stylesheets, frames,

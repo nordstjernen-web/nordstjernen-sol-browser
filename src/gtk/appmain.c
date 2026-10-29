@@ -475,6 +475,7 @@ ns_run_headless(ns_headless_opts *hopts)
     if (!g_getenv("NS_WEBGL_ALLOW"))
         g_setenv("NS_WEBGL_ALLOW", "1", TRUE);
     ns_net_init();
+    ns_net_set_early_hints_handler(ns_engine_early_hints);
     ns_net_set_allow_file_urls(TRUE);
     if (hopts->debug_levels & (1u << NS_DLOG_NET))
         ns_net_set_log_fetches(TRUE);

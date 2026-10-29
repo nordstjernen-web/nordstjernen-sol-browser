@@ -81,6 +81,7 @@ restrict_to_owner(const char *path, gboolean is_dir)
 }
 
 #define NS_CACHE_MAX_AGE_SECONDS (30 * 24 * 60 * 60)
+#define NS_CACHE_HEURISTIC_MAX_SECONDS (24 * 60 * 60)
 
 static void delete_key(const char *key);
 static void cache_rmrf(const char *path);
@@ -437,30 +438,88 @@ parse_http_date(const char *s)
     return r;
 }
 
-static gint64
-freshness_from_headers(const char *cache_control, const char *expires_header)
+static gboolean
+cache_control_directive(const char *cache_control, const char *name,
+                        gint64 *number)
 {
-    if (cache_control) {
-        if (strstr(cache_control, "no-store")) return -1;
-        if (strstr(cache_control, "no-cache")) return 0;
-        const char *p = strstr(cache_control, "max-age");
-        if (p) {
-            p = strchr(p, '=');
-            if (p) {
-                gint64 ma = g_ascii_strtoll(p + 1, NULL, 10);
-                if (ma < 0) ma = 0;
-                if (ma > 86400LL * 3650) ma = 86400LL * 3650;
-                return g_get_real_time() / G_USEC_PER_SEC + ma;
+    if (!cache_control) return FALSE;
+    size_t name_len = strlen(name);
+    const char *p = cache_control;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == ',') p++;
+        const char *end = strchr(p, ',');
+        size_t len = end ? (size_t)(end - p) : strlen(p);
+        const char *eq = memchr(p, '=', len);
+        size_t klen = eq ? (size_t)(eq - p) : len;
+        while (klen && (p[klen - 1] == ' ' || p[klen - 1] == '\t')) klen--;
+        if (klen == name_len && g_ascii_strncasecmp(p, name, name_len) == 0) {
+            if (number) {
+                *number = -1;
+                if (eq) {
+                    const char *v = eq + 1;
+                    while (*v == ' ' || *v == '\t' || *v == '"') v++;
+                    char *stop = NULL;
+                    gint64 n = g_ascii_strtoll(v, &stop, 10);
+                    if (stop != v && n >= 0) *number = n;
+                }
             }
+            return TRUE;
         }
-        if (strstr(cache_control, "immutable"))
-            return g_get_real_time() / G_USEC_PER_SEC + 86400 * 30;
+        p += len;
     }
+    return FALSE;
+}
+
+static gboolean
+heuristic_freshness_allowed(long status)
+{
+    return status == 200 || status == 203 || status == 204 ||
+           status == 301 || status == 308 || status == 404 ||
+           status == 405 || status == 410 || status == 414 ||
+           status == 501;
+}
+
+static gint64
+freshness_lifetime(const char *cache_control, const char *expires_header,
+                   gint64 date, const char *last_modified, long status)
+{
+    gint64 max_age = -1;
+    if (cache_control_directive(cache_control, "max-age", &max_age) &&
+        max_age >= 0)
+        return MIN(max_age, 86400LL * 3650);
+    if (cache_control_directive(cache_control, "immutable", NULL))
+        return 86400LL * 30;
     if (expires_header) {
-        gint64 t = parse_http_date(expires_header);
-        if (t > 0) return t;
+        gint64 expires = parse_http_date(expires_header);
+        return expires > date ? expires - date : 0;
     }
-    return 0;
+    if (!heuristic_freshness_allowed(status) || !last_modified) return 0;
+    gint64 modified = parse_http_date(last_modified);
+    if (modified <= 0 || modified >= date) return 0;
+    return MIN((date - modified) / 10, NS_CACHE_HEURISTIC_MAX_SECONDS);
+}
+
+static gint64
+freshness_from_headers(const char *cache_control, const char *expires_header,
+                       const char *date_header, const char *age_header,
+                       const char *last_modified, long status)
+{
+    if (cache_control_directive(cache_control, "no-store", NULL)) return -1;
+    if (cache_control_directive(cache_control, "no-cache", NULL)) return 0;
+    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
+    gint64 date = date_header ? parse_http_date(date_header) : 0;
+    if (date <= 0) date = now;
+    gint64 lifetime = freshness_lifetime(cache_control, expires_header, date,
+                                        last_modified, status);
+    if (lifetime <= 0) return 0;
+    gint64 age = 0;
+    if (age_header) {
+        char *stop = NULL;
+        gint64 declared = g_ascii_strtoll(age_header, &stop, 10);
+        if (stop != age_header && declared > 0) age = declared;
+    }
+    if (now > date) age = MAX(age, now - date);
+    return age < lifetime ? now + lifetime - age : 0;
 }
 
 static gboolean
@@ -619,17 +678,19 @@ ns_cache_put(const char *url,
              const char *last_modified,
              const char *cache_control,
              const char *expires_header,
+             const char *date_header,
+             const char *age_header,
              const char *vary,
              const char *const *request_headers,
              const void *body, gsize body_len)
 {
     G_GNUC_UNUSED g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&g_cache_mutex);
     if (!ns_cache_enabled() || !url_should_cache(url)) return;
-    if (cache_control && (strstr(cache_control, "no-store") ||
-                          strstr(cache_control, "private"))) return;
     if (!is_cacheable_status(status)) return;
     if (body_len > G_MAXINT || (guint64)body_len > cache_cap_bytes()) return;
-    gint64 expires_at = freshness_from_headers(cache_control, expires_header);
+    gint64 expires_at = freshness_from_headers(cache_control, expires_header,
+                                               date_header, age_header,
+                                               last_modified, status);
     if (expires_at < 0) return;
     g_autofree char *selector = NULL;
     if (!vary_selector(vary, request_headers, &selector)) return;
@@ -691,7 +752,10 @@ ns_cache_promote_304(const char *url,
                      const char *partition,
                      const char *const *request_headers,
                      const char *cache_control,
-                     const char *expires_header)
+                     const char *expires_header,
+                     const char *date_header,
+                     const char *age_header,
+                     const char *last_modified)
 {
     G_GNUC_UNUSED g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&g_cache_mutex);
     if (!ns_cache_enabled() || !url_should_cache(url)) return;
@@ -701,7 +765,7 @@ ns_cache_promote_304(const char *url,
 
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(g_cache_db,
-            "SELECT expires_at FROM entries WHERE key=?",
+            "SELECT status,last_modified FROM entries WHERE key=?",
             -1, &st, NULL) != SQLITE_OK)
         return;
     sqlite3_bind_text(st, 1, key, -1, SQLITE_TRANSIENT);
@@ -709,22 +773,31 @@ ns_cache_promote_304(const char *url,
         sqlite3_finalize(st);
         return;
     }
-    gint64 old_expires = sqlite3_column_int64(st, 0);
+    long status = (long)sqlite3_column_int64(st, 0);
+    g_autofree char *stored_last_modified = column_dup(st, 1);
     sqlite3_finalize(st);
 
-    gint64 expires_at = freshness_from_headers(cache_control, expires_header);
-    if (expires_at < 0) expires_at = 0;
-    if (expires_at <= old_expires) return;
+    const char *effective_last_modified =
+        last_modified ? last_modified : stored_last_modified;
+    gint64 expires_at = freshness_from_headers(cache_control, expires_header,
+                                               date_header, age_header,
+                                               effective_last_modified, status);
+    if (expires_at < 0) {
+        delete_key(key);
+        return;
+    }
 
     if (sqlite3_prepare_v2(g_cache_db,
-            "UPDATE entries SET expires_at=?,fetched_at=?,last_used=? WHERE key=?",
+            "UPDATE entries SET expires_at=?,fetched_at=?,last_used=?,"
+            "last_modified=COALESCE(?,last_modified) WHERE key=?",
             -1, &st, NULL) != SQLITE_OK)
         return;
     gint64 now = now_seconds();
     sqlite3_bind_int64(st, 1, expires_at);
     sqlite3_bind_int64(st, 2, now);
     sqlite3_bind_int64(st, 3, now);
-    sqlite3_bind_text (st, 4, key, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (st, 4, last_modified, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (st, 5, key, -1, SQLITE_TRANSIENT);
     sqlite3_step(st);
     sqlite3_finalize(st);
 }

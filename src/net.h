@@ -202,6 +202,17 @@ char *ns_net_request_key(const char        *url,
 void         ns_net_preload_expect(const char *key);
 void         ns_net_preload_keep(const char *key, const ns_response *resp);
 void         ns_net_preload_clear(void);
+void         ns_net_preload_clear_except(const char *const *keep_keys);
+
+typedef struct ns_net_link_hint {
+    char *url;
+    char *rel;
+    char *as;
+} ns_net_link_hint;
+
+typedef void (*ns_net_early_hints_fn)(const char *document_url,
+                                      GPtrArray  *hints);
+void         ns_net_set_early_hints_handler(ns_net_early_hints_fn handler);
 
 ns_response *ns_net_fetch_blocking(const char   *url,
                                    GCancellable *cancellable,
@@ -230,6 +241,7 @@ char *ns_net_log_dump(void);
 char *ns_url_host_from(const char *url);
 char *ns_url_origin_from(const char *url);
 gboolean ns_url_same_origin(const char *a, const char *b);
+gboolean ns_url_is_same_site(const char *a, const char *b);
 char *ns_net_raw_header_values(const char *raw, const char *name);
 gboolean ns_url_is_http_or_https(const char *url);
 
