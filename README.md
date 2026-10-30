@@ -5,7 +5,7 @@ Nordstjernen (aka "Sol browser", shipped as **Nordstjernen Sol**) is a web
 browser written from scratch in C, focused on support for modern HTML, CSS
 and JavaScript standards.
 
-![Nordstjernen 1.0.38 playing a game on chess.com](docs/screenshot.png)
+![Nordstjernen 1.0.39 playing a music video on YouTube](docs/screenshot.png)
 
 Supported platforms:
 * [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)
