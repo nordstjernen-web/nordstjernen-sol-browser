@@ -20,6 +20,14 @@ Changelog:
   is kept per image, sizes are rounded up to quarter-octave steps so a
   scale animation re-renders a few times instead of every frame, and all
   SVG rasters share a 96 MB budget (2048x2048 per raster at most).
+* Layout: a line holding an inline-block or image with `vertical-align:
+  top` or `bottom` sizes and places its text the way other browsers do.
+  The baseline content is measured first, then the top and bottom boxes
+  are fitted tallest first and set on the line's top or bottom edge.
+  Such a line used to centre its text, so text beside a top-aligned
+  image sat 2 px above the line, and a taller bottom-aligned box pushed
+  a top-aligned one down. `text-top` and `text-bottom` use the font's
+  real ascent and descent.
 * CSS: the `lh` unit resolves against the element's computed
   line-height, in plain lengths and inside `calc()`. Inside `calc()` it
   was read as px, so `calc(-0.5lh + 0.48em)`, the "line height trim"
