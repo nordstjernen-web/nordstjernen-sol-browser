@@ -16938,8 +16938,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         explicit_width = TRUE;
         intrinsic_width = TRUE;
     } else if (!flex_col_item_stretch &&
-               display_is_atomic_inline_container(
-                   ns_css_display_of(box->style))) {
+               (display_is_atomic_inline_container(
+                    ns_css_display_of(box->style)) ||
+                (node_is_form_hit_target(box->dom) &&
+                 !(box->parent && box_is_grid_container(box->parent))))) {
         double avail = parent_content_width - horiz_total;
         if (avail < 0) avail = 0;
         if (height_keyword_stretches(wv)) {
@@ -16950,6 +16952,11 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             cw = atomic_inline_fit_width(box,
                                          inherited_style ? inherited_style : box->style,
                                          avail);
+            if (!display_is_atomic_inline_container(
+                    ns_css_display_of(box->style))) {
+                explicit_width = TRUE;
+                intrinsic_width = TRUE;
+            }
         }
         if (cw < 0) cw = 0;
     } else if (!flex_col_item_stretch && ratio_transferred_width(box) >= 0) {

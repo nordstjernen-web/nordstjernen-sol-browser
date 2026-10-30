@@ -3,6 +3,11 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Layout: form controls (`button`, `input`, `select`, `textarea`) with
+  `display: block` and `width: auto` keep their fit-content width, as in
+  Chrome, instead of stretching across the line. A block-level button,
+  input or select filled its whole container. `margin: 0 auto` still
+  centers them, and a stretching flex column still stretches them.
 * CSSOM: `getComputedStyle(el).getPropertyValue('--x')` returns the
   computed value of a custom property, with its `var()` references
   substituted, as browsers do; it returned the specified text (for
