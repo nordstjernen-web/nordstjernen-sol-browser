@@ -3,6 +3,11 @@ Changelog:
 
 1.0.39-dev:
 ======
+* CSSOM: `getComputedStyle(el).getPropertyValue('--x')` returns the
+  computed value of a custom property, with its `var()` references
+  substituted, as browsers do; it returned the specified text (for
+  example `var(--x-lg, initial)`). The `flex` and `flex-flow` shorthands
+  are serialized from their longhands instead of returning "".
 * Forms: a `<select>` with `appearance: none` is as wide as its widest
   option plus its own padding and border, as in Chrome. A no-break space
   was drawn on each side of the label, which made every custom-styled
