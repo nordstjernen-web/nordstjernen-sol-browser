@@ -20,10 +20,11 @@ nothing imported.
   Settings, and reports active use in the browser status bar.
 - **WebGPU** (`navigator.gpu`) is an **experimental** feature that
   layers `src/webgpu.c` over the external wgpu-native library. The
-  `webgpu` meson feature is `auto`: built only when wgpu-native is
-  present, silently skipped otherwise, and even when built it stays
-  off at runtime until the browser is started with `--enable-webgpu`
-  (which sets `NS_WEBGPU_ALLOW=1`). See `docs/webgpu.md`.
+  `webgpu` meson feature is `auto`: required on glibc Linux, macOS
+  and Windows (fetched by a meson wrap when not found), optional
+  elsewhere. When built it is on at runtime by default, like WebGL;
+  Settings can turn it off, and `--enable-webgpu` (which sets
+  `NS_WEBGPU_ALLOW=1`) overrides that. See `docs/webgpu.md`.
 - The one vendored, in-tree video codec is MPEG-1, decoded by the
   vendored pl_mpeg decoder (`subprojects/plmpeg/`, wrapped by
   `src/video_decode.c`); such `<video>` plays inline (`src/video.c`).
@@ -321,8 +322,8 @@ don't add `meson test` targets.
   already exists as a deliberate exception — extend
   `src/webgl.c`, don't re-architect it. WebGPU is an experimental
   exception layered over external wgpu-native — `src/webgpu.c`, kept
-  behind the `--enable-webgpu` / `NS_WEBGPU_ALLOW` runtime gate; don't
-  make wgpu-native a hard/default dependency or vendor its library.)
+  switchable in Settings (`webgpu_enabled`); don't vendor its
+  library.)
 - Don't add telemetry, crash reporters, update pingers, or "studies"
   infrastructure. UI translation goes through `src/i18n.c` and the
   `data/i18n/*.lang` catalogues — don't introduce gettext or `.po`
