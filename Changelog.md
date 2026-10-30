@@ -1,9 +1,6 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.40-dev:
-======
-
 1.0.39:
 ======
 * Layout: an image with an aspect ratio but no natural width or height
