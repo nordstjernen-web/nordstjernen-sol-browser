@@ -1,6 +1,5 @@
 nordstjernen_gtk_sources = files(
   'appmain.c',
-  'icons.c',
   'mcp.c',
   'pagelayers.c',
   'procview.c',
@@ -16,6 +15,10 @@ nordstjernen_gtk_sources = files(
   '../ipc_http.c',
   '../threaddump.c',
 )
+
+if gtk4_dep.version().version_compare('<4.22')
+  nordstjernen_gtk_sources += files('icons.c')
+endif
 
 nordstjernen_gtk_deps = nordstjernen_deps + [gtk4_dep]
 if host_machine.system() != 'windows'

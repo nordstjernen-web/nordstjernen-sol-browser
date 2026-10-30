@@ -1,4 +1,4 @@
-/* Nordstjernen — the shell's own icons, drawn by the in-engine SVG renderer.
+/* Nordstjernen — the shell's icons through the in-engine SVG renderer, built only for GTK before 4.22.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
