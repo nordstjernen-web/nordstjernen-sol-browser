@@ -1017,6 +1017,8 @@ static const char *css_scan_declaration_value(const char *p, const char *end,
                                               char *terminator);
 static gboolean css_declaration_value_syntax_valid(const char *text);
 static const char *css_skip_to_block_end(const char *p, const char *end);
+static const char *css_skip_to_block_end_balanced(const char *p, const char *end,
+                                                  gboolean *balanced);
 static const char *css_block_body_end(const char *body_start,
                                       const char *block_end);
 static const char *css_find_top_level_char(const char *p, const char *end,
@@ -20391,6 +20393,7 @@ ns_css_rule_free(ns_css_rule *r)
     if (r->vars) g_hash_table_destroy(r->vars);
     if (r->var_important) g_hash_table_destroy(r->var_important);
     if (r->pending) g_array_free(r->pending, TRUE);
+    g_free(r->lazy_decls);
     g_free(r->layer_name);
     g_free(r->container_condition);
     cq_query_free(r->container_query);
@@ -20424,6 +20427,9 @@ static const char *
 css_scan_until(const char *p, const char *end,
                const char *terminators, char *terminator)
 {
+    gboolean stop[256] = { [0] = TRUE };
+    for (const char *t = terminators; *t; t++)
+        stop[(unsigned char)*t] = TRUE;
     char quote = 0;
     int paren = 0, bracket = 0, brace = 0;
     if (terminator) *terminator = 0;
@@ -20453,7 +20459,7 @@ css_scan_until(const char *p, const char *end,
             continue;
         }
         if (paren == 0 && bracket == 0 && brace == 0 &&
-            strchr(terminators, c)) {
+            stop[(unsigned char)c]) {
             if (terminator) *terminator = c;
             return p;
         }
@@ -20571,8 +20577,17 @@ ns_css_named_property_supported(const char *name)
 static const char *
 css_skip_to_block_end(const char *p, const char *end)
 {
-    int depth = 0;
+    return css_skip_to_block_end_balanced(p, end, NULL);
+}
+
+static const char *
+css_skip_to_block_end_balanced(const char *p, const char *end,
+                               gboolean *balanced)
+{
+    int depth = 0, paren = 0, bracket = 0;
+    gboolean underflow = FALSE;
     char quote = 0;
+    if (balanced) *balanced = FALSE;
     while (p < end) {
         char c = *p;
         if (quote) {
@@ -20601,8 +20616,16 @@ css_skip_to_block_end(const char *p, const char *end)
         if (c == '{') depth++;
         else if (c == '}') {
             depth--;
-            if (depth <= 0) return p + 1;
+            if (depth <= 0) {
+                if (balanced)
+                    *balanced = !underflow && paren == 0 && bracket == 0;
+                return p + 1;
+            }
         }
+        else if (c == '(') paren++;
+        else if (c == ')') underflow |= paren-- == 0;
+        else if (c == '[') bracket++;
+        else if (c == ']') underflow |= bracket-- == 0;
         p++;
     }
     return end;
@@ -23028,10 +23051,16 @@ css_decl_blocks(void)
 
 static void
 parse_rule_declarations(const char **pp, const char *end, const char *open,
-                        ns_css_rule *rule)
+                        ns_css_rule *rule, gboolean lazy)
 {
     const char *start = *pp;
-    const char *block_end = css_skip_to_block_end(open, end);
+    gboolean balanced = FALSE;
+    const char *block_end = css_skip_to_block_end_balanced(open, end, &balanced);
+    if (lazy && balanced) {
+        rule->lazy_decls = g_strndup(open, (gsize)(block_end - open));
+        *pp = block_end;
+        return;
+    }
     gsize len = (gsize)(css_block_body_end(start, block_end) - start);
     if (rule->decls->len || rule->vars || rule->pending ||
         len > CSS_DECL_BLOCK_MAX_LEN) {
@@ -23654,7 +23683,7 @@ parse_rules_until(const char **pp, const char *end,
             continue;
         }
         p = sel_end + 1;
-        parse_rule_declarations(&p, end, sel_end, rule);
+        parse_rule_declarations(&p, end, sel_end, rule, sh->lazy_decls);
         g_ptr_array_add(sh->rules, rule);
     }
     *pp = p;
@@ -23859,7 +23888,8 @@ css_flatten_style_rule(GString *out, const char *sel,
                        gsize *budget)
 {
     if (depth > NS_CSS_NEST_MAX_DEPTH) return;
-    if (!css_body_has_nested_rule(body_s, body_e)) {
+    if (!memchr(body_s, '{', (gsize)(body_e - body_s)) ||
+        !css_body_has_nested_rule(body_s, body_e)) {
         if (!css_flatten_take_budget(budget, sel)) return;
         g_string_append(out, sel);
         g_string_append_c(out, '{');
@@ -23979,10 +24009,26 @@ ns_css_stylesheet_parse_detached(const char *text, gssize len)
     return sh;
 }
 
+static ns_css_stylesheet *css_stylesheet_parse(const char *text, gssize len_in,
+                                                gboolean lazy_decls);
+
 ns_css_stylesheet *
 ns_css_stylesheet_parse(const char *text, gssize len_in)
 {
+    return css_stylesheet_parse(text, len_in, FALSE);
+}
+
+ns_css_stylesheet *
+ns_css_stylesheet_parse_author(const char *text, gssize len_in)
+{
+    return css_stylesheet_parse(text, len_in, TRUE);
+}
+
+static ns_css_stylesheet *
+css_stylesheet_parse(const char *text, gssize len_in, gboolean lazy_decls)
+{
     ns_css_stylesheet *sh = g_new0(ns_css_stylesheet, 1);
+    sh->lazy_decls = lazy_decls;
     sh->serial = css_stylesheet_serial_take();
     sh->rules = g_ptr_array_new_with_free_func((GDestroyNotify)ns_css_rule_free);
     if (!text) return sh;
@@ -24069,6 +24115,50 @@ css_raw_text_resolve_urls(const char *text, const char *base_url)
     return g_string_free(out, FALSE);
 }
 
+static void
+css_rule_resolve_urls(ns_css_rule *r, const char *base_url)
+{
+    if (r->decls) {
+        for (guint di = 0; di < r->decls->len; di++) {
+            ns_css_decl *d = &g_array_index(r->decls, ns_css_decl, di);
+            css_value_resolve_url(d->value, base_url);
+        }
+    }
+    if (r->vars) {
+        GHashTableIter it;
+        gpointer k, v;
+        g_hash_table_iter_init(&it, r->vars);
+        while (g_hash_table_iter_next(&it, &k, &v)) {
+            char *resolved = css_raw_text_resolve_urls(v, base_url);
+            if (resolved) g_hash_table_iter_replace(&it, resolved);
+        }
+    }
+    if (r->pending) {
+        for (guint pi = 0; pi < r->pending->len; pi++) {
+            ns_css_pending_decl *pd =
+                &g_array_index(r->pending, ns_css_pending_decl, pi);
+            char *resolved = css_raw_text_resolve_urls(pd->raw_vtext, base_url);
+            if (resolved) {
+                g_free(pd->raw_vtext);
+                pd->raw_vtext = resolved;
+            }
+        }
+    }
+}
+
+static void
+css_rule_parse_lazy_decls(const ns_css_stylesheet *sheet, ns_css_rule *r)
+{
+    char *block = r->lazy_decls;
+    if (!block) return;
+    r->lazy_decls = NULL;
+    const char *p = block + 1;
+    parse_rule_declarations(&p, block + strlen(block), block, r, FALSE);
+    g_free(block);
+    if (sheet && sheet->resolved_base)
+        css_rule_resolve_urls(r, sheet->resolved_base);
+}
+
 void
 ns_css_stylesheet_resolve_urls(ns_css_stylesheet *s, const char *base_url)
 {
@@ -24079,34 +24169,7 @@ ns_css_stylesheet_resolve_urls(ns_css_stylesheet *s, const char *base_url)
     if (s->rules) {
         for (guint ri = 0; ri < s->rules->len; ri++) {
             ns_css_rule *r = g_ptr_array_index(s->rules, ri);
-            if (!r) continue;
-            if (r->decls) {
-                for (guint di = 0; di < r->decls->len; di++) {
-                    ns_css_decl *d = &g_array_index(r->decls, ns_css_decl, di);
-                    css_value_resolve_url(d->value, base_url);
-                }
-            }
-            if (r->vars) {
-                GHashTableIter it;
-                gpointer k, v;
-                g_hash_table_iter_init(&it, r->vars);
-                while (g_hash_table_iter_next(&it, &k, &v)) {
-                    char *resolved = css_raw_text_resolve_urls(v, base_url);
-                    if (resolved) g_hash_table_iter_replace(&it, resolved);
-                }
-            }
-            if (r->pending) {
-                for (guint pi = 0; pi < r->pending->len; pi++) {
-                    ns_css_pending_decl *pd =
-                        &g_array_index(r->pending, ns_css_pending_decl, pi);
-                    char *resolved =
-                        css_raw_text_resolve_urls(pd->raw_vtext, base_url);
-                    if (resolved) {
-                        g_free(pd->raw_vtext);
-                        pd->raw_vtext = resolved;
-                    }
-                }
-            }
+            if (r) css_rule_resolve_urls(r, base_url);
         }
     }
     if (s->font_faces) {
@@ -30074,8 +30137,10 @@ css_bucket_each_match(const ns_css_stylesheet *sheet, const GArray *bucket,
         const ns_css_selector *sel =
             g_ptr_array_index(r->selectors, c->selector_idx);
         if (!sel || sel->pseudo_element != NS_CSS_PE_NONE) continue;
-        if (rule_selector_matches(r, sel, el, NS_CSS_PE_NONE, NULL))
+        if (rule_selector_matches(r, sel, el, NS_CSS_PE_NONE, NULL)) {
+            css_rule_parse_lazy_decls(sheet, (ns_css_rule *)r);
             fn(r, c->rule_idx, sel, data);
+        }
     }
 }
 
@@ -30272,6 +30337,7 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
     for (guint mi = 0; mi < matched_n; mi++) {
         guint ri = g_rule_matched[mi];
         ns_css_rule *r = g_ptr_array_index(sheet->rules, ri);
+        css_rule_parse_lazy_decls(sheet, r);
         css_rule_match_accum *acc = &g_rule_accum[ri];
         if (acc->layer_order == INT_MIN)
             acc->layer_order = css_layer_rank_for(layer_ranks, r->layer_name);
@@ -37711,8 +37777,8 @@ ns_css_merged_styles_cached_digest(guint64 digest, gsize len,
     }
     GString *text = g_string_sized_new(len + 1);
     build(text, data);
-    ns_css_stylesheet *sh = ns_css_stylesheet_parse(text->str,
-                                                    (gssize)text->len);
+    ns_css_stylesheet *sh = css_stylesheet_parse(text->str, (gssize)text->len,
+                                                 TRUE);
     g_string_free(text, TRUE);
     if (!sh) return NULL;
     sh->cached = TRUE;
@@ -37730,7 +37796,7 @@ ns_css_stylesheet *
 ns_css_stylesheet_parse_url_cached(const char *url, const char *css, gssize len)
 {
     if (!css) return NULL;
-    if (!url || !*url) return ns_css_stylesheet_parse(css, len);
+    if (!url || !*url) return css_stylesheet_parse(css, len, TRUE);
     if (!g_link_sheet_cache)
         g_link_sheet_cache =
             g_hash_table_new_full(g_str_hash, g_str_equal,
@@ -37744,7 +37810,7 @@ ns_css_stylesheet_parse_url_cached(const char *url, const char *css, gssize len)
         g_free(key);
         return hit;
     }
-    ns_css_stylesheet *sh = ns_css_stylesheet_parse(css, len);
+    ns_css_stylesheet *sh = css_stylesheet_parse(css, len, TRUE);
     if (!sh) {
         g_free(key);
         return NULL;
@@ -37759,7 +37825,7 @@ ns_css_stylesheet_parse_in_layer(GBytes *bytes, const char *layer_name)
 {
     gsize len = 0;
     const char *data = g_bytes_get_data(bytes, &len);
-    ns_css_stylesheet *sh = ns_css_stylesheet_parse(data, (gssize)len);
+    ns_css_stylesheet *sh = css_stylesheet_parse(data, (gssize)len, TRUE);
     if (sh && layer_name)
         ns_css_stylesheet_force_layer(sh, layer_name);
     return sh;
@@ -37815,7 +37881,7 @@ ns_css_stylesheet_from_style_element_cached(ns_node *style)
         g_free(css);
         return e->sheet;
     }
-    ns_css_stylesheet *sh = ns_css_stylesheet_parse(css, -1);
+    ns_css_stylesheet *sh = css_stylesheet_parse(css, -1, TRUE);
     if (!sh) {
         g_free(css);
         return NULL;

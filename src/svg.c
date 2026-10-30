@@ -2109,9 +2109,9 @@ svg_text_layout(svg_ctx *ctx, const ns_node *n, const svg_state *st,
 
     NsPangoLayout *layout = ns_pango_cairo_create_layout(ctx->cr);
     NsPangoFontDescription *desc = ns_pango_font_description_new();
-    char *fam = st->font_family
-        ? ns_css_font_family_for_pango(st->font_family) : NULL;
-    ns_pango_font_description_set_family(desc, fam ? fam : "sans-serif");
+    char *fam = ns_css_font_family_for_pango(st->font_family ? st->font_family
+                                                              : "serif");
+    ns_pango_font_description_set_family(desc, fam ? fam : "serif");
     g_free(fam);
     ns_pango_font_description_set_absolute_size(
         desc, ns_paint_pango_font_size(st->font_size));
