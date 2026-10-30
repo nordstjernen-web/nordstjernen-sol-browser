@@ -39850,6 +39850,104 @@ ns_svg_foreign_client_rect(JSContext *ctx, const ns_node *node,
     return TRUE;
 }
 
+static gboolean
+ns_box_wraps_blocks_in_inline(const ns_box *b)
+{
+    if (!b || b->kind != NS_BOX_BLOCK || !b->style || !b->dom) return FALSE;
+    ns_display d = ns_css_display_of(b->style);
+    return d.box == NS_DISPLAY_BOX_NORMAL &&
+           d.internal == NS_DISPLAY_INTERNAL_NONE &&
+           d.outer == NS_DISPLAY_OUTER_INLINE &&
+           d.inner == NS_DISPLAY_INNER_FLOW;
+}
+
+static gboolean
+ns_box_out_of_flow(const ns_box *b)
+{
+    if (!b->style) return FALSE;
+    const ns_css_value *pos = b->style->values[NS_CSS_POSITION];
+    const ns_css_value *fl = b->style->values[NS_CSS_FLOAT];
+    return ns_css_keyword_is(pos, "absolute") ||
+           ns_css_keyword_is(pos, "fixed") ||
+           (fl && !ns_css_keyword_is(fl, "none"));
+}
+
+static void
+ns_rect_union_add(double rx, double ry, double rw, double rh,
+                  double *x0, double *y0, double *x1, double *y1,
+                  gboolean *any)
+{
+    if (!*any) {
+        *x0 = rx; *y0 = ry; *x1 = rx + rw; *y1 = ry + rh;
+        *any = TRUE;
+        return;
+    }
+    *x0 = MIN(*x0, rx);
+    *y0 = MIN(*y0, ry);
+    *x1 = MAX(*x1, rx + rw);
+    *y1 = MAX(*y1, ry + rh);
+}
+
+static void
+ns_block_in_inline_union(const ns_box *wrapper, const ns_box *b,
+                         double *x0, double *y0, double *x1, double *y1,
+                         gboolean *any)
+{
+    double wx, wy, ww, wh;
+    ns_box_border_box(wrapper, &wx, &wy, &ww, &wh);
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        if (ns_box_out_of_flow(c)) continue;
+        double rx, ry, rw, rh;
+        if (c->kind == NS_BOX_INLINE) {
+            if (!c->text || !*c->text) continue;
+            ns_inline_attr own = {
+                .kind = NS_INLINE_ELEMENT,
+                .len = strlen(c->text),
+                .dom = wrapper->dom,
+                .style = wrapper->style,
+            };
+            double ex, ey;
+            if (!ns_paint_inline_range_extents(c, 0, own.len, &own,
+                                               &ex, &ey, &rw, &rh))
+                continue;
+            rx = c->x + ex;
+            ry = c->y + ey;
+        } else if (c->kind == NS_BOX_BLOCK && (!c->dom || c->dom == b->dom)) {
+            ns_block_in_inline_union(wrapper, c, x0, y0, x1, y1, any);
+            continue;
+        } else {
+            ns_box_border_box(c, &rx, &ry, &rw, &rh);
+            rx = wx;
+            rw = ww;
+        }
+        ns_rect_union_add(rx, ry, rw, rh, x0, y0, x1, y1, any);
+    }
+}
+
+static gboolean
+ns_block_in_inline_rect(const ns_box *b, gboolean visual,
+                        double *x, double *y, double *w, double *h)
+{
+    if (!ns_box_wraps_blocks_in_inline(b)) return FALSE;
+    double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    gboolean any = FALSE;
+    ns_block_in_inline_union(b, b, &x0, &y0, &x1, &y1, &any);
+    if (!any) return FALSE;
+    *x = x0;
+    *y = y0;
+    *w = x1 - x0;
+    *h = y1 - y0;
+    if (visual) ns_box_apply_visual_transform(b, x, y, w, h);
+    return TRUE;
+}
+
+static const ns_box *
+ns_block_box_for_this(JSContext *ctx, JSValueConst this_val)
+{
+    const ns_box *b = ns_box_for_this(ctx, this_val);
+    return ns_box_wraps_blocks_in_inline(b) ? NULL : b;
+}
+
 static JSValue
 ns_element_getBoundingClientRect(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv)
@@ -39869,7 +39967,8 @@ ns_element_getBoundingClientRect(JSContext *ctx, JSValueConst this_val,
         got_box = TRUE;
     else if (!b && ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
         got_box = TRUE;
-    if (b) ns_box_visual_border_box(b, &x, &y, &w, &h);
+    if (b && !ns_block_in_inline_rect(b, TRUE, &x, &y, &w, &h))
+        ns_box_visual_border_box(b, &x, &y, &w, &h);
     if (got_box) ns_point_to_client(ctx, node, &x, &y);
     return ns_make_dom_rect(ctx, x, y, w, h);
 }
@@ -40240,7 +40339,8 @@ ns_element_get_offsetWidth(JSContext *ctx, JSValueConst this_val)
             return JS_NewInt32(ctx, (int)(w + 0.5));
         return JS_NewInt32(ctx, 0);
     }
-    ns_box_border_box(b, &x, &y, &w, &h);
+    if (!ns_block_in_inline_rect(b, FALSE, &x, &y, &w, &h))
+        ns_box_border_box(b, &x, &y, &w, &h);
     return JS_NewInt32(ctx, (int)(w + 0.5));
 }
 
@@ -40254,7 +40354,8 @@ ns_element_get_offsetHeight(JSContext *ctx, JSValueConst this_val)
             return JS_NewInt32(ctx, (int)(h + 0.5));
         return JS_NewInt32(ctx, 0);
     }
-    ns_box_border_box(b, &x, &y, &w, &h);
+    if (!ns_block_in_inline_rect(b, FALSE, &x, &y, &w, &h))
+        ns_box_border_box(b, &x, &y, &w, &h);
     return JS_NewInt32(ctx, (int)(h + 0.5));
 }
 
@@ -40264,7 +40365,7 @@ ns_element_get_clientWidth(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     gboolean is_root = n && n->name &&
         (strcmp(n->name, "html") == 0 || strcmp(n->name, "body") == 0);
-    const ns_box *b = ns_box_for_this(ctx, this_val);
+    const ns_box *b = ns_block_box_for_this(ctx, this_val);
     if (!b) {
         if (is_root) return JS_NewInt32(ctx, (int)(ns_css_viewport_w() + 0.5));
         return JS_NewInt32(ctx, 0);
@@ -40282,7 +40383,7 @@ ns_element_get_clientHeight(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     gboolean is_root = n && n->name &&
         (strcmp(n->name, "html") == 0 || strcmp(n->name, "body") == 0);
-    const ns_box *b = ns_box_for_this(ctx, this_val);
+    const ns_box *b = ns_block_box_for_this(ctx, this_val);
     if (!b) {
         if (is_root) return JS_NewInt32(ctx, (int)(ns_css_viewport_h() + 0.5));
         return JS_NewInt32(ctx, 0);
@@ -40309,7 +40410,10 @@ ns_element_get_offsetTop(JSContext *ctx, JSValueConst this_val)
             return JS_NewInt32(ctx, (int)floor(y - origin_y + 0.5));
         return JS_NewInt32(ctx, 0);
     }
-    return JS_NewInt32(ctx, (int)floor(b->y + b->margin.top - origin_y + 0.5));
+    double x, y, w, h;
+    if (!ns_block_in_inline_rect(b, FALSE, &x, &y, &w, &h))
+        ns_box_border_box(b, &x, &y, &w, &h);
+    return JS_NewInt32(ctx, (int)floor(y - origin_y + 0.5));
 }
 
 static JSValue
@@ -40324,20 +40428,23 @@ ns_element_get_offsetLeft(JSContext *ctx, JSValueConst this_val)
             return JS_NewInt32(ctx, (int)floor(x - origin_x + 0.5));
         return JS_NewInt32(ctx, 0);
     }
-    return JS_NewInt32(ctx, (int)floor(b->x + b->margin.left - origin_x + 0.5));
+    double x, y, w, h;
+    if (!ns_block_in_inline_rect(b, FALSE, &x, &y, &w, &h))
+        ns_box_border_box(b, &x, &y, &w, &h);
+    return JS_NewInt32(ctx, (int)floor(x - origin_x + 0.5));
 }
 
 static JSValue
 ns_element_get_clientTop(JSContext *ctx, JSValueConst this_val)
 {
-    const ns_box *b = ns_box_for_this(ctx, this_val);
+    const ns_box *b = ns_block_box_for_this(ctx, this_val);
     return JS_NewInt32(ctx, b ? (int)(b->border.top + 0.5) : 0);
 }
 
 static JSValue
 ns_element_get_clientLeft(JSContext *ctx, JSValueConst this_val)
 {
-    const ns_box *b = ns_box_for_this(ctx, this_val);
+    const ns_box *b = ns_block_box_for_this(ctx, this_val);
     return JS_NewInt32(ctx, b ? (int)(b->border.left + 0.5) : 0);
 }
 
@@ -42586,7 +42693,7 @@ ns_element_get_scrollHeight(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     gboolean is_root = n && n->name &&
         (strcmp(n->name, "html") == 0 || strcmp(n->name, "body") == 0);
-    const ns_box *b = ns_box_for_this(ctx, this_val);
+    const ns_box *b = ns_block_box_for_this(ctx, this_val);
     if (!b) {
         if (is_root) return JS_NewInt32(ctx, (int)(ns_css_viewport_h() + 0.5));
         return JS_NewInt32(ctx, 0);
@@ -42607,7 +42714,7 @@ ns_element_get_scrollHeight(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_element_get_scrollWidth(JSContext *ctx, JSValueConst this_val)
 {
-    const ns_box *b = ns_box_for_this(ctx, this_val);
+    const ns_box *b = ns_block_box_for_this(ctx, this_val);
     if (!b) return JS_NewInt32(ctx, 0);
     double w = 0, h = 0;
     ns_scrollable_overflow_size(b, &w, &h);
