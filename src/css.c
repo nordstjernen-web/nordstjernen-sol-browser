@@ -3307,6 +3307,7 @@ typedef struct ns_calc_term {
     double pct;
     double em;
     double rem;
+    double lh;
     double vw, vh, vmin, vmax;
     double num;
     gboolean is_number;
@@ -3354,7 +3355,7 @@ calc_term_fn_add(ns_calc_term *out, const ns_calc_term *rhs, double sign)
 {
     if (!out->fn && !rhs->fn) return;
     if ((out->fn && rhs->fn) || out->em != 0 || out->rem != 0 ||
-        rhs->em != 0 || rhs->rem != 0) {
+        out->lh != 0 || rhs->em != 0 || rhs->rem != 0 || rhs->lh != 0) {
         out->fn = 0;
         return;
     }
@@ -3389,6 +3390,7 @@ calc_term_scale(ns_calc_term *v, double m)
         v->pct *= m;
         v->em *= m;
         v->rem *= m;
+        v->lh *= m;
         v->vw *= m;
         v->vh *= m;
         v->vmin *= m;
@@ -3398,6 +3400,7 @@ calc_term_scale(ns_calc_term *v, double m)
         if (v->pct != 0) v->pct *= m;
         if (v->em  != 0) v->em  *= m;
         if (v->rem != 0) v->rem *= m;
+        if (v->lh  != 0) v->lh  *= m;
         v->vw = 0;
         v->vh = 0;
         v->vmin = 0;
@@ -3457,6 +3460,9 @@ calc_unit_value(const char *unit, double num, ns_calc_term *out)
         break;
     case NS_CSS_UNIT_REM:
         out->rem = v;
+        break;
+    case NS_CSS_UNIT_LH:
+        out->lh = v;
         break;
     case NS_CSS_UNIT_VW:
     case NS_CSS_UNIT_VH:
@@ -3685,6 +3691,7 @@ calc_expr_parse(const char **pp, const char *end, ns_calc_term *out,
             out->pct += rhs.pct;
             out->em += rhs.em;
             out->rem += rhs.rem;
+            out->lh += rhs.lh;
             out->vw += rhs.vw;
             out->vh += rhs.vh;
             out->vmin += rhs.vmin;
@@ -3694,6 +3701,7 @@ calc_expr_parse(const char **pp, const char *end, ns_calc_term *out,
             out->pct -= rhs.pct;
             out->em -= rhs.em;
             out->rem -= rhs.rem;
+            out->lh -= rhs.lh;
             out->vw -= rhs.vw;
             out->vh -= rhs.vh;
             out->vmin -= rhs.vmin;
@@ -4308,6 +4316,7 @@ ns_css_math_canonical(const char *value)
         if (v->u.calc.pct != 0) { nonzero++; val = v->u.calc.pct; unit = "%"; }
         if (v->u.calc.em != 0)  { nonzero++; val = v->u.calc.em;  unit = "em"; }
         if (v->u.calc.rem != 0) { nonzero++; val = v->u.calc.rem; unit = "rem"; }
+        if (v->u.calc.lh != 0)  { nonzero++; val = v->u.calc.lh;  unit = "lh"; }
         if (nonzero == 0) {
             out = g_strdup("calc(0px)");
         } else if (nonzero == 1) {
@@ -4635,6 +4644,7 @@ parse_calc_inner(const char *text)
     double px  = 0;
     double em  = 0;
     double rem = 0;
+    double lh  = 0;
     const char *p = text;
     ns_calc_term term;
     gboolean parsed = FALSE;
@@ -4647,6 +4657,7 @@ parse_calc_inner(const char *text)
             pct = term.pct;
             em = term.em;
             rem = term.rem;
+            lh = term.lh;
             parsed = TRUE;
         }
     }
@@ -4654,7 +4665,7 @@ parse_calc_inner(const char *text)
     ns_css_value *v = g_new0(ns_css_value, 1);
     v->kind = NS_CSS_V_CALC;
     if (term.fn) {
-        v->u.calc.px = px + em * 16.0 + rem * g_root_font_px +
+        v->u.calc.px = px + (em + lh * 1.2) * 16.0 + rem * g_root_font_px +
                        pct * 0.01 * g_viewport_w;
         v->u.calc.fn = term.fn;
         v->u.calc.n_args = term.n_args;
@@ -4669,6 +4680,7 @@ parse_calc_inner(const char *text)
     v->u.calc.px  = px;
     v->u.calc.em  = em;
     v->u.calc.rem = rem;
+    v->u.calc.lh  = lh;
     v->u.calc.vw = term.vw;
     v->u.calc.vh = term.vh;
     v->u.calc.vmin = term.vmin;
@@ -4692,7 +4704,7 @@ parse_bg_size_component(const char *tok, double *out_v, ns_css_unit *out_unit)
         *out_unit = cv->u.length.unit;
     } else if (cv->kind == NS_CSS_V_CALC) {
         if (cv->u.calc.pct != 0 && cv->u.calc.px == 0 &&
-            cv->u.calc.em == 0 && cv->u.calc.rem == 0) {
+            cv->u.calc.em == 0 && cv->u.calc.rem == 0 && cv->u.calc.lh == 0) {
             *out_v = cv->u.calc.pct;
             *out_unit = NS_CSS_UNIT_PERCENT;
         } else {
@@ -4792,7 +4804,7 @@ parse_math_track(const char *start, gsize len, ns_css_track *out)
         ok = TRUE;
     } else if (cv->kind == NS_CSS_V_CALC) {
         if (cv->u.calc.pct != 0 && cv->u.calc.px == 0 &&
-            cv->u.calc.em == 0 && cv->u.calc.rem == 0) {
+            cv->u.calc.em == 0 && cv->u.calc.rem == 0 && cv->u.calc.lh == 0) {
             out->kind = NS_CSS_TRACK_PERCENT;
             out->v = cv->u.calc.pct;
         } else {
@@ -12693,7 +12705,7 @@ numeric_value_valid_for_prop(ns_css_prop prop, const ns_css_value *v)
         return FALSE;
     if (prop == NS_CSS_OPACITY)
         return v->u.calc.px == 0 && v->u.calc.em == 0 &&
-               v->u.calc.rem == 0;
+               v->u.calc.rem == 0 && v->u.calc.lh == 0;
     return TRUE;
 }
 
@@ -14114,7 +14126,7 @@ parse_def_number(const prop_def *def, const char *t)
     }
     double num = 0;
     gboolean percent_calc = v->kind == NS_CSS_V_CALC && !v->u.calc.fn &&
-                            v->u.calc.px == 0 && v->u.calc.em == 0 && v->u.calc.rem == 0;
+                            v->u.calc.px == 0 && v->u.calc.em == 0 && v->u.calc.rem == 0 && v->u.calc.lh == 0;
     gboolean ok = percent_calc ||
                   (v->kind == NS_CSS_V_LENGTH &&
                    (v->u.length.unit == NS_CSS_UNIT_NUMBER ||
@@ -14948,7 +14960,7 @@ parse_value_for(ns_css_prop prop, const char *text)
                 v->u.length.v /= 100.0;
                 v->u.length.unit = NS_CSS_UNIT_NUMBER;
             } else if (v->kind == NS_CSS_V_CALC && v->u.calc.px == 0 &&
-                       v->u.calc.em == 0 && v->u.calc.rem == 0) {
+                       v->u.calc.em == 0 && v->u.calc.rem == 0 && v->u.calc.lh == 0) {
                 double pnum = v->u.calc.pct / 100.0;
                 ns_css_value_free(v);
                 v = calc_num_value(pnum);
@@ -29442,19 +29454,20 @@ value_serialize_one(const ns_css_value *v)
         return g_string_free(s, FALSE);
     }
     case NS_CSS_V_CALC: {
-        const struct { double v; const char *unit; } part[4] = {
+        const struct { double v; const char *unit; } part[] = {
             { v->u.calc.pct, "%" }, { v->u.calc.em, "em" },
             { v->u.calc.px, "px" }, { v->u.calc.rem, "rem" },
+            { v->u.calc.lh, "lh" },
         };
         int used = 0, only = 0;
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < (int)G_N_ELEMENTS(part); i++)
             if (part[i].v != 0) { used++; only = i; }
         if (used == 0) return g_strdup("0px");
         if (used == 1)
             return g_strdup_printf("%g%s", part[only].v, part[only].unit);
         GString *s = g_string_new("calc(");
         gboolean first = TRUE;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < (int)G_N_ELEMENTS(part); i++) {
             if (part[i].v == 0) continue;
             if (!first) g_string_append(s, part[i].v < 0 ? " - " : " + ");
             g_string_append_printf(s, "%g%s",
@@ -32202,11 +32215,31 @@ calc_fold_arg_font_units(ns_css_value *v, double em_px, double rem_px)
 }
 
 typedef struct {
-    double font_px, root_px;
+    double font_px, root_px, line_px;
     const char *family;
     int weight;
     gboolean italic;
 } layer_units_ctx;
+
+static double
+style_line_height_px(const ns_style *s, double font_px, double root_px)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_LINE_HEIGHT] : NULL;
+    if (v && v->kind == NS_CSS_V_LENGTH) {
+        switch (v->u.length.unit) {
+        case NS_CSS_UNIT_NUMBER:  return v->u.length.v * font_px;
+        case NS_CSS_UNIT_PX:      return v->u.length.v;
+        case NS_CSS_UNIT_PERCENT: return v->u.length.v * font_px / 100.0;
+        case NS_CSS_UNIT_EM:      return v->u.length.v * font_px;
+        case NS_CSS_UNIT_REM:     return v->u.length.v * root_px;
+        default: break;
+        }
+    } else if (v && v->kind == NS_CSS_V_CALC && !v->u.calc.fn) {
+        return v->u.calc.px + v->u.calc.em * font_px +
+               v->u.calc.rem * root_px + v->u.calc.pct * font_px / 100.0;
+    }
+    return font_px * 1.2;
+}
 
 static gboolean
 length_unit_is_relative(ns_css_unit unit)
@@ -32227,7 +32260,8 @@ static gboolean
 calc_has_relative_units(const ns_css_value *v)
 {
     if (v->u.calc.fn) return calc_args_have_font_units(v);
-    double sum = fabs(v->u.calc.em) + fabs(v->u.calc.rem) + fabs(v->u.calc.vw) +
+    double sum = fabs(v->u.calc.em) + fabs(v->u.calc.rem) +
+                 fabs(v->u.calc.lh) + fabs(v->u.calc.vw) +
                  fabs(v->u.calc.vh) + fabs(v->u.calc.vmin) + fabs(v->u.calc.vmax);
     return sum != 0;
 }
@@ -32278,8 +32312,8 @@ static void
 calc_resolve_relative_units(ns_css_value *v, const layer_units_ctx *c)
 {
     v->u.calc.px += v->u.calc.em * c->font_px + v->u.calc.rem * c->root_px +
-                    calc_viewport_refresh_px(v);
-    v->u.calc.em = v->u.calc.rem = 0;
+                    v->u.calc.lh * c->line_px + calc_viewport_refresh_px(v);
+    v->u.calc.em = v->u.calc.rem = v->u.calc.lh = 0;
     v->u.calc.vw = v->u.calc.vh = 0;
     v->u.calc.vmin = v->u.calc.vmax = 0;
 }
@@ -32397,9 +32431,10 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
     gboolean fr_italic =
         ns_css_keyword_is(out->values[NS_CSS_FONT_STYLE], "italic") ||
         ns_css_keyword_is(out->values[NS_CSS_FONT_STYLE], "oblique");
+    double my_line_px = style_line_height_px(out, my_font_px, root_px);
     const layer_units_ctx lc = {
-        .font_px = my_font_px, .root_px = root_px, .family = fr_family,
-        .weight = fr_weight, .italic = fr_italic,
+        .font_px = my_font_px, .root_px = root_px, .line_px = my_line_px,
+        .family = fr_family, .weight = fr_weight, .italic = fr_italic,
     };
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
         if (i == NS_CSS_FONT_SIZE) continue;
@@ -32473,14 +32508,17 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             double viewport_refresh = calc_viewport_refresh_px(v);
             gboolean line_pct = i == NS_CSS_LINE_HEIGHT && calc_has_percent(v);
             if (v->u.calc.em == 0 && v->u.calc.rem == 0 &&
+                v->u.calc.lh == 0 &&
                 v->u.calc.vw == 0 && v->u.calc.vh == 0 &&
                 v->u.calc.vmin == 0 && v->u.calc.vmax == 0 && !line_pct)
                 continue;
             v = ns_css_value_cow(out, i);
             v->u.calc.px += v->u.calc.em * my_font_px +
-                            v->u.calc.rem * root_px + viewport_refresh;
+                            v->u.calc.rem * root_px +
+                            v->u.calc.lh * my_line_px + viewport_refresh;
             v->u.calc.em = 0;
             v->u.calc.rem = 0;
+            v->u.calc.lh = 0;
             v->u.calc.vw = 0;
             v->u.calc.vh = 0;
             v->u.calc.vmin = 0;
@@ -32510,6 +32548,12 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         case NS_CSS_UNIT_REM:
             v = ns_css_value_cow(out, i);
             v->u.length.v *= root_px;
+            v->u.length.unit = NS_CSS_UNIT_PX;
+            break;
+        case NS_CSS_UNIT_LH:
+            if (i == NS_CSS_LINE_HEIGHT) break;
+            v = ns_css_value_cow(out, i);
+            v->u.length.v *= my_line_px;
             v->u.length.unit = NS_CSS_UNIT_PX;
             break;
         case NS_CSS_UNIT_VW:

@@ -3,6 +3,12 @@ Changelog:
 
 1.0.39-dev:
 ======
+* CSS: the `lh` unit resolves against the element's computed
+  line-height, in plain lengths and inside `calc()`. Inside `calc()` it
+  was read as px, so `calc(-0.5lh + 0.48em)`, the "line height trim"
+  that Webflow sites put on every heading's `::before` and `::after`,
+  added space instead of trimming it (a 71 px hero heading came out
+  154 px tall, 72 px in Chrome).
 * DOM: when an image finishes loading, layout is marked stale before its
   `load` event (and the window `load` event that may follow) runs, so a
   handler that measures the image or the page sees the image's real size.
