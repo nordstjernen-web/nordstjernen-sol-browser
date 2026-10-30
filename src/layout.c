@@ -983,6 +983,8 @@ ns_box_free(ns_box *box)
 
 static gboolean box_clips_children(const ns_box *b);
 static gboolean box_first_baseline(const ns_box *b, double *out);
+static gboolean inline_atomic_baseline(const ns_box *ab, double *out);
+static gboolean node_is_form_hit_target(const ns_node *n);
 static gboolean style_has_layout_containment(const ns_style *s);
 
 static gboolean
@@ -7167,8 +7169,8 @@ ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
                 ? ns_style_keyword(ab->style, NS_CSS_VERTICAL_ALIGN) : NULL;
             double a_asc = h;
             double ab_baseline;
-            if (!box_clips_children(ab) && box_first_baseline(ab, &ab_baseline))
-                a_asc = ab->margin.top + ab_baseline;
+            if (inline_atomic_baseline(ab, &ab_baseline))
+                a_asc = ab_baseline;
             if (va) {
                 if (strcmp(va, "middle") == 0)      a_asc = h / 2 + xh / 2;
                 else if (a->rise_px != 0)           a_asc = h + a->rise_px;
@@ -7203,8 +7205,8 @@ ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
             }
             double top = -h;
             double ab_baseline;
-            if (!box_clips_children(ab) && box_first_baseline(ab, &ab_baseline))
-                top = -(ab->margin.top + ab_baseline);
+            if (inline_atomic_baseline(ab, &ab_baseline))
+                top = -ab_baseline;
             if (ab->kind == NS_BOX_MATH) {
                 double mw = 0, ma = 0, md = 0;
                 ns_math_measure(ab->dom, fs, &mw, &ma, &md);
@@ -7993,6 +7995,47 @@ box_first_baseline(const ns_box *b, double *out)
     return FALSE;
 }
 
+static gboolean
+box_last_baseline(const ns_box *b, double *out)
+{
+    if (!b) return FALSE;
+    if (b->kind == NS_BOX_INLINE) {
+        if (b->first_baseline <= 0) return FALSE;
+        *out = b->margin.top + b->border.top + b->padding.top +
+               b->last_baseline;
+        return TRUE;
+    }
+    if (b->kind != NS_BOX_BLOCK || box_is_flex_container(b) ||
+        box_is_grid_container(b))
+        return box_first_baseline(b, out);
+    if (style_has_layout_containment(b->style)) return FALSE;
+    gboolean found = FALSE;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        if (style_is_absolute_or_fixed(c->style) || c->is_rendered_legend ||
+            float_side_of(c->style) >= 0)
+            continue;
+        double child_baseline;
+        if (box_last_baseline(c, &child_baseline)) {
+            *out = (c->y - b->y) + child_baseline;
+            found = TRUE;
+        }
+    }
+    return found;
+}
+
+static gboolean
+inline_atomic_baseline(const ns_box *ab, double *out)
+{
+    if (box_clips_children(ab)) return FALSE;
+    ns_display d = ns_css_display_of(ab->style);
+    gboolean block_flow = ab->kind == NS_BOX_BLOCK &&
+        (d.inner == NS_DISPLAY_INNER_FLOW || d.inner == NS_DISPLAY_INNER_FLOW_ROOT) &&
+        !box_is_flex_container(ab) && !box_is_grid_container(ab) &&
+        (!node_is_form_hit_target(ab->dom) ||
+         ns_node_is_element_named(ab->dom, "button"));
+    return block_flow ? box_last_baseline(ab, out) : box_first_baseline(ab, out);
+}
+
 static const char *
 flex_item_align(const ns_box *c, const char *container_align)
 {
@@ -8063,6 +8106,33 @@ inline_run_holds_only_abs_placeholders(const ns_box *box,
     return any;
 }
 
+static double
+inline_last_baseline(NsPangoLayout *layout, const double *line_heights,
+                     const double *line_offsets, int line_count,
+                     double first_baseline)
+{
+    if (line_count < 2) return first_baseline;
+    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    double top = 0;
+    double baseline = first_baseline;
+    for (int j = 0; j < line_count; j++) {
+        if (j == line_count - 1) {
+            NsPangoRectangle logical;
+            ns_pango_layout_iter_get_line_extents(it, NULL, &logical);
+            double ascent = (double)(ns_pango_layout_iter_get_baseline(it) -
+                                     logical.y) / NS_PANGO_SCALE;
+            double shift = line_offsets ? line_offsets[j]
+                : (line_heights[j] - (double)logical.height / NS_PANGO_SCALE) / 2.0;
+            baseline = top + ascent + shift;
+            break;
+        }
+        top += line_heights[j];
+        if (!ns_pango_layout_iter_next_line(it)) break;
+    }
+    ns_pango_layout_iter_free(it);
+    return baseline;
+}
+
 static void
 inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 {
@@ -8071,7 +8141,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         box->phantom_line = inline_run_has_empty_elements(box);
         box->content_width  = box->phantom_line ? content_width : 0;
         box->content_height = 0;
-        box->first_baseline = 0;
+        box->first_baseline = box->last_baseline = 0;
         return;
     }
 
@@ -8085,7 +8155,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         ns_vertical_measure(box, parent_style, &thickness, &length);
         box->content_width  = thickness;
         box->content_height = length;
-        box->first_baseline = 0;
+        box->first_baseline = box->last_baseline = 0;
         box->phantom_line = FALSE;
         box->inline_layout_cache_valid = FALSE;
         return;
@@ -8249,10 +8319,12 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         box->first_baseline += line_offsets[0];
     else if (line_heights[0] > measured_h)
         box->first_baseline += (line_heights[0] - measured_h) / 2.0;
+    box->last_baseline = inline_last_baseline(layout, line_heights, line_offsets,
+                                              line_count, box->first_baseline);
     if (inline_run_holds_only_abs_placeholders(box, parent_style)) {
         box->phantom_line = TRUE;
         box->content_height = 0;
-        box->first_baseline = 0;
+        box->first_baseline = box->last_baseline = 0;
     }
     if (cacheable) {
         box->inline_layout_cache_style = parent_style;
@@ -8326,7 +8398,6 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 }
 
 static gboolean style_blocks_hit_testing(const ns_style *s);
-static gboolean node_is_form_hit_target(const ns_node *n);
 
 static gboolean
 inline_attr_is_form_hit(ns_inline_attr_kind k)

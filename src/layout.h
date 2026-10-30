@@ -151,6 +151,7 @@ typedef struct ns_box {
 
     double content_width, content_height;
     double first_baseline;
+    double last_baseline;
     double definite_height;
     double definite_height_before_flex;
     double flex_pass_x, flex_pass_y;
