@@ -33,6 +33,99 @@ not compiled; the build is the final gate. After a QuickJS refresh, also build
 `-Dquickjs=quickjs` and fix the adapter if the binding changed (see
 [`quickjs.md`](quickjs.md)).
 
+## 2026-10-30 — QuickJS 270b8c9 → 7b5f588, Lexbor f4cbbcd → 145872a
+
+### QuickJS
+
+| | value |
+|---|---|
+| Fork base | `270b8c9` |
+| Updated to | `7b5f588` (master, "Use $RUNNER_TEMP instead of /tmp in CI recipes (#1861)"), less the commits listed as not taken |
+| Reported version | `0.17.0` (unchanged) |
+
+Nine upstream commits; three are taken, done as a three-way merge per file
+(base `270b8c9`).
+
+- **Memory safety** — freeing a `WeakMap` whose values are symbols that are
+  also keys of the same map could free records the finalizer had yet to
+  visit; the finalizer now drops every weak reference before freeing any
+  value (`25a005b`, #1844). `JS_ReadBigInt` leaked its partly read BigInt on
+  truncated input (`7a23d8e`).
+- **Language** — `Array.fromAsync` calls the iterator method and the mapping
+  function through an internal call instead of looking up `.call`, so a
+  patched `Function.prototype.call` no longer changes it (`c1ed194`, #1795).
+  `builtin-array-fromasync.h` is regenerated with the fork's own `qjsc`
+  (`qjsc -C -ss`), since the fork's `BC_VERSION` differs from upstream's.
+
+**Not taken.**
+
+- Asynchronous dynamic `import()` (`d4cd8f4`) conflicts with the fork's
+  import-phase plumbing in `js_dynamic_import_job` and `JS_LoadModule`
+  (`import defer`, `import source`) and changes the public `JS_LoadModule`
+  signature. It is an opt-in embedder API the browser does not use.
+- The Cosmopolitan libc build, CI and `os.platform` detection (`11e08c0`,
+  `231400a`, `cea851c`), upstream's CI runner change (`7b5f588`) and the WASI
+  reactor function-table export (`e680786`, a `CMakeLists.txt` block the fork
+  does not carry). Upstream's `.github/workflows/` files stay at `270b8c9`.
+- The new tests `tests/bug1795.js` and `tests/bug1835.js` and `api-test.c`
+  are not carried; `tests/test_bjson.js` takes upstream's truncated-BigInt
+  case.
+
+**Local modifications preserved.** `quickjs.c` merged without a conflict;
+every browser hook carries over unchanged. No API changed, so the binding and
+`-Dquickjs=quickjs` adapter are untouched, and the bytecode format is
+unchanged.
+
+### Lexbor
+
+| | value |
+|---|---|
+| Fork base | `f4cbbcd` |
+| Updated to | `145872a` (master, "HTML: grow tokenizer temporary buffers geometrically (#433)") |
+| Version | `3.1.0` (unchanged) |
+
+Six upstream commits; three touch the modules we carry (the three
+Selectors fixes, `4c44b8c`, `6ce5125` and `f6c1d06`, are in a module this
+fork does not build).
+
+- **HTML** — the `textarea` start tag switches to the "text" insertion mode
+  again after dropping a leading newline, so its contents are no longer
+  parsed by the "in body" rules, which recreated a stale formatting element
+  inside it: `<div><a></div><textarea>ab</textarea>x` gave
+  `<textarea><a>ab</a></textarea>` (`0c657de`, #434).
+- **HTML** — the tree builder caches, per entry of the stack of open
+  elements, whether a `p` element is in button scope, so a start tag such as
+  `div` no longer walks the whole stack and N nested elements parse in linear
+  time instead of quadratic (`730b667`, #437).
+- **Tokenizer** — `lxb_html_tokenizer_temp_realloc()` grows its buffer
+  geometrically instead of by 4 KB each time, checks the new size for
+  overflow, and keeps the old buffer when `realloc` fails instead of losing
+  it (`145872a`, #433).
+
+All six files (`html/tokenizer.h`, `html/tree.c`, `html/tree.h`,
+`html/tree/open_elements.c`, `html/tree/open_elements.h`,
+`html/tree/insertion_mode/in_body.c`) carry no local modification, so
+upstream's versions are copied. The new tests are not carried.
+
+The memory-safety fixes upstream made since the previous fork bases are all
+in the fork already: `lexbor_mraw_realloc()` (`f3f6fa7`),
+`lxb_dom_character_data_replace()` (`cf31487`, #408) and the encoder and
+decoder bounds checks (`47be1dc`, `5d3a6f5`) since `327a8b6`, and the
+`lexbor_array_obj_t` sizes (#428) since `f4cbbcd`.
+
+### Verification
+
+- `meson compile -C builddir` (MSYS2 MINGW64, GCC) builds and links with no
+  warnings.
+- `./scripts/dev.sh smoke` passes.
+- A headless page gives the expected results: 50 rounds of `WeakMap`s
+  holding symbol keys and symbol values, some values also keys, are freed
+  without a fault; `Array.fromAsync` with a mapping function; the two
+  textarea cases above and a foster-parented textarea; a `p` under 400
+  nested `div`s closed by a following `div`; a `div` after a `button` inside
+  a `p` staying inside the button; the adoption agency case
+  `<p>1<b>2<p>3<i>4</b>5<div>6`; and a 200,000-character attribute value.
+
 ## 2026-10-22 — QuickJS 5271a40 → 270b8c9
 
 | | value |

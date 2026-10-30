@@ -3,6 +3,16 @@ Changelog:
 
 1.0.40-dev:
 ======
+* JavaScript: QuickJS fork synced with quickjs-ng master `7b5f588`. Freeing
+  a `WeakMap` whose symbol values are also its keys no longer uses freed
+  memory, reading a truncated BigInt from stored data no longer leaks, and
+  `Array.fromAsync` no longer depends on a patched `Function.prototype.call`.
+* HTML: lexbor refreshed to upstream master `145872a`. A `<textarea>` no
+  longer picks up a formatting element left open before it
+  (`<div><a></div><textarea>ab</textarea>` put an `<a>` inside the
+  textarea), deeply nested elements parse in linear time instead of
+  quadratic, and the tokenizer's temporary buffer grows geometrically and
+  survives a failed reallocation.
 * Windows and macOS packages: the bundled LGPL FFmpeg is 8.1.3, up from
   8.1.1, for CVE-2026-8461 and CVE-2026-30999 (fixed in 8.1.2).
 * SVG: `getComputedTextLength()` and `getSubStringLength()` measure SVG
