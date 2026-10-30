@@ -3,6 +3,9 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Rendering: text in an SVG image (`<img src=*.svg>`, CSS backgrounds)
+  without a `font-family` uses the default serif font, as in Chrome and as
+  HTML text does. It was drawn in sans-serif.
 * WOFF2 web fonts are decoded by FreeType wherever it can: the in-tree
   decoder (`src/woff2.c`) is compiled only when the FreeType the build
   finds predates 2.10.2 or was built without Brotli, as Homebrew's is,
