@@ -14040,8 +14040,11 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
     if (content_min) {
         double base_sum = 0, auto_sum = 0, content_sum = 0;
         for (int i = 0; i < tr->n; i++) {
-            if (!track_is_intrinsic(tr->tracks[i].kind)) continue;
-            auto_base[i] = content_min[i] > 0 ? content_min[i] : 0;
+            const ns_css_track *t = &tr->tracks[i];
+            if (!track_is_intrinsic(t->kind)) continue;
+            auto_base[i] = t->has_min && !track_is_intrinsic(t->min_kind)
+                ? track_min_px(t, pct_basis)
+                : content_min[i] > 0 ? content_min[i] : 0;
             double lim = content_max ? content_max[i] : auto_base[i];
             auto_lim[i] = lim > auto_base[i] ? lim : auto_base[i];
             if (tr->tracks[i].kind == NS_CSS_TRACK_MAX_CONTENT)
