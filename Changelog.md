@@ -3,6 +3,13 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Grid: a track like `minmax(520px, auto)` starts from its fixed minimum
+  when the free space is shared out, as the grid spec says. Its base
+  size was taken from the content's min-content size and the minimum was
+  only applied at the end, so the other auto tracks were handed space
+  that the minimum then took back, and the grid overflowed its
+  container. Fox News's lead story was 1064 px wide in an 899 px column,
+  with its headline cut off.
 * Layout: a percentage height resolves against the nearest block
   container, as CSS 2.1 defines the containing block, and skips inline
   ancestors such as `<picture>` or `<span>`. An `<img style="height:
