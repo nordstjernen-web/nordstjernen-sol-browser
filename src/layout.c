@@ -8398,7 +8398,6 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 }
 
 static gboolean style_blocks_hit_testing(const ns_style *s);
-static gboolean node_is_form_hit_target(const ns_node *n);
 
 static gboolean
 inline_attr_is_form_hit(ns_inline_attr_kind k)
