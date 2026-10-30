@@ -19,7 +19,7 @@ option('gstreamer', type: 'feature', value: 'auto',
 option('audio', type: 'feature', value: 'auto',
        description: 'Build the nordstjernen-audio playback helper (SDL2 output + minimp3/pl_mpeg decode). Auto-detects SDL2; disable for engine-only or JNI builds without SDL2.')
 option('webgpu', type: 'feature', value: 'auto',
-       description: 'Build the WebGPU API (navigator.gpu) over the external wgpu-native library. Auto: required on glibc Linux, macOS and Windows (x86_64/aarch64), where the pinned release is fetched by a meson wrap when neither pkg-config wgpu_native nor -Dwgpu_native_root provides it; optional elsewhere. -Dwebgpu=enabled hard-requires it everywhere, -Dwebgpu=disabled never builds it. Even when built, WebGPU stays off at runtime until the browser is started with --enable-webgpu (or NS_WEBGPU_ALLOW=1).')
+       description: 'Build the WebGPU API (navigator.gpu) over the external wgpu-native library. Auto: required on glibc Linux, macOS and Windows (x86_64/aarch64), where the pinned release is fetched by a meson wrap when neither pkg-config wgpu_native nor -Dwgpu_native_root provides it; optional elsewhere. -Dwebgpu=enabled hard-requires it everywhere, -Dwebgpu=disabled never builds it. When built, WebGPU is on at runtime by default; Settings can turn it off, and --enable-webgpu (or NS_WEBGPU_ALLOW=1) overrides that.')
 option('wgpu_native_root', type: 'string', value: '',
        description: 'Root of an extracted wgpu-native release (expects include/webgpu/webgpu.h and lib/libwgpu_native.{so,a}). Used only when -Dwebgpu is enabled and pkg-config cannot find wgpu_native.')
 option('web-text-lib', type: 'feature', value: 'auto',

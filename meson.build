@@ -262,7 +262,8 @@ endif
 # subprojects/wgpu-native-<platform>.wrap and linked statically. On those
 # platforms WebGPU, like WebGL, is a required part of the build; elsewhere
 # (the BSDs, musl, Android, iOS) it stays optional. -Dwebgpu=disabled always
-# drops it. At runtime it stays off until --enable-webgpu (NS_WEBGPU_ALLOW=1).
+# drops it. At runtime it is on by default, like WebGL; Settings can turn it
+# off, and --enable-webgpu (NS_WEBGPU_ALLOW=1) overrides that.
 have_webgpu = false
 webgpu_dep = declare_dependency()
 webgpu_feature = get_option('webgpu')
@@ -300,7 +301,7 @@ if not webgpu_feature.disabled() and not is_mobile
     )
     add_project_arguments('-DND_HAVE_WEBGPU=1', language: 'c')
     have_webgpu = true
-    message('WebGPU: built over wgpu-native -- runtime-gated by --enable-webgpu')
+    message('WebGPU: built over wgpu-native -- on by default, switchable in Settings')
   elif webgpu_required
     error('WebGPU needs wgpu-native: install its pkg-config file (wgpu_native), ' +
           'pass -Dwgpu_native_root=/path/to/extracted/release, or ' +
