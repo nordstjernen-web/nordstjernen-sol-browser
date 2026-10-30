@@ -39,6 +39,7 @@ struct ns_image {
     GBytes      *svg_source;
     int          natural_width;
     int          natural_height;
+    double       natural_ratio_only;
     long         http_status;
     char        *error;
     gint64       failed_at_us;

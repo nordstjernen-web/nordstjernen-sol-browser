@@ -254,9 +254,10 @@ ns_image_supports_mime(const char *mime)
 
 static ns_texture *
 image_decode_bytes_full(const guchar *data, gsize len, int *out_w, int *out_h,
-                        gboolean *out_svg)
+                        gboolean *out_svg, double *out_ratio_only)
 {
     if (out_svg) *out_svg = FALSE;
+    if (out_ratio_only) *out_ratio_only = 0;
     if (!data || len == 0) return NULL;
 
     if (len >= 4 && data[0] == 0 && data[1] == 0 &&
@@ -294,7 +295,8 @@ image_decode_bytes_full(const guchar *data, gsize len, int *out_w, int *out_h,
 #endif
 
     if (ns_svg_bytes_look_like_svg(data, len)) {
-        ns_texture *tex = ns_svg_decode_bytes(data, len, out_w, out_h);
+        ns_texture *tex = ns_svg_decode_bytes_ratio(data, len, out_w, out_h,
+                                                    out_ratio_only);
         if (tex && out_svg) *out_svg = TRUE;
         if (tex) return tex;
     }
@@ -307,7 +309,7 @@ image_decode_bytes_full(const guchar *data, gsize len, int *out_w, int *out_h,
 ns_texture *
 ns_image_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
 {
-    return image_decode_bytes_full(data, len, out_w, out_h, NULL);
+    return image_decode_bytes_full(data, len, out_w, out_h, NULL, NULL);
 }
 
 static guint8 *
@@ -475,6 +477,7 @@ typedef struct {
     ns_texture *tex;
     GArray     *frames;
     GBytes     *svg;
+    double      ratio_only;
     int         w;
     int         h;
     int         loops;
@@ -504,7 +507,7 @@ ns_image_decode_body(const guchar *data, gsize len)
         g_array_free(frames, TRUE);
     }
     gboolean svg = FALSE;
-    d.tex = image_decode_bytes_full(data, len, &w, &h, &svg);
+    d.tex = image_decode_bytes_full(data, len, &w, &h, &svg, &d.ratio_only);
     if (d.tex && svg) d.svg = g_bytes_new(data, len);
     d.w = w;
     d.h = h;
@@ -535,6 +538,7 @@ ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
         img->svg_source = g_steal_pointer(&d->svg);
         img->natural_width  = d->w;
         img->natural_height = d->h;
+        img->natural_ratio_only = d->ratio_only;
         img->loaded = TRUE;
     } else {
         img->failed = TRUE;
@@ -977,10 +981,13 @@ ns_image_cache_insert_encoded(ns_image_cache *cache, const char *url,
     }
 
     gboolean svg = FALSE;
-    ns_texture *tex = image_decode_bytes_full(data, len, &w, &h, &svg);
+    double ratio_only = 0;
+    ns_texture *tex = image_decode_bytes_full(data, len, &w, &h, &svg,
+                                              &ratio_only);
     if (!tex) return NULL;
     ns_image *img = ns_image_cache_insert_loaded(cache, url, tex, w, h);
     if (img && svg && !img->svg_source) img->svg_source = g_bytes_new(data, len);
+    if (img) img->natural_ratio_only = ratio_only;
     return img;
 }
 

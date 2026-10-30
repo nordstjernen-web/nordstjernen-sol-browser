@@ -3,6 +3,12 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Layout: an image with an aspect ratio but no natural width or height
+  (an SVG with only a `viewBox`) fills the available width when its
+  `width` and `height` are auto, and contributes nothing to min- and
+  max-content sizes, as in Chrome (CSS 2.1 10.3.2). It was laid out at a
+  made-up 150 px height. Inside a float or inline-block it is 0x0, in a
+  flex or grid item or a block it fills the container.
 * Rendering: SVG images (`<img>` and CSS backgrounds) are drawn from the
   vector source at the size they appear on screen. They were rasterized
   once at their natural size and scaled, so a 24 px icon shown at 96 px,

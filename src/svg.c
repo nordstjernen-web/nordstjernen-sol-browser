@@ -3789,6 +3789,14 @@ ns_svg_render_bytes(cairo_t *cr, const guchar *data, gsize len,
 ns_texture *
 ns_svg_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
 {
+    return ns_svg_decode_bytes_ratio(data, len, out_w, out_h, NULL);
+}
+
+ns_texture *
+ns_svg_decode_bytes_ratio(const guchar *data, gsize len, int *out_w, int *out_h,
+                          double *out_ratio_only)
+{
+    if (out_ratio_only) *out_ratio_only = 0;
     if (!data || len == 0 || len > NS_SVG_MAX_INPUT_BYTES) return NULL;
     if (!ns_svg_bytes_look_like_svg(data, len)) return NULL;
 
@@ -3810,6 +3818,7 @@ ns_svg_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
                        NS_SVG_DEFAULT_OBJECT_H);
         w = size.ratio * k;
         h = k;
+        if (out_ratio_only) *out_ratio_only = size.ratio;
     }
     if (!isfinite(w) || w <= 0) w = NS_SVG_DEFAULT_DIM_PX;
     if (!isfinite(h) || h <= 0) h = NS_SVG_DEFAULT_DIM_PX;
