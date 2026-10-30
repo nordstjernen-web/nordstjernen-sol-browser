@@ -3,6 +3,20 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Networking: the DNS-over-HTTPS setting (`doh_url`, `NS_DOH_URL`) is
+  applied. Every libcurl option the engine guarded with `#ifdef` is an
+  enum constant rather than a macro, so the preprocessor never saw it and
+  the guarded code was never compiled: names were always resolved by the
+  system resolver whatever `doh_url` said, the TLS 1.3 cipher order was
+  never set, and EventSource and the audio helper never restricted the
+  protocols they fetch or follow redirects to. All of these options
+  predate the libcurl 8.5 floor, so they are now set unconditionally.
+  The audio helper's protocol list also dropped `data`, which is not a
+  libcurl scheme and made libcurl reject the whole list. The share-object
+  lines for the connection, PSL and HSTS caches, equally never compiled,
+  are removed rather than enabled: libcurl does not support sharing
+  connections or HSTS between concurrent threads, and the preconnect
+  thread uses the same share object as the network thread.
 * Text layout: the stand-in glyph ids that kept icon-font ligatures
   working are built only against HarfBuzz 11.4 to 14.5. Those releases
   store coverage-cache entries without checking the glyph id, so the

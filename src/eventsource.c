@@ -375,14 +375,10 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
     ns_net_apply_curl_proxy(curl, es->url);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 20L);
-#ifdef CURLOPT_PROTOCOLS_STR
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-#endif
-#ifdef CURLOPT_REDIR_PROTOCOLS_STR
     curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR,
                      g_str_has_prefix(es->url, "https://") ? "https"
                                                             : "http,https");
-#endif
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
