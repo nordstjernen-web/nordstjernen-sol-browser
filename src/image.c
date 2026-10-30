@@ -112,6 +112,7 @@ ns_image_free(gpointer p)
     g_free(img->timing_allow_origin);
     g_free(img->error);
     if (img->render_surface) cairo_surface_destroy(img->render_surface);
+    if (img->svg_source) g_bytes_unref(img->svg_source);
     if (img->anim_frames) g_array_free(img->anim_frames, TRUE);
     else ns_texture_unref(img->texture);
     g_free(img);
@@ -176,6 +177,7 @@ ns_image_cache_purge(ns_image_cache *cache, ns_image *img)
         cairo_surface_destroy(img->render_surface);
         img->render_surface = NULL;
     }
+    g_clear_pointer(&img->svg_source, g_bytes_unref);
     img->anim_current = 0;
     img->anim_total_ms = 0;
     img->anim_start_us = 0;
@@ -250,9 +252,11 @@ ns_image_supports_mime(const char *mime)
 }
 
 
-ns_texture *
-ns_image_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
+static ns_texture *
+image_decode_bytes_full(const guchar *data, gsize len, int *out_w, int *out_h,
+                        gboolean *out_svg)
 {
+    if (out_svg) *out_svg = FALSE;
     if (!data || len == 0) return NULL;
 
     if (len >= 4 && data[0] == 0 && data[1] == 0 &&
@@ -291,12 +295,19 @@ ns_image_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
 
     if (ns_svg_bytes_look_like_svg(data, len)) {
         ns_texture *tex = ns_svg_decode_bytes(data, len, out_w, out_h);
+        if (tex && out_svg) *out_svg = TRUE;
         if (tex) return tex;
     }
 
     (void)out_w;
     (void)out_h;
     return NULL;
+}
+
+ns_texture *
+ns_image_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
+{
+    return image_decode_bytes_full(data, len, out_w, out_h, NULL);
 }
 
 static guint8 *
@@ -463,6 +474,7 @@ ns_image_pixel_frames_for(const guchar *data, gsize len, int *out_w, int *out_h,
 typedef struct {
     ns_texture *tex;
     GArray     *frames;
+    GBytes     *svg;
     int         w;
     int         h;
     int         loops;
@@ -471,7 +483,7 @@ typedef struct {
 static ns_img_decoded
 ns_image_decode_body(const guchar *data, gsize len)
 {
-    ns_img_decoded d = { NULL, NULL, 0, 0, 0 };
+    ns_img_decoded d = { 0 };
     int w = 0, h = 0, loops = 0;
     GArray *frames = NULL;
     GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h,
@@ -491,7 +503,9 @@ ns_image_decode_body(const guchar *data, gsize len)
         g_array_set_clear_func(frames, ns_image_anim_frame_clear);
         g_array_free(frames, TRUE);
     }
-    d.tex = ns_image_decode_bytes(data, len, &w, &h);
+    gboolean svg = FALSE;
+    d.tex = image_decode_bytes_full(data, len, &w, &h, &svg);
+    if (d.tex && svg) d.svg = g_bytes_new(data, len);
     d.w = w;
     d.h = h;
     return d;
@@ -518,6 +532,7 @@ ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
         img->loaded = TRUE;
     } else if (d->tex) {
         img->texture = d->tex;
+        img->svg_source = g_steal_pointer(&d->svg);
         img->natural_width  = d->w;
         img->natural_height = d->h;
         img->loaded = TRUE;
@@ -528,6 +543,7 @@ ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
             content_type && *content_type ? content_type : "unknown type",
             (unsigned)body_len);
     }
+    g_clear_pointer(&d->svg, g_bytes_unref);
 }
 
 typedef struct {
@@ -574,13 +590,14 @@ on_image_decoded(GObject *src, GAsyncResult *res, gpointer user_data)
                 g_array_free(d->frames, TRUE);
             }
             if (d->tex) ns_texture_unref(d->tex);
+            if (d->svg) g_bytes_unref(d->svg);
             g_free(d);
         }
         g_free(pending);
         ns_decode_job_free(job);
         return;
     }
-    ns_img_decoded result = { NULL, NULL, 0, 0, 0 };
+    ns_img_decoded result = { 0 };
     if (d) {
         result = *d;
         g_free(d);
@@ -959,9 +976,12 @@ ns_image_cache_insert_encoded(ns_image_cache *cache, const char *url,
         }
     }
 
-    ns_texture *tex = ns_image_decode_bytes(data, len, &w, &h);
+    gboolean svg = FALSE;
+    ns_texture *tex = image_decode_bytes_full(data, len, &w, &h, &svg);
     if (!tex) return NULL;
-    return ns_image_cache_insert_loaded(cache, url, tex, w, h);
+    ns_image *img = ns_image_cache_insert_loaded(cache, url, tex, w, h);
+    if (img && svg && !img->svg_source) img->svg_source = g_bytes_new(data, len);
+    return img;
 }
 
 void

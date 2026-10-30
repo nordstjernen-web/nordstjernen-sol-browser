@@ -3,6 +3,17 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Rendering: SVG images (`<img>` and CSS backgrounds) are drawn from the
+  vector source at the size they appear on screen. They were rasterized
+  once at their natural size and scaled, so a 24 px icon shown at 96 px,
+  and every SVG on a 2x display, came out blurry. An SVG drawn into a box
+  of another shape is now fitted by its own `preserveAspectRatio` (a
+  square logo in a 200x100 box stays square) instead of being stretched,
+  as in Chrome. Only images the SVG decoder produced take this path (a
+  PNG or JPEG with `<svg` in its metadata stays a raster); the parsed SVG
+  is kept per image, sizes are rounded up to quarter-octave steps so a
+  scale animation re-renders a few times instead of every frame, and all
+  SVG rasters share a 96 MB budget (2048x2048 per raster at most).
 * CSS: a custom property whose value is `var(--x, initial)` (or another
   CSS-wide keyword in a fallback) is resolved against the final cascaded
   values of the element's other custom properties. It was expanded in

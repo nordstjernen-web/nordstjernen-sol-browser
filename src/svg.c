@@ -3736,24 +3736,54 @@ svg_render_document(cairo_t *cr, ns_node *doc, const ns_node *root,
     svg_sheets_free(&sheets);
 }
 
+struct ns_svg_doc {
+    ns_node       *doc;
+    const ns_node *root;
+};
+
+ns_svg_doc *
+ns_svg_doc_parse(const guchar *data, gsize len)
+{
+    if (!data || len == 0 || len > NS_SVG_MAX_INPUT_BYTES) return NULL;
+    if (!ns_svg_bytes_look_like_svg(data, len)) return NULL;
+    ns_node *doc = ns_html_parse((const char *)data, (gssize)len);
+    if (!doc) return NULL;
+    const ns_node *root = svg_find_root(doc);
+    if (!root) {
+        ns_node_free(doc);
+        return NULL;
+    }
+    ns_svg_doc *d = g_new(ns_svg_doc, 1);
+    d->doc = doc;
+    d->root = root;
+    return d;
+}
+
+gboolean
+ns_svg_doc_render(cairo_t *cr, ns_svg_doc *d, double width, double height)
+{
+    if (!cr || !d || width <= 0 || height <= 0) return FALSE;
+    svg_render_document(cr, d->doc, d->root, width, height);
+    return TRUE;
+}
+
+void
+ns_svg_doc_free(ns_svg_doc *d)
+{
+    if (!d) return;
+    ns_node_free(d->doc);
+    g_free(d);
+}
+
 gboolean
 ns_svg_render_bytes(cairo_t *cr, const guchar *data, gsize len,
                     double width, double height)
 {
-    if (!cr || !data || len == 0 || len > NS_SVG_MAX_INPUT_BYTES) return FALSE;
-    if (width <= 0 || height <= 0) return FALSE;
-    if (!ns_svg_bytes_look_like_svg(data, len)) return FALSE;
-
-    ns_node *doc = ns_html_parse((const char *)data, (gssize)len);
-    if (!doc) return FALSE;
-    const ns_node *root = svg_find_root(doc);
-    if (!root) {
-        ns_node_free(doc);
-        return FALSE;
-    }
-    svg_render_document(cr, doc, root, width, height);
-    ns_node_free(doc);
-    return TRUE;
+    if (!cr || width <= 0 || height <= 0) return FALSE;
+    ns_svg_doc *d = ns_svg_doc_parse(data, len);
+    gboolean drawn = ns_svg_doc_render(cr, d, width, height);
+    ns_svg_doc_free(d);
+    return drawn;
 }
 
 ns_texture *

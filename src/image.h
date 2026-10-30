@@ -36,6 +36,7 @@ struct ns_image {
     char        *cors_allow_origin;
     ns_texture  *texture;
     void        *render_surface;
+    GBytes      *svg_source;
     int          natural_width;
     int          natural_height;
     long         http_status;
