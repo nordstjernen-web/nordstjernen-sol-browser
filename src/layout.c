@@ -272,13 +272,27 @@ box_height_known_for_children(const ns_box *p)
     return p->block_size_indefinite ? -1 : 0;
 }
 
+static gboolean
+box_is_inline_flow(const ns_box *b)
+{
+    if (!b->style) return TRUE;
+    ns_display d = ns_css_display_of(b->style);
+    return d.box == NS_DISPLAY_BOX_NORMAL &&
+           d.internal == NS_DISPLAY_INTERNAL_NONE &&
+           d.outer == NS_DISPLAY_OUTER_INLINE &&
+           d.inner == NS_DISPLAY_INNER_FLOW;
+}
+
 static double
 containing_block_definite_height(const ns_box *box)
 {
     double known = box_cb_height_known(box);
     if (known != 0) return known;
     const ns_box *p = box ? box->parent : NULL;
-    while (p && !p->style) p = p->parent;
+    gboolean in_flow = box && box->style &&
+                       !style_is_absolute_or_fixed(box->style);
+    while (p && (!p->style || (in_flow && box_is_inline_flow(p))))
+        p = p->parent;
     if (!p) return -1;
     known = box_height_known_for_children(p);
     if (known != 0) return known;

@@ -3,6 +3,13 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Layout: a percentage height resolves against the nearest block
+  container, as CSS 2.1 defines the containing block, and skips inline
+  ancestors such as `<picture>` or `<span>`. An `<img style="height:
+  100%">` inside a `<picture>` resolved against the inline picture,
+  found no height and fell back to its natural ratio, so image cards
+  with `aspect-ratio` boxes (AP News, Amazon, Canva) showed the wrong
+  crop and size.
 * CSS: a custom property whose value is `var(--x, initial)` (or another
   CSS-wide keyword in a fallback) is resolved against the final cascaded
   values of the element's other custom properties. It was expanded in
