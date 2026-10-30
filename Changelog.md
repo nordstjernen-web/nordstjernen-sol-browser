@@ -20,6 +20,13 @@ Changelog:
   is kept per image, sizes are rounded up to quarter-octave steps so a
   scale animation re-renders a few times instead of every frame, and all
   SVG rasters share a 96 MB budget (2048x2048 per raster at most).
+* Layout: a percentage height resolves against the nearest block
+  container, as CSS 2.1 defines the containing block, and skips inline
+  ancestors such as `<picture>` or `<span>`. An `<img style="height:
+  100%">` inside a `<picture>` resolved against the inline picture,
+  found no height and fell back to its natural ratio, so image cards
+  with `aspect-ratio` boxes (AP News, Amazon, Canva) showed the wrong
+  crop and size.
 * CSS: a custom property whose value is `var(--x, initial)` (or another
   CSS-wide keyword in a fallback) is resolved against the final cascaded
   values of the element's other custom properties. It was expanded in
