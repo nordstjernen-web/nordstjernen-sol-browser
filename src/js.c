@@ -40161,6 +40161,43 @@ ns_element_getBBox(JSContext *ctx, JSValueConst this_val,
 }
 
 static double
+ns_svg_text_advance(JSContext *ctx, const ns_node *n)
+{
+    ns_svg_geometry geometry;
+    ns_svg_measure_node(ctx, n, &geometry);
+    return geometry.found && geometry.rendered ? geometry.width : 0;
+}
+
+static JSValue
+ns_element_getComputedTextLength(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    return JS_NewFloat64(ctx, ns_svg_text_advance(ctx, ns_unwrap_element(this_val)));
+}
+
+static JSValue
+ns_element_getSubStringLength(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    uint32_t first = 0, count = 0;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "getSubStringLength: 2 arguments required");
+    if (JS_ToUint32(ctx, &first, argv[0]) || JS_ToUint32(ctx, &count, argv[1]))
+        return JS_EXCEPTION;
+    char *text = n ? ns_node_collect_text(n) : NULL;
+    glong total = text ? g_utf8_strlen(text, -1) : 0;
+    g_free(text);
+    if (first >= (uint32_t)total)
+        return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
+                                      "getSubStringLength: index out of range");
+    uint32_t chars = MIN(count, (uint32_t)total - first);
+    double advance = ns_svg_text_advance(ctx, n);
+    return JS_NewFloat64(ctx, advance * chars / (double)total);
+}
+
+static double
 ns_svg_path_length(GArray *pts, double at, double *out_x, double *out_y)
 {
     double total = 0;
@@ -53595,6 +53632,8 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("hasChildNodes",           0, ns_element_hasChildNodes),
     JS_CFUNC_DEF("getBoundingClientRect",   0, ns_element_getBoundingClientRect),
     JS_CFUNC_DEF("getBBox",                 0, ns_element_getBBox),
+    JS_CFUNC_DEF("getComputedTextLength",   0, ns_element_getComputedTextLength),
+    JS_CFUNC_DEF("getSubStringLength",      2, ns_element_getSubStringLength),
     JS_CFUNC_DEF("getCTM",                  0, ns_element_getCTM),
     JS_CFUNC_DEF("getScreenCTM",            0, ns_element_getScreenCTM),
     JS_CFUNC_DEF("getTotalLength",          0, ns_element_getTotalLength),
