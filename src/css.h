@@ -984,6 +984,7 @@ typedef struct ns_css_rule {
     GHashTable *vars;
     GHashTable *var_important;
     GArray     *pending;
+    char       *lazy_decls;
     char       *layer_name;
     char       *container_condition;
     ns_css_container_query *container_query;
@@ -1062,6 +1063,7 @@ typedef struct ns_css_stylesheet {
     gboolean   has_container_units;
     gboolean   has_hover_rules;
     gboolean   has_active_rules;
+    gboolean   lazy_decls;
     gboolean   cached;
     guint      pseudo_mask;
     guint64    serial;
@@ -1087,6 +1089,7 @@ int         ns_css_layer_rank(GHashTable *ranks, const char *layer_name);
 #define NS_CSS_IMPORT_MAX_DEPTH 8
 
 ns_css_stylesheet *ns_css_stylesheet_parse(const char *text, gssize len);
+ns_css_stylesheet *ns_css_stylesheet_parse_author(const char *text, gssize len);
 const ns_css_stylesheet *ns_css_ua_stylesheet(void);
 ns_css_stylesheet *ns_css_stylesheet_parse_detached(const char *text, gssize len);
 gboolean           ns_css_supports_declaration(const char *property,

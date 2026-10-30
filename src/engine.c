@@ -1348,7 +1348,7 @@ large_style_entry(ns_node *style, guint64 hash, gsize len, const char *base_url)
         return e;
     char *css = ns_css_style_element_text(style);
     if (!css) return NULL;
-    ns_css_stylesheet *sheet = ns_css_stylesheet_parse(css, -1);
+    ns_css_stylesheet *sheet = ns_css_stylesheet_parse_author(css, -1);
     gboolean media_dep = css_has_viewport_media(css);
     g_free(css);
     if (!sheet) return NULL;
@@ -1394,7 +1394,7 @@ adopted_sheet_parse(ns_node *root, const char *css, adopted_sheet_key *key,
 {
     char *scoped = ns_css_shadow_adopted_css(root);
     if (!scoped) return NULL;
-    ns_css_stylesheet *sheet = ns_css_stylesheet_parse(scoped, -1);
+    ns_css_stylesheet *sheet = ns_css_stylesheet_parse_author(scoped, -1);
     gboolean media = css_has_viewport_media(scoped);
     g_free(scoped);
     if (!sheet) return NULL;

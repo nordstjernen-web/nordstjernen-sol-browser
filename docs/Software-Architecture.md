@@ -270,6 +270,14 @@ pseudo-element and a custom-property (`--var`) map.
   order, with `!important`, `revert`, `inherit`/`initial`, and inherited
   fill-down resolved in `cascade_for` (`src/css.c:29322`). Font-relative
   and viewport/container units are resolved during the cascade.
+- **Lazy declarations.** Author sheets from `<style>`, `<link>`,
+  `@import` and adopted sheets (`ns_css_stylesheet_parse_author`) parse
+  selectors up front but keep each rule's declaration block as text
+  (`ns_css_rule.lazy_decls`) until a selector first matches; the block is
+  then parsed and its URLs resolved against the sheet's base. Large sites
+  ship CSS for their whole app (3.7 MB on YouTube), and most rules never
+  match the page. A block whose parentheses or brackets do not balance
+  is parsed at once, because its end is only known by parsing it.
 - **Selectors.** `ns_css_selector_matches` (`src/css.c:25737`) matches
   the rightmost compound then walks combinators right-to-left (child,
   `+`, `~`, descendant). The pseudo-class/element coverage is broad,
