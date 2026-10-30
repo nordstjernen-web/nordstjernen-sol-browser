@@ -13,6 +13,8 @@ Changelog:
   textarea), deeply nested elements parse in linear time instead of
   quadratic, and the tokenizer's temporary buffer grows geometrically and
   survives a failed reallocation.
+* Windows and macOS packages: the bundled LGPL FFmpeg is 8.1.3, up from
+  8.1.1, for CVE-2026-8461 and CVE-2026-30999 (fixed in 8.1.2).
 * SVG: `getComputedTextLength()` and `getSubStringLength()` measure SVG
   text. Charts that size their axes from label widths threw on the
   missing methods and drew no data; Google Finance showed an empty price

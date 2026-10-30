@@ -16,14 +16,14 @@
 # Prints the prefix on success; point pkg-config at "<prefix>/lib/pkgconfig".
 #
 # Env:
-#   FFMPEG_VERSION   release tag without the leading n (default 8.1.1)
+#   FFMPEG_VERSION   release tag without the leading n (default 8.1.3)
 #   NS_FFMPEG_NOASM  set to 1 to configure --disable-x86asm (no nasm needed)
 #   NS_FFMPEG_HOST   cross prefix passed as --cross-prefix (e.g. for mingw)
 #   FFMPEG_EXTRA_CONFIGURE  extra configure flags (target-os/arch on cross)
 set -euo pipefail
 
 PREFIX=${1:?usage: build-ffmpeg-lgpl.sh <install-prefix>}
-VER=${FFMPEG_VERSION:-8.1.1}
+VER=${FFMPEG_VERSION:-8.1.3}
 JOBS=${NS_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -31,7 +31,7 @@ trap 'rm -rf "$WORK"' EXIT
 log() { printf '[ffmpeg-lgpl] %s\n' "$*" >&2; }
 
 case "$VER" in
-    8.1.1) SHA256=1b856f26a07082b6879f3e5300d81e8c7ce3b410ade5898b14382d90c2904634 ;;
+    8.1.3) SHA256=bd458826a039b48a9606e794554c75eb4c4984b84173f7afa3128eae89336f2b ;;
     *)     SHA256=${FFMPEG_SHA256:-} ;;
 esac
 [ -n "$SHA256" ] || { log "ERROR: no pinned checksum for FFmpeg ${VER}; set FFMPEG_SHA256"; exit 1; }
