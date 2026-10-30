@@ -7101,6 +7101,23 @@ ns_inline_range_geometry(const ns_inline_attr *r, const ns_box *box,
     return TRUE;
 }
 
+typedef enum inline_line_edge {
+    INLINE_EDGE_NONE,
+    INLINE_EDGE_TOP,
+    INLINE_EDGE_BOTTOM,
+} inline_line_edge;
+
+static inline_line_edge
+inline_atomic_edge_of(const ns_box *atomic)
+{
+    const char *va = atomic && atomic->style
+        ? ns_style_keyword(atomic->style, NS_CSS_VERTICAL_ALIGN) : NULL;
+    if (!va) return INLINE_EDGE_NONE;
+    if (strcmp(va, "top") == 0) return INLINE_EDGE_TOP;
+    if (strcmp(va, "bottom") == 0) return INLINE_EDGE_BOTTOM;
+    return INLINE_EDGE_NONE;
+}
+
 static void
 inline_apply_toggle_shapes(NsPangoAttrList *list, const ns_box *box)
 {
@@ -7179,6 +7196,11 @@ ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
             double fs = length_or(ab->style ? ab->style->values[NS_CSS_FONT_SIZE]
                                             : NULL, 16);
             double asc = fs * 0.8, desc = fs * 0.2, xh = fs * 0.5;
+            ns_css_font_metrics fm = { 0 };
+            if (ab->style && ns_paint_style_font_metrics(ab->style, &fm)) {
+                asc = fm.ascent_px;
+                desc = fm.descent_px;
+            }
             double top = -h;
             double ab_baseline;
             if (!box_clips_children(ab) && box_first_baseline(ab, &ab_baseline))
@@ -7614,20 +7636,47 @@ inline_run_shape(const NsPangoLayoutRun *run)
     return NULL;
 }
 
-static gboolean
-inline_atomic_aligns_to_line_edge(const ns_box *box, gsize offset)
+typedef struct inline_edge_item {
+    double height;
+    gboolean top;
+} inline_edge_item;
+
+static gint
+inline_edge_item_taller_first(gconstpointer a, gconstpointer b)
 {
+    double ha = ((const inline_edge_item *)a)->height;
+    double hb = ((const inline_edge_item *)b)->height;
+    return ha < hb ? 1 : ha > hb ? -1 : 0;
+}
+
+static gboolean
+inline_atomic_line_edge(const ns_box *box, gsize offset,
+                        inline_line_edge *edge)
+{
+    *edge = INLINE_EDGE_NONE;
     for (guint i = 0; i < box->inline_atomics->len; i++) {
         const ns_inline_atomic *a =
             &g_array_index(box->inline_atomics, ns_inline_atomic, i);
         if (a->byte_off != offset) continue;
         if (!a->box || (g_abs_ph_set && g_hash_table_contains(g_abs_ph_set, a->box)))
-            return TRUE;
-        const char *va = a->box->style
-            ? ns_style_keyword(a->box->style, NS_CSS_VERTICAL_ALIGN) : NULL;
-        return va && (strcmp(va, "top") == 0 || strcmp(va, "bottom") == 0);
+            return FALSE;
+        *edge = inline_atomic_edge_of(a->box);
+        return TRUE;
     }
-    return FALSE;
+    return TRUE;
+}
+
+static void
+inline_line_fit_edge_items(GArray *items, double *above, double *below)
+{
+    g_array_sort(items, inline_edge_item_taller_first);
+    for (guint i = 0; i < items->len; i++) {
+        const inline_edge_item *it = &g_array_index(items, inline_edge_item, i);
+        if (it->top)
+            *below = MAX(*below, it->height - *above);
+        else
+            *above = MAX(*above, it->height - *below);
+    }
 }
 
 static double
@@ -7658,15 +7707,24 @@ inline_line_css_extent(const ns_box *box, NsPangoLayoutLine *line,
                        double line_height, gboolean normal,
                        double *above, double *below)
 {
+    GArray *edge_items = g_array_new(FALSE, FALSE, sizeof(inline_edge_item));
     for (GSList *l = line ? line->runs : NULL; l; l = l->next) {
         NsPangoLayoutRun *run = l->data;
         double rise = (double)run->y_offset / NS_PANGO_SCALE;
         const NsPangoAttrShape *shape = inline_run_shape(run);
         if (shape) {
-            if (inline_atomic_aligns_to_line_edge(box, (gsize)run->item->offset))
+            inline_line_edge edge;
+            if (!inline_atomic_line_edge(box, (gsize)run->item->offset, &edge)) {
+                g_array_free(edge_items, TRUE);
                 return FALSE;
+            }
             double y = (double)shape->logical_rect.y / NS_PANGO_SCALE;
             double h = (double)shape->logical_rect.height / NS_PANGO_SCALE;
+            if (edge != INLINE_EDGE_NONE) {
+                inline_edge_item it = { h, edge == INLINE_EDGE_TOP };
+                g_array_append_val(edge_items, it);
+                continue;
+            }
             *above = MAX(*above, rise - y);
             *below = MAX(*below, y + h - rise);
             continue;
@@ -7682,6 +7740,8 @@ inline_line_css_extent(const ns_box *box, NsPangoLayoutLine *line,
         *above = MAX(*above, (double)run_above / NS_PANGO_SCALE);
         *below = MAX(*below, (double)run_below / NS_PANGO_SCALE);
     }
+    inline_line_fit_edge_items(edge_items, above, below);
+    g_array_free(edge_items, TRUE);
     return TRUE;
 }
 #endif
@@ -8247,6 +8307,11 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             if (slack < 0) slack = 0;
             if (within < 0) within = 0;
             if (within > slack) within = slack;
+            if (!(g_abs_ph_set && g_hash_table_contains(g_abs_ph_set, a->box))) {
+                inline_line_edge edge = inline_atomic_edge_of(a->box);
+                if (edge == INLINE_EDGE_TOP) within = 0;
+                else if (edge == INLINE_EDGE_BOTTOM) within = slack;
+            }
             double nx = text_x0 + (double)pos.x / NS_PANGO_SCALE;
             double ny = box->y + line_y + within;
             shift_box_tree(a->box, nx - a->box->x, ny - a->box->y);
