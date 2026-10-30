@@ -17672,6 +17672,16 @@ ns_computed_needs_layout(const char *name)
 }
 
 static char *
+ns_computed_custom_property(const char *specified, const ns_style *s)
+{
+    char *value = strstr(specified, "var(")
+        ? ns_css_resolve_style_vars(specified, s) : g_strdup(specified);
+    if (value && g_ascii_strcasecmp(g_strstrip(value), "initial") == 0)
+        g_clear_pointer(&value, g_free);
+    return value;
+}
+
+static char *
 ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name);
 
 static char *
@@ -18562,6 +18572,24 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         g_free(fallbacks);
         return out;
     }
+    if (strcmp(name, "flex") == 0 || strcmp(name, "flex-flow") == 0) {
+        gboolean flow = name[4] == '-';
+        static const char *const flex_parts[3] = {
+            "flex-grow", "flex-shrink", "flex-basis",
+        };
+        static const char *const flow_parts[2] = {
+            "flex-direction", "flex-wrap",
+        };
+        const char *const *parts = flow ? flow_parts : flex_parts;
+        GString *out = g_string_new(NULL);
+        for (int i = 0; i < (flow ? 2 : 3); i++) {
+            char *v = ns_computed_lookup(ctx, n, parts[i]);
+            if (out->len) g_string_append_c(out, ' ');
+            g_string_append(out, v && *v ? v : "");
+            g_free(v);
+        }
+        return g_string_free(out, FALSE);
+    }
     if (strcmp(name, "gap") == 0 || strcmp(name, "grid-gap") == 0) {
         char *row = ns_computed_lookup(ctx, n, "row-gap");
         char *col = ns_computed_lookup(ctx, n, "column-gap");
@@ -18742,9 +18770,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             const ns_style *s = g_hash_table_lookup(js->style_table, n);
             if (s && s->vars) {
                 const char *v = ns_var_map_lookup(s->vars, name);
-                if (v)
-                    return g_ascii_strcasecmp(v, "initial") == 0
-                        ? NULL : g_strdup(v);
+                if (v) return ns_computed_custom_property(v, s);
             }
         }
         if (style && *style) {
@@ -18982,8 +19008,7 @@ ns_computed_lookup_pseudo(JSContext *ctx, const ns_node *n,
     if (name[0] == '-' && name[1] == '-' && name[2]) {
         if (ps->vars) {
             const char *v = ns_var_map_lookup(ps->vars, name);
-            if (v && g_ascii_strcasecmp(v, "initial") != 0)
-                return g_strdup(v);
+            if (v) return ns_computed_custom_property(v, ps);
         }
         return NULL;
     }

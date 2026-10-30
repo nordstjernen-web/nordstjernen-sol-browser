@@ -3,6 +3,11 @@ Changelog:
 
 1.0.39-dev:
 ======
+* CSSOM: `getComputedStyle(el).getPropertyValue('--x')` returns the
+  computed value of a custom property, with its `var()` references
+  substituted, as browsers do; it returned the specified text (for
+  example `var(--x-lg, initial)`). The `flex` and `flex-flow` shorthands
+  are serialized from their longhands instead of returning "".
 * WOFF2 web fonts are decoded by FreeType wherever it can: the in-tree
   decoder (`src/woff2.c`) is compiled only when the FreeType the build
   finds predates 2.10.2 or was built without Brotli, as Homebrew's is,
