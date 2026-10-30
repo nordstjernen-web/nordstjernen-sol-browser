@@ -9713,6 +9713,8 @@ img_has_source(const ns_node *img)
     return FALSE;
 }
 
+static double image_ratio_only(const ns_box *box);
+
 static void
 layout_image(ns_box *box, double parent_content_width)
 {
@@ -9788,7 +9790,10 @@ layout_image(ns_box *box, double parent_content_width)
         if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
         if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
     }
-    double intrinsic_ratio = nat_w > 0 && nat_h > 0 ? nat_w / nat_h : -1;
+    double only_ratio = image_ratio_only(box);
+    if (only_ratio > 0) nat_w = nat_h = -1;
+    double intrinsic_ratio = only_ratio > 0 ? only_ratio
+                           : nat_w > 0 && nat_h > 0 ? nat_w / nat_h : -1;
     if (box->kind == NS_BOX_SVG && box->dom) {
         ns_svg_size svg_size;
         ns_svg_intrinsic_size(box->dom, &svg_size);
@@ -9809,7 +9814,8 @@ layout_image(ns_box *box, double parent_content_width)
     if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
     if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
 
-    gboolean ratio_only = box->media && box->media->intrinsic_ratio_only;
+    gboolean ratio_only = box->media &&
+                          (box->media->intrinsic_ratio_only || only_ratio > 0);
     gboolean img_sourceless = box->kind == NS_BOX_IMAGE &&
         ns_node_is_element_named(box->dom, "img") && !(img && img->loaded) &&
         !img_has_source(box->dom);
@@ -9818,9 +9824,14 @@ layout_image(ns_box *box, double parent_content_width)
     if (w < 0 && h < 0) {
         if (ratio_only && intrinsic_ratio > 0) {
             double cb_h = containing_block_definite_height(box);
-            if (parent_content_width > 0) {
-                w = parent_content_width; h = w / intrinsic_ratio;
-            } else if (cb_h >= 0) {
+            double fill = parent_content_width;
+            if (only_ratio > 0)
+                fill -= box->margin.left + box->margin.right +
+                        box->padding.left + box->padding.right +
+                        box->border.left + box->border.right;
+            if (fill > 0) {
+                w = fill; h = w / intrinsic_ratio;
+            } else if (cb_h >= 0 && only_ratio <= 0) {
                 h = cb_h; w = h * intrinsic_ratio;
             } else { w = 0; h = 0; }
         } else if (nat_w > 0 && nat_h > 0) {
@@ -10165,9 +10176,19 @@ replaced_containing_block_is_definite(const ns_box *box)
 }
 
 static double
+image_ratio_only(const ns_box *box)
+{
+    const ns_image *img = box->kind == NS_BOX_IMAGE && box->media
+        ? (const ns_image *)box->media->image : NULL;
+    return img && img->loaded ? img->natural_ratio_only : 0;
+}
+
+static double
 ratio_only_replaced_width(const ns_box *box, gboolean max_content)
 {
+    double ratio = image_ratio_only(box);
     double h = replaced_height_for_width(box);
+    if (h > 0 && ratio > 0) return h * ratio;
     if (h > 0) {
         ns_svg_size size;
         ns_svg_intrinsic_size(box->dom, &size);
@@ -10211,6 +10232,7 @@ width_attribute_px(const ns_node *dom)
 static double
 replaced_auto_width(const ns_box *box)
 {
+    if (image_ratio_only(box) > 0) return ratio_only_replaced_width(box, FALSE);
     if (box->media && box->media->intrinsic_ratio_only) {
         double w = ratio_only_replaced_width(box, FALSE);
         return w > 0 ? w : 300;
@@ -10239,7 +10261,8 @@ replaced_width_is_cyclic(const ns_box *box)
     const ns_css_value *wv = box->style ? box->style->values[NS_CSS_WIDTH] : NULL;
     if (value_is_percent(wv)) return !replaced_containing_block_is_definite(box);
     gboolean sized = wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC);
-    return !sized && box->media && box->media->intrinsic_ratio_only;
+    return !sized && box->media &&
+           (box->media->intrinsic_ratio_only || image_ratio_only(box) > 0);
 }
 
 static gboolean

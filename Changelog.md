@@ -3,6 +3,23 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Layout: an image with an aspect ratio but no natural width or height
+  (an SVG with only a `viewBox`) fills the available width when its
+  `width` and `height` are auto, and contributes nothing to min- and
+  max-content sizes, as in Chrome (CSS 2.1 10.3.2). It was laid out at a
+  made-up 150 px height. Inside a float or inline-block it is 0x0, in a
+  flex or grid item or a block it fills the container.
+* Rendering: SVG images (`<img>` and CSS backgrounds) are drawn from the
+  vector source at the size they appear on screen. They were rasterized
+  once at their natural size and scaled, so a 24 px icon shown at 96 px,
+  and every SVG on a 2x display, came out blurry. An SVG drawn into a box
+  of another shape is now fitted by its own `preserveAspectRatio` (a
+  square logo in a 200x100 box stays square) instead of being stretched,
+  as in Chrome. Only images the SVG decoder produced take this path (a
+  PNG or JPEG with `<svg` in its metadata stays a raster); the parsed SVG
+  is kept per image, sizes are rounded up to quarter-octave steps so a
+  scale animation re-renders a few times instead of every frame, and all
+  SVG rasters share a 96 MB budget (2048x2048 per raster at most).
 * CSS: the `lh` unit resolves against the element's computed
   line-height, in plain lengths and inside `calc()`. Inside `calc()` it
   was read as px, so `calc(-0.5lh + 0.48em)`, the "line height trim"

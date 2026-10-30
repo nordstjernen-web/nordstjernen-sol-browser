@@ -61,6 +61,16 @@ gboolean ns_svg_node_geometry(const ns_node *svg, const ns_node *target,
 
 ns_texture *ns_svg_decode_bytes(const guchar *data, gsize len,
                                 int *out_w, int *out_h);
+ns_texture *ns_svg_decode_bytes_ratio(const guchar *data, gsize len,
+                                      int *out_w, int *out_h,
+                                      double *out_ratio_only);
+
+typedef struct ns_svg_doc ns_svg_doc;
+
+ns_svg_doc *ns_svg_doc_parse(const guchar *data, gsize len);
+gboolean    ns_svg_doc_render(cairo_t *cr, ns_svg_doc *doc,
+                              double width, double height);
+void        ns_svg_doc_free(ns_svg_doc *doc);
 
 gboolean ns_svg_render_bytes(cairo_t *cr, const guchar *data, gsize len,
                              double width, double height);

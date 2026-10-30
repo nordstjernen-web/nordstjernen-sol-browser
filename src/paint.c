@@ -79,6 +79,11 @@ ns_paint_set_caret_visible(gboolean visible)
 }
 static cairo_surface_t *texture_surface_cached(ns_texture *tex,
                                                const char *filter_kw);
+static cairo_surface_t *svg_raster_cached(ns_texture *tex, GBytes *svg,
+                                          double vw, double vh, int pw, int ph,
+                                          const char *filter_kw);
+static gboolean svg_raster_size(cairo_t *cr, double vw, double vh, int iw,
+                                int ih, int *out_pw, int *out_ph);
 
 static void ns_paint_font_metrics(const char *family, double size_px,
                                   int weight, gboolean italic,
@@ -1335,7 +1340,18 @@ paint_bg_image_core(cairo_t *cr, ns_image *img,
     } else if (py && py->kind == NS_CSS_V_CALC) {
         off_y = (h - draw_h) * (py->u.calc.pct / 100.0) + py->u.calc.px;
     }
-    cairo_surface_t *surf = texture_surface_cached(img->texture, NULL);
+    int pw = 0, ph = 0;
+    cairo_surface_t *surf =
+        img->svg_source && svg_raster_size(cr, draw_w, draw_h, iw, ih, &pw, &ph)
+        ? svg_raster_cached(img->texture, img->svg_source, draw_w, draw_h,
+                            pw, ph, NULL)
+        : NULL;
+    if (surf) {
+        iw = cairo_image_surface_get_width(surf);
+        ih = cairo_image_surface_get_height(surf);
+    } else {
+        surf = texture_surface_cached(img->texture, NULL);
+    }
     if (!surf) return;
     cairo_save(cr);
     rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
@@ -7200,11 +7216,43 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
     return apply_clip_path(cr, b) || clipped;
 }
 
+#define SVG_RASTERS 4
+#define SVG_RASTER_MAX_PIXELS (2048.0 * 2048.0)
+#define SVG_RASTER_BUDGET ((gsize)96 * 1024 * 1024)
+#define SVG_RASTER_REUSE 1.5
+#define SVG_RASTER_STEPS 4.0
+
+static gsize g_svg_raster_bytes;
+
+typedef struct {
+    cairo_surface_t *surf;
+    char            *filter;
+    int              pw, ph;
+    double           vw, vh;
+    guint            used;
+} svg_raster;
+
 typedef struct {
     cairo_surface_t *plain;
     char            *filter;
     cairo_surface_t *filtered;
+    svg_raster       svg[SVG_RASTERS];
+    guint            svg_clock;
+    ns_svg_doc      *svg_doc;
+    gboolean         svg_doc_failed;
 } texture_surfaces;
+
+static void
+svg_raster_drop(svg_raster *r)
+{
+    if (r->surf) {
+        g_svg_raster_bytes -= (gsize)cairo_image_surface_get_stride(r->surf) *
+                              (gsize)cairo_image_surface_get_height(r->surf);
+        cairo_surface_destroy(r->surf);
+    }
+    g_free(r->filter);
+    *r = (svg_raster){ 0 };
+}
 
 static void
 texture_surfaces_free(gpointer data)
@@ -7213,7 +7261,20 @@ texture_surfaces_free(gpointer data)
     if (ts->plain) cairo_surface_destroy(ts->plain);
     if (ts->filtered) cairo_surface_destroy(ts->filtered);
     g_free(ts->filter);
+    for (int i = 0; i < SVG_RASTERS; i++) svg_raster_drop(&ts->svg[i]);
+    ns_svg_doc_free(ts->svg_doc);
     g_free(ts);
+}
+
+static texture_surfaces *
+texture_surfaces_for(ns_texture *tex)
+{
+    texture_surfaces *ts = ns_texture_get_user_data(tex);
+    if (!ts) {
+        ts = g_new0(texture_surfaces, 1);
+        ns_texture_set_user_data(tex, ts, texture_surfaces_free);
+    }
+    return ts;
 }
 
 static cairo_surface_t *
@@ -7240,11 +7301,7 @@ texture_surface_cached(ns_texture *tex, const char *filter_kw)
     int iw = ns_texture_get_width(tex);
     int ih = ns_texture_get_height(tex);
     if (iw <= 0 || ih <= 0) return NULL;
-    texture_surfaces *ts = ns_texture_get_user_data(tex);
-    if (!ts) {
-        ts = g_new0(texture_surfaces, 1);
-        ns_texture_set_user_data(tex, ts, texture_surfaces_free);
-    }
+    texture_surfaces *ts = texture_surfaces_for(tex);
     if (!filter_kw) {
         if (!ts->plain) ts->plain = texture_surface_create(tex, iw, ih, NULL);
         return ts->plain;
@@ -7357,8 +7414,94 @@ paint_video_layer_hole(cairo_t *cr, const ns_box *b, ns_video *v,
     return TRUE;
 }
 
+static cairo_surface_t *
+svg_raster_cached(ns_texture *tex, GBytes *svg, double vw, double vh,
+                  int pw, int ph, const char *filter_kw)
+{
+    texture_surfaces *ts = texture_surfaces_for(tex);
+    svg_raster *slot = &ts->svg[0], *hit = NULL;
+    for (int i = 0; i < SVG_RASTERS; i++) {
+        svg_raster *r = &ts->svg[i];
+        if (r->surf && r->vw == vw && r->vh == vh &&
+            r->pw >= pw && r->ph >= ph &&
+            r->pw <= pw * SVG_RASTER_REUSE + 1 &&
+            r->ph <= ph * SVG_RASTER_REUSE + 1 &&
+            g_strcmp0(r->filter, filter_kw) == 0 &&
+            (!hit || r->pw < hit->pw))
+            hit = r;
+        if (r->used < slot->used) slot = r;
+    }
+    if (hit) {
+        hit->used = ++ts->svg_clock;
+        return hit->surf;
+    }
+    svg_raster_drop(slot);
+    if (g_svg_raster_bytes + (gsize)pw * (gsize)ph * 4 > SVG_RASTER_BUDGET)
+        return NULL;
+    if (!ts->svg_doc && !ts->svg_doc_failed) {
+        gsize len = 0;
+        const guchar *data = g_bytes_get_data(svg, &len);
+        ts->svg_doc = ns_svg_doc_parse(data, len);
+        ts->svg_doc_failed = !ts->svg_doc;
+    }
+    if (!ts->svg_doc) return NULL;
+    cairo_surface_t *surf =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surf);
+        return NULL;
+    }
+    cairo_t *rc = cairo_create(surf);
+    cairo_scale(rc, pw / vw, ph / vh);
+    gboolean drawn = ns_svg_doc_render(rc, ts->svg_doc, vw, vh);
+    cairo_destroy(rc);
+    if (!drawn) {
+        cairo_surface_destroy(surf);
+        return NULL;
+    }
+    g_svg_raster_bytes += (gsize)cairo_image_surface_get_stride(surf) *
+                          (gsize)ph;
+    cairo_surface_flush(surf);
+    if (filter_kw)
+        apply_image_filter(cairo_image_surface_get_data(surf),
+                           cairo_image_surface_get_stride(surf), pw, ph,
+                           filter_kw, 1.0, NULL);
+    cairo_surface_mark_dirty(surf);
+    *slot = (svg_raster){ .surf = surf, .filter = g_strdup(filter_kw),
+                          .pw = pw, .ph = ph, .vw = vw, .vh = vh,
+                          .used = ++ts->svg_clock };
+    return surf;
+}
+
 static gboolean
-paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
+svg_raster_size(cairo_t *cr, double vw, double vh, int iw, int ih,
+                int *out_pw, int *out_ph)
+{
+    double ax = vw, ay = 0, bx = 0, by = vh;
+    cairo_user_to_device_distance(cr, &ax, &ay);
+    cairo_user_to_device_distance(cr, &bx, &by);
+    double pw = hypot(ax, ay), ph = hypot(bx, by);
+    if (!(pw >= 1) || !(ph >= 1)) return FALSE;
+    gboolean upscaled = ceil(pw - 0.01) > iw || ceil(ph - 0.01) > ih;
+    gboolean reshaped = fabs(vw * ih - vh * iw) > 0.01 * vw * ih;
+    if (!upscaled && !reshaped) return FALSE;
+    double scale = MAX(pw / vw, ph / vh);
+    double step = pow(2.0, ceil(log2(scale) * SVG_RASTER_STEPS - 1e-6) /
+                           SVG_RASTER_STEPS);
+    pw *= step / scale;
+    ph *= step / scale;
+    if (pw * ph > SVG_RASTER_MAX_PIXELS) {
+        double k = sqrt(SVG_RASTER_MAX_PIXELS / (pw * ph));
+        pw *= k;
+        ph *= k;
+    }
+    *out_pw = (int)ceil(pw - 0.01);
+    *out_ph = (int)ceil(ph - 0.01);
+    return TRUE;
+}
+
+static gboolean
+paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex, GBytes *svg)
 {
     int iw = ns_texture_get_width(tex);
     int ih = ns_texture_get_height(tex);
@@ -7384,8 +7527,19 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
     apply_box_content_clip(cr, b);
     cairo_rectangle(cr, cx, cy, cw, ch);
     cairo_clip(cr);
+    double vw = iw * sx, vh = ih * sy;
+    int pw = 0, ph = 0;
+    cairo_surface_t *vector =
+        svg && svg_raster_size(cr, vw, vh, iw, ih, &pw, &ph)
+        ? svg_raster_cached(tex, svg, vw, vh, pw, ph, surface_filter) : NULL;
     cairo_translate(cr, cx + ox, cy + oy);
-    cairo_scale(cr, sx, sy);
+    if (vector) {
+        surf = vector;
+        cairo_scale(cr, vw / cairo_image_surface_get_width(vector),
+                    vh / cairo_image_surface_get_height(vector));
+    } else {
+        cairo_scale(cr, sx, sy);
+    }
     cairo_set_source_surface(cr, surf, 0, 0);
     ns_video *pv = b->media ? (ns_video *)b->media->video : NULL;
     if (pv && pv->playing && pv->frame_texture == tex)
@@ -7636,7 +7790,7 @@ paint_image(cairo_t *cr, const ns_box *b)
         img = b->media->image;
     cairo_save(cr);
     if (img && img->loaded && img->texture) {
-        paint_texture(cr, b, img->texture);
+        paint_texture(cr, b, img->texture, img->svg_source);
     } else if ((img && img->failed) || !b->media || !b->media->image_src ||
                !*b->media->image_src) {
         paint_image_fallback(cr, b, img);
@@ -7801,7 +7955,7 @@ paint_video(cairo_t *cr, const ns_box *b)
     gboolean layered = tex && tex == v->frame_texture &&
                        paint_video_layer_hole(cr, b, v, tex);
     if (tex) {
-        if (!layered) paint_texture(cr, b, tex);
+        if (!layered) paint_texture(cr, b, tex, NULL);
     } else if (!bg_painted && b->dom &&
                ns_element_get_attr(b->dom, "controls")) {
         cairo_set_source_rgb(cr, 0.10, 0.10, 0.10);
