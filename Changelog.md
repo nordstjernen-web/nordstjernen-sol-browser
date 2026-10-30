@@ -3,6 +3,21 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Text layout: the stand-in glyph ids that kept icon-font ligatures
+  working are built only against HarfBuzz 11.4 to 14.5. Those releases
+  store coverage-cache entries without checking the glyph id, so the
+  made-up id for a missing space overwrote the entry for the letter "s";
+  HarfBuzz 14.6 checks the id again, and releases before 11.4 never
+  skipped the check. Builds against HarfBuzz 8.3 (Ubuntu 24.04), 10.2
+  (Debian 13) or 14.6 and later shape exactly as upstream Pango does.
+* The shell's own SVG icons are drawn by the in-engine SVG renderer
+  (`src/gtk/icons.c`) only when built against GTK older than 4.22. GTK
+  4.22 draws SVG icons itself, symbolic ones included, without
+  gdk-pixbuf's librsvg loader, so there the toolbar, tab and address-bar
+  icons and the window icon go straight through GTK's icon theme.
+  Ubuntu 24.04 (GTK 4.14) and Debian 13 (GTK 4.18) builds keep the
+  in-engine path; Windows, which already requires GTK 4.22.1, no longer
+  compiles it.
 * Web Storage: `sessionStorage` lives for the tab, per origin, as the
   standard requires. Every navigation used to start with an empty
   store, so a login that saves its OIDC state on one origin, visits
