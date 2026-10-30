@@ -3,6 +3,13 @@ Changelog:
 
 1.0.39-dev:
 ======
+* DOM: an inline element that contains blocks reports the union of its
+  line fragments and its in-flow children from `getBoundingClientRect()`
+  and `offsetTop`/`offsetLeft`/`offsetWidth`/`offsetHeight`, and zero
+  for `clientWidth`/`clientHeight`/`scrollWidth`/`scrollHeight`, as an
+  inline box does in other browsers. It reported the border box of the
+  block that wraps it, so a card element whose first line holds a tall
+  image started at the image top instead of the text line below it.
 * Layout: a line holding an inline-block or image with `vertical-align:
   top` or `bottom` sizes and places its text the way other browsers do.
   The baseline content is measured first, then the top and bottom boxes
