@@ -3,6 +3,13 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Text layout: the stand-in glyph ids that kept icon-font ligatures
+  working are built only against HarfBuzz 11.4 to 14.5. Those releases
+  store coverage-cache entries without checking the glyph id, so the
+  made-up id for a missing space overwrote the entry for the letter "s";
+  HarfBuzz 14.6 checks the id again, and releases before 11.4 never
+  skipped the check. Builds against HarfBuzz 8.3 (Ubuntu 24.04), 10.2
+  (Debian 13) or 14.6 and later shape exactly as upstream Pango does.
 * Web Storage: `sessionStorage` lives for the tab, per origin, as the
   standard requires. Every navigation used to start with an empty
   store, so a login that saves its OIDC state on one origin, visits

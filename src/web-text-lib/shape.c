@@ -95,19 +95,27 @@ release_buffer (hb_buffer_t *buffer)
  * advance and extents callbacks below answer for as the made-up glyph would.
  * ns_pango_hb_shape puts the made-up glyphs back. A font too big to leave room
  * for stand-ins under the cache's key range gets the made-up ids as before.
+ * The unchecked store arrived in HarfBuzz 11.4.0 and 14.6.0 checks the key
+ * again, so only builds against the releases in between carry the stand-ins.
  */
+#if HB_VERSION_ATLEAST (11, 4, 0) && !HB_VERSION_ATLEAST (14, 6, 0)
+#define NS_PANGO_HB_STAND_INS
 #define NS_PANGO_STAND_IN_END (1u << 14)
+#endif
 
 typedef struct
 {
   NsPangoFont *font;
   hb_font_t *parent;
   NsPangoShowFlags show_flags;
+#ifdef NS_PANGO_HB_STAND_INS
   hb_codepoint_t stand_in_base;
   GArray *stand_ins;
   GHashTable *stand_in_index;
+#endif
 } NsPangoHbShapeContext;
 
+#ifdef NS_PANGO_HB_STAND_INS
 static hb_codepoint_t
 stand_in_for (NsPangoHbShapeContext *context,
               hb_codepoint_t         made_up)
@@ -160,6 +168,19 @@ free_stand_ins (NsPangoHbShapeContext *context)
   context->stand_ins = NULL;
   context->stand_in_index = NULL;
 }
+#else
+static inline hb_codepoint_t
+made_up_for (const NsPangoHbShapeContext *context G_GNUC_UNUSED,
+             hb_codepoint_t               glyph)
+{
+  return glyph;
+}
+
+static inline void
+free_stand_ins (NsPangoHbShapeContext *context G_GNUC_UNUSED)
+{
+}
+#endif
 
 static hb_bool_t
 ns_pango_nominal_or_unknown_glyph (NsPangoHbShapeContext *context,
@@ -251,8 +272,10 @@ ns_pango_hb_font_get_nominal_glyph (hb_font_t      *font,
   NsPangoHbShapeContext *context = (NsPangoHbShapeContext *) font_data;
   hb_bool_t found = ns_pango_nominal_or_unknown_glyph (context, unicode, glyph);
 
+#ifdef NS_PANGO_HB_STAND_INS
   if (*glyph > 0xFFFF)
     *glyph = stand_in_for (context, *glyph);
+#endif
 
   return found;
 }
@@ -351,9 +374,11 @@ ns_pango_font_get_hb_font_for_context (NsPangoFont           *font,
 
   context->font = font;
   context->parent = hb_font;
+#ifdef NS_PANGO_HB_STAND_INS
   context->stand_in_base = hb_face_get_glyph_count (hb_font_get_face (hb_font));
   context->stand_ins = NULL;
   context->stand_in_index = NULL;
+#endif
 
   hb_font = hb_font_create_sub_font (hb_font);
   hb_font_set_funcs (hb_font, funcs, context, NULL);
