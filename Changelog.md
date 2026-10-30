@@ -3,6 +3,12 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Layout: an `inline-block` (and a `<button>`) sits on the line by the
+  baseline of its last line box, as CSS 2.1 defines it, instead of its
+  first. Text beside a three-line inline-block lined up with its first
+  line, 27 px too high. Inline flex, grid and table boxes and other form
+  controls keep their first baseline. An inline-block's top margin was
+  also counted twice when placing it on the line.
 * DOM: an inline element that contains blocks reports the union of its
   line fragments and its in-flow children from `getBoundingClientRect()`
   and `offsetTop`/`offsetLeft`/`offsetWidth`/`offsetHeight`, and zero
