@@ -3,6 +3,12 @@ Changelog:
 
 1.0.39-dev:
 ======
+* CSS: the `lh` unit resolves against the element's computed
+  line-height, in plain lengths and inside `calc()`. Inside `calc()` it
+  was read as px, so `calc(-0.5lh + 0.48em)`, the "line height trim"
+  that Webflow sites put on every heading's `::before` and `::after`,
+  added space instead of trimming it (a 71 px hero heading came out
+  154 px tall, 72 px in Chrome).
 * CSS: a custom property whose value is `var(--x, initial)` (or another
   CSS-wide keyword in a fallback) is resolved against the final cascaded
   values of the element's other custom properties. It was expanded in

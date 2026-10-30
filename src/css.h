@@ -749,7 +749,7 @@ typedef struct ns_css_value {
         struct { double w, h; ns_css_unit w_unit, h_unit; gboolean w_auto, h_auto; } size;
         struct { guint8 r, g, b, a; } color;
         struct {
-            double pct; double px; double em; double rem;
+            double pct; double px; double em; double rem; double lh;
             double vw, vh, vmin, vmax;
             double parsed_vw, parsed_vh;
             guint8 fn;
