@@ -2423,15 +2423,6 @@ ns_net_init(void)
     if (g_share) {
         curl_share_setopt(g_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
         curl_share_setopt(g_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
-#ifdef CURL_LOCK_DATA_CONNECT
-        curl_share_setopt(g_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
-#endif
-#ifdef CURL_LOCK_DATA_PSL
-        curl_share_setopt(g_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_PSL);
-#endif
-#ifdef CURL_LOCK_DATA_HSTS
-        curl_share_setopt(g_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_HSTS);
-#endif
         curl_share_setopt(g_share, CURLSHOPT_LOCKFUNC,   ns_share_lock);
         curl_share_setopt(g_share, CURLSHOPT_UNLOCKFUNC, ns_share_unlock);
     }
@@ -2708,11 +2699,9 @@ ns_net_apply_curl_tls(void *curl_handle)
         "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:"
         "ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:"
         "AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA:AES256-SHA");
-#ifdef CURLOPT_TLS13_CIPHERS
     curl_easy_setopt(curl, CURLOPT_TLS13_CIPHERS,
         "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:"
         "TLS_CHACHA20_POLY1305_SHA256");
-#endif
     curl_easy_setopt(curl, CURLOPT_SSL_EC_CURVES, g_ec_curves);
 #if LIBCURL_VERSION_NUM >= 0x080800
     {
@@ -2735,11 +2724,9 @@ ns_net_apply_curl_tls(void *curl_handle)
 #ifdef G_OS_WIN32
     curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
 #endif
-#ifdef CURLOPT_DOH_URL
     const ns_config *cfg = ns_config_get();
     if (cfg && cfg->doh_url && g_str_has_prefix(cfg->doh_url, "https://"))
         curl_easy_setopt(curl, CURLOPT_DOH_URL, cfg->doh_url);
-#endif
 }
 
 void

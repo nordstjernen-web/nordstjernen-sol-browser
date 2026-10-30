@@ -144,7 +144,8 @@ build. See [npm/README.md](npm/README.md).
   animation); ICO and SVG are rendered in-engine, with optional AVIF (still
   images), JPEG XL and inline PDF support (poppler renders each page as an
   image). Animated images play as many times as their loop count asks. Web
-  fonts load as TTF/OTF, WOFF and WOFF2 (in-tree decoder over brotli).
+  fonts load as TTF/OTF, WOFF and WOFF2 (through FreeType, or an in-tree
+  decoder over brotli where FreeType cannot read WOFF2).
 - **Media** — `<video>` plays **inline** for MPEG-1 (decoded in-tree by
   [pl_mpeg](https://github.com/phoboslab/pl_mpeg)), **WebM** and Ogg
   (VP9/VP8/Theora + Opus/Vorbis) through FFmpeg's libav, which Linux and

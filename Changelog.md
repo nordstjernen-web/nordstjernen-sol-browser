@@ -3,6 +3,41 @@ Changelog:
 
 1.0.39-dev:
 ======
+* WOFF2 web fonts are decoded by FreeType wherever it can: the in-tree
+  decoder (`src/woff2.c`) is compiled only when the FreeType the build
+  finds predates 2.10.2 or was built without Brotli, as Homebrew's is,
+  which `meson setup` reads from FreeType's installed `ftoption.h`.
+  Everywhere else the engine already asked FreeType first and kept the
+  in-tree decoder only as an unused fallback; now it no longer carries
+  that second parser for untrusted font data. libbrotlidec stays a
+  dependency for the `br` Content-Encoding.
+* `-Dquickjs=quickjs` builds Fabrice Bellard's QuickJS at master
+  `19d6bd8` (2026-10-26) instead of `84e723f`. The 21 commits in between
+  fix a use-after-free in `build_backtrace()` when an exception runs out
+  of memory, an infinite loop in `unicode_script()` when building a
+  `\p{Script=...}` set fails, a Proxy `ownKeys` trap whose primitive
+  result was accepted instead of throwing `TypeError`, template literal
+  substitution, `Array.prototype.sort` not writing back every element and
+  `for await` not awaiting the iterator's `return()`, and add `using`
+  declarations and `Atomics.waitAsync()`. The sort patch still applies
+  and is still needed: upstream still skips the comparator for identical
+  values. The in-tree quickjs-ng fork, the default engine, already holds
+  the exception in `build_backtrace()` and returns from
+  `unicode_script()`'s failure path.
+* Networking: the DNS-over-HTTPS setting (`doh_url`, `NS_DOH_URL`) is
+  applied. Every libcurl option the engine guarded with `#ifdef` is an
+  enum constant rather than a macro, so the preprocessor never saw it and
+  the guarded code was never compiled: names were always resolved by the
+  system resolver whatever `doh_url` said, the TLS 1.3 cipher order was
+  never set, and EventSource and the audio helper never restricted the
+  protocols they fetch or follow redirects to. All of these options
+  predate the libcurl 8.5 floor, so they are now set unconditionally.
+  The audio helper's protocol list also dropped `data`, which is not a
+  libcurl scheme and made libcurl reject the whole list. The share-object
+  lines for the connection, PSL and HSTS caches, equally never compiled,
+  are removed rather than enabled: libcurl does not support sharing
+  connections or HSTS between concurrent threads, and the preconnect
+  thread uses the same share object as the network thread.
 * Text layout: the stand-in glyph ids that kept icon-font ligatures
   working are built only against HarfBuzz 11.4 to 14.5. Those releases
   store coverage-cache entries without checking the glyph id, so the

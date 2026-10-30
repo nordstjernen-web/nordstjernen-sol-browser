@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/bellard/quickjs.git
-revision = 84e723f1ace5e3823cef8149dd0f890fe74b77ce
+revision = 19d6bd865e709e2b5717fb4f2290c0cecc57ee4b
 depth = 1
 patch_directory = quickjs
 diff_files = quickjs-sort-calls-comparator.patch

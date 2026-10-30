@@ -1263,25 +1263,18 @@ write_temp_from_url(const char *url)
         curl_easy_setopt(c, CURLOPT_WRITEDATA, &dl);
         curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(c, CURLOPT_MAXREDIRS, 8L);
-#ifdef CURLOPT_PROTOCOLS_STR
-        curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https,data");
-#endif
-#ifdef CURLOPT_REDIR_PROTOCOLS_STR
+        curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https");
         curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR,
-                         strncmp(url, "https://", 8) == 0 ? "https" :
-                         strncmp(url, "data:", 5) == 0 ? "data" :
-                         "http,https");
-#endif
-#ifdef CURLOPT_MAXFILESIZE_LARGE
+                         strncmp(url, "https://", 8) == 0 ? "https"
+                                                          : "http,https");
         curl_easy_setopt(c, CURLOPT_MAXFILESIZE_LARGE,
                          (curl_off_t)NS_AUDIO_MAX_BYTES);
-#endif
         curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
         curl_easy_setopt(c, CURLOPT_FAILONERROR, 1L);
         curl_easy_setopt(c, CURLOPT_USERAGENT, "Nordstjernen-Audio");
         curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 1L);
         curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 2L);
-#if defined(_WIN32) && defined(CURLSSLOPT_NATIVE_CA)
+#ifdef _WIN32
         curl_easy_setopt(c, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
 #endif
         const char *ca = getenv("CURL_CA_BUNDLE");
