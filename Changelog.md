@@ -20,6 +20,18 @@ Changelog:
   is kept per image, sizes are rounded up to quarter-octave steps so a
   scale animation re-renders a few times instead of every frame, and all
   SVG rasters share a 96 MB budget (2048x2048 per raster at most).
+* CSS: the `lh` unit resolves against the element's computed
+  line-height, in plain lengths and inside `calc()`. Inside `calc()` it
+  was read as px, so `calc(-0.5lh + 0.48em)`, the "line height trim"
+  that Webflow sites put on every heading's `::before` and `::after`,
+  added space instead of trimming it (a 71 px hero heading came out
+  154 px tall, 72 px in Chrome).
+* DOM: when an image finishes loading, layout is marked stale before its
+  `load` event (and the window `load` event that may follow) runs, so a
+  handler that measures the image or the page sees the image's real size.
+  `getBoundingClientRect()` on a just-loaded image returned 0x0 until the
+  next frame, which broke galleries and masonry grids that lay
+  themselves out on load.
 * Layout: a percentage height resolves against the nearest block
   container, as CSS 2.1 defines the containing block, and skips inline
   ancestors such as `<picture>` or `<span>`. An `<img style="height:
