@@ -3,6 +3,13 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Layout: a percentage height resolves against the nearest block
+  container, as CSS 2.1 defines the containing block, and skips inline
+  ancestors such as `<picture>` or `<span>`. An `<img style="height:
+  100%">` inside a `<picture>` resolved against the inline picture,
+  found no height and fell back to its natural ratio, so image cards
+  with `aspect-ratio` boxes (AP News, Amazon, Canva) showed the wrong
+  crop and size.
 * WOFF2 web fonts are decoded by FreeType wherever it can: the in-tree
   decoder (`src/woff2.c`) is compiled only when the FreeType the build
   finds predates 2.10.2 or was built without Brotli, as Homebrew's is,
