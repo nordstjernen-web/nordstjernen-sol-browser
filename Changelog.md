@@ -3,6 +3,10 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Forms: a `<select>` with `appearance: none` is as wide as its widest
+  option plus its own padding and border, as in Chrome. A no-break space
+  was drawn on each side of the label, which made every custom-styled
+  select about 8 px wider and moved its text right.
 * Rendering: text in an SVG image (`<img src=*.svg>`, CSS backgrounds)
   without a `font-family` uses the default serif font, as in Chrome and as
   HTML text does. It was drawn in sans-serif.
