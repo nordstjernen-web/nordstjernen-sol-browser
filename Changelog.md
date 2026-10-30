@@ -3,6 +3,10 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Forms: a `<select>` with `appearance: none` is as wide as its widest
+  option plus its own padding and border, as in Chrome. A no-break space
+  was drawn on each side of the label, which made every custom-styled
+  select about 8 px wider and moved its text right.
 * Text layout: the stand-in glyph ids that kept icon-font ligatures
   working are built only against HarfBuzz 11.4 to 14.5. Those releases
   store coverage-cache entries without checking the glyph id, so the
