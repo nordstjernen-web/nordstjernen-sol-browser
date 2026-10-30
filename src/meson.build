@@ -251,8 +251,8 @@ if have_freetype
   nordstjernen_deps += [libfreetype]
 endif
 
-if have_woff2
-  nordstjernen_deps += [libbrotlidec_fonts]
+if libbrotlidec.found()
+  nordstjernen_deps += [libbrotlidec]
 endif
 
 if libzstd.found()

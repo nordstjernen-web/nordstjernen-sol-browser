@@ -3,6 +3,14 @@ Changelog:
 
 1.0.39-dev:
 ======
+* WOFF2 web fonts are decoded by FreeType wherever it can: the in-tree
+  decoder (`src/woff2.c`) is compiled only when the FreeType the build
+  finds predates 2.10.2 or was built without Brotli, as Homebrew's is,
+  which `meson setup` reads from FreeType's installed `ftoption.h`.
+  Everywhere else the engine already asked FreeType first and kept the
+  in-tree decoder only as an unused fallback; now it no longer carries
+  that second parser for untrusted font data. libbrotlidec stays a
+  dependency for the `br` Content-Encoding.
 * `-Dquickjs=quickjs` builds Fabrice Bellard's QuickJS at master
   `19d6bd8` (2026-10-26) instead of `84e723f`. The 21 commits in between
   fix a use-after-free in `build_backtrace()` when an exception runs out

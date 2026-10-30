@@ -338,13 +338,25 @@ if have_freetype
   add_project_arguments('-DNS_HAVE_FREETYPE=1', language: 'c')
 endif
 
-# WOFF2 web fonts. FreeType reads them only when it was built with Brotli
-# (Homebrew's is not), so src/woff2.c decodes them over libbrotlidec.
-libbrotlidec_fonts = dependency('libbrotlidec', required: false)
-have_woff2 = libbrotlidec_fonts.found()
+# Brotli: the br Content-Encoding, and WOFF2 web fonts. FreeType 2.10.2 and
+# later decode WOFF2 themselves when built with Brotli, which the installed
+# ftoption.h records; only a FreeType without it (Homebrew's) needs
+# src/woff2.c to decode them over libbrotlidec.
+libbrotlidec = dependency('libbrotlidec', required: false)
+if libbrotlidec.found()
+  add_project_arguments('-DNS_HAVE_BROTLI_DEC=1', language: 'c')
+endif
+freetype_reads_woff2 = have_freetype and cc.compiles('''
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_CONFIG_OPTIONS_H
+#if !defined(FT_CONFIG_OPTION_USE_BROTLI) || FREETYPE_MAJOR * 10000 + FREETYPE_MINOR * 100 + FREETYPE_PATCH < 21002
+#error FreeType does not decode WOFF2
+#endif
+''', dependencies: libfreetype, name: 'FreeType decodes WOFF2')
+have_woff2 = libbrotlidec.found() and not freetype_reads_woff2
 if have_woff2
   add_project_arguments('-DNS_HAVE_WOFF2=1', language: 'c')
-  add_project_arguments('-DNS_HAVE_BROTLI_DEC=1', language: 'c')
 endif
 
 # zstd Content-Encoding; without it the browser stops advertising zstd.

@@ -314,9 +314,11 @@ clip-paths, and paints positioned/z-indexed children in stacking order.
 fork vendored in-tree at `src/web-text-lib/` (loaded via `subdir()`,
 included as `"ns_pango.h"`), which caches shaped glyph strings across layouts;
 Android and iOS link the system Pango. `@font-face`
-fonts are fetched, converted from WOFF to SFNT (`src/font.c`) and from
-WOFF2 to SFNT over libbrotlidec when it is available (`src/woff2.c`), and
-registered with Fontconfig so the Pango-FC fontmap can use them.
+fonts are fetched, converted from WOFF and WOFF2 to SFNT through FreeType
+(`src/font.c`) -- or, when FreeType predates 2.10.2 or was built without
+Brotli, from WOFF2 by the in-tree decoder over libbrotlidec (`src/woff2.c`,
+compiled only then) -- and registered with Fontconfig so the Pango-FC
+fontmap can use them.
 
 **Animation.** `src/anim.c` tracks CSS transitions and `@keyframes`.
 The per-frame pump `ns_browser_tick` (`src/libnordstjernen.c:1866`)
