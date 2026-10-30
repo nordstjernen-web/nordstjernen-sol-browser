@@ -3,6 +3,13 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Rendering: SVG images (`<img>` and CSS backgrounds) are drawn from the
+  vector source at the size they appear on screen. They were rasterized
+  once at their natural size and scaled, so a 24 px icon shown at 96 px,
+  and every SVG on a 2x display, came out blurry. An SVG drawn into a box
+  of another shape is now fitted by its own `preserveAspectRatio` (a
+  square logo in a 200x100 box stays square) instead of being stretched,
+  as in Chrome. Up to four sizes per image are cached.
 * Text layout: the stand-in glyph ids that kept icon-font ligatures
   working are built only against HarfBuzz 11.4 to 14.5. Those releases
   store coverage-cache entries without checking the glyph id, so the
