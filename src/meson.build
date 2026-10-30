@@ -19,21 +19,40 @@ if not meson.is_cross_build() and not quickjs_original and qjsc_prog.found() and
   )
 endif
 
-polyfills_h = custom_target(
-  'polyfills.h',
-  input: ['../scripts/embed-text.py', '../data/js/polyfills.js'],
-  output: 'polyfills.h',
-  command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
-            'ns_js_polyfills_src'],
-)
-
-streaming_h = custom_target(
-  'streaming.h',
-  input: ['../scripts/embed-text.py', '../data/js/streaming.js'],
-  output: 'streaming.h',
-  command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
-            'ns_js_streaming_src'],
-)
+# The engine's own scripts run in every realm and every worker. A native
+# build compiles them to bytecode once, here, so a new process reads
+# bytecode instead of parsing 670 KB of JavaScript before the page starts.
+engine_bytecode = not meson.is_cross_build() and not quickjs_original
+engine_bundles = {}
+foreach name, src : {'polyfills': '../data/js/polyfills.js',
+                     'streaming': '../data/js/streaming.js'}
+  if engine_bytecode
+    bc = custom_target(
+      name + '.bc',
+      input: src,
+      output: name + '.bc',
+      command: [qjsc_exe, '-b', '-C', '-H', '-n', '<' + name + '>',
+                '-o', '@OUTPUT@', '@INPUT@'],
+    )
+    engine_bundles += {name: custom_target(
+      name + '.h',
+      input: ['../scripts/embed-text.py', bc],
+      output: name + '.h',
+      command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
+                'ns_js_' + name + '_bc', 'NS_ENGINE_BYTECODE'],
+    )}
+  else
+    engine_bundles += {name: custom_target(
+      name + '.h',
+      input: ['../scripts/embed-text.py', src],
+      output: name + '.h',
+      command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
+                'ns_js_' + name + '_src'],
+    )}
+  endif
+endforeach
+polyfills_h = engine_bundles['polyfills']
+streaming_h = engine_bundles['streaming']
 
 remote_page_h = custom_target(
   'remote_page.h',

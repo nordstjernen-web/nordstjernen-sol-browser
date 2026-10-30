@@ -383,8 +383,14 @@ observer APIs.
 with reference-types and bulk-memory, no JIT/AOT); `src/wasm.c` binds the
 `WebAssembly` JS API over it.
 
-**Polyfills.** A ~500 KB `data/js/polyfills.js` bundle is embedded at
-build time and evaluated after the native bindings install. It builds
+**Polyfills.** A ~640 KB `data/js/polyfills.js` bundle is embedded at
+build time and evaluated after the native bindings install, in every
+window, frame and worker realm. Native builds embed it (and
+`data/js/streaming.js`) as bytecode compiled by the in-tree `qjsc -H`
+(hidden source, like the runtime compile), so a new process reads 370 KB
+of bytecode instead of parsing the source: about 11 ms less per page load
+and per renderer. Cross builds and `-Dquickjs=quickjs` embed the source
+and compile it on first use in each process. It builds
 higher-level spec object models over thin native backends (the whole
 IndexedDB interface over `__nd_idb`), and adds faithfulness shims (making
 patched methods report `[native code]`). It is syntax-verified against
