@@ -16,7 +16,7 @@ Supported platforms:
 * Java
 * iOS (experimental port, simulator builds — see [docs/iOS.md](docs/iOS.md))
 
-**Current release:** **1.0.36** (October 2026) — see [Changelog.md](Changelog.md).
+**Current release:** **1.0.39** (October 2026) — see [Changelog.md](Changelog.md).
 
 **Standards.** Behaviour is measured against the spec text, section by
 section, not against another browser. The walk-through of the in-scope
@@ -66,16 +66,17 @@ this browser rewritten in Rust.
 | Windows | [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl) |
 | Android | [Google Play](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser) |
 | macOS | notarised Apple Silicon `.dmg` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
-| Debian / Ubuntu | `.deb` packages (Debian 13, Ubuntu 24.04 and 26.04) and a portable Linux `.zip` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
-| npm (Linux, macOS, BSD) | [`nordstjernen-browser`](https://www.npmjs.com/package/nordstjernen-browser), see below |
+| Debian / Ubuntu / Fedora | `.deb` packages (Debian 13, Ubuntu 24.04 and 26.04), a Fedora 45 `.rpm` and a portable Linux `.zip` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
+| npm (Linux, macOS, BSD, Windows) | [`nordstjernen-browser`](https://www.npmjs.com/package/nordstjernen-browser), see below |
 | Java/JVM | [`org.nordstjernen:nordstjernen-java`](https://github.com/nordstjernen-web/nordstjernen-sol-browser/packages) on GitHub Packages (Maven) |
 | Source | [release tags](https://github.com/nordstjernen-web/nordstjernen-sol-browser/tags) |
 
 Windows 10 version 1809 or later on x64 is required. Android 14 or later
 is required (arm64 and x86_64). Other platforms build from source — see
 "Build" below and the per-platform install notes in [docs/](docs/README.md);
-packaging scripts for AppImage, RPM, Alpine, the BSDs, MSIX and the Windows
-installer are in `scripts/`.
+packaging scripts for `.deb`, AppImage, RPM, Alpine, the BSDs, the macOS `.dmg`,
+MSIX and the Windows installer are in `scripts/`, and the Arch `PKGBUILD` is in
+`packaging/arch/`.
 
 ### Install with npm
 
@@ -89,8 +90,8 @@ directory belongs to root; on Windows, run it without `sudo`.
 
 On Linux, the BSDs and Intel Macs the package builds Nordstjernen from the
 release source against your system's libraries, and first names any build
-dependency that is missing; Apple Silicon Macs get the notarised release
-build. See [npm/README.md](npm/README.md).
+dependency that is missing; on Windows it builds the same way with MSYS2's
+UCRT64 toolchain. Apple Silicon Macs get the notarised release build. See [npm/README.md](npm/README.md).
 
 ## Browser features
 
@@ -273,10 +274,13 @@ WHATWG URL module), [QuickJS](https://github.com/quickjs-ng/quickjs)
 (memory-safe image decoding), [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
 (MPEG-1 video + MP2 audio), [minimp3](https://github.com/lieff/minimp3)
 (MP3) and web-text-lib (`src/web-text-lib/`, the text-shaping Pango fork
-that began as [ns-pango](https://github.com/nordstjernen-web/ns-pango)). The
-first `meson setup` downloads one pinned subproject, the
+that began as the separate ns-pango repository). Unless they are installed,
+the first `meson setup` downloads two pinned subprojects: the
 [wgpu-native](https://github.com/gfx-rs/wgpu-native) release for WebGPU,
-linked statically; `-Dwebgpu=disabled` drops WebGPU and needs no network.
+linked statically (`-Dwebgpu=disabled` drops WebGPU), and the header-only
+[SIMDe](https://github.com/simd-everywhere/simde) library for WebAssembly
+SIMD (`-Dwasm_simd=disabled` drops it). With both disabled the build needs
+no network.
 
 **Required system libraries:**
 
@@ -299,9 +303,10 @@ linked statically; `-Dwebgpu=disabled` drops WebGPU and needs no network.
 SDL2 (audio output and microphone capture, `-Daudio`),
 [FFmpeg](https://github.com/FFmpeg/FFmpeg) libav\* on macOS and the BSDs (inline WebM),
 GStreamer ≥ 1.20 (H.264/AAC on Linux and the BSDs, `-Dgstreamer`),
-vorbisfile / opusfile (Ogg audio without FFmpeg), brotli (WOFF2 fonts),
+vorbisfile / opusfile (Ogg audio without FFmpeg), brotli (`br` content
+encoding and WOFF2 fonts), zstd (`zstd` content encoding),
 poppler-glib (inline PDF), libavif (AVIF images), libjxl (JPEG XL images),
-Enchant (spell checking), FreeType (extra font backend), wgpu-native on platforms it publishes no release for (the BSDs, musl,
+Enchant (spell checking), FreeType (WOFF/WOFF2 web-font unpacking), wgpu-native on platforms it publishes no release for (the BSDs, musl,
 Windows on Arm; WebGPU is not built for Android and iOS) and Fabrice
 Bellard's original
 [QuickJS](https://github.com/bellard/quickjs) (`-Dquickjs=quickjs`, fetched
