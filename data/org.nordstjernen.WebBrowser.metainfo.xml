@@ -60,6 +60,18 @@
   </branding>
 
   <releases>
+    <release version="1.0.39" date="2026-10-30">
+      <description>
+        <p>Compatibility and web standards release.</p>
+        <ul>
+          <li>Content-Security-Policy applies per iframe, and response bodies are decoded by the browser, which makes BankID logins work.</li>
+          <li>The HTTP cache follows RFC 9111, honours stale-while-revalidate and stores private responses; 103 Early Hints are used.</li>
+          <li>SVG images are drawn sharply at the size they are shown, and SVG text renders in images and backgrounds.</li>
+          <li>Many layout fixes: percentage heights, inline-block baselines, vertical-align top and bottom, grid track minimums, container queries and the lh unit.</li>
+          <li>Faster stylesheet parsing and engine start-up.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.38" date="2026-10-28">
       <description>
         <p>Security and compatibility release.</p>
