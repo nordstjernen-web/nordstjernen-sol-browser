@@ -3,6 +3,12 @@ Changelog:
 
 1.0.39-dev:
 ======
+* DOM: when an image finishes loading, layout is marked stale before its
+  `load` event (and the window `load` event that may follow) runs, so a
+  handler that measures the image or the page sees the image's real size.
+  `getBoundingClientRect()` on a just-loaded image returned 0x0 until the
+  next frame, which broke galleries and masonry grids that lay
+  themselves out on load.
 * Layout: a percentage height resolves against the nearest block
   container, as CSS 2.1 defines the containing block, and skips inline
   ancestors such as `<picture>` or `<span>`. An `<img style="height:

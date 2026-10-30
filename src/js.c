@@ -48581,6 +48581,7 @@ ns_js_flush_ready_images(ns_js *js)
         ns_node *el = ready->pdata[i];
         ns_js_image_load *r = g_hash_table_lookup(js->js_image_loads, el);
         if (!r || !r->img) continue;
+        if (r->img->loaded) js->mutated = TRUE;
         ns_realm_scope scope;
         ns_js_realm_scope_enter(js, r->realm, &scope);
         ns_js_fire_img_load_once(js, el, r->img->failed);
@@ -48642,11 +48643,11 @@ ns_js_image_ready_idle(gpointer data)
         g_free(line);
     }
     if (img && (img->loaded || img->failed)) {
+        if (img->loaded) js->mutated = TRUE;
         ns_realm_scope scope;
         ns_js_realm_scope_enter(js, r->realm, &scope);
         ns_js_fire_img_load_once(js, r->el, img->failed);
         ns_js_realm_scope_leave(js, &scope);
-        if (img->loaded) js->mutated = TRUE;
     }
     if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
     return G_SOURCE_REMOVE;
