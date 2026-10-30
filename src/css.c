@@ -30499,9 +30499,16 @@ var_text_mentions_wide_keyword(const char *text)
     return found;
 }
 
+static gboolean
+var_text_expands_to_keyword(const char *text)
+{
+    return text && custom_prop_wide_kind(text) == NS_CUSTOM_WIDE_NONE &&
+           strstr(text, "var(") && var_text_mentions_wide_keyword(text);
+}
+
 static void
 var_map_apply_unregistered(GHashTable *own, const ns_var_map *parent,
-                           GArray *matches, guint index)
+                           GArray *matches, guint index, gboolean expand)
 {
     var_match *current = &g_array_index(matches, var_match, index);
     const var_match *resolved = var_resolved_match(matches, index);
@@ -30512,8 +30519,7 @@ var_map_apply_unregistered(GHashTable *own, const ns_var_map *parent,
     const char *value_text = resolved->text;
     ns_custom_prop_wide kind = custom_prop_wide_kind(value_text);
     char *expanded = NULL;
-    if (kind == NS_CUSTOM_WIDE_NONE && strstr(resolved->text, "var(") &&
-        var_text_mentions_wide_keyword(resolved->text)) {
+    if (expand && var_text_expands_to_keyword(resolved->text)) {
         ns_var_map scope = { .ref = 1, .own = own,
                              .parent = (ns_var_map *)parent };
         expanded = substitute_vars_with(value_text, &scope, 0);
@@ -31146,15 +31152,30 @@ var_map_apply_matches(GHashTable *own, ns_var_map *parent, GArray *var_matches,
 {
     g_array_sort(var_matches, var_match_cmp);
     GHashTable *prefilled = var_prefill_plain_values(own, var_matches);
+    GHashTable *deferred = g_hash_table_new(g_str_hash, g_str_equal);
     for (guint i = 0; i < var_matches->len; i++) {
         var_match *vm = &g_array_index(var_matches, var_match, i);
         if (!vm->name || !vm->text) continue;
         if (g_hash_table_contains(prefilled, vm->name)) continue;
-        if (registered)
+        if (registered) {
             var_map_apply_registered(own, parent, var_matches, i);
+            continue;
+        }
+        var_map_apply_unregistered(own, parent, var_matches, i, FALSE);
+        const var_match *resolved = var_resolved_match(var_matches, i);
+        if (resolved && var_text_expands_to_keyword(resolved->text))
+            g_hash_table_replace(deferred, (gpointer)vm->name,
+                                 GUINT_TO_POINTER(i + 1));
         else
-            var_map_apply_unregistered(own, parent, var_matches, i);
+            g_hash_table_remove(deferred, vm->name);
     }
+    GHashTableIter it;
+    gpointer name, slot;
+    g_hash_table_iter_init(&it, deferred);
+    while (g_hash_table_iter_next(&it, &name, &slot))
+        var_map_apply_unregistered(own, parent, var_matches,
+                                   GPOINTER_TO_UINT(slot) - 1, TRUE);
+    g_hash_table_destroy(deferred);
     g_hash_table_destroy(prefilled);
 }
 

@@ -3,6 +3,13 @@ Changelog:
 
 1.0.39-dev:
 ======
+* CSS: a custom property whose value is `var(--x, initial)` (or another
+  CSS-wide keyword in a fallback) is resolved against the final cascaded
+  values of the element's other custom properties. It was expanded in
+  cascade order, so it saw a class rule's `--x: initial` before the
+  inline `--x` that wins over it, and became invalid. Netflix's design
+  system sets its breakpoint values this way, so its card rows lost their
+  `flex` and stacked full width.
 * WOFF2 web fonts are decoded by FreeType wherever it can: the in-tree
   decoder (`src/woff2.c`) is compiled only when the FreeType the build
   finds predates 2.10.2 or was built without Brotli, as Homebrew's is,
