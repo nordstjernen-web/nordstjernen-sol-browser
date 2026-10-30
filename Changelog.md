@@ -3,6 +3,12 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Layout: an image with an aspect ratio but no natural width or height
+  (an SVG with only a `viewBox`) fills the available width when its
+  `width` and `height` are auto, and contributes nothing to min- and
+  max-content sizes, as in Chrome (CSS 2.1 10.3.2). It was laid out at a
+  made-up 150 px height. Inside a float or inline-block it is 0x0, in a
+  flex or grid item or a block it fills the container.
 * Text layout: the stand-in glyph ids that kept icon-font ligatures
   working are built only against HarfBuzz 11.4 to 14.5. Those releases
   store coverage-cache entries without checking the glyph id, so the

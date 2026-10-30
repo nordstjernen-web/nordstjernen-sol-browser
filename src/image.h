@@ -38,6 +38,7 @@ struct ns_image {
     void        *render_surface;
     int          natural_width;
     int          natural_height;
+    double       natural_ratio_only;
     long         http_status;
     char        *error;
     gint64       failed_at_us;

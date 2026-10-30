@@ -463,15 +463,27 @@ ns_image_pixel_frames_for(const guchar *data, gsize len, int *out_w, int *out_h,
 typedef struct {
     ns_texture *tex;
     GArray     *frames;
+    double      ratio_only;
     int         w;
     int         h;
     int         loops;
 } ns_img_decoded;
 
+static ns_texture *
+ns_image_decode_svg_or_bytes(const guchar *data, gsize len, int *out_w,
+                             int *out_h, double *out_ratio_only)
+{
+    *out_ratio_only = 0;
+    if (ns_svg_bytes_look_like_svg(data, len))
+        return ns_svg_decode_bytes_ratio(data, len, out_w, out_h,
+                                         out_ratio_only);
+    return ns_image_decode_bytes(data, len, out_w, out_h);
+}
+
 static ns_img_decoded
 ns_image_decode_body(const guchar *data, gsize len)
 {
-    ns_img_decoded d = { NULL, NULL, 0, 0, 0 };
+    ns_img_decoded d = { 0 };
     int w = 0, h = 0, loops = 0;
     GArray *frames = NULL;
     GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h,
@@ -491,7 +503,7 @@ ns_image_decode_body(const guchar *data, gsize len)
         g_array_set_clear_func(frames, ns_image_anim_frame_clear);
         g_array_free(frames, TRUE);
     }
-    d.tex = ns_image_decode_bytes(data, len, &w, &h);
+    d.tex = ns_image_decode_svg_or_bytes(data, len, &w, &h, &d.ratio_only);
     d.w = w;
     d.h = h;
     return d;
@@ -520,6 +532,7 @@ ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
         img->texture = d->tex;
         img->natural_width  = d->w;
         img->natural_height = d->h;
+        img->natural_ratio_only = d->ratio_only;
         img->loaded = TRUE;
     } else {
         img->failed = TRUE;
@@ -580,7 +593,7 @@ on_image_decoded(GObject *src, GAsyncResult *res, gpointer user_data)
         ns_decode_job_free(job);
         return;
     }
-    ns_img_decoded result = { NULL, NULL, 0, 0, 0 };
+    ns_img_decoded result = { 0 };
     if (d) {
         result = *d;
         g_free(d);
@@ -959,9 +972,13 @@ ns_image_cache_insert_encoded(ns_image_cache *cache, const char *url,
         }
     }
 
-    ns_texture *tex = ns_image_decode_bytes(data, len, &w, &h);
+    double ratio_only = 0;
+    ns_texture *tex = ns_image_decode_svg_or_bytes(data, len, &w, &h,
+                                                   &ratio_only);
     if (!tex) return NULL;
-    return ns_image_cache_insert_loaded(cache, url, tex, w, h);
+    ns_image *img = ns_image_cache_insert_loaded(cache, url, tex, w, h);
+    if (img) img->natural_ratio_only = ratio_only;
+    return img;
 }
 
 void

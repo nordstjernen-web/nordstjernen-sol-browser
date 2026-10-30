@@ -61,6 +61,9 @@ gboolean ns_svg_node_geometry(const ns_node *svg, const ns_node *target,
 
 ns_texture *ns_svg_decode_bytes(const guchar *data, gsize len,
                                 int *out_w, int *out_h);
+ns_texture *ns_svg_decode_bytes_ratio(const guchar *data, gsize len,
+                                      int *out_w, int *out_h,
+                                      double *out_ratio_only);
 
 gboolean ns_svg_render_bytes(cairo_t *cr, const guchar *data, gsize len,
                              double width, double height);
