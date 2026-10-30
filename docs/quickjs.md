@@ -16,7 +16,7 @@ An existing build directory switches with
 |---|---|---|
 | Source | `src/quickjs/`, an in-tree fork of [quickjs-ng](https://github.com/quickjs-ng/quickjs) | [bellard/quickjs](https://github.com/bellard/quickjs), the original engine |
 | How it gets into the build | always in the tree | fetched at configure time by `subprojects/quickjs.wrap`, never vendored |
-| Version | quickjs-ng 0.17.0 (master `270b8c9`) plus the browser hooks; refresh history in [`vendored-engine-updates.md`](vendored-engine-updates.md) | master `84e723f` (2026-10-13), pinned by commit, plus one sort patch |
+| Version | quickjs-ng 0.17.0 (master `270b8c9`) plus the browser hooks; refresh history in [`vendored-engine-updates.md`](vendored-engine-updates.md) | master `19d6bd8` (2026-10-26), pinned by commit, plus one sort patch |
 | About page | `QuickJS 0.17.0` | `QuickJS 2026-06-04` |
 | CI | every workflow | none; build it locally (see below) |
 
@@ -27,7 +27,7 @@ engine gets that API through a small adapter instead of a second binding.
 ## How the original engine is built
 
 `subprojects/quickjs.wrap` pins a commit on the upstream `master` branch,
-currently `84e723f` (2026-10-13), sixty commits past the 2026-06-04 release.
+currently `19d6bd8` (2026-10-26), eighty-one commits past the 2026-06-04 release.
 Upstream has not changed `VERSION` since, so the About page still reads
 `QuickJS 2026-06-04`. Upstream ships only a Makefile, so the wrap's
 `patch_directory` overlays `subprojects/packagefiles/quickjs/meson.build`,

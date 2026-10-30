@@ -3,6 +3,19 @@ Changelog:
 
 1.0.39-dev:
 ======
+* `-Dquickjs=quickjs` builds Fabrice Bellard's QuickJS at master
+  `19d6bd8` (2026-10-26) instead of `84e723f`. The 21 commits in between
+  fix a use-after-free in `build_backtrace()` when an exception runs out
+  of memory, an infinite loop in `unicode_script()` when building a
+  `\p{Script=...}` set fails, a Proxy `ownKeys` trap whose primitive
+  result was accepted instead of throwing `TypeError`, template literal
+  substitution, `Array.prototype.sort` not writing back every element and
+  `for await` not awaiting the iterator's `return()`, and add `using`
+  declarations and `Atomics.waitAsync()`. The sort patch still applies
+  and is still needed: upstream still skips the comparator for identical
+  values. The in-tree quickjs-ng fork, the default engine, already holds
+  the exception in `build_backtrace()` and returns from
+  `unicode_script()`'s failure path.
 * Networking: the DNS-over-HTTPS setting (`doh_url`, `NS_DOH_URL`) is
   applied. Every libcurl option the engine guarded with `#ifdef` is an
   enum constant rather than a macro, so the preprocessor never saw it and
