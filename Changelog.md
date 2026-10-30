@@ -3,6 +3,13 @@ Changelog:
 
 1.0.39-dev:
 ======
+* CSS: container queries match for containers inside an inline-block.
+  The pass that records each container's size after layout walked only
+  the block children of the box tree and skipped atomic inline boxes,
+  so every `@container` rule below an inline-block ancestor stayed
+  unmatched. CNN wraps its whole page in an inline-block, and its cards
+  lost all their container-query styles (headline overlays, image
+  ratios).
 * WOFF2 web fonts are decoded by FreeType wherever it can: the in-tree
   decoder (`src/woff2.c`) is compiled only when the FreeType the build
   finds predates 2.10.2 or was built without Brotli, as Homebrew's is,
