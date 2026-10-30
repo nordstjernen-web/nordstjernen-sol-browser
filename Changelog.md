@@ -3,6 +3,14 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Performance: author stylesheets parse each rule's declarations only
+  when one of its selectors first matches an element, as Chrome does.
+  Sites ship CSS for their whole app (YouTube 3.7 MB, GitHub 6 MB), and
+  most of those rules never match the page, yet every declaration was
+  parsed, copied and URL-resolved up front. Frozen YouTube loads in 172
+  ms of main-thread CPU instead of 285 and GitHub in 260 instead of 312;
+  box positions and every computed style stay identical. The CSS
+  scanner also stops calling strchr() for every character.
 * Text layout: the stand-in glyph ids that kept icon-font ligatures
   working are built only against HarfBuzz 11.4 to 14.5. Those releases
   store coverage-cache entries without checking the glyph id, so the
