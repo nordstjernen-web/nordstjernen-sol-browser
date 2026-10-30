@@ -2,10 +2,11 @@
 import sys
 
 def main(argv):
-    if len(argv) != 4:
-        sys.stderr.write("usage: embed-text.py <src> <out> <symbol>\n")
+    if len(argv) not in (4, 5):
+        sys.stderr.write("usage: embed-text.py <src> <out> <symbol> [<macro to define>]\n")
         return 2
     src, out, sym = argv[1], argv[2], argv[3]
+    macro = argv[4] if len(argv) == 5 else None
     with open(src, "rb") as f:
         data = f.read()
     bytes_per_line = 16
@@ -18,6 +19,8 @@ def main(argv):
         body += ","
     with open(out, "w") as f:
         f.write("/* generated from %s — do not edit */\n" % src)
+        if macro:
+            f.write("#define %s 1\n" % macro)
         f.write("static const char %s[] = {\n%s\n    0x00\n};\n" % (sym, body))
     return 0
 

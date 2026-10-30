@@ -15,6 +15,8 @@ wamr_c_args = cc.get_supported_arguments(['-w']) + [
   '-DWASM_DISABLE_STACK_HW_BOUND_CHECK=1',
 ]
 
+wamr_invoke_native_suffix = have_wasm_simd ? '_simd.s' : '.s'
+
 wamr_srcs = files(
   'ns_wamr.c',
   'core/iwasm/common/wasm_blocking_op.c',
@@ -49,7 +51,7 @@ if wamr_system == 'windows'
     '-D_WINSOCK_DEPRECATED_NO_WARNINGS',
   ]
   wamr_srcs += files(
-    'core/iwasm/common/arch/invokeNative_mingw_x64.s',
+    'core/iwasm/common/arch/invokeNative_mingw_x64' + wamr_invoke_native_suffix,
     'core/shared/platform/common/libc-util/libc_errno.c',
     'core/shared/platform/common/memory/mremap.c',
     'core/shared/platform/windows/platform_init.c',
@@ -83,9 +85,9 @@ else
   else
     wamr_c_args += ['-DBH_PLATFORM_LINUX', '-D_GNU_SOURCE']
     if host_machine.cpu_family() == 'aarch64'
-      wamr_srcs += files('core/iwasm/common/arch/invokeNative_aarch64.s')
+      wamr_srcs += files('core/iwasm/common/arch/invokeNative_aarch64' + wamr_invoke_native_suffix)
     else
-      wamr_srcs += files('core/iwasm/common/arch/invokeNative_em64.s')
+      wamr_srcs += files('core/iwasm/common/arch/invokeNative_em64' + wamr_invoke_native_suffix)
     endif
     wamr_srcs += files('core/shared/platform/linux/platform_init.c')
     wamr_platform_inc = 'core/shared/platform/linux'

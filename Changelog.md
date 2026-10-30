@@ -10,6 +10,62 @@ Changelog:
   found no height and fell back to its natural ratio, so image cards
   with `aspect-ratio` boxes (AP News, Amazon, Canva) showed the wrong
   crop and size.
+* CSS: a custom property whose value is `var(--x, initial)` (or another
+  CSS-wide keyword in a fallback) is resolved against the final cascaded
+  values of the element's other custom properties. It was expanded in
+  cascade order, so it saw a class rule's `--x: initial` before the
+  inline `--x` that wins over it, and became invalid. Netflix's design
+  system sets its breakpoint values this way, so its card rows lost their
+  `flex` and stacked full width.
+* CSS: container queries match for containers inside an inline-block.
+  The pass that records each container's size after layout walked only
+  the block children of the box tree and skipped atomic inline boxes,
+  so every `@container` rule below an inline-block ancestor stayed
+  unmatched. CNN wraps its whole page in an inline-block, and its cards
+  lost all their container-query styles (headline overlays, image
+  ratios).
+* Layout: form controls (`button`, `input`, `select`, `textarea`) with
+  `display: block` and `width: auto` keep their fit-content width, as in
+  Chrome, instead of stretching across the line. A block-level button,
+  input or select filled its whole container. `margin: 0 auto` still
+  centers them, and a stretching flex column still stretches them.
+* CSSOM: `getComputedStyle(el).getPropertyValue('--x')` returns the
+  computed value of a custom property, with its `var()` references
+  substituted, as browsers do; it returned the specified text (for
+  example `var(--x-lg, initial)`). The `flex` and `flex-flow` shorthands
+  are serialized from their longhands instead of returning "".
+* Forms: a `<select>` with `appearance: none` is as wide as its widest
+  option plus its own padding and border, as in Chrome. A no-break space
+  was drawn on each side of the label, which made every custom-styled
+  select about 8 px wider and moved its text right.
+* Rendering: text in an SVG image (`<img src=*.svg>`, CSS backgrounds)
+  without a `font-family` uses the default serif font, as in Chrome and as
+  HTML text does. It was drawn in sans-serif.
+* Performance: author stylesheets parse each rule's declarations only
+  when one of its selectors first matches an element, as Chrome does.
+  Sites ship CSS for their whole app (YouTube 3.7 MB, GitHub 6 MB), and
+  most of those rules never match the page, yet every declaration was
+  parsed, copied and URL-resolved up front. Frozen YouTube loads in 172
+  ms of main-thread CPU instead of 285 and GitHub in 260 instead of 312;
+  box positions and every computed style stay identical. The CSS
+  scanner also stops calling strchr() for every character.
+* Performance: the engine's own JavaScript (`polyfills.js` and
+  `streaming.js`, 670 KB) is compiled to QuickJS bytecode at build time
+  instead of in every new process. Each page load, renderer and the first
+  worker of a page used to parse it before any page script ran; now they
+  read 370 KB of bytecode, which takes about 11 ms less main-thread CPU
+  per page (a blank page goes from 29 to 18 ms) and starts a worker in
+  3 ms instead of 16. The bytecode is byte-identical to the one the
+  engine compiled at run time, and the binary is 270 KB smaller. Cross
+  builds and `-Dquickjs=quickjs` keep compiling the source at run time.
+* Build: WebAssembly SIMD builds on macOS again. The WAMR glue for
+  native calls includes `invokeNative_aarch64_simd.s` (or the x86-64
+  one) when SIMD is on, and those files were missing from the tree, so
+  `meson compile` stopped with "file not found" on Apple clang 21. They
+  are now vendored from WAMR 2.4.5, and Linux, the BSDs and Windows
+  pick the SIMD variant too: with SIMD on, WAMR lays out float
+  arguments in 16-byte slots, and the 8-byte assembly read every
+  argument from the wrong offset.
 * WOFF2 web fonts are decoded by FreeType wherever it can: the in-tree
   decoder (`src/woff2.c`) is compiled only when the FreeType the build
   finds predates 2.10.2 or was built without Brotli, as Homebrew's is,

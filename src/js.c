@@ -451,6 +451,29 @@ static void ns_js_setup_document_interfaces(ns_js *js, JSContext *ctx,
                                             JSValueConst global);
 static void ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx,
                                       gboolean main_realm);
+
+typedef struct {
+    GMutex        lock;
+    const char   *src;
+    gsize         src_len;
+    const guint8 *bytes;
+    gsize         len;
+} ns_engine_bundle;
+
+#ifdef NS_ENGINE_BYTECODE
+#define NS_ENGINE_BUNDLE(name) \
+    { .bytes = (const guint8 *)ns_js_##name##_bc, \
+      .len = sizeof ns_js_##name##_bc - 1 }
+#else
+#define NS_ENGINE_BUNDLE(name) \
+    { .src = ns_js_##name##_src, .src_len = sizeof ns_js_##name##_src - 1 }
+#endif
+
+static ns_engine_bundle ns_polyfills_bundle = NS_ENGINE_BUNDLE(polyfills);
+static ns_engine_bundle ns_streaming_bundle = NS_ENGINE_BUNDLE(streaming);
+
+static void ns_js_eval_engine_bundle(ns_js *js, ns_engine_bundle *bundle,
+                                     const char *origin);
 static JSValue ns_structured_clone_value(JSContext *ctx, JSValueConst v, JSValueConst transfer);
 static JSValue ns_iframe_cross_origin_window(JSContext *ctx, JSValue target);
 static void ns_install_cross_window_maker(JSContext *ctx, JSValueConst global);
@@ -17672,6 +17695,16 @@ ns_computed_needs_layout(const char *name)
 }
 
 static char *
+ns_computed_custom_property(const char *specified, const ns_style *s)
+{
+    char *value = strstr(specified, "var(")
+        ? ns_css_resolve_style_vars(specified, s) : g_strdup(specified);
+    if (value && g_ascii_strcasecmp(g_strstrip(value), "initial") == 0)
+        g_clear_pointer(&value, g_free);
+    return value;
+}
+
+static char *
 ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name);
 
 static char *
@@ -18562,6 +18595,24 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         g_free(fallbacks);
         return out;
     }
+    if (strcmp(name, "flex") == 0 || strcmp(name, "flex-flow") == 0) {
+        gboolean flow = name[4] == '-';
+        static const char *const flex_parts[3] = {
+            "flex-grow", "flex-shrink", "flex-basis",
+        };
+        static const char *const flow_parts[2] = {
+            "flex-direction", "flex-wrap",
+        };
+        const char *const *parts = flow ? flow_parts : flex_parts;
+        GString *out = g_string_new(NULL);
+        for (int i = 0; i < (flow ? 2 : 3); i++) {
+            char *v = ns_computed_lookup(ctx, n, parts[i]);
+            if (out->len) g_string_append_c(out, ' ');
+            g_string_append(out, v && *v ? v : "");
+            g_free(v);
+        }
+        return g_string_free(out, FALSE);
+    }
     if (strcmp(name, "gap") == 0 || strcmp(name, "grid-gap") == 0) {
         char *row = ns_computed_lookup(ctx, n, "row-gap");
         char *col = ns_computed_lookup(ctx, n, "column-gap");
@@ -18742,9 +18793,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             const ns_style *s = g_hash_table_lookup(js->style_table, n);
             if (s && s->vars) {
                 const char *v = ns_var_map_lookup(s->vars, name);
-                if (v)
-                    return g_ascii_strcasecmp(v, "initial") == 0
-                        ? NULL : g_strdup(v);
+                if (v) return ns_computed_custom_property(v, s);
             }
         }
         if (style && *style) {
@@ -18982,8 +19031,7 @@ ns_computed_lookup_pseudo(JSContext *ctx, const ns_node *n,
     if (name[0] == '-' && name[1] == '-' && name[2]) {
         if (ps->vars) {
             const char *v = ns_var_map_lookup(ps->vars, name);
-            if (v && g_ascii_strcasecmp(v, "initial") != 0)
-                return g_strdup(v);
+            if (v) return ns_computed_custom_property(v, ps);
         }
         return NULL;
     }
@@ -28826,8 +28874,7 @@ ns_worker_js_new(ns_worker_host *host)
     ns_install_abort_signal_interface(ctx, global);
     ns_net_install_interfaces(ctx, global);
     ns_idb_install(ctx, global);
-    ns_js_eval(js, ns_js_polyfills_src,
-               sizeof(ns_js_polyfills_src) - 1, "<worker-polyfills>");
+    ns_js_eval_engine_bundle(js, &ns_polyfills_bundle, "<polyfills>");
     {
         JSValue g = JS_GetGlobalObject(ctx);
         ns_install_event_attribute_getters(ctx, g);
@@ -63820,18 +63867,9 @@ ns_js_setup_document_interfaces(ns_js *js, JSContext *ctx, JSValueConst global)
     ns_net_install_interfaces(ctx, global);
 }
 
-typedef struct {
-    GMutex  lock;
-    guint8 *bytes;
-    gsize   len;
-} ns_engine_bundle;
-
-static ns_engine_bundle ns_polyfills_bundle;
-static ns_engine_bundle ns_streaming_bundle;
-
 static JSValue
 ns_engine_bundle_function(JSContext *ctx, ns_engine_bundle *bundle,
-                          const char *src, gsize len, const char *origin)
+                          const char *origin)
 {
     g_mutex_lock(&bundle->lock);
     if (bundle->bytes) {
@@ -63840,7 +63878,7 @@ ns_engine_bundle_function(JSContext *ctx, ns_engine_bundle *bundle,
         g_mutex_unlock(&bundle->lock);
         return fn;
     }
-    JSValue fn = JS_Eval(ctx, src, len, origin,
+    JSValue fn = JS_Eval(ctx, bundle->src, bundle->src_len, origin,
                          JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY |
                          JS_EVAL_FLAG_HIDE_SOURCE);
     if (!JS_IsException(fn)) {
@@ -63858,13 +63896,13 @@ ns_engine_bundle_function(JSContext *ctx, ns_engine_bundle *bundle,
 
 static void
 ns_js_eval_engine_bundle(ns_js *js, ns_engine_bundle *bundle,
-                         const char *src, gsize len, const char *origin)
+                         const char *origin)
 {
     JSContext *ctx = js->ctx;
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
     js->eval_depth++;
-    JSValue fn = ns_engine_bundle_function(ctx, bundle, src, len, origin);
+    JSValue fn = ns_engine_bundle_function(ctx, bundle, origin);
     JSValue v = JS_IsException(fn) ? fn : JS_EvalFunction(ctx, fn);
     js->eval_depth--;
     if (js->eval_depth == 0) {
@@ -63890,10 +63928,8 @@ ns_js_eval_engine_bundle(ns_js *js, ns_engine_bundle *bundle,
 static void
 ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx, gboolean main_realm)
 {
-    ns_js_eval_engine_bundle(js, &ns_polyfills_bundle, ns_js_polyfills_src,
-                             sizeof(ns_js_polyfills_src) - 1, "<polyfills>");
-    ns_js_eval_engine_bundle(js, &ns_streaming_bundle, ns_js_streaming_src,
-                             sizeof(ns_js_streaming_src) - 1, "<streaming>");
+    ns_js_eval_engine_bundle(js, &ns_polyfills_bundle, "<polyfills>");
+    ns_js_eval_engine_bundle(js, &ns_streaming_bundle, "<streaming>");
     ns_drain_microtasks(js);
     {
         JSValue g = JS_GetGlobalObject(ctx);

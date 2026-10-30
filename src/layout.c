@@ -4228,13 +4228,12 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         char *label = chosen ? ns_node_collect_text(chosen) : g_strdup("");
         if (!label) label = g_strdup("");
         gsize start = ctx->out->len;
-        g_string_append(ctx->out, "\xc2\xa0");
-        if (*label) g_string_append(ctx->out, label);
         const ns_style *select_style = g_hash_table_lookup(ctx->styles, n);
-        if (select_style &&
-            keyword_is(select_style->values[NS_CSS_APPEARANCE], "none"))
-            g_string_append(ctx->out, "\xc2\xa0");
-        else
+        gboolean plain = select_style &&
+            keyword_is(select_style->values[NS_CSS_APPEARANCE], "none");
+        if (!plain || !*label) g_string_append(ctx->out, "\xc2\xa0");
+        if (*label) g_string_append(ctx->out, label);
+        if (!plain)
             g_string_append(ctx->out, n == g_open_select_for_layout
                                       ? " \xe2\x96\xb4\xc2\xa0"
                                       : " \xe2\x96\xbe\xc2\xa0");
@@ -10430,8 +10429,8 @@ static double
 select_label_width(NsPangoLayout *l, const ns_style *s, const char *label)
 {
     gboolean arrow = !keyword_is(s->values[NS_CSS_APPEARANCE], "none");
-    char *text = g_strdup_printf(arrow ? "\xc2\xa0%s \xe2\x96\xbe\xc2\xa0"
-                                       : "\xc2\xa0%s\xc2\xa0", label);
+    char *text = arrow ? g_strdup_printf("\xc2\xa0%s \xe2\x96\xbe\xc2\xa0", label)
+                       : g_strdup(*label ? label : "\xc2\xa0");
     ns_pango_layout_set_text(l, text, -1);
     NsPangoAttrList *attrs = ns_pango_attr_list_new();
     ns_paint_apply_font_features(attrs, s, 0, G_MAXUINT);
@@ -16953,8 +16952,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         explicit_width = TRUE;
         intrinsic_width = TRUE;
     } else if (!flex_col_item_stretch &&
-               display_is_atomic_inline_container(
-                   ns_css_display_of(box->style))) {
+               (display_is_atomic_inline_container(
+                    ns_css_display_of(box->style)) ||
+                (node_is_form_hit_target(box->dom) &&
+                 !(box->parent && box_is_grid_container(box->parent))))) {
         double avail = parent_content_width - horiz_total;
         if (avail < 0) avail = 0;
         if (height_keyword_stretches(wv)) {
@@ -16965,6 +16966,11 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             cw = atomic_inline_fit_width(box,
                                          inherited_style ? inherited_style : box->style,
                                          avail);
+            if (!display_is_atomic_inline_container(
+                    ns_css_display_of(box->style))) {
+                explicit_width = TRUE;
+                intrinsic_width = TRUE;
+            }
         }
         if (cw < 0) cw = 0;
     } else if (!flex_col_item_stretch && ratio_transferred_width(box) >= 0) {

@@ -59,6 +59,7 @@ static OutputTypeEnum output_type;
 static FILE *outfile;
 static const char *c_ident_prefix = "qjsc_";
 static int strip;
+static bool hide_source;
 
 void namelist_add(namelist_t *lp, const char *name, const char *short_name,
                   int flags)
@@ -283,6 +284,8 @@ static void compile_file(JSContext *ctx, FILE *fo,
         exit(1);
     }
     eval_flags = JS_EVAL_FLAG_COMPILE_ONLY;
+    if (hide_source)
+        eval_flags |= JS_EVAL_FLAG_HIDE_SOURCE;
     if (module < 0) {
         module = (js__has_suffix(filename, ".mjs") ||
                   JS_DetectModule((const char *)buf, buf_len));
@@ -343,6 +346,7 @@ void help(void)
            "-n script_name    set the script name (as used in stack traces)\n"
            "-N cname    set the C name of the generated data\n"
            "-C          compile as JS classic script (default=autodetect)\n"
+           "-H          compile as engine code whose source stays hidden\n"
            "-m          compile as ES module (default=autodetect)\n"
            "-D module_name         compile a dynamically loaded module or worker\n"
            "-M module_name[,cname] add initialization code for an external C module\n"
@@ -413,6 +417,7 @@ int main(int argc, char **argv)
     cname = NULL;
     module = -1;
     strip = 0;
+    hide_source = false;
     stack_size = 0;
     memset(&dynamic_module_list, 0, sizeof(dynamic_module_list));
 
@@ -484,6 +489,10 @@ int main(int argc, char **argv)
             }
             if (opt == 'm') {
                 module = 1;
+                continue;
+            }
+            if (opt == 'H') {
+                hide_source = true;
                 continue;
             }
             if (opt == 'M') {
