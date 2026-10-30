@@ -3,6 +3,14 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Build: WebAssembly SIMD builds on macOS again. The WAMR glue for
+  native calls includes `invokeNative_aarch64_simd.s` (or the x86-64
+  one) when SIMD is on, and those files were missing from the tree, so
+  `meson compile` stopped with "file not found" on Apple clang 21. They
+  are now vendored from WAMR 2.4.5, and Linux, the BSDs and Windows
+  pick the SIMD variant too: with SIMD on, WAMR lays out float
+  arguments in 16-byte slots, and the 8-byte assembly read every
+  argument from the wrong offset.
 * Web Storage: `sessionStorage` lives for the tab, per origin, as the
   standard requires. Every navigation used to start with an empty
   store, so a login that saves its OIDC state on one origin, visits
