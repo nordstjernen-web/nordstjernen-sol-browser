@@ -3,6 +3,15 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Performance: the engine's own JavaScript (`polyfills.js` and
+  `streaming.js`, 670 KB) is compiled to QuickJS bytecode at build time
+  instead of in every new process. Each page load, renderer and the first
+  worker of a page used to parse it before any page script ran; now they
+  read 370 KB of bytecode, which takes about 11 ms less main-thread CPU
+  per page (a blank page goes from 29 to 18 ms) and starts a worker in
+  3 ms instead of 16. The bytecode is byte-identical to the one the
+  engine compiled at run time, and the binary is 270 KB smaller. Cross
+  builds and `-Dquickjs=quickjs` keep compiling the source at run time.
 * Build: WebAssembly SIMD builds on macOS again. The WAMR glue for
   native calls includes `invokeNative_aarch64_simd.s` (or the x86-64
   one) when SIMD is on, and those files were missing from the tree, so
