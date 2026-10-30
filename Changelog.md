@@ -3,6 +3,9 @@ Changelog:
 
 1.0.39-dev:
 ======
+* Rendering: text in an SVG image (`<img src=*.svg>`, CSS backgrounds)
+  without a `font-family` uses the default serif font, as in Chrome and as
+  HTML text does. It was drawn in sans-serif.
 * Performance: author stylesheets parse each rule's declarations only
   when one of its selectors first matches an element, as Chrome does.
   Sites ship CSS for their whole app (YouTube 3.7 MB, GitHub 6 MB), and
