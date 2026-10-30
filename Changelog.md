@@ -3,6 +3,13 @@ Changelog:
 
 1.0.39-dev:
 ======
+* CSS: a custom property whose value is `var(--x, initial)` (or another
+  CSS-wide keyword in a fallback) is resolved against the final cascaded
+  values of the element's other custom properties. It was expanded in
+  cascade order, so it saw a class rule's `--x: initial` before the
+  inline `--x` that wins over it, and became invalid. Netflix's design
+  system sets its breakpoint values this way, so its card rows lost their
+  `flex` and stacked full width.
 * CSS: container queries match for containers inside an inline-block.
   The pass that records each container's size after layout walked only
   the block children of the box tree and skipped atomic inline boxes,
