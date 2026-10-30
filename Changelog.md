@@ -3,6 +3,10 @@ Changelog:
 
 1.0.40-dev:
 ======
+* SVG: `getComputedTextLength()` and `getSubStringLength()` measure SVG
+  text. Charts that size their axes from label widths threw on the
+  missing methods and drew no data; Google Finance showed an empty price
+  chart and no watchlist sparklines.
 
 1.0.39:
 ======
