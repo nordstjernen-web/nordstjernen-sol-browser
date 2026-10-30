@@ -381,6 +381,9 @@ render_collect_containers(const ns_box *b, GHashTable *map, guint64 *sig)
     }
     for (const ns_box *ch = b->first_child; ch; ch = ch->next_sibling)
         render_collect_containers(ch, map, sig);
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++)
+        render_collect_containers(
+            g_array_index(b->inline_atomics, ns_inline_atomic, i).box, map, sig);
 }
 
 static const ns_node *g_cq_prev_doc;
