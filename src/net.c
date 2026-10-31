@@ -3542,6 +3542,12 @@ about_security_html(void)
     diag_state(s, "Hardened allocator", st.allocator_hardened,
                st.allocator_hardened ? "Freed memory is poisoned" : "Off");
 #endif
+#ifdef NS_IPC_RUST
+    diag_state(s, "Memory-safe IPC parser (Rust)", TRUE,
+               "Renderer messages parsed in Rust");
+#else
+    diag_state(s, "Memory-safe IPC parser (Rust)", FALSE, "Off (C parser)");
+#endif
 
     g_string_append(s, "<h3>Browsing</h3>");
     gboolean https_first = cfg && cfg->https_first;

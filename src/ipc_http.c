@@ -20,6 +20,41 @@
 #endif
 #endif
 
+#ifdef NS_IPC_RUST
+
+int ns_ipc_rs_conn_init(http_conn *c, int fd, size_t conn_size);
+int ns_ipc_rs_read_head(http_conn *c, http_head *out, size_t conn_size,
+                        size_t head_size);
+int ns_ipc_rs_read_body(http_conn *c, long n, void *dst, size_t conn_size);
+int ns_ipc_rs_skip_body(http_conn *c, long n, size_t conn_size);
+
+void
+http_conn_init(http_conn *c, int fd)
+{
+    if (ns_ipc_rs_conn_init(c, fd, sizeof *c) != 0)
+        abort();
+}
+
+int
+http_read_head(http_conn *c, http_head *out)
+{
+    return ns_ipc_rs_read_head(c, out, sizeof *c, sizeof *out);
+}
+
+int
+http_read_body(http_conn *c, long n, void *dst)
+{
+    return ns_ipc_rs_read_body(c, n, dst, sizeof *c);
+}
+
+int
+http_skip_body(http_conn *c, long n)
+{
+    return ns_ipc_rs_skip_body(c, n, sizeof *c);
+}
+
+#else
+
 void
 http_conn_init(http_conn *c, int fd)
 {
@@ -27,6 +62,8 @@ http_conn_init(http_conn *c, int fd)
     c->start = 0;
     c->len = 0;
 }
+
+#endif
 
 #ifdef _WIN32
 
@@ -131,6 +168,8 @@ http_recv_fd(int sock)
 }
 
 #endif
+
+#ifndef NS_IPC_RUST
 
 static int
 conn_fill(http_conn *c)
@@ -624,3 +663,5 @@ json_get_str(const char *body, const char *key)
     *w = '\0';
     return out;
 }
+
+#endif

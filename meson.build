@@ -446,6 +446,11 @@ endif
 if media_os_backend == 'none'
   add_project_arguments('-DNS_MEDIA_OS_NONE=1', language: 'c')
 endif
+ns_ipc_rust = add_languages('rust', native: false,
+                            required: get_option('ipc_rust'))
+if ns_ipc_rust
+  add_project_arguments('-DNS_IPC_RUST=1', language: 'c')
+endif
 media_os_sources = files('src/media_os.c')
 if media_os_backend != 'none'
   media_os_sources += files('src/media_os_' + media_os_backend + '.c')
@@ -676,5 +681,24 @@ summary({'AVIF images (libavif)': have_avif}, section: 'Features')
 summary({'H.264/AAC OS decoders': media_os_backend}, section: 'Features')
 summary({'JPEG XL images (libjxl)': have_jxl}, section: 'Features')
 summary({'GTK 4 shell': have_gtk}, section: 'Shells')
+
+ns_ipc_rust_dep = []
+if ns_ipc_rust
+  ns_ipc_rust_raw = static_library('ns_ipc_http_rs_raw',
+    'src/ipc_http_rs/lib.rs',
+    rust_abi: 'c',
+    rust_args: ['-C', 'panic=abort'],
+    override_options: ['rust_std=2021'],
+  )
+  ns_ipc_rust_lib = custom_target('ns_ipc_http_rs',
+    input: ns_ipc_rust_raw,
+    output: 'libns_ipc_http_rs.a',
+    command: [find_program('scripts/rust-staticlib-localize.sh'),
+              '@INPUT@', '@OUTPUT@',
+              find_program('ld'), find_program('objcopy'), find_program('ar'),
+              'ns_ipc_rs_*', 'http_write_*', 'json_*'],
+  )
+  ns_ipc_rust_dep = declare_dependency(link_with: ns_ipc_rust_lib)
+endif
 
 subdir('src')

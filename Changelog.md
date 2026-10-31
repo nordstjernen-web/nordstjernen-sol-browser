@@ -14,6 +14,12 @@ Changelog:
 * Security: a request body given as an object with a huge `length` no
   longer makes the renderer allocate (and abort on) gigabytes; such bodies
   are capped at the same 32 MiB as other request bodies.
+* Security: an optional memory-safe Rust port of the renderer IPC parser
+  (`-Dipc_rust=enabled`, off by default). The browser shell parses every
+  message from the sandboxed renderer with it instead of C; the two
+  parsers produce identical results except that a lone UTF-16 surrogate in
+  a JSON string becomes U+FFFD instead of invalid UTF-8.
+  about:nordstjernen shows which parser is active.
 * Media: on Linux, VP9, AV1 and HEVC video decode in hardware through
   GStreamer when it has a VA-API (or other hardware) decoder for them, so
   YouTube's VP9/AV1 streams no longer fall to the CPU on machines whose GPU
