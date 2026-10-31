@@ -17,13 +17,14 @@ Summary:        Small, hand-written GTK web browser
 License:        LicenseRef-NSL-1.0 OR GPL-3.0-or-later
 Group:          Productivity/Networking/Web/Browsers
 URL:            https://nordstjernen.org
+ExcludeArch:    %ix86 %arm
 
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
 BuildRequires:  meson >= 1.0
 BuildRequires:  ninja
 BuildRequires:  pkgconfig
-BuildRequires:  update-desktop-files
+BuildRequires:  hicolor-icon-theme
 BuildRequires:  pkgconfig(epoxy)
 BuildRequires:  pkgconfig(enchant-2)
 BuildRequires:  pkgconfig(gstreamer-1.0) >= 1.20
@@ -50,7 +51,6 @@ BuildRequires:  pkgconfig(fontconfig)
 BuildRequires:  pkgconfig(pango)
 BuildRequires:  pkgconfig(pangocairo)
 BuildRequires:  pkgconfig(pangoft2)
-Requires:       hicolor-icon-theme
 Recommends:     mpv
 Recommends:     myspell-en_US
 Requires(post): update-alternatives
@@ -83,12 +83,8 @@ cp -a "$(dirname "$top")"/. .
 test -f meson.build
 
 %build
-%ifarch i386 i486 i586 i686
-%global extra_meson -Dwasm=disabled
-%endif
 %meson \
-    -Dwebgpu=disabled \
-    %{?extra_meson}
+    -Dwebgpu=disabled
 %meson_build
 
 %install
@@ -104,8 +100,6 @@ touch %{buildroot}%{_sysconfdir}/alternatives/open-browser-nordstjernen
 rm -f %{buildroot}%{_libdir}/libnordstjernen.so
 rm -f %{buildroot}%{_includedir}/nordstjernen/libnordstjernen.h
 rmdir %{buildroot}%{_includedir}/nordstjernen 2>/dev/null || :
-
-%suse_update_desktop_file org.nordstjernen.WebBrowser
 
 %post
 %{_sbindir}/update-alternatives --remove internet-browser %{_bindir}/nordstjernen \

@@ -5,6 +5,9 @@ Changelog:
 ======
 * Packaging: the openSUSE package carries a `nordstjernen.changes`
   file again, which openSUSE:Factory submissions require.
+* Packaging: the openSUSE package now builds only for 64-bit targets,
+  since the JavaScript engine's Temporal support needs `__int128`, and
+  declares its libjxl and GStreamer build dependencies.
 * Security: the browser no longer moves an old
   `nordstjernen/extensions` directory into the extension folder at
   startup. That directory is writable by the sandboxed renderer, so a
