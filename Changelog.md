@@ -14,6 +14,10 @@ Changelog:
 * Security: a request body given as an object with a huge `length` no
   longer makes the renderer allocate (and abort on) gigabytes; such bodies
   are capped at the same 32 MiB as other request bodies.
+* Build: meson warns when SDL2 is missing and the browser is being built
+  without audio, instead of silently producing a build in which every page
+  and video is mute. The openSUSE instructions name `sdl2-compat-devel`,
+  which provides SDL2 on Tumbleweed.
 * Security: an optional memory-safe Rust port of the renderer IPC parser
   (`-Dipc_rust=enabled`, off by default). The browser shell parses every
   message from the sandboxed renderer with it instead of C; the two

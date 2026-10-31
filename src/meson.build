@@ -292,6 +292,12 @@ if host_machine.system() == 'darwin' and not is_ios
 endif
 
 sdl2_dep = dependency('sdl2', required: get_option('audio'))
+if not sdl2_dep.found() and not is_mobile and get_option('audio').auto()
+  warning('SDL2 not found: building WITHOUT audio, so pages and videos ' +
+          'play silently. Install the SDL2 development package ' +
+          '(libsdl2-dev, SDL2-devel, or sdl2-compat-devel on openSUSE ' +
+          'Tumbleweed) or pass -Daudio=disabled to silence this warning.')
+endif
 ns_lib_c_args = []
 ns_sdl_deps = []
 if sdl2_dep.found()

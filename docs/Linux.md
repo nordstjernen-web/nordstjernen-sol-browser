@@ -23,7 +23,7 @@ On openSUSE:
 
     sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
         libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel libseccomp-devel \
-        libwebp-devel libSDL2-devel
+        libwebp-devel sdl2-compat-devel
 
 On Arch Linux (packaging and the AUR: `Arch.md`):
 
