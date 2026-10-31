@@ -15,7 +15,6 @@ char    *ns_ext_content_scripts_for_url(JSContext *ctx, const char *url,
                                         gboolean at_start, JSValue *bridges);
 gboolean ns_ext_should_block(const char *url, const char *initiator);
 char    *ns_ext_default_root(void);
-void     ns_ext_migrate_default_root(void);
 
 G_END_DECLS
 

@@ -591,18 +591,6 @@ ns_ext_default_root(void)
     return g_build_filename(g_get_user_data_dir(), leaf, NULL);
 }
 
-void
-ns_ext_migrate_default_root(void)
-{
-    g_autofree char *old = g_build_filename(g_get_user_data_dir(),
-                                            NS_APP_DIR_NAME, "extensions",
-                                            NULL);
-    g_autofree char *root = ns_ext_default_root();
-    if (g_file_test(old, G_FILE_TEST_IS_DIR) &&
-        !g_file_test(root, G_FILE_TEST_EXISTS))
-        g_rename(old, root);
-}
-
 static char *
 ns_ext_safe_path(const char *base_dir, const char *rel)
 {

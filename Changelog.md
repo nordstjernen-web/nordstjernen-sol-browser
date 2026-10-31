@@ -3,6 +3,11 @@ Changelog:
 
 1.0.40-dev:
 ======
+* Security: the browser no longer moves an old
+  `nordstjernen/extensions` directory into the extension folder at
+  startup. That directory is writable by the sandboxed renderer, so a
+  compromised renderer could have planted an extension that ran on
+  every page in later sessions. Move any extension still there by hand.
 * Security: the browser's internal `postMessage` helpers are no longer
   reachable from page script. A page could call one directly to send a
   message whose `origin` and `source` named another site.

@@ -619,7 +619,6 @@ main(int argc, char **argv)
         }
     }
 
-    ns_ext_migrate_default_root();
     if (proc_mode)
         g_setenv("NS_CONFIG_VIA_PARENT", "1", TRUE);
     ns_security_win32_mitigations_init(proc_mode);
