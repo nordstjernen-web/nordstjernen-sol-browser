@@ -3,6 +3,9 @@ Changelog:
 
 1.0.40-dev:
 ======
+* Security: the browser's internal `postMessage` helpers are no longer
+  reachable from page script. A page could call one directly to send a
+  message whose `origin` and `source` named another site.
 * Security: a frame nested inside another frame is now classified as
   same- or cross-origin against the document that embeds it, not the
   top-level page. A frame from the top page's origin nested inside a
