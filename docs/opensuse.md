@@ -2,18 +2,19 @@
 
 This document records how Nordstjernen is packaged for openSUSE through
 the [Open Build Service (OBS)](https://build.opensuse.org), where it can
-live, and how the git-backed build is wired up. For plain
+live, and how the package is built from a release tarball. For plain
 build-from-source instructions (any distro) see `Linux.md`; this document
 is specifically about the openSUSE RPM and OBS.
 
-The build recipe lives at the repository **root** (`nordstjernen.spec`),
-because OBS clones the whole repo and looks for the recipe at the top of
-the synced tree. Notes for maintainers are in `packaging/obs/README.md`.
+The build recipe (`nordstjernen.spec`) and openSUSE changelog
+(`nordstjernen.changes`) live at the repository root; OBS gets copies of
+them next to the release tarball. Notes for maintainers, including the
+release steps, are in `packaging/obs/README.md`.
 
 ## Install it (users)
 
 Nordstjernen is built in the OBS home project
-[`home:andreasrosdal`](https://build.opensuse.org/package/show/home:andreasrosdal/Nordstjernen).
+[`home:andreasrosdal`](https://build.opensuse.org/package/show/home:andreasrosdal/nordstjernen).
 Add the repository and install; updates then arrive through `zypper`:
 
 ```sh
@@ -24,7 +25,7 @@ sudo zypper install nordstjernen
 ```
 
 For Leap, replace `openSUSE_Tumbleweed` with your release (e.g. `16.0`).
-The package builds for `x86_64`, `aarch64`, and `i586`.
+The package builds for `x86_64` and `aarch64`.
 
 Prefer a one-off install without adding the repo? Grab the nightly RPM
 directly: [`nordstjernen-opensuse-x86_64.rpm`](https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm)
@@ -60,52 +61,29 @@ There are two paths, in order of effort:
    maintainers, the legal team (Cavil) and the Factory reviewers check
    it. Expect the legal review to look at the `LicenseRef-NSL-1.0` half
    of the expression, since it is not an SPDX-listed license; the
-   `GPL-3.0-or-later` alternative is what qualifies the package. **Ask first**
-   on the opensuse-factory mailing list which devel project should host
-   it before preparing a submit request.
+   `GPL-3.0-or-later` alternative is what qualifies the package. The devel
+   project is **`network`**: `home:andreasrosdal/nordstjernen` is submitted
+   to `network/nordstjernen`, and from there forwarded to Factory.
 
 The non-OSS component (`openSUSE:Factory:NonFree` → the `non-oss` repo) is
 no longer the target: it is for software without a free license option.
 
-## Git-backed OBS package (scmsync)
+## Release tarball package
 
-The package is bound to this git repo with the OBS
-[`obs-scm-bridge`](https://github.com/openSUSE/obs-scm-bridge): OBS clones
-`main` and builds it. Nothing is uploaded to OBS by hand and no source
-tarball is stored — git is authoritative.
-
-It is set via the package meta (package → *Advanced* → *Meta* in the web
-UI, or `osc meta pkg home:andreasrosdal Nordstjernen -e`), adding one line:
-
-```xml
-<scmsync>https://github.com/nordstjernen-web/nordstjernen-sol-browser?trackingbranch=main</scmsync>
-```
-
-After this, edit the spec in this repo and push — do not edit files in
-OBS. To pick up a push, the bridge must re-fetch: re-save the meta, or set
-up a `runservice` token as a GitHub push webhook so it re-syncs
-automatically.
-
-### Why there is no fetch `_service`
-
-build.opensuse.org runs its build workers in **secure mode with no network
-access**, so source services that clone over the network (`tar_scm`,
-`obs_scm`) produce nothing there — the build dies at `recompress`
-("no such file … `nordstjernen-*.tar`") or at the buildtime `tar`
-("no .obsinfo file found"). The scmsync bridge clones git on OBS
-infrastructure *outside* the workers, which is why it is the only
-git-backed path that works. The spec therefore has **no** `Source0` and no
-`_service`; its `%prep` simply locates the source the bridge laid down and
-assembles the build tree:
+Factory requires sources that trace to an upstream release, so the OBS
+package is a classic one: `nordstjernen.spec`, `nordstjernen.changes`
+and `nordstjernen-<version>.tar.gz`, the GitHub archive of the release
+tag named by the spec's `Source0`:
 
 ```spec
+Source0:        https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/%{version}.tar.gz#/%{name}-%{version}.tar.gz
+
 %prep
-%setup -q -c -T
-top=$(find "%{_sourcedir}" -name meson.build 2>/dev/null \
-      | awk '{ print length, $0 }' | sort -n | head -1 | cut -d' ' -f2-)
-cp -a "$(dirname "$top")"/. .
-test -f meson.build
+%autosetup -n nordstjernen-sol-browser-%{version}
 ```
+
+The build workers have no network access, so the tarball is uploaded to
+OBS with `osc`, never fetched at build time, and never committed to git.
 
 ## Build options and dependencies
 
@@ -117,21 +95,22 @@ web-text-lib, the text-shaping Pango fork, is vendored at
 `src/web-text-lib/` and builds from the tarball, so OBS workers need no
 network for it.
 
-On 32-bit x86 the bundled WebAssembly interpreter (WAMR, `src/wamr/`) fails
-to build, so the spec additionally passes `-Dwasm=disabled` there:
+The package is built for 64-bit targets only (`ExcludeArch: %ix86 %arm`):
+the Temporal code in the in-tree QuickJS uses `__int128`, which GCC does
+not offer on 32-bit x86 or ARM.
 
-```spec
-%ifarch i386 i486 i586 i686
-%global extra_meson -Dwasm=disabled
-%endif
-```
+openSUSE's `%meson` passes `--auto-features=enabled`, so every `auto`
+feature in `meson_options.txt` needs its dependency in `BuildRequires`;
+a missing one fails `meson setup` with `Dependency "…" not found`.
 
 Everything else builds from the declared `BuildRequires`:
 
-    gcc gcc-c++ meson ninja pkgconfig update-desktop-files
+    gcc gcc-c++ meson ninja pkgconfig hicolor-icon-theme
     pkgconfig(gtk4) pkgconfig(epoxy) pkgconfig(libcurl) pkgconfig(libcrypto)
     pkgconfig(uchardet) pkgconfig(libpsl) pkgconfig(sqlite3)
-    pkgconfig(libwebp) pkgconfig(libavif) pkgconfig(sdl2)
+    pkgconfig(libwebp) pkgconfig(libavif) pkgconfig(libjxl) pkgconfig(sdl2)
+    pkgconfig(gstreamer-1.0) pkgconfig(gstreamer-app-1.0)
+    pkgconfig(gstreamer-video-1.0) pkgconfig(simde)
     pkgconfig(libavcodec) pkgconfig(libavformat) pkgconfig(libavutil)
     pkgconfig(libswresample) pkgconfig(libswscale)
     pkgconfig(fontconfig) pkgconfig(pango) pkgconfig(pangocairo)
@@ -155,8 +134,8 @@ The package is tagged `License: LicenseRef-NSL-1.0 OR GPL-3.0-or-later`;
 
 Off OBS, you can build the same RPM from a checkout with `rpmbuild`, or use
 the helper scripts `scripts/pack-rpm.sh` (portable repackage) and
-`scripts/pack-srpm.sh` (source RPM). For OBS itself nothing is needed
-beyond the `<scmsync>` meta line — pushing to `main` is the build trigger.
+`scripts/pack-srpm.sh` (source RPM). OBS rebuilds when a new spec,
+changes file or tarball is committed with `osc ci`.
 
 ## Build the package set wider
 
@@ -167,17 +146,10 @@ care about.
 
 ## Troubleshooting
 
-* **Build keeps using an old commit** — the bridge has not re-fetched.
-  Re-save the package meta or trigger the `runservice` token; set up a
-  GitHub push webhook so it syncs automatically.
-* **`%prep` fails / meson can't find `meson.build`** — the bridge laid the
-  source out somewhere the `%prep` search did not reach; check the
-  `%{_sourcedir}` listing in the log.
-* **`recompress` / buildtime `tar` errors about a missing tarball or
-  `.obsinfo`** — a network fetch `_service` crept back in; remove it, the
-  scmsync bridge provides the source.
-* **i586 fails compiling `src/wamr/…`** — `-Dwasm=disabled` is not being
-  applied for that arch; confirm the `%ifarch` block is present.
+* **`Dependency "…" not found` at `meson setup`** — an `auto` feature
+  gained a dependency that `BuildRequires` does not list; add it.
+* **i586 or armv7 builds appear** — `ExcludeArch: %ix86 %arm` is missing
+  from the spec.
 * **Sandbox warnings at runtime** (`seccomp: load failed`) — harmless
   outside a confined environment; the per-tab Landlock + seccomp sandbox
   logs and continues. See `tab-isolation.md`.

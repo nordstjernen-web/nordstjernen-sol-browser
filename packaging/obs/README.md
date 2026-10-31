@@ -1,66 +1,63 @@
 # openSUSE / OBS packaging
 
-The OBS package is built **directly from this git repo** via the
-obs-scm-bridge (`scmsync`). Nothing is uploaded to OBS by hand and no
-source tarball is stored anywhere — the bridge clones the repo, and the
-build reconstructs the source tarball in the build VM.
+The OBS package `home:andreasrosdal/nordstjernen` is a classic OBS
+package built from a release tarball, the form openSUSE:Factory
+requires. Its sources are three files:
 
-The build recipe therefore lives at the **repo root**, where the bridge
-can find it:
+- `nordstjernen.spec` — the RPM build recipe, kept at the repo root.
+  `Source0` is the GitHub archive of the release tag.
+- `nordstjernen.changes` — the openSUSE changelog, kept at the repo
+  root. Factory requires it; add an entry for each version.
+- `nordstjernen-<version>.tar.gz` — the GitHub tag archive, downloaded
+  from the `Source0` URL. Never committed to git.
 
-- `/nordstjernen.spec` — RPM build recipe (meson build). It carries no
-  `Source0`: its `%prep` locates the tree the bridge laid down under
-  `%{_sourcedir}` and copies it into the build directory.
-- `/nordstjernen.changes` — the openSUSE changelog. Factory requires it;
-  add an entry for each submitted version.
+The repo copies of the spec and changes file are authoritative; OBS
+gets copies of them.
 
-There is no `_service` file. The source comes from the scmsync checkout
-alone.
+## Releasing a new version
 
-## One-time OBS setup
+After tagging `<version>` on GitHub, bump `Version:` in
+`nordstjernen.spec`, add a `nordstjernen.changes` entry, merge, then:
 
-The package must be named lowercase **`nordstjernen`** (so the
-bridge-generated tarball is `nordstjernen-<version>` and matches the
-spec's `%prep`). Create it if needed, then bind it to git:
+    osc co home:andreasrosdal nordstjernen && cd home:andreasrosdal/nordstjernen
+    cp ~/path/to/repo/nordstjernen.spec ~/path/to/repo/nordstjernen.changes .
+    osc rm nordstjernen-<old>.tar.gz
+    curl -Lo nordstjernen-<version>.tar.gz \
+        https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/<version>.tar.gz
+    osc add nordstjernen-<version>.tar.gz
+    osc ci -m "Update to <version>"
 
-    osc meta pkg home:andreasrosdal nordstjernen -e
+Once the builds succeed, submit to the devel project:
 
-and add inside `<package>`:
+    osc sr home:andreasrosdal nordstjernen network
 
-    <scmsync>https://github.com/nordstjernen-web/nordstjernen-sol-browser?trackingbranch=main</scmsync>
+## Path to openSUSE:Factory
 
-That is the whole setup. After it, git is authoritative: edit the spec in
-this repo and push — never touch files in the OBS web UI.
-OBS follows `main` and rebuilds when it advances; for instant rebuilds add
-a git webhook backed by `osc token --create --operation runservice`.
-
-## Why not a `_service` that fetches from git
-
-build.opensuse.org does not run network-fetching source services
-(`tar_scm` / `obs_scm`) on its source server for this package — they
-produce no archive, so the chain dies at `recompress`
-("no such file … nordstjernen-*.tar") or at the buildtime `tar`
-("no .obsinfo file found"). The scmsync bridge is a separate, working
-code path for cloning git, so the source comes from there and the spec
-builds it in place.
+New Factory packages come through a devel project. Nordstjernen's is
+`network`: submit `home:andreasrosdal/nordstjernen` to
+`network/nordstjernen`, and once the `network` maintainers accept it,
+they (or the package maintainer) forward it to `openSUSE:Factory`. The
+source and target package names must match — always lowercase
+`nordstjernen`.
 
 ## License
 
 Nordstjernen is dual-licensed under the **Nordstjernen Source License
 v1.0 (NSL-1.0)** or the **GNU General Public License version 3 or later
 (GPL-3.0-or-later)**, at the recipient's option, so the spec tags it
-`LicenseRef-NSL-1.0 OR GPL-3.0-or-later` and ships `License.md` and `COPYING`
-as `%license`. NSL-1.0 alone is not OSI-approved (it forbids "Competing
-Use"), but the GPL option is free software, which makes the package
-eligible for openSUSE:Factory / Tumbleweed through the usual devel-project
-submit request and legal review. Until it is accepted there, the home:
-project is the distribution channel. See `docs/opensuse.md`.
+`LicenseRef-NSL-1.0 OR GPL-3.0-or-later` and ships `License.md` and
+`COPYING` as `%license`. The GPL option is free software, which makes
+the package eligible for openSUSE:Factory proper, not NonFree. See
+`docs/opensuse.md`.
 
 ## Build options
 
-The spec disables one meson feature unavailable in OBS:
+openSUSE's `%meson` passes `--auto-features=enabled`, so every `auto`
+feature in `meson_options.txt` must have its dependency declared in
+`BuildRequires`, or `meson setup` fails. The spec disables one feature
+unavailable in OBS:
 
 - `-Dwebgpu=disabled` — needs external wgpu-native.
 
-Everything else (GTK shell, sandboxed renderer, SDL2 audio helper, WebGL,
-enchant spell-check) builds from the declared `BuildRequires`.
+The package is built for 64-bit targets only (`ExcludeArch: %ix86
+%arm`): the Temporal code in the in-tree QuickJS uses `__int128`.

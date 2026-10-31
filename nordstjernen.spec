@@ -15,8 +15,8 @@ Version:        1.0.39
 Release:        0
 Summary:        Small, hand-written GTK web browser
 License:        LicenseRef-NSL-1.0 OR GPL-3.0-or-later
-Group:          Productivity/Networking/Web/Browsers
 URL:            https://nordstjernen.org
+Source0:        https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/%{version}.tar.gz#/%{name}-%{version}.tar.gz
 ExcludeArch:    %ix86 %arm
 
 BuildRequires:  gcc
@@ -69,18 +69,7 @@ secure, and readable by a single person end to end.
   * No telemetry: it does not phone home and does not track the user.
 
 %prep
-%setup -q -c -T
-top=$(find "%{_sourcedir}" -name meson.build 2>/dev/null \
-      | awk '{ print length, $0 }' | sort -n | head -1 | cut -d' ' -f2-)
-echo "DIAG: top meson.build = ${top:-<none>}"
-echo "DIAG: %{_sourcedir} ="; ls -la "%{_sourcedir}"
-if [ -z "$top" ]; then
-    echo "DIAG: no meson.build under SOURCES; listing %{_builddir}:"
-    ls -laR "%{_builddir}" | head -80
-    exit 1
-fi
-cp -a "$(dirname "$top")"/. .
-test -f meson.build
+%autosetup -n nordstjernen-sol-browser-%{version}
 
 %build
 %meson \
