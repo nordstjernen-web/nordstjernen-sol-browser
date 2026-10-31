@@ -11,6 +11,17 @@ Changelog:
 * Security: replacing a frame's document no longer frees nodes that are
   still attached to another tree. Only detached orphan roots are freed, so a
   node left both in a tree and on the orphan list is not freed twice.
+* Security: a request body given as an object with a huge `length` no
+  longer makes the renderer allocate (and abort on) gigabytes; such bodies
+  are capped at the same 32 MiB as other request bodies.
+* JavaScript: a `ShadowRealm` whose realm keeps a callback from the outer
+  page is freed again; it used to leak the whole realm.
+* JavaScript: `structuredClone()` and `postMessage()` throw
+  `DataCloneError` for a detached `ArrayBuffer` even when a page patches
+  `ArrayBuffer.prototype.detached`; decoding a detached buffer no longer
+  leaves a stray exception behind; `AbortSignal.throwIfAborted()` rethrows
+  the error from a throwing `reason` getter; and two small reference leaks
+  in MediaSource appends and `DataView` cloning are gone.
 * HTML: a lone UTF-16 surrogate in JSON-LD media metadata no longer produces
   invalid UTF-8 in the extracted media URL.
 * Packaging: the openSUSE package carries a `nordstjernen.changes`
