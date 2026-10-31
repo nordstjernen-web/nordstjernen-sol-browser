@@ -14,6 +14,9 @@ Changelog:
 * Security: a request body given as an object with a huge `length` no
   longer makes the renderer allocate (and abort on) gigabytes; such bodies
   are capped at the same 32 MiB as other request bodies.
+* Security: a GStreamer decoding pipeline that fails to start no longer
+  releases its source and sink twice. Opening such a video (for example
+  when a VA-API decoder cannot start) crashed the renderer.
 * Build: meson warns when SDL2 is missing and the browser is being built
   without audio, instead of silently producing a build in which every page
   and video is mute. The openSUSE instructions name `sdl2-compat-devel`,
