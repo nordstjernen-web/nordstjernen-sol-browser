@@ -440,6 +440,7 @@ else
   if gst_core.found() and gst_app.found() and gst_video.found()
     media_os_backend = 'gst'
     media_os_deps += [gst_core, gst_app, gst_video]
+    add_project_arguments('-DNS_MEDIA_OS_GST=1', language: 'c')
   endif
 endif
 if media_os_backend == 'none'

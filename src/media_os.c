@@ -301,6 +301,21 @@ ns_os_aac_config(const uint8_t *asc, size_t asc_len, int *out_rate,
     return 1;
 }
 
+#ifndef NS_MEDIA_OS_GST
+
+int ns_os_hw_video_available(const char *codec) { (void)codec; return 0; }
+const char *ns_os_hw_video_decoder_name(const char *codec) { (void)codec; return NULL; }
+
+ns_os_vdec *
+ns_os_vdec_new_hw(const char *codec, const uint8_t *extradata,
+                  size_t extradata_len, int width, int height)
+{
+    (void)codec; (void)extradata; (void)extradata_len; (void)width; (void)height;
+    return NULL;
+}
+
+#endif
+
 #ifdef NS_MEDIA_OS_NONE
 
 void ns_os_media_preinit(void) { }

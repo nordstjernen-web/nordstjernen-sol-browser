@@ -56,8 +56,11 @@ How libav is obtained differs by platform, to keep it redistributable:
   `libopenh264` (the `libopenh264-8` package from the Cisco repository). For
   the GStreamer H.264/AAC path build with `gstreamer-devel
   gstreamer-plugins-base-devel` and install a decoder plugin at runtime:
-  `gstreamer-plugins-bad` (VA-API `vah264dec`), `gstreamer-plugin-openh264` or
-  `gstreamer-plugins-libav`.
+  `gstreamer-plugins-bad` (VA-API `vah264dec`/`vavp9dec`/`vaav1dec`, and
+  `openh264dec` against the Cisco library) or `gstreamer-plugins-libav`, plus
+  `intel-media-driver` on Intel GPUs for hardware decoding. Cisco's own
+  `gstreamer-plugin-openh264` package may lag behind its `libopenh264` and is
+  not needed.
 - **macOS / Windows** vendor a **minimal, LGPL-only FFmpeg** built from source
   (`scripts/build-ffmpeg-lgpl.sh`), carrying just the matroska/ogg demuxers and
   the native VP8/VP9/Theora/Opus/Vorbis decoders — no GPL parts, no external codec
@@ -115,6 +118,25 @@ YouTube itself prefers VP9 or AV1 when the browser accepts them, so on Linux
 and Windows (where libav decodes those) it keeps using them; the OS H.264
 path is what plays MP4/HLS video elsewhere on the web, and YouTube on builds
 without libav's VP9/AV1. Encrypted media (EME/Widevine) is not supported.
+
+### Hardware VP9, AV1 and HEVC through GStreamer
+
+On GStreamer builds, VP9, AV1 and HEVC also go to GStreamer when it has a
+**hardware** decoder for them (an element whose class names `Hardware`, such
+as VA-API's `vavp9dec`, `vaav1dec` and `vah265dec`). The pipeline names that
+element explicitly after its parser (`vp9parse`, `av1parse`, `h265parse`)
+rather than letting `decodebin` choose, so a higher-ranked software decoder
+never takes over. Without a hardware decoder those codecs stay on libav
+(`libdav1d` for AV1), and a hardware pipeline that fails before its first
+frame falls back to libav as H.264 does. HEVC (`hvc1`/`hev1`) is reported as
+playable when a hardware decoder exists, since distribution FFmpeg builds
+often lack an HEVC decoder.
+
+VA-API needs the GPU's driver: `intel-media-driver` for Intel Broadwell and
+newer, Mesa's `libva` drivers for AMD. `NS_MEDIA_NO_HW_DECODER=1` keeps these
+codecs on libav, and `NS_MEDIA_GST_SOFTWARE_DECODER=1` lets the path accept
+a software GStreamer decoder, which exercises it on machines without a
+hardware decoder.
 
 ## Audio
 
