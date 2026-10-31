@@ -195,9 +195,12 @@ gst_build(const char *desc, GstCaps *caps, GstAppSrc **src, GstAppSink **sink)
     g_object_set(s, "format", GST_FORMAT_TIME, "is-live", FALSE, NULL);
     g_object_set(k, "sync", FALSE, "max-buffers", 32, NULL);
     if (gst_element_set_state(p, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
+        gst_element_set_state(p, GST_STATE_NULL);
         gst_object_unref(s);
         gst_object_unref(k);
         gst_object_unref(p);
+        *src = NULL;
+        *sink = NULL;
         return NULL;
     }
     return p;
