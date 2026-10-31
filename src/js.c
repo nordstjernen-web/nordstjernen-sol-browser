@@ -20700,6 +20700,7 @@ ns_dom_parser_parseFromString(JSContext *ctx, JSValueConst this_val,
     }
     JS_FreeCString(ctx, src);
     if (!doc) { if (mime) JS_FreeCString(ctx, mime); return JS_NULL; }
+    ns_node_take_strings(doc);
     ns_mark_scripts_already_started(doc);
     if (js_from_ctx(ctx)) g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, doc);
     JSValue cu = JS_GetPropertyStr(ctx, this_val, "__ns_creator_url");
@@ -63513,6 +63514,13 @@ static const JSCFunctionListEntry ns_location_funcs[] = {
     JS_CFUNC_DEF("toString", 0, ns_location_toString),
 };
 
+static gboolean
+ns_js_orphan_is_detached_root(const ns_js *js, const ns_node *node)
+{
+    return node && !node->parent && node != js->current_doc &&
+           !(node->flags & NS_NODE_TEMPLATE_CONTENT);
+}
+
 static void
 ns_js_reset_runtime_state(ns_js *js)
 {
@@ -63635,7 +63643,8 @@ ns_js_reset_runtime_state(ns_js *js)
         GList *list = g_hash_table_get_keys(js->orphan_nodes);
         g_hash_table_remove_all(js->orphan_nodes);
         for (GList *l = list; l; l = l->next)
-            ns_node_free(l->data);
+            if (ns_js_orphan_is_detached_root(js, l->data))
+                ns_node_free(l->data);
         g_list_free(list);
     }
 
@@ -64527,15 +64536,7 @@ ns_js_free(ns_js *js)
                 node->js_wrapper = NULL;
                 node->js_invalidate = NULL;
             }
-            gboolean owned = FALSE;
-            for (ns_node *a = node->parent; a; a = a->parent) {
-                if (a == js->current_doc ||
-                    g_hash_table_contains(js->orphan_nodes, a)) {
-                    owned = TRUE;
-                    break;
-                }
-            }
-            if (!owned)
+            if (ns_js_orphan_is_detached_root(js, node))
                 g_ptr_array_add(roots, node);
         }
         g_list_free(list);
@@ -69086,7 +69087,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
                 content_doc = NULL;
             } else {
                 doc_is_xml = TRUE;
-                ns_node_own_strings_deep(content_doc);
+                ns_node_take_strings(content_doc);
                 ns_node_append_child(iframe, content_doc);
             }
         }
@@ -69105,7 +69106,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         ns_node_append_child(html, body);
         ns_node_append_child(content_doc, html);
         content_root = html;
-        ns_node_own_strings_deep(content_doc);
+        ns_node_take_strings(content_doc);
         ns_node_append_child(iframe, content_doc);
     }
     if (!content_doc && decoded) {
@@ -69121,7 +69122,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
             if (html) {
                 content_doc = cdoc;
                 content_root = html;
-                ns_node_own_strings_deep(content_doc);
+                ns_node_take_strings(content_doc);
                 ns_node_append_child(iframe, content_doc);
             } else {
                 ns_node_free(cdoc);

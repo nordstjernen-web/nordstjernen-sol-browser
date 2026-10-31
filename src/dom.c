@@ -1018,6 +1018,17 @@ ns_node_own_strings_deep(ns_node *n)
     g_ptr_array_free(stack, TRUE);
 }
 
+void
+ns_node_take_strings(ns_node *root)
+{
+    if (!root) return;
+    ns_node_own_strings_deep(root);
+    if (root->backing && root->backing_free)
+        root->backing_free(root->backing);
+    root->backing = NULL;
+    root->backing_free = NULL;
+}
+
 static guint32
 ns_attr_presence_bit(const char *name)
 {
