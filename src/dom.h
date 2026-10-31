@@ -127,6 +127,7 @@ void ns_node_replace_text_len_owned(ns_node *n, char *text, guint32 len);
 char *ns_node_collect_all_text_len(const ns_node *root, size_t *out_len);
 gboolean ns_node_is_embedded_doc(const ns_node *n);
 void ns_node_own_strings_deep(ns_node *n);
+void ns_node_take_strings(ns_node *root);
 void ns_element_append_attr_borrow(ns_node *el, const char *name, const char *value);
 void ns_node_attach_backing(ns_node *root, void *backing, void (*destroy)(void *));
 

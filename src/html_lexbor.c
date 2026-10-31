@@ -314,7 +314,7 @@ json_string_unescape(const char *p)
                    g_ascii_isxdigit(p[3]) && g_ascii_isxdigit(p[4])) {
             char hex[5] = { p[1], p[2], p[3], p[4], 0 };
             gunichar ch = (gunichar)g_ascii_strtoull(hex, NULL, 16);
-            if (ch) {
+            if (ch && g_unichar_validate(ch)) {
                 char buf[8] = {0};
                 gint len = g_unichar_to_utf8(ch, buf);
                 g_string_append_len(out, buf, len);

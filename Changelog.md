@@ -3,6 +3,16 @@ Changelog:
 
 1.0.40-dev:
 ======
+* Security: a document returned by `DOMParser.parseFromString()` and the
+  document loaded into an `<iframe>` now own their strings and release the
+  lexbor parse tree straight away. Nodes moved from a parsed document into
+  the page used to keep pointing into that tree, which was freed with the
+  parsed document, so the page could read freed memory afterwards.
+* Security: replacing a frame's document no longer frees nodes that are
+  still attached to another tree. Only detached orphan roots are freed, so a
+  node left both in a tree and on the orphan list is not freed twice.
+* HTML: a lone UTF-16 surrogate in JSON-LD media metadata no longer produces
+  invalid UTF-8 in the extracted media URL.
 * Packaging: the openSUSE package carries a `nordstjernen.changes`
   file again, which openSUSE:Factory submissions require.
 * Packaging: the openSUSE package now builds only for 64-bit targets,
