@@ -11,6 +11,8 @@ can find it:
 - `/nordstjernen.spec` — RPM build recipe (meson build). It carries no
   `Source0`: its `%prep` locates the tree the bridge laid down under
   `%{_sourcedir}` and copies it into the build directory.
+- `/nordstjernen.changes` — the openSUSE changelog. Factory requires it;
+  add an entry for each submitted version.
 
 There is no `_service` file. The source comes from the scmsync checkout
 alone.

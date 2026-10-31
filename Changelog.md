@@ -3,6 +3,8 @@ Changelog:
 
 1.0.40-dev:
 ======
+* Packaging: the openSUSE package carries a `nordstjernen.changes`
+  file again, which openSUSE:Factory submissions require.
 * Security: the browser no longer moves an old
   `nordstjernen/extensions` directory into the extension folder at
   startup. That directory is writable by the sandboxed renderer, so a
