@@ -31,6 +31,13 @@ Changelog:
   references to it are cleared when it is freed instead of dangling. A page
   restored from the back/forward cache, and a page being torn down, now
   clean up against their own script state rather than another page's.
+* JavaScript: setting `outerHTML` or `outerText` throws
+  `NoModificationAllowedError` when the value's `toString()` detaches the
+  element (the parsed nodes used to leak), and rethrows an exception from
+  `toString()` instead of dropping it. `composedPath()` in a listener keeps
+  its path after the listener dispatches another event, and
+  MutationRecord `addedNodes`/`removedNodes` keep their order when a listed
+  node is freed.
 * JavaScript: a `ShadowRealm` whose realm keeps a callback from the outer
   page is freed again; it used to leak the whole realm.
 * JavaScript: `structuredClone()` and `postMessage()` throw
