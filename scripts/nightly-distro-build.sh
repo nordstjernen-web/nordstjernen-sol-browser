@@ -28,7 +28,8 @@ install_apt() {
     # audio). meson requires it on Linux, so this is not optional — its own
     # line to keep the failure legible when a mirror is missing the packages.
     apt-get install -y --no-install-recommends \
-        libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
+        libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
+        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
     pip3 install --break-system-packages --upgrade 'meson>=1.4' \
         || pip3 install --upgrade 'meson>=1.4'
 }
@@ -58,7 +59,7 @@ install_zypper() {
     # nightly. Its own line (not the optional group) so it is independent of
     # poppler availability.
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
-        libSDL2-devel \
+        'pkgconfig(sdl2)' \
         || echo "nightly-distro-build(opensuse): SDL2 unavailable; audio helper skipped" >&2
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
         libpoppler-glib-devel \
@@ -67,7 +68,8 @@ install_zypper() {
     # Linux, so a failure here is fatal; if the default repos come up short,
     # the container needs Packman enabled.
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
-        libavformat-devel libavcodec-devel libavutil-devel libswscale-devel libswresample-devel
+        libavformat-devel libavcodec-devel libavutil-devel libswscale-devel libswresample-devel \
+        'pkgconfig(gstreamer-1.0)' 'pkgconfig(gstreamer-app-1.0)' 'pkgconfig(gstreamer-video-1.0)'
 }
 
 install_dnf() {
