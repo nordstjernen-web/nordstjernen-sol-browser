@@ -1255,7 +1255,7 @@ headless_edit_replace(headless_flush_ctx *fc, gsize lo, gsize hi, const char *in
         ns_js_dispatch_event(fc->js, t, "beforeinput", &prevented);
         if (prevented) { g_string_free(s, TRUE); return; }
     }
-    ns_node_set_editable_value(t, s->str);
+    ns_js_set_editable_value(fc->js, t, s->str);
     fc->caret = lo + ins_len;
     fc->anchor = fc->caret;
     g_string_free(s, TRUE);
@@ -1752,7 +1752,7 @@ headless_key(headless_flush_ctx *fc, headless_nav_capture *nav,
             if (mx && *mx) { double m = g_ascii_strtod(mx, NULL); if (val > m) val = m; }
             char buf[32];
             g_snprintf(buf, sizeof buf, "%g", val);
-            ns_node_set_editable_value(t, buf);
+            ns_js_set_editable_value(fc->js, t, buf);
             fc->caret = strlen(buf); fc->anchor = fc->caret;
             if (fc->js) {
                 ns_js_dispatch_event(fc->js, t, "input",  NULL);

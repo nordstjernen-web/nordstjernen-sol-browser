@@ -14,6 +14,16 @@ Changelog:
 * Security: a request body given as an object with a huge `length` no
   longer makes the renderer allocate (and abort on) gigabytes; such bodies
   are capped at the same 32 MiB as other request bodies.
+* Security: typing into a `contenteditable` element no longer frees the
+  nodes it replaces while timers, animation frames or frame realms still
+  point at them (an `<iframe>` inside the editable host was freed under its
+  own running timer). The old children are now orphaned and swept like any
+  other removed node.
+* Security: a node whose script wrapper was garbage-collected keeps its
+  cleanup hook, so event listeners, focus, MutationObserver and `Attr`
+  references to it are cleared when it is freed instead of dangling. A page
+  restored from the back/forward cache, and a page being torn down, now
+  clean up against their own script state rather than another page's.
 * JavaScript: a `ShadowRealm` whose realm keeps a callback from the outer
   page is freed again; it used to leak the whole realm.
 * JavaScript: `structuredClone()` and `postMessage()` throw
