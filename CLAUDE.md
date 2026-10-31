@@ -79,7 +79,8 @@ Update Changelog.md
   Foundation on Windows (`media_os_mf.c`, mfplat loaded at runtime),
   VideoToolbox/AudioToolbox on macOS and iOS (`media_os_vt.c`), MediaCodec on
   Android (`media_os_android.c`) and GStreamer on Linux/BSD
-  (`media_os_gst.c`, auto-detected, `-Dgstreamer`). libav only demuxes MP4
+  (`media_os_gst.c`, required on Linux, optional on the BSDs, `-Dgstreamer`;
+  it also takes VP9/AV1/HEVC when a hardware decoder exists). libav only demuxes MP4
   for them (builds without libav use the in-tree `src/mp4.c` +
   `src/video_mp4.c` instead); don't add an H.264/AAC decoder to the LGPL FFmpeg build. Encrypted
   media (EME/Widevine) is out of scope. Other `<audio>` and other `<video>`
@@ -295,10 +296,12 @@ sudo apt install build-essential pkg-config meson ninja-build \
     libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
 ```
 
-Optional: `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` enables
-H.264/AAC playback through the system GStreamer (which then needs a decoder
-plugin at runtime: `gstreamer1.0-vaapi`/`gstreamer1.0-plugins-bad` for VA-API,
-or `gstreamer1.0-libav`). It is auto-detected.
+Required on Linux: `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev`
+(openSUSE `gstreamer-devel gstreamer-plugins-base-devel`, Fedora
+`gstreamer1-devel gstreamer1-plugins-base-devel`) for H.264/AAC and hardware
+VP9/AV1/HEVC through the system GStreamer, which then needs decoder plugins at
+runtime: `gstreamer1.0-plugins-bad` for VA-API (plus the GPU's VA driver, e.g.
+`intel-media-driver`) or `gstreamer1.0-libav`. `-Dgstreamer=disabled` drops it.
 
 Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
 enables on-screen spell-checking of editable text. It is auto-detected —

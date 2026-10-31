@@ -94,7 +94,8 @@ keyframe before the target and converts frames to BGRA in plain C. Those
 builds play the video picture of MP4 and H.264 MSE streams; their audio has
 no MP4 path yet, since the audio helper's container support comes from libav.
 
-GStreamer is auto-detected (`-Dgstreamer=disabled` drops it); the other
+GStreamer is required on Linux and auto-detected on the BSDs
+(`-Dgstreamer=disabled` drops it); the other
 backends are always built on their platforms. A backend returns NV12 or I420
 frames; the renderer converts only the frame it is about to show to BGRA
 (through swscale), so frames skipped while seeking forward from a keyframe

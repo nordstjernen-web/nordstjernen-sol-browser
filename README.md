@@ -303,12 +303,13 @@ no network.
 | zlib | — | `CompressionStream` / `DecompressionStream` |
 | FFmpeg libav\* | ≥ 6.0 (Linux, Windows; optional on macOS and the BSDs) | inline WebM/Ogg (VP9/VP8/Theora video, Opus/Vorbis audio) |
 | libseccomp | — (Linux only) | renderer syscall sandbox |
+| GStreamer | ≥ 1.20 (Linux; optional on the BSDs) | H.264/AAC, and VP9/AV1/HEVC in hardware through VA-API |
 
 **Optional**, auto-detected or build-time-selected:
-SDL2 (audio output and microphone capture, `-Daudio`),
+SDL2 (audio output and microphone capture, `-Daudio`; without it the
+build is silent and meson warns),
 [FFmpeg](https://github.com/FFmpeg/FFmpeg) libav\* on macOS and the BSDs (inline WebM),
-GStreamer ≥ 1.20 (H.264/AAC on Linux and the BSDs, plus hardware
-VP9/AV1/HEVC through VA-API, `-Dgstreamer`), rustc (the memory-safe IPC
+GStreamer on the BSDs (`-Dgstreamer`), rustc (the memory-safe IPC
 parser, `-Dipc_rust`),
 vorbisfile / opusfile (Ogg audio without FFmpeg), brotli (`br` content
 encoding and WOFF2 fonts), zstd (`zstd` content encoding),

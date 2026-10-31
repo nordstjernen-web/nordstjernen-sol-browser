@@ -25,6 +25,13 @@ On openSUSE:
         libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel libseccomp-devel \
         libwebp-devel sdl2-compat-devel
 
+GStreamer is required on Linux too (H.264/AAC, and VP9/AV1/HEVC in hardware):
+`libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian/Ubuntu,
+`gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora,
+`gstreamer-devel gstreamer-plugins-base-devel` on openSUSE. At runtime install
+`gstreamer-plugins-bad` and the GPU's VA-API driver (`intel-media-driver` on
+Intel) for hardware decoding. Without SDL2 the build has no audio; meson warns.
+
 On Arch Linux (packaging and the AUR: `Arch.md`):
 
     sudo pacman -S --needed base-devel meson gtk4 libepoxy curl uchardet \
