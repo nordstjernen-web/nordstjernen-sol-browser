@@ -50,7 +50,14 @@ or dependency and falls back to the poster-and-overlay path. The minimum is
 How libav is obtained differs by platform, to keep it redistributable:
 
 - **Linux** depends on the distribution's FFmpeg at runtime (never bundled), so
-  no licensing obligation falls on the package.
+  no licensing obligation falls on the package. openSUSE Tumbleweed's own
+  `libavcodec` (no Packman needed) decodes every codec YouTube serves: native
+  VP9 and Opus, AV1 through `libdav1d`, AAC natively and H.264 through Cisco's
+  `libopenh264` (the `libopenh264-8` package from the Cisco repository). For
+  the GStreamer H.264/AAC path build with `gstreamer-devel
+  gstreamer-plugins-base-devel` and install a decoder plugin at runtime:
+  `gstreamer-plugins-bad` (VA-API `vah264dec`), `gstreamer-plugin-openh264` or
+  `gstreamer-plugins-libav`.
 - **macOS / Windows** vendor a **minimal, LGPL-only FFmpeg** built from source
   (`scripts/build-ffmpeg-lgpl.sh`), carrying just the matroska/ogg demuxers and
   the native VP8/VP9/Theora/Opus/Vorbis decoders — no GPL parts, no external codec
