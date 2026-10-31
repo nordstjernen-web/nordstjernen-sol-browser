@@ -20,7 +20,7 @@ history.
 Beyond navigation it covers hover link previews and pointer shapes, zoom that
 reflows the page, sharp rendering on HiDPI screens, find-in-page, drag text
 selection with cut, copy and paste, a right-click menu the page can override,
-WebGL and camera trust prompts, downloads, dropping files onto the page, page
+camera trust prompts, downloads, dropping files onto the page, page
 audio through the `nordstjernen-audio` helper, page-requested full screen,
 external media playback, scrolling of overflow scrollers and the scrollbars a
 page paints itself, back/forward-cache history traversal, and a JavaScript
