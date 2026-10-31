@@ -51,7 +51,7 @@ import java.util.concurrent.Executors;
  * pointer shapes, zoom ({@code Ctrl}+{@code +}/{@code -}/{@code 0} and
  * {@code Ctrl}+wheel), find-in-page ({@code Ctrl+F}), drag text selection with
  * copy, a right-click context menu that the page can override, the page
- * favicon as the window icon, a transport-security indicator, WebGL and camera
+ * favicon as the window icon, a transport-security indicator, camera
  * trust prompts, file downloads, dropping files onto the page, external media
  * playback, scrolling of overflow scrollers and in-page scrollbars,
  * back/forward-cache history traversal, a JavaScript console and page dumps
@@ -156,7 +156,6 @@ public final class Browser {
     private boolean pageFullscreen = false;
     private boolean closed = false;
 
-    private final Set<String> webglAsked = new HashSet<>();
     private final Set<String> cameraAsked = new HashSet<>();
 
     private JDialog console;
@@ -868,9 +867,6 @@ public final class Browser {
                 }
                 if (f.windowAction != null) {
                     applyWindowAction(f.windowAction);
-                }
-                if (f.webgl != null) {
-                    promptWebgl(f.webgl);
                 }
                 if (f.camera != null) {
                     promptCamera(f.camera);
@@ -1952,26 +1948,6 @@ public final class Browser {
         }
         return URLDecoder.decode(payload.replace("+", "%2B"), StandardCharsets.UTF_8)
             .getBytes(StandardCharsets.UTF_8);
-    }
-
-    // --- WebGL trust prompt --------------------------------------------------
-
-    private void promptWebgl(String origin) {
-        if (!webglAsked.add(origin)) return;
-        int choice = JOptionPane.showOptionDialog(frame,
-            "This page wants to use WebGL (hardware-accelerated 3D graphics) on\n"
-            + origin + ".\n\nWebGL hands the page near-direct access to your GPU "
-            + "driver — only allow it on sites you trust. Allowing keeps WebGL "
-            + "enabled for this site for the rest of the session and reloads the "
-            + "page.",
-            "Enable WebGL for " + origin + "?",
-            JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE, null,
-            new String[]{"Allow and trust this site", "Block"}, "Block");
-        final boolean allow = choice == 0;
-        io.submit(() -> engine.resolveWebgl(origin, allow));
-        if (allow && currentUrl() != null) {
-            navigate(currentUrl(), false);
-        }
     }
 
     // --- Camera trust prompt -------------------------------------------------

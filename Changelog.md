@@ -14,6 +14,8 @@ Changelog:
 * Security: a request body given as an object with a huge `length` no
   longer makes the renderer allocate (and abort on) gigabytes; such bodies
   are capped at the same 32 MiB as other request bodies.
+* Java browser: no WebGL trust prompt. Like the GTK browser, it leaves
+  WebGL to the Settings switch instead of asking per site.
 * Build: GStreamer is now required on Linux (as FFmpeg already is), so
   every Linux build decodes H.264/AAC through the system and can use VA-API
   hardware decoding for VP9, AV1 and HEVC. `-Dgstreamer=disabled` still
