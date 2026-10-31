@@ -4598,10 +4598,7 @@ ns_element_finalizer(JSRuntime *rt, JSValue val)
 {
     (void)rt;
     ns_node *n = JS_GetOpaque(val, ns_element_class_id);
-    if (n) {
-        n->js_wrapper = NULL;
-        n->js_invalidate = NULL;
-    }
+    if (n) n->js_wrapper = NULL;
 }
 
 static int ns_element_named_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
@@ -45400,6 +45397,7 @@ ns_js_set_focused_node(ns_js *js, const ns_node *el)
 {
     if (!js || js->focused_node == el) return;
     js->focused_node = el;
+    ns_node_arm_js_invalidate((ns_node *)el);
     if (el) ns_node_arm_spellcheck((ns_node *)el);
     ns_js_update_focus_visible(js);
     js->mutated = TRUE;
@@ -64284,6 +64282,9 @@ void
 ns_js_free(ns_js *js)
 {
     if (!js) return;
+    ns_js *resume_active = ns_active_js();
+    if (resume_active == js) resume_active = NULL;
+    ns_set_active_js(js);
     ns_js_module_prefetch_release(js);
     if (js->doc_ready_states) {
         g_hash_table_destroy(js->doc_ready_states);
@@ -64692,7 +64693,6 @@ ns_js_free(ns_js *js)
         g_hash_table_destroy(js->box_lookup_cache);
         js->box_lookup_cache = NULL;
     }
-    if (ns_active_js() == js) ns_set_active_js(NULL);
     ns_css_set_fullscreen_node(NULL);
     if (js->frame_windows) {
         GHashTableIter it;
@@ -64739,7 +64739,29 @@ ns_js_free(ns_js *js)
     }
     JS_FreeContext(js->ctx);
     JS_FreeRuntime(js->rt);
+    ns_set_active_js(resume_active);
     g_free(js);
+}
+
+void
+ns_js_activate(ns_js *js)
+{
+    if (js) ns_set_active_js(js);
+}
+
+void
+ns_js_set_editable_value(ns_js *js, ns_node *n, const char *value)
+{
+    if (!js || !ns_node_is_contenteditable_host(n)) {
+        ns_node_set_editable_value(n, value);
+        return;
+    }
+    ns_set_active_js(js);
+    ns_js_orphan_children(js, n);
+    ns_node *text = ns_node_new_text(g_strdup(value ? value : ""));
+    ns_node_append_child(n, text);
+    ns_js_index_child_change(js, n, text, NULL);
+    js->mutated = TRUE;
 }
 
 static gboolean

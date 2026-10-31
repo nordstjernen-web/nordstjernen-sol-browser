@@ -3159,7 +3159,7 @@ browser_range_set_from_x(ns_browser *b, ns_node *n, int x)
     char buf[G_ASCII_DTOSTR_BUF_SIZE];
     g_ascii_formatd(buf, sizeof buf, "%.10g", v);
     if (g_strcmp0(ns_node_editable_value(n), buf) == 0) return;
-    ns_node_set_editable_value(n, buf);
+    ns_js_set_editable_value(b->js, n, buf);
     if (b->js) {
         ns_js_dispatch_event(b->js, n, "input", NULL);
         (void)ns_js_consume_mutated(b->js);
@@ -4391,7 +4391,7 @@ browser_input_replace(ns_browser *b, ns_node *node, gsize del_start,
         }
         ns_js_note_user_edit(b->js, node, ns_node_editable_value(node));
     }
-    ns_node_set_editable_value(node, s->str);
+    ns_js_set_editable_value(b->js, node, s->str);
     b->caret_byte = del_start + ins_len;
     b->sel_anchor_byte = b->caret_byte;
     g_string_free(s, TRUE);
@@ -5160,8 +5160,10 @@ ns_browser_bfcache_restore(ns_browser *browser, int viewport_width,
     if (!browser) return;
     if (viewport_width > 0 && viewport_height > 0.0)
         ns_browser_set_viewport(browser, viewport_width, viewport_height);
-    if (browser->js)
+    if (browser->js) {
+        ns_js_activate(browser->js);
         ns_js_fire_page_transition(browser->js, "pageshow", TRUE);
+    }
 }
 
 int
