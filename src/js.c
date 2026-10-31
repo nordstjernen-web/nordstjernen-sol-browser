@@ -939,6 +939,7 @@ ns_js_bytes_view(JSContext *ctx, JSValueConst value, const uint8_t **out_data,
             if (out_holder) *out_holder = JS_DupValue(ctx, value);
             return TRUE;
         }
+        JS_FreeValue(ctx, JS_GetException(ctx));
         return FALSE;
     }
 
@@ -979,6 +980,7 @@ ns_js_bytes_view(JSContext *ctx, JSValueConst value, const uint8_t **out_data,
 
     size_t total = 0;
     uint8_t *base = JS_GetArrayBuffer(ctx, &total, buf);
+    if (!base) JS_FreeValue(ctx, JS_GetException(ctx));
     if (!base || byte_off > total || byte_len > total - byte_off) {
         JS_FreeValue(ctx, buf);
         return FALSE;
@@ -15753,6 +15755,10 @@ ns_sc_copy_array_buffer(ns_sc *s, JSValueConst src)
     JS_FreeValue(ctx, resizable);
     size_t size = 0;
     uint8_t *bytes = JS_GetArrayBuffer(ctx, &size, src);
+    if (!bytes) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return ns_sc_fail(ctx);
+    }
     if (!is_resizable) return JS_NewArrayBufferCopy(ctx, bytes, size);
     JSValue opts = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, opts, "maxByteLength",
@@ -16079,7 +16085,10 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         if (JS_IsException(offset)) return offset;
         JSValue length = ns_sc_fail_on_exception(ctx,
             JS_GetPropertyStr(ctx, v, "byteLength"));
-        if (JS_IsException(length)) return length;
+        if (JS_IsException(length)) {
+            JS_FreeValue(ctx, offset);
+            return length;
+        }
         JSValue buf = JS_GetPropertyStr(ctx, v, "buffer");
         JSValue cbuf = ns_sc_clone(s, buf);
         JS_FreeValue(ctx, buf);
@@ -23096,6 +23105,7 @@ ns_abort_signal_throw_if_aborted(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, ab);
     if (aborted) {
         JSValue reason = JS_GetPropertyStr(ctx, this_val, "reason");
+        if (JS_IsException(reason)) return reason;
         if (JS_IsUndefined(reason) || JS_IsNull(reason)) {
             JS_FreeValue(ctx, reason);
             return JS_ThrowTypeError(ctx, "signal is aborted");
@@ -24004,8 +24014,9 @@ static char *
 ns_blob_array_copy(JSContext *ctx, JSValueConst b, gsize *out_len)
 {
     uint32_t len = ns_js_array_length(ctx, b);
-    if ((gsize)len + 1 < (gsize)len) return g_strdup("");
-    char *out = g_malloc((gsize)len + 1);
+    if (len > NS_JS_BODY_BYTES_MAX) return g_strdup("");
+    char *out = g_try_malloc((gsize)len + 1);
+    if (!out) return g_strdup("");
     for (uint32_t i = 0; i < len; i++) {
         JSValue v = JS_GetPropertyUint32(ctx, b, i);
         int32_t b_val = 0;
@@ -26277,9 +26288,13 @@ ns_wire_encode_object(ns_wire_enc *e, JSValueConst v)
 
     if (JS_IsArrayBuffer(v)) {
         if (ns_sc_buffer_detached(ctx, v)) return ns_sc_fail(ctx);
-        JSValue node = ns_wire_node(ctx, "AB");
         size_t size = 0;
         uint8_t *bytes = JS_GetArrayBuffer(ctx, &size, v);
+        if (!bytes) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+            return ns_sc_fail(ctx);
+        }
+        JSValue node = ns_wire_node(ctx, "AB");
         ns_wire_push(ctx, node, JS_NewArrayBufferCopy(ctx, bytes, size));
         JSValue resizable = JS_GetPropertyStr(ctx, v, "resizable");
         if (JS_ToBool(ctx, resizable) > 0)
@@ -69778,8 +69793,12 @@ ns_window_mse_append(JSContext *ctx, JSValueConst this_val,
     const uint8_t *data = NULL;
     size_t len = 0;
     JSValue holder = JS_UNDEFINED;
-    if (!ns_js_bytes_view(ctx, argv[2], &data, &len, &holder) || !id)
+    if (!ns_js_bytes_view(ctx, argv[2], &data, &len, &holder))
         return JS_FALSE;
+    if (!id) {
+        JS_FreeValue(ctx, holder);
+        return JS_FALSE;
+    }
     gboolean ok = js->mse_cb(id, kind, data, len, FALSE, js->mse_user_data);
     JS_FreeValue(ctx, holder);
     return ok ? JS_TRUE : JS_FALSE;
