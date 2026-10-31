@@ -15,7 +15,7 @@ option('avif', type: 'feature', value: 'auto',
 option('jxl', type: 'feature', value: 'auto',
        description: 'Decode JPEG XL images (stills and animations) through libjxl (on by default when libjxl is present; never on the mobile builds).')
 option('gstreamer', type: 'feature', value: 'auto',
-       description: 'Decode H.264 video and AAC audio through the system GStreamer (which picks VA-API, V4L2 or an installed software decoder) on Linux and the BSDs. Windows, macOS and Android always use their own OS decoders instead.')
+       description: 'Decode H.264 video and AAC audio through the system GStreamer (which picks VA-API, V4L2 or an installed software decoder), and VP9/AV1/HEVC when it has a hardware decoder for them. Auto: required on Linux, optional on the BSDs; -Dgstreamer=disabled drops it. Windows, macOS and Android always use their own OS decoders instead.')
 option('audio', type: 'feature', value: 'auto',
        description: 'Build the nordstjernen-audio playback helper (SDL2 output + minimp3/pl_mpeg decode). Auto-detects SDL2; disable for engine-only or JNI builds without SDL2.')
 option('webgpu', type: 'feature', value: 'auto',

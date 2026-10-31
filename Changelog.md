@@ -14,6 +14,10 @@ Changelog:
 * Security: a request body given as an object with a huge `length` no
   longer makes the renderer allocate (and abort on) gigabytes; such bodies
   are capped at the same 32 MiB as other request bodies.
+* Build: GStreamer is now required on Linux (as FFmpeg already is), so
+  every Linux build decodes H.264/AAC through the system and can use VA-API
+  hardware decoding for VP9, AV1 and HEVC. `-Dgstreamer=disabled` still
+  drops it; it stays optional on the BSDs.
 * Security: a GStreamer decoding pipeline that fails to start no longer
   releases its source and sink twice. Opening such a video (for example
   when a VA-API decoder cannot start) crashed the renderer.
