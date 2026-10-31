@@ -8733,7 +8733,12 @@ ns_element_set_outerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
     size_t len = 0;
     gboolean free_s = !JS_IsNull(val);
     const char *s = free_s ? JS_ToCStringLen(ctx, &len, val) : "";
-    if (!s) return JS_UNDEFINED;
+    if (!s) return JS_EXCEPTION;
+    if (!n->parent) {
+        if (free_s) JS_FreeCString(ctx, s);
+        return ns_throw_dom_exception(ctx, "NoModificationAllowedError", 7,
+                                      "Cannot set outerText on a detached node.");
+    }
     ns_node *fragment = ns_rendered_text_fragment_new(s, len);
     if (free_s) JS_FreeCString(ctx, s);
     if (!fragment) return JS_UNDEFINED;
@@ -8923,7 +8928,12 @@ ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
     if (!self || !self->parent) return JS_UNDEFINED;
     gboolean free_s = !JS_IsNull(val);
     const char *s = free_s ? JS_ToCString(ctx, val) : "";
-    if (!s) return JS_UNDEFINED;
+    if (!s) return JS_EXCEPTION;
+    if (!self->parent) {
+        if (free_s) JS_FreeCString(ctx, s);
+        return ns_throw_dom_exception(ctx, "NoModificationAllowedError", 7,
+                                      "Cannot set outerHTML on a detached node.");
+    }
     const ns_node *root = ns_node_root(self);
     gboolean scripting = !root ||
         !(root->flags & NS_NODE_SCRIPTING_DISABLED);
@@ -29626,8 +29636,8 @@ ns_mut_scrub_node(ns_js *js, ns_node *n)
                 if (rd->target == n)           rd->target = NULL;
                 if (rd->previous_sibling == n) rd->previous_sibling = NULL;
                 if (rd->next_sibling == n)     rd->next_sibling = NULL;
-                if (rd->added)   g_ptr_array_remove_fast(rd->added, n);
-                if (rd->removed) g_ptr_array_remove_fast(rd->removed, n);
+                if (rd->added)   g_ptr_array_remove(rd->added, n);
+                if (rd->removed) g_ptr_array_remove(rd->removed, n);
             }
         }
     }
@@ -33756,6 +33766,8 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
         path_tail->kind == NS_NODE_DOCUMENT &&
         !(path_tail->flags & NS_NODE_FRAGMENT);
 
+    GPtrArray *outer_dispatch_path = js->current_dispatch_path;
+    gboolean outer_dispatch_window = js->current_dispatch_window;
     js->current_dispatch_path = path;
     js->current_dispatch_window = window_in_path;
 
@@ -33816,8 +33828,8 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
         bubble_len == path->len)
         stopped = ns_invoke_window_listeners(js, target, type, event, FALSE,
                                              &fired);
-    js->current_dispatch_path = NULL;
-    js->current_dispatch_window = FALSE;
+    js->current_dispatch_path = outer_dispatch_path;
+    js->current_dispatch_window = outer_dispatch_window;
     g_ptr_array_free(path, TRUE);
     g_array_free(shadow_flags, TRUE);
 
