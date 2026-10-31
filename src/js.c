@@ -52712,6 +52712,13 @@ ns_iframe_run_native_scripts(ns_js *js, JSContext *fctx)
 }
 
 static gboolean
+ns_iframe_parent_is_top_window(ns_js *js, const ns_node *iframe)
+{
+    if (!iframe || !iframe->parent) return TRUE;
+    return ns_js_node_realm_context(js, iframe->parent) == NULL;
+}
+
+static gboolean
 ns_iframe_parent_realm_is_native(ns_js *js, const ns_node *iframe)
 {
     JSContext *parent = iframe && iframe->parent
@@ -68837,7 +68844,7 @@ ns_frame_response_is_download(const ns_response *resp)
 }
 
 static void
-ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
+ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
 {
     if (!js || !iframe || js->halted || !js->current_doc) return;
     if (!ns_js_node_in_page(js, iframe)) return;
@@ -69142,6 +69149,9 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
             ((sandbox & NS_SANDBOX_ACTIVE) &&
              !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN)))
             sandbox |= NS_FRAME_CROSS_ORIGIN;
+        if (iorigin && ns_iframe_parent_is_top_window(js, iframe) &&
+            !ns_url_same_origin(iorigin, ns_js_top_url(js)))
+            sandbox |= NS_FRAME_CROSS_ORIGIN;
         const char *cs = ns_element_get_attr(iframe, "data-nd-frame-charset");
         if (!cs || !*cs) cs = "UTF-8";
         JSValue realm_doc = ns_make_realm_document(
@@ -69261,6 +69271,22 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
     if (resp) ns_response_free(resp);
     g_free(decoded);
     g_free(abs_url);
+}
+
+static void
+ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
+{
+    if (!js || !iframe) return;
+    const char *embedder = ns_js_frame_url_above(iframe, NULL);
+    if (!embedder) embedder = ns_js_top_url(js);
+    if (g_strcmp0(embedder, js->current_url) == 0) {
+        ns_js_load_iframe_in_embedder(js, iframe);
+        return;
+    }
+    ns_frame_url fu;
+    ns_frame_url_enter(js, &fu, embedder);
+    ns_js_load_iframe_in_embedder(js, iframe);
+    ns_frame_url_leave(js, &fu);
 }
 
 static void

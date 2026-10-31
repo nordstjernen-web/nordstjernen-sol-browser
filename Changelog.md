@@ -3,6 +3,10 @@ Changelog:
 
 1.0.40-dev:
 ======
+* Security: a frame nested inside another frame is now classified as
+  same- or cross-origin against the document that embeds it, not the
+  top-level page. A frame from the top page's origin nested inside a
+  cross-origin frame could read and change that frame's document.
 * JavaScript: QuickJS fork synced with quickjs-ng master `7b5f588`. Freeing
   a `WeakMap` whose symbol values are also its keys no longer uses freed
   memory, reading a truncated BigInt from stored data no longer leaks, and
