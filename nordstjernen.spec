@@ -32,6 +32,7 @@ BuildRequires:  pkgconfig(libcurl) >= 7.85
 BuildRequires:  pkgconfig(libpsl)
 BuildRequires:  pkgconfig(libseccomp)
 BuildRequires:  pkgconfig(libavif)
+BuildRequires:  pkgconfig(libjxl)
 BuildRequires:  pkgconfig(libavcodec) >= 60
 BuildRequires:  pkgconfig(libavformat) >= 60
 BuildRequires:  pkgconfig(libavutil) >= 58
