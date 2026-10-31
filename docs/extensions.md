@@ -17,8 +17,10 @@ locations are scanned at renderer start:
   `$XDG_DATA_HOME/nordstjernen-extensions/` (GLib's user data directory:
   on Linux, by default `~/.local/share/nordstjernen-extensions/<ext>/`).
   It sits outside the profile directory so that a sandboxed renderer,
-  which can write the profile, cannot plant an extension; an older
-  `nordstjernen/extensions/` directory is moved there at startup.
+  which can write the profile, cannot plant an extension. Nothing is
+  moved there automatically: an extension left in the older
+  `nordstjernen/extensions/` directory is ignored until it is moved by
+  hand.
 - Any path in the `NS_EXTENSIONS_DIR` environment variable
   (`:`-separated, `;` on Windows). Each entry is treated as a directory of extensions,
   or — if it directly contains a `manifest.json` — as a single
