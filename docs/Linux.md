@@ -49,7 +49,9 @@ VP9/WebM, so the external-player fallback is not acceptable here.
     sudo apt install libavformat-dev libavcodec-dev libavutil-dev \
         libswscale-dev libswresample-dev                       # Debian / Ubuntu
     sudo dnf install ffmpeg-devel                               # Fedora / RHEL (RPM Fusion)
-    sudo zypper install ffmpeg-devel                            # openSUSE (Packman)
+    sudo zypper install ffmpeg-9-libavformat-devel ffmpeg-9-libavcodec-devel \
+        ffmpeg-9-libavutil-devel ffmpeg-9-libswscale-devel \
+        ffmpeg-9-libswresample-devel                            # openSUSE Tumbleweed (OSS)
     sudo apk add ffmpeg-dev                                     # Alpine
 
 Optional, auto-detected: `libpoppler-glib-dev` (PDF rendering),
