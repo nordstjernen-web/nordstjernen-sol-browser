@@ -14,6 +14,13 @@ Changelog:
 * Security: a request body given as an object with a huge `length` no
   longer makes the renderer allocate (and abort on) gigabytes; such bodies
   are capped at the same 32 MiB as other request bodies.
+* Media: on Linux, VP9, AV1 and HEVC video decode in hardware through
+  GStreamer when it has a VA-API (or other hardware) decoder for them, so
+  YouTube's VP9/AV1 streams no longer fall to the CPU on machines whose GPU
+  decodes them. HEVC plays where a hardware decoder exists. Without one,
+  these codecs stay on FFmpeg as before.
+* Headless: `--headless` renders the first frame of `.mp4`, `.m4v` and
+  `.ogv` videos like the windowed browser, instead of only MPEG-1 and WebM.
 * Security: typing into a `contenteditable` element no longer frees the
   nodes it replaces while timers, animation frames or frame realms still
   point at them (an `<iframe>` inside the editable host was freed under its

@@ -47,6 +47,10 @@ int  ns_os_aac_available(void);
 
 ns_os_vdec  *ns_os_vdec_new_h264(const uint8_t *avcc, size_t avcc_len,
                                  int width, int height);
+int          ns_os_hw_video_available(const char *codec);
+const char  *ns_os_hw_video_decoder_name(const char *codec);
+ns_os_vdec  *ns_os_vdec_new_hw(const char *codec, const uint8_t *extradata,
+                               size_t extradata_len, int width, int height);
 int          ns_os_vdec_send(ns_os_vdec *dec, const uint8_t *data, size_t len,
                              int64_t pts_us);
 ns_os_status ns_os_vdec_receive(ns_os_vdec *dec, ns_os_frame *out);

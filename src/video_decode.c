@@ -197,9 +197,41 @@ ns_lav_container_described(AVFormatContext *fmt)
            par->height > 0;
 }
 
+static const char *
+ns_lav_hw_codec_name(enum AVCodecID id)
+{
+    switch (id) {
+    case AV_CODEC_ID_VP9:  return "vp9";
+    case AV_CODEC_ID_AV1:  return "av1";
+    case AV_CODEC_ID_HEVC: return "hevc";
+    default:               return NULL;
+    }
+}
+
+static gboolean
+ns_lav_open_hw_decoder(ns_lav *L, AVStream *vs)
+{
+    const char *hw = ns_lav_hw_codec_name(L->codec_id);
+    if (!hw || g_getenv("NS_MEDIA_NO_OS_DECODER") ||
+        !ns_os_hw_video_available(hw))
+        return FALSE;
+    L->osdec = ns_os_vdec_new_hw(hw, vs->codecpar->extradata,
+                                 vs->codecpar->extradata_size > 0
+                                     ? (size_t)vs->codecpar->extradata_size : 0,
+                                 vs->codecpar->width, vs->codecpar->height);
+    if (!L->osdec) return FALSE;
+    ns_debug_log_emit(NS_DLOG_INFO, "media",
+                      "%s %dx%d decoding through %s (%s)",
+                      avcodec_get_name(L->codec_id), vs->codecpar->width,
+                      vs->codecpar->height, ns_os_media_backend(),
+                      ns_os_hw_video_decoder_name(hw));
+    return TRUE;
+}
+
 static gboolean
 ns_lav_open_decoder(ns_lav *L, AVStream *vs)
 {
+    if (ns_lav_open_hw_decoder(L, vs)) return TRUE;
     if (L->codec_id == AV_CODEC_ID_H264 && vs->codecpar->extradata &&
         vs->codecpar->extradata_size > 6 && vs->codecpar->extradata[0] == 1 &&
         !g_getenv("NS_MEDIA_NO_OS_DECODER")) {
@@ -544,8 +576,8 @@ ns_lav_os_fallback(ns_lav *L)
         return FALSE;
     }
     ns_debug_log_emit(NS_DLOG_WARN, "media",
-                      "%s H.264 decoder failed; falling back to libavcodec",
-                      ns_os_media_backend());
+                      "%s %s decoder failed; falling back to libavcodec",
+                      ns_os_media_backend(), avcodec_get_name(L->codec_id));
     ns_os_vdec_free(L->osdec);
     L->osdec = NULL;
     L->vdec = ctx;
@@ -867,6 +899,7 @@ ns_video_codec_available(const char *codec)
     if (id == AV_CODEC_ID_NONE) return FALSE;
     if (id == AV_CODEC_ID_H264 && ns_os_h264_available()) return TRUE;
     if (id == AV_CODEC_ID_AAC && ns_os_aac_available()) return TRUE;
+    if (id == AV_CODEC_ID_HEVC && ns_os_hw_video_available("hevc")) return TRUE;
     if (g_getenv("NS_MEDIA_OS_CODECS_ONLY") &&
         id != AV_CODEC_ID_OPUS && id != AV_CODEC_ID_VORBIS &&
         id != AV_CODEC_ID_MP3)

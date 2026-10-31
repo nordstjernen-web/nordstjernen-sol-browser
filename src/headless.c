@@ -191,15 +191,9 @@ fetch_videos_into_layout(ns_box **root_slot, const char *base_url)
         g_ptr_array_free(vids, TRUE);
 
         ns_video *made = NULL;
-        gsize sn = want_src ? strcspn(want_src, "?#") : 0;
         gboolean inline_video = want_src &&
-            ((sn >= 4 && g_ascii_strncasecmp(want_src + sn - 4, ".mpg", 4) == 0) ||
-             (sn >= 4 && g_ascii_strncasecmp(want_src + sn - 4, ".m1v", 4) == 0) ||
-             (sn >= 5 && g_ascii_strncasecmp(want_src + sn - 5, ".mpeg", 5) == 0)
-#ifdef NS_HAVE_LIBAV
-             || (sn >= 5 && g_ascii_strncasecmp(want_src + sn - 5, ".webm", 5) == 0)
-#endif
-             );
+            !g_str_has_prefix(want_src, "blob:") &&
+            ns_video_url_is_inline(want_src);
         if (inline_video) {
             ns_response *resp = ns_engine_fetch_blocking(want_src, base_url, NULL);
             if (resp && !resp->error && resp->body && resp->body->len > 0) {

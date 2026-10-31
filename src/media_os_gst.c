@@ -15,6 +15,7 @@
 #define NS_GST_INFLIGHT 32
 
 struct ns_os_vdec {
+    char       *desc;
     GstElement *pipeline;
     GstAppSrc  *src;
     GstAppSink *sink;
@@ -67,12 +68,89 @@ gst_has_decoder(const char *caps_str, int *cache)
 static int g_h264 = -1;
 static int g_aac = -1;
 
+typedef struct {
+    const char *codec;
+    const char *caps;
+    const char *parser;
+    char       *factory;
+    int         probed;
+} gst_hw_codec;
+
+static gst_hw_codec g_hw_codecs[] = {
+    { "vp9",  "video/x-vp9", "vp9parse", NULL, 0 },
+    { "av1",  "video/x-av1", "av1parse", NULL, 0 },
+    { "hevc", "video/x-h265", "h265parse", NULL, 0 },
+};
+
+static gst_hw_codec *
+gst_hw_lookup(const char *codec)
+{
+    if (!codec) return NULL;
+    for (size_t i = 0; i < G_N_ELEMENTS(g_hw_codecs); i++)
+        if (strcmp(g_hw_codecs[i].codec, codec) == 0) return &g_hw_codecs[i];
+    return NULL;
+}
+
+static gboolean
+gst_factory_is_hardware(GstElementFactory *f)
+{
+    const char *klass =
+        gst_element_factory_get_metadata(f, GST_ELEMENT_METADATA_KLASS);
+    return klass && strstr(klass, "Hardware") != NULL;
+}
+
+static gboolean
+gst_element_exists(const char *name)
+{
+    GstElementFactory *f = gst_element_factory_find(name);
+    if (!f) return FALSE;
+    gst_object_unref(f);
+    return TRUE;
+}
+
+static gst_hw_codec *
+gst_hw_probe(const char *codec)
+{
+    gst_hw_codec *c = gst_hw_lookup(codec);
+    if (!c) return NULL;
+    if (c->probed) return c;
+    c->probed = 1;
+    if (getenv("NS_MEDIA_NO_OS_DECODER") || getenv("NS_MEDIA_NO_HW_DECODER") ||
+        !gst_ready())
+        return c;
+    GList *hits = g_list_sort(gst_decoders_for(c->caps),
+                              gst_plugin_feature_rank_compare_func);
+    for (GList *l = hits; l && !c->factory; l = l->next) {
+        GstElementFactory *f = l->data;
+        if (strstr(gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(f)), "alpha"))
+            continue;
+        if (!gst_factory_is_hardware(f) &&
+            !getenv("NS_MEDIA_GST_SOFTWARE_DECODER"))
+            continue;
+        GstPluginFeature *loaded = gst_plugin_feature_load(GST_PLUGIN_FEATURE(f));
+        if (!loaded) continue;
+        c->factory = g_strdup(gst_plugin_feature_get_name(loaded));
+        gst_object_unref(loaded);
+    }
+    gst_plugin_feature_list_free(hits);
+    return c;
+}
+
+int
+ns_os_hw_video_available(const char *codec)
+{
+    gst_hw_codec *c = gst_hw_probe(codec);
+    return c && c->factory != NULL;
+}
+
 void
 ns_os_media_preinit(void)
 {
     if (getenv("NS_MEDIA_NO_OS_DECODER")) return;
     ns_os_h264_available();
     ns_os_aac_available();
+    for (size_t i = 0; i < G_N_ELEMENTS(g_hw_codecs); i++)
+        gst_hw_probe(g_hw_codecs[i].codec);
 }
 
 const char *
@@ -162,7 +240,8 @@ static const char ns_gst_audio_desc[] =
 static int
 vdec_start(ns_os_vdec *d)
 {
-    d->pipeline = gst_build(ns_gst_video_desc, d->caps, &d->src, &d->sink);
+    d->pipeline = gst_build(d->desc ? d->desc : ns_gst_video_desc, d->caps,
+                            &d->src, &d->sink);
     d->inflight = 0;
     d->draining = 0;
     return d->pipeline != NULL;
@@ -188,6 +267,66 @@ ns_os_vdec_new_h264(const uint8_t *avcc, size_t avcc_len, int width, int height)
         return NULL;
     }
     return d;
+}
+
+static GstCaps *
+gst_hw_caps(const gst_hw_codec *c, const uint8_t *extradata,
+            size_t extradata_len, int width, int height)
+{
+    GstCaps *caps = gst_caps_new_empty_simple(c->caps);
+    if (strcmp(c->codec, "av1") == 0)
+        gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "obu-stream",
+                            "alignment", G_TYPE_STRING, "tu", NULL);
+    if (strcmp(c->codec, "hevc") == 0) {
+        if (!extradata || extradata_len < 23 || extradata[0] != 1) {
+            gst_caps_unref(caps);
+            return NULL;
+        }
+        gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "hvc1",
+                            "alignment", G_TYPE_STRING, "au", NULL);
+    }
+    if (extradata && extradata_len > 0 && strcmp(c->codec, "vp9") != 0) {
+        GstBuffer *cd = gst_buffer_new_memdup(extradata, extradata_len);
+        gst_caps_set_simple(caps, "codec_data", GST_TYPE_BUFFER, cd, NULL);
+        gst_buffer_unref(cd);
+    }
+    if (width > 0 && height > 0)
+        gst_caps_set_simple(caps, "width", G_TYPE_INT, width,
+                            "height", G_TYPE_INT, height, NULL);
+    return caps;
+}
+
+ns_os_vdec *
+ns_os_vdec_new_hw(const char *codec, const uint8_t *extradata,
+                  size_t extradata_len, int width, int height)
+{
+    gst_hw_codec *c = gst_hw_probe(codec);
+    if (!c || !c->factory) return NULL;
+    GstCaps *caps = gst_hw_caps(c, extradata, extradata_len, width, height);
+    if (!caps) return NULL;
+    ns_os_vdec *d = calloc(1, sizeof *d);
+    if (!d) {
+        gst_caps_unref(caps);
+        return NULL;
+    }
+    d->caps = caps;
+    d->desc = g_strdup_printf(
+        "appsrc name=src ! %s%s%s ! videoconvert ! "
+        "video/x-raw,format=NV12 ! appsink name=sink",
+        gst_element_exists(c->parser) ? c->parser : "",
+        gst_element_exists(c->parser) ? " ! " : "", c->factory);
+    if (!vdec_start(d)) {
+        ns_os_vdec_free(d);
+        return NULL;
+    }
+    return d;
+}
+
+const char *
+ns_os_hw_video_decoder_name(const char *codec)
+{
+    gst_hw_codec *c = gst_hw_lookup(codec);
+    return c ? c->factory : NULL;
 }
 
 int
@@ -262,6 +401,7 @@ ns_os_vdec_free(ns_os_vdec *d)
     if (!d) return;
     gst_teardown(&d->pipeline, &d->src, &d->sink);
     if (d->caps) gst_caps_unref(d->caps);
+    g_free(d->desc);
     free(d);
 }
 
