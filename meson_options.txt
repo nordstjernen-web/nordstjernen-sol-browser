@@ -24,3 +24,5 @@ option('wgpu_native_root', type: 'string', value: '',
        description: 'Root of an extracted wgpu-native release (expects include/webgpu/webgpu.h and lib/libwgpu_native.{so,a}). Used only when -Dwebgpu is enabled and pkg-config cannot find wgpu_native.')
 option('web-text-lib', type: 'feature', value: 'auto',
        description: 'Shape text through web-text-lib, the in-tree Pango fork under src/web-text-lib/, which caches finished glyph strings across layouts. Auto: used on desktop, never on Android or iOS, where the fork has no CoreText backend and no fontconfig. Disabled links the system Pango instead, with src/ns_pango_names.h mapping the renamed API back -- the same path the mobile builds take.')
+option('ipc_rust', type: 'feature', value: 'disabled',
+       description: 'Parse the renderer IPC framing (src/ipc_http.c: HTTP/1.1 heads, bodies and the JSON helpers) with the memory-safe Rust port in src/ipc_http_rs/ instead of C. Off by default; enabling it needs rustc (no crates are used) and keeps the C ABI of ipc_http.h, so callers are unchanged.')

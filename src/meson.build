@@ -262,6 +262,8 @@ if have_fontconfig
   nordstjernen_deps += [libfontconfig]
 endif
 
+nordstjernen_deps += ns_ipc_rust_dep
+
 if have_pangoft2
   nordstjernen_deps += [libpangoft2]
 endif

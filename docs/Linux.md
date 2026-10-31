@@ -79,6 +79,25 @@ automatically. With ccache warm, a clean `meson setup builddir &&
 meson compile -C builddir` drops from ~35 s to ~1 s. Install once
 with the distro package manager.
 
+### Optional: Rust IPC parser (`-Dipc_rust=enabled`)
+
+The browser shell parses every message the sandboxed renderer sends it
+(HTTP/1.1 heads, bodies and small JSON payloads, `src/ipc_http.c`). A
+compromised renderer controls those bytes, so that parser is the sandbox's
+attack surface. `-Dipc_rust=enabled` replaces it with a memory-safe Rust port
+(`src/ipc_http_rs/lib.rs`, standard library only, no crates) behind the same
+C ABI; the default build keeps the C parser. It needs `rustc` and GNU
+binutils (`ld`, `objcopy`, `ar`), which `scripts/rust-staticlib-localize.sh`
+uses to hide the Rust standard library inside the archive so it cannot clash
+with wgpu-native's. The C shims pass the size of the shared structs, and the
+Rust side refuses to parse if they differ from its own layout.
+about:nordstjernen lists the active parser under Security.
+
+    meson setup -Dipc_rust=enabled builddir-rust
+
+With rustup but no default toolchain, point meson at one:
+`RUSTC=~/.rustup/toolchains/<toolchain>/bin/rustc meson setup ...`.
+
 ## Develop
 
     meson setup builddir
