@@ -240,7 +240,7 @@ On openSUSE:
 ```sh
 sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
     libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libwebp-devel libSDL2-devel ffmpeg-devel
+    libseccomp-devel libwebp-devel sdl2-compat-devel ffmpeg-devel
 ```
 
 (`ffmpeg-devel` comes from Packman.)
