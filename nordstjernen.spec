@@ -26,6 +26,9 @@ BuildRequires:  pkgconfig
 BuildRequires:  update-desktop-files
 BuildRequires:  pkgconfig(epoxy)
 BuildRequires:  pkgconfig(enchant-2)
+BuildRequires:  pkgconfig(gstreamer-1.0) >= 1.20
+BuildRequires:  pkgconfig(gstreamer-app-1.0) >= 1.20
+BuildRequires:  pkgconfig(gstreamer-video-1.0) >= 1.20
 BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(libcrypto)
 BuildRequires:  pkgconfig(libcurl) >= 7.85
