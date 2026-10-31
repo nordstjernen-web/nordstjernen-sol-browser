@@ -44,7 +44,9 @@ directories; on Windows it runs with process mitigation policies (forced
 ASLR, strict handle checks, restricted image loads, no child processes) and
 the browser drops administrator rights at start-up. The FreeBSD and NetBSD
 builds have no renderer sandbox yet. No JIT, in either the JavaScript or the
-WebAssembly engine.
+WebAssembly engine. The shell can parse the renderer's IPC messages with an
+optional memory-safe Rust parser (`-Dipc_rust=enabled`, off by default), and
+about:nordstjernen shows which parser and sandbox layers are active.
 
 **Minimalism.** The core engine is about 254,000 lines of project C and
 headers, excluding vendored libraries and generated assets — small enough for
@@ -154,7 +156,10 @@ UCRT64 toolchain. Apple Silicon Macs get the notarised release build. See [npm/R
   operating system — Media Foundation on Windows, VideoToolbox on macOS/iOS,
   MediaCodec on Android and GStreamer on Linux/BSD — or by the system FFmpeg
   where no OS decoder is available, never by a bundled decoder. A
-  distribution FFmpeg on Linux adds AV1 and HEVC. MSE/`blob:` streaming
+  distribution FFmpeg on Linux adds AV1 and HEVC. With GStreamer on Linux,
+  VP9, AV1 and HEVC decode in **hardware** when a VA-API (or other hardware)
+  decoder is installed, falling back to FFmpeg otherwise; YouTube's AV1/VP9
+  streams play either way. MSE/`blob:` streaming
   decodes in the renderer, HLS and DASH manifests play through a built-in
   player over MSE, and a `<track default>` WebVTT file is drawn over the
   video. `<audio>` plays MP3 (via minimp3) and, with libav, WebM, Ogg and
@@ -302,7 +307,9 @@ no network.
 **Optional**, auto-detected or build-time-selected:
 SDL2 (audio output and microphone capture, `-Daudio`),
 [FFmpeg](https://github.com/FFmpeg/FFmpeg) libav\* on macOS and the BSDs (inline WebM),
-GStreamer ≥ 1.20 (H.264/AAC on Linux and the BSDs, `-Dgstreamer`),
+GStreamer ≥ 1.20 (H.264/AAC on Linux and the BSDs, plus hardware
+VP9/AV1/HEVC through VA-API, `-Dgstreamer`), rustc (the memory-safe IPC
+parser, `-Dipc_rust`),
 vorbisfile / opusfile (Ogg audio without FFmpeg), brotli (`br` content
 encoding and WOFF2 fonts), zstd (`zstd` content encoding),
 poppler-glib (inline PDF), libavif (AVIF images), libjxl (JPEG XL images),
