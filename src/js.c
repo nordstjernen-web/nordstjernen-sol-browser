@@ -48634,6 +48634,7 @@ typedef struct ns_js_image_load {
     char      *requested_url;
     double     start_ms;
     guint      ready_idle;
+    gboolean   blocked;
 } ns_js_image_load;
 
 static gboolean
@@ -48962,11 +48963,11 @@ ns_js_image_ready_idle(gpointer data)
         js->log_cb(line, js->log_user_data);
         g_free(line);
     }
-    if (img && (img->loaded || img->failed)) {
-        if (img->loaded) js->mutated = TRUE;
+    if (r->blocked || (img && (img->loaded || img->failed))) {
+        if (img && img->loaded && !r->blocked) js->mutated = TRUE;
         ns_realm_scope scope;
         ns_js_realm_scope_enter(js, r->realm, &scope);
-        ns_js_fire_img_load_once(js, r->el, img->failed);
+        ns_js_fire_img_load_once(js, r->el, r->blocked || img->failed);
         ns_js_realm_scope_leave(js, &scope);
     }
     if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
@@ -49014,6 +49015,14 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
     r->requested_url = abs_url;
     r->start_ms = ns_perf_now_ms(js);
     g_hash_table_insert(js->js_image_loads, el, r);
+    const ns_csp *csp = ns_js_node_csp(js, el);
+    const char *frame_url = ns_js_node_frame_url(js, el);
+    if (csp && !ns_csp_allows(csp, NS_CSP_IMG, abs_url,
+                              frame_url ? frame_url : js->current_url)) {
+        r->blocked = TRUE;
+        r->ready_idle = g_idle_add(ns_js_image_ready_idle, r);
+        return;
+    }
     r->img = ns_image_cache_get(js->image_cache, abs_url,
                                 base ? base : abs_url,
                                 ns_js_on_image_ready, r);
@@ -69057,6 +69066,61 @@ ns_frame_response_is_download(const ns_response *resp)
 }
 
 static void
+ns_js_collect_frame_images(ns_node *n, GPtrArray *out)
+{
+    for (ns_node *c = n ? n->first_child : NULL; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "iframe") ||
+            ns_node_is_element_named(c, "frame") ||
+            ns_node_is_element_named(c, "object"))
+            continue;
+        if (ns_node_is_element_named(c, "img")) {
+            const char *loading = ns_element_get_attr(c, "loading");
+            if (!loading || g_ascii_strcasecmp(loading, "lazy") != 0)
+                g_ptr_array_add(out, c);
+        }
+        ns_js_collect_frame_images(c, out);
+    }
+}
+
+static gboolean
+ns_js_frame_images_settled(ns_js *js, GPtrArray *imgs)
+{
+    for (guint i = 0; i < imgs->len; i++) {
+        ns_js_image_load *r = js->js_image_loads
+            ? g_hash_table_lookup(js->js_image_loads, imgs->pdata[i]) : NULL;
+        if (r && r->img && !r->img->loaded && !r->img->failed) return FALSE;
+    }
+    return TRUE;
+}
+
+static void
+ns_js_wait_for_frame_images(ns_js *js, ns_node *content_root)
+{
+    if (!js || !content_root || js->halted) return;
+    g_autoptr(GPtrArray) imgs = g_ptr_array_new();
+    ns_js_collect_frame_images(content_root, imgs);
+    for (guint i = 0; i < imgs->len; i++) {
+        ns_node *img = imgs->pdata[i];
+        const char *src = ns_element_get_attr(img, "src");
+        if (!src || !*src) continue;
+        if (js->js_image_loads && g_hash_table_lookup(js->js_image_loads, img))
+            continue;
+        ns_js_start_image_load(js, img, src);
+    }
+    gint64 deadline = g_get_monotonic_time() + 2 * G_USEC_PER_SEC;
+    gboolean saved = js->in_pump;
+    js->in_pump = TRUE;
+    gint64 pump_start_us = g_get_monotonic_time();
+    while (!js->halted && !ns_js_frame_images_settled(js, imgs) &&
+           g_get_monotonic_time() < deadline) {
+        if (!g_main_context_iteration(NULL, FALSE))
+            g_usleep(1000);
+    }
+    ns_js_credit_pumped_time(js, pump_start_us);
+    js->in_pump = saved;
+}
+
+static void
 ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
 {
     if (!js || !iframe || js->halted || !js->current_doc) return;
@@ -69441,6 +69505,17 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         GHashTable *globals_before = ns_js_snapshot_globals(js);
         js->iframe_load_depth++;
         ns_js_set_doc_ready_state(js, content_doc, 0);
+        if (resp) {
+            ns_csp *own_csp = resp->csp_header && *resp->csp_header
+                ? ns_csp_parse(resp->csp_header) : NULL;
+            g_hash_table_replace(js->frame_csps, iframe, own_csp);
+        } else {
+            g_hash_table_remove(js->frame_csps, iframe);
+        }
+        if (resp && resp->csp_header && *resp->csp_header)
+            ns_element_set_attr(iframe, "data-nd-frame-csp", resp->csp_header);
+        else
+            ns_element_remove_attr(iframe, "data-nd-frame-csp");
         if (xhtml_suppress_scripts)
             ns_js_mark_scripts_already_started(content_root);
         if (!scripts_ok) {
@@ -69453,13 +69528,6 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
                 g_free(line);
             }
         } else if (JS_IsObject(realm_doc)) {
-            if (resp) {
-                ns_csp *own_csp = resp->csp_header && *resp->csp_header
-                    ? ns_csp_parse(resp->csp_header) : NULL;
-                g_hash_table_replace(js->frame_csps, iframe, own_csp);
-            } else {
-                g_hash_table_remove(js->frame_csps, iframe);
-            }
             ns_js_run_iframe_scripts(js, content_root, iorigin, realm_doc,
                                      realm_scope, sandbox, iframe,
                                      ns_js_frame_csp(js, iframe));
@@ -69475,6 +69543,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
             ns_js_set_doc_ready_state(js, content_doc, 1);
             ns_js_dispatch_event(js, content_doc, "readystatechange", NULL);
             ns_js_dispatch_event(js, content_doc, "DOMContentLoaded", NULL);
+            ns_js_wait_for_frame_images(js, content_root);
             ns_js_set_doc_ready_state(js, content_doc, 2);
             ns_js_dispatch_event(js, content_doc, "readystatechange", NULL);
             ns_js_dispatch_event(js, content_doc, "load", NULL);
@@ -70312,7 +70381,7 @@ ns_js_add_csp_header(ns_js *js, const char *header_value)
 }
 
 const char *
-ns_js_form_frame_url(const ns_js *js, const ns_node *form)
+ns_js_node_frame_url(const ns_js *js, const ns_node *form)
 {
     (void)js;
     const ns_node *frame = form ? ns_js_node_frame(form->parent) : NULL;
@@ -70328,7 +70397,7 @@ ns_js_csp_form_action_allowed(const ns_js *js, const ns_node *form,
     if (!js || !action_url) return TRUE;
     const ns_csp *csp = form ? ns_js_node_csp(js, form) : js->csp;
     if (!csp) return TRUE;
-    const char *self_url = ns_js_form_frame_url(js, form);
+    const char *self_url = ns_js_node_frame_url(js, form);
     return ns_csp_allows(csp, NS_CSP_FORM_ACTION, action_url,
                          self_url ? self_url : js->current_url);
 }

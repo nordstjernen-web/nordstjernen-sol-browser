@@ -3,6 +3,13 @@ Changelog:
 
 1.0.40-dev:
 ======
+* Security: images in a framed document now obey that frame's own
+  Content-Security-Policy, also when the frame runs no script and when
+  layout fetches the image. They used to be checked against the top
+  page's policy, so a frame's `img-src` was ignored.
+* An iframe's `load` event (and its document's `load`) now waits for the
+  frame's images, as browsers do, instead of firing before they were
+  requested.
 * Security: a credentialed cross-origin `XMLHttpRequest` or `fetch()` now
   reads the response only when the server answers with
   `Access-Control-Allow-Credentials: true` and names the origin, not `*`.

@@ -136,7 +136,7 @@ void   ns_js_set_early_inject_src(ns_js *js, const char *src);
 void   ns_js_add_csp_header(ns_js *js, const char *header_value);
 gboolean ns_js_csp_form_action_allowed(const ns_js *js, const ns_node *form,
                                        const char *action_url);
-const char *ns_js_form_frame_url(const ns_js *js, const ns_node *form);
+const char *ns_js_node_frame_url(const ns_js *js, const ns_node *form);
 gboolean ns_js_navigate_form_frame(ns_js *js, const ns_node *form, const char *url);
 gboolean ns_js_post_form_frame(ns_js *js, const ns_node *form, const char *url,
                                char *body, gsize body_len, const char *content_type);
