@@ -3,6 +3,12 @@ Changelog:
 
 1.0.41-dev:
 ======
+* Media: when a `<video>` moves on to a new `MediaSource` (YouTube does
+  this for each new video and on some quality changes), the old
+  stream's appended bytes, decoder, decoded-frame queue and audio file
+  are freed. They used to stay in the renderer until the tab closed:
+  up to ~256 MB of appended video, a ~96 MB demux window and a 64 MB
+  frame queue per replaced stream.
 * Style: a page whose stylesheets contain a `:has()` with nothing to key
   on (no class, id or type on its own compound or the subject, such as
   `:has(> .x) [dialog]`) no longer turns off incremental restyling for
