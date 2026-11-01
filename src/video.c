@@ -1456,6 +1456,8 @@ ns_video_cache_mse_append(ns_video_cache *cache, guint stream_id, char kind,
     if (!s) {
         s = g_new0(ns_mse_stream, 1);
         s->id = stream_id;
+        s->video_gen_start = -1.0;
+        s->audio_gen_start = -1.0;
         g_hash_table_insert(cache->mse_streams,
                             GUINT_TO_POINTER(stream_id), s);
     }
