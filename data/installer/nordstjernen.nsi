@@ -19,7 +19,7 @@ SetCompressor /SOLID lzma
 !endif
 
 !define APP_NAME "Nordstjernen"
-!define APP_DISPLAY "Nordstjernen Sol"
+!define APP_DISPLAY "Nordstjernen Sol Explorer"
 !define APP_PUBLISHER "Andreas Rosdal"
 !define APP_URL "https://nordstjernen.org"
 !define APP_REGKEY "Software\Nordstjernen"

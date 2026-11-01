@@ -135,7 +135,7 @@ cat > "$STAGE/Contents/Info.plist" <<PLIST_EOF
     <key>CFBundleName</key>
     <string>Nordstjernen</string>
     <key>CFBundleDisplayName</key>
-    <string>Nordstjernen Sol</string>
+    <string>Nordstjernen Sol Explorer</string>
     <key>CFBundleIdentifier</key>
     <string>org.nordstjernen.Nordstjernen</string>
     <key>CFBundleVersion</key>

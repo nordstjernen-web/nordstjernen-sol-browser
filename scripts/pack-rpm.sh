@@ -82,7 +82,7 @@ cat > "$SPEC" <<SPEC_EOF
 Name:           nordstjernen
 Version:        ${RPMVERSION}
 Release:        1%{?dist}
-Summary:        Nordstjernen Web Navigator — a small, hand-written web browser
+Summary:        Nordstjernen Sol Explorer — a small, hand-written web browser
 
 License:        LicenseRef-NSL-1.0 OR GPL-3.0-or-later
 URL:            https://nordstjernen.org

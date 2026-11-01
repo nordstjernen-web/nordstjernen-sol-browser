@@ -225,7 +225,7 @@ Depends: ${RUNTIME_DEPS}
 Section: web
 Priority: optional
 Homepage: https://nordstjernen.org
-Description: Nordstjernen Web Navigator — a small, hand-written web browser
+Description: Nordstjernen Sol Explorer — a small, hand-written web browser
  Nordstjernen is a small, free software web browser written in C with
  GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint and
  JavaScript glue are written from scratch — no third-party browser engine

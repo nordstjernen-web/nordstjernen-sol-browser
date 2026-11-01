@@ -3735,7 +3735,7 @@ build_about_license(void)
         NULL,
     };
     return build_about_markdown_page(paths, "Nordstjernen License",
-                                     "about:nordstjernen", "About Nordstjernen Sol",
+                                     "about:nordstjernen", "About Nordstjernen Sol Explorer",
                                      "License.md");
 }
 
@@ -3753,7 +3753,7 @@ build_about_gpl(void)
     };
     return build_about_markdown_page(paths,
                                      "GNU General Public License, version 3",
-                                     "about:nordstjernen", "About Nordstjernen Sol",
+                                     "about:nordstjernen", "About Nordstjernen Sol Explorer",
                                      "COPYING");
 }
 
@@ -3770,7 +3770,7 @@ build_about_third_party(void)
         NULL,
     };
     return build_about_markdown_page(paths, "Third-party software notices",
-                                     "about:nordstjernen", "About Nordstjernen Sol",
+                                     "about:nordstjernen", "About Nordstjernen Sol Explorer",
                                      "THIRD-PARTY-LICENSES.md");
 }
 
@@ -5005,7 +5005,7 @@ static const char k_about_start_template[] =
     ".brand h1{font-size:26px}}\n"
     "</style></head>"
     "<body><main class=\"ntp\">"
-    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen Sol Browser "
+    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen Sol Explorer "
     "<span class=\"ver\">" NS_VERSION "</span></h1></div>"
     "<form class=\"search\" id=\"dsearch\" role=\"search\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
@@ -5081,7 +5081,7 @@ static const char k_about_nordstjernen_template[] =
     "<meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "<meta name=\"color-scheme\" content=\"light dark\">"
-    "<title>About Nordstjernen Sol</title>"
+    "<title>About Nordstjernen Sol Explorer</title>"
     "<style>\n" NS_ABOUT_BASE_CSS
     ".wrap{max-width:760px;margin:0 auto;padding:28px 24px 48px}\n"
     ".top{margin-bottom:22px}\n"
@@ -5122,7 +5122,7 @@ static const char k_about_nordstjernen_template[] =
     "<div class=\"top\"><a class=\"crumb\" href=\"about:start\">"
     "\xe2\x86\x90 New Tab</a></div>"
     "<div class=\"head\">__ND_LOGO_MARK__<div>"
-    "<h1>Nordstjernen Sol<span class=\"ver\">" NS_VERSION "</span></h1>"
+    "<h1>Nordstjernen Sol Explorer<span class=\"ver\">" NS_VERSION "</span></h1>"
     "<p>A web browser implemented in C.</p></div></div>"
     "<section class=\"card\">"
     "<h2>License</h2>"

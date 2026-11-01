@@ -1161,7 +1161,7 @@ handle_initialize(const RjValue *id, const RjValue *params)
     rj_append_str(s, version);
     g_string_append(s, ",\"capabilities\":{\"tools\":{\"listChanged\":false}},"
                        "\"serverInfo\":{\"name\":\"nordstjernen\",\"title\":"
-                       "\"Nordstjernen Web Navigator\",\"version\":");
+                       "\"Nordstjernen Sol Explorer\",\"version\":");
     rj_append_str(s, NS_VERSION);
     g_string_append(s, "},\"instructions\":");
     rj_append_str(s,

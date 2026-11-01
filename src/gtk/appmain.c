@@ -402,7 +402,7 @@ ns_print_version_or_help(int argc, char **argv)
 {
     for (int i = 1; i < argc; i++) {
         if (g_strcmp0(argv[i], "--version") == 0) {
-            printf("Nordstjernen Sol Browser %s\n", NS_VERSION);
+            printf("Nordstjernen Sol Explorer %s\n", NS_VERSION);
             return 0;
         }
         if (g_strcmp0(argv[i], "--help") == 0 || g_strcmp0(argv[i], "-h") == 0) {

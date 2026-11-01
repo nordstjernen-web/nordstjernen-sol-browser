@@ -3,6 +3,9 @@ Changelog:
 
 1.0.40-dev:
 ======
+* The browser is named "Nordstjernen Sol Explorer" for the 1.0.40 series:
+  the window title, About page, menus, desktop entry, installers and
+  packages carry the new name.
 * `<frame>` elements now load their document. A `<frame>` that a script
   creates or whose `src` changes used to fire no `load` event, and
   `contentDocument`/`contentWindow` were always null. X-Frame-Options

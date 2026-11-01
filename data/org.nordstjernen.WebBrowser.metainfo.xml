@@ -4,7 +4,7 @@
   <id>org.nordstjernen.WebBrowser</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>LicenseRef-NSL-1.0 OR GPL-3.0-or-later</project_license>
-  <name>Nordstjernen Sol</name>
+  <name>Nordstjernen Sol Explorer</name>
   <summary>A small, hand-written web browser</summary>
   <developer id="org.nordstjernen">
     <name>Andreas Røsdal</name>

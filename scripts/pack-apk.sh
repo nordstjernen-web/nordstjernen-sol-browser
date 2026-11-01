@@ -90,7 +90,7 @@ cat > "$BUILDTOP/APKBUILD" <<APKBUILD_EOF
 pkgname=nordstjernen
 pkgver=${APKVER}
 pkgrel=0
-pkgdesc="Nordstjernen Web Navigator — a small, hand-written web browser"
+pkgdesc="Nordstjernen Sol Explorer — a small, hand-written web browser"
 url="https://nordstjernen.org"
 arch="${ARCH}"
 license="LicenseRef-NSL-1.0 OR GPL-3.0-or-later"
