@@ -14,9 +14,9 @@ Supported platforms:
 * FreeBSD and NetBSD
 * [Android](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser)
 * Java
-* iOS (experimental port, simulator builds — see [docs/iOS.md](docs/iOS.md))
+* iOS (experimental port, built from source for arm64 devices and the simulator — see [docs/iOS.md](docs/iOS.md))
 
-**Current release:** **1.0.39** (October 2026) — see [Changelog.md](Changelog.md).
+**Current release:** **1.0.40** (November 2026) — see [Changelog.md](Changelog.md).
 
 **Standards.** Behaviour is measured against the spec text, section by
 section, not against another browser. The walk-through of the in-scope
@@ -48,7 +48,7 @@ WebAssembly engine. The shell can parse the renderer's IPC messages with an
 optional memory-safe Rust parser (`-Dipc_rust=enabled`, off by default), and
 about:nordstjernen shows which parser and sandbox layers are active.
 
-**Minimalism.** The core engine is about 254,000 lines of project C and
+**Minimalism.** The core engine is about 263,000 lines of project C and
 headers, excluding vendored libraries and generated assets — small enough for
 one person to read and audit end-to-end. See
 [docs/Software-Architecture.md](docs/Software-Architecture.md) for a map of
@@ -124,9 +124,11 @@ UCRT64 toolchain. Apple Silicon Macs get the notarised release build. See [npm/R
 - **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer APIs,
   Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`, `OffscreenCanvas`),
   WebCrypto (`crypto.subtle` over OpenSSL), custom elements including
-  customized built-ins (`is=` / `{extends}`), and the `Navigation` API for
-  single-page routing, plus dedicated and module Web Workers, Service Workers
-  (which intercept the page's own `fetch()`), Streams, IndexedDB (over
+  customized built-ins (`is=` / `{extends}`), the `Navigation` API for
+  single-page routing, form-associated custom elements (`ElementInternals`),
+  `window.open()` popups in the GTK browser that message their opener
+  (including transferred `MessagePort`s), plus dedicated, module and shared
+  Web Workers, Service Workers (which intercept the page's own `fetch()`), Streams, IndexedDB (over
   SQLite), WebSocket, `EventSource`, Web Animations (`Element.animate`),
   Fullscreen and Pointer Lock. The quickjs-ng fork carries `Temporal`, the
   full `Intl` suite without ICU, and `ShadowRealm`. Much of the higher-level
@@ -156,10 +158,14 @@ UCRT64 toolchain. Apple Silicon Macs get the notarised release build. See [npm/R
   operating system — Media Foundation on Windows, VideoToolbox on macOS/iOS,
   MediaCodec on Android and GStreamer on Linux/BSD — or by the system FFmpeg
   where no OS decoder is available, never by a bundled decoder. A
-  distribution FFmpeg on Linux adds AV1 and HEVC. With GStreamer on Linux,
-  VP9, AV1 and HEVC decode in **hardware** when a VA-API (or other hardware)
-  decoder is installed, falling back to FFmpeg otherwise; YouTube's AV1/VP9
-  streams play either way. MSE/`blob:` streaming
+  distribution FFmpeg on Linux adds AV1 and HEVC. On Windows, Media
+  Foundation decodes H.264 on the GPU through DXVA (D3D11), falling back to
+  the CPU. With GStreamer on Linux, VP9, AV1 and HEVC decode in **hardware**
+  when a VA-API (or other hardware) decoder is installed, falling back to
+  FFmpeg otherwise. Where the OS decodes H.264, `MediaSource.isTypeSupported()`
+  and `canPlayType()` report VP9, AV1 and VP8 as unsupported unless a hardware
+  decoder exists for them, so sites such as YouTube stream H.264 through the
+  OS decoder instead of decoding VP9/AV1 in software. MSE/`blob:` streaming
   decodes in the renderer, HLS and DASH manifests play through a built-in
   player over MSE, and a `<track default>` WebVTT file is drawn over the
   video. `<audio>` plays MP3 (via minimp3) and, with libav, WebM, Ogg and
@@ -177,8 +183,8 @@ UCRT64 toolchain. Apple Silicon Macs get the notarised release build. See [npm/R
   experimental `navigator.gpu` over wgpu-native (fetched and linked
   statically on Linux, macOS and Windows when not installed), on by default
   and switchable in Settings ([docs/webgpu.md](docs/webgpu.md)); the core
-  WebAssembly JS API (MVP, reference types and bulk memory) over a vendored
-  WAMR interpreter ([docs/webassembly.md](docs/webassembly.md)).
+  WebAssembly JS API (MVP, reference types, bulk memory and, with SIMDe,
+  SIMD) over a vendored WAMR interpreter ([docs/webassembly.md](docs/webassembly.md)).
 - **MathML** — a minimalist presentation-MathML renderer (`src/mathml.c`)
   for fractions, roots, scripts, under/over and tables, laid out over
   Pango/Cairo and embedded inline on the text baseline.
@@ -313,7 +319,8 @@ GStreamer on the BSDs (`-Dgstreamer`), rustc (the memory-safe IPC
 parser, `-Dipc_rust`),
 vorbisfile / opusfile (Ogg audio without FFmpeg), brotli (`br` content
 encoding and WOFF2 fonts), zstd (`zstd` content encoding),
-poppler-glib (inline PDF), libavif (AVIF images), libjxl (JPEG XL images),
+poppler-glib (inline PDF), libavif (AVIF images, `-Davif`), libjxl (JPEG XL
+images, `-Djxl`),
 Enchant (spell checking), FreeType (WOFF/WOFF2 web-font unpacking), wgpu-native on platforms it publishes no release for (the BSDs, musl,
 Windows on Arm; WebGPU is not built for Android and iOS) and Fabrice
 Bellard's original
