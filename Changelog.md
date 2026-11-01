@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-Unreleased:
+1.0.41-dev:
 ======
 * Media: when the operating system can decode H.264 (Media Foundation
   on Windows, VideoToolbox on macOS, GStreamer on Linux),
