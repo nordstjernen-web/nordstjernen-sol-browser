@@ -3,6 +3,13 @@ Changelog:
 
 1.0.41-dev:
 ======
+* Media (Windows): H.264 video is decoded on the GPU. The Media
+  Foundation decoder gets a D3D11 device and decodes through DXVA; the
+  frames are read back and shown as before. If the GPU cannot take a
+  stream, or D3D11 is missing, it decodes on the CPU as before.
+  `NS_MEDIA_NO_HW_DECODE=1` forces CPU decoding, and `NS_DBG_MEDIA=1`
+  prints which one is used. On a 720p YouTube video the renderer went
+  from ~93-98% to ~64-72% of a core.
 * Media: when a `<video>` moves on to a new `MediaSource` (YouTube does
   this for each new video and on some quality changes), the old
   stream's appended bytes, decoder, decoded-frame queue and audio file
