@@ -3,6 +3,14 @@ Changelog:
 
 Unreleased:
 ======
+* Media: when the operating system can decode H.264 (Media Foundation
+  on Windows, VideoToolbox on macOS, GStreamer on Linux),
+  `MediaSource.isTypeSupported()` and `canPlayType()` report AV1, VP9
+  and VP8 as unsupported, unless the OS also has a hardware decoder for
+  that codec. Sites like YouTube then stream H.264 through the OS
+  decoder instead of AV1/VP9 decoded in software, which kept a CPU core
+  busy. `NS_MEDIA_SOFTWARE_CODECS=1` restores the old behaviour. A plain
+  `<video src="….webm">` still plays through FFmpeg.
 * `MessagePort`s can be transferred between a popup and its opener. A
   port in the transfer list of a cross-tab `postMessage()` arrives in
   `event.ports`, and messages posted on either end reach the other tab.

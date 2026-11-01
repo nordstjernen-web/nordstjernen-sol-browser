@@ -900,6 +900,13 @@ ns_video_codec_available(const char *codec)
     if (id == AV_CODEC_ID_H264 && ns_os_h264_available()) return TRUE;
     if (id == AV_CODEC_ID_AAC && ns_os_aac_available()) return TRUE;
     if (id == AV_CODEC_ID_HEVC && ns_os_hw_video_available("hevc")) return TRUE;
+    if (id == AV_CODEC_ID_AV1 || id == AV_CODEC_ID_VP9 || id == AV_CODEC_ID_VP8) {
+        const char *hw = id == AV_CODEC_ID_AV1 ? "av1"
+                       : id == AV_CODEC_ID_VP9 ? "vp9" : "vp8";
+        if (ns_os_hw_video_available(hw)) return TRUE;
+        if (ns_os_h264_available() && !g_getenv("NS_MEDIA_SOFTWARE_CODECS"))
+            return FALSE;
+    }
     if (g_getenv("NS_MEDIA_OS_CODECS_ONLY") &&
         id != AV_CODEC_ID_OPUS && id != AV_CODEC_ID_VORBIS &&
         id != AV_CODEC_ID_MP3)
