@@ -549,6 +549,8 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
              (animating & 1) ? session_wake_ms(s) : 0,
              rv->unchanged ? "X-Unchanged: 1\r\n" : "",
              tiles ? "X-Tiles: 1\r\n" : "");
+    if (ns_browser_popup_pending() && hn > 0 && (size_t)hn < sizeof hdrs)
+        hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn, "X-Popup: 1\r\n");
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Nav", nav, 2000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-WebGL", webgl, 2000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Camera", camera, 2000);
@@ -703,6 +705,14 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         json_get_long(body, "history", &history);
         json_get_long(body, "user_activated", &user_activated);
         json_get_long(body, "reload", &reload);
+        long popups = 0;
+        json_get_long(body, "popups", &popups);
+        ns_browser_set_popups_supported((int)popups);
+        char *opener_token = json_get_str(body, "opener_token");
+        char *opener_origin = json_get_str(body, "opener_origin");
+        ns_browser_set_opener(opener_token, opener_origin);
+        free(opener_token);
+        free(opener_origin);
         int vw = css_viewport_extent(w, s->max_w);
         int vh = css_viewport_extent(h, s->max_h);
         double dpr = request_device_pixel_ratio(body);
@@ -836,13 +846,14 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             "\"webgl\":\"%s\",\"camera\":\"%s\","
             "\"download\":\"%s\",\"config\":\"%s\",\"audio\":\"%s\","
             "\"window_action\":\"%s\",\"title\":\"%s\",\"url\":\"%s\","
-            "\"url_pushed\":%d}",
+            "\"url_pushed\":%d,\"popup\":%d}",
             changed != 0, session_animating(s) ? 1 : 0, session_wake_ms(s),
             page_w, page_h, nav_e ? nav_e : "", webgl_e ? webgl_e : "",
             camera_e ? camera_e : "", download_e ? download_e : "",
             config_e ? config_e : "",
             audio_e ? audio_e : "", window_action_e ? window_action_e : "",
-            title_e ? title_e : "", url_e ? url_e : "", url_pushed);
+            title_e ? title_e : "", url_e ? url_e : "", url_pushed,
+            ns_browser_popup_pending());
         if (n >= 0)
             http_write_response(ctrl_w, 200, "application/json", NULL, json,
                                 (size_t)n);
@@ -1164,6 +1175,26 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         http_write_response(ctrl_w, 200, "application/json", NULL, json,
                             (size_t)n);
         free(url);
+        return 0;
+    }
+
+    if (strcmp(head->path, "/popup-poll") == 0) {
+        char *json = ns_browser_popup_take();
+        const char *out = json ? json : "[]";
+        http_write_response(ctrl_w, 200, "application/json", NULL, out,
+                            strlen(out));
+        free(json);
+        return 0;
+    }
+
+    if (strcmp(head->path, "/popup-deliver") == 0) {
+        if (s->cur && body) {
+            ns_browser_popup_deliver(s->cur, body);
+            s->frame_valid = 0;
+        }
+        const char *json = "{\"ok\":1}";
+        http_write_response(ctrl_w, 200, "application/json", NULL, json,
+                            strlen(json));
         return 0;
     }
 

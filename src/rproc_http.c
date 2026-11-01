@@ -106,6 +106,9 @@ struct ns_rproc_http {
     int            linear_w;
     int            linear_h;
     int            linear_stride;
+    char          *opener_token;
+    char          *opener_origin;
+    int            popups;
 };
 
 static ns_rproc_inproc_attach_fn g_inproc_attach;
@@ -577,17 +580,23 @@ rproc_open(ns_rproc_http *r, const char *url, int viewport_width,
     char *ue = json_escape(url);
     if (!ue)
         return -1;
+    char *te = json_escape(r->opener_token ? r->opener_token : "");
+    char *oe = json_escape(r->opener_origin ? r->opener_origin : "");
     char *json = NULL;
     int dpr = device_pixel_ratio_milli(r);
     int jn = asprintf(&json,
                       "{\"url\":\"%s\",\"width\":%d,\"height\":%d,"
                       "\"settle_ms\":%d,\"history\":%d,"
                       "\"user_activated\":%d,\"reload\":%d,"
-                      "\"dpr\":%d.%03d}",
+                      "\"dpr\":%d.%03d,\"popups\":%d,"
+                      "\"opener_token\":\"%s\",\"opener_origin\":\"%s\"}",
                       ue, viewport_width, viewport_height, settle_ms,
                       history ? 1 : 0, user_activated ? 1 : 0,
-                      reload ? 1 : 0, dpr / 1000, dpr % 1000);
+                      reload ? 1 : 0, dpr / 1000, dpr % 1000, r->popups,
+                      te ? te : "", oe ? oe : "");
     free(ue);
+    free(te);
+    free(oe);
     if (jn < 0)
         return -1;
     int rc = http_write_request(r->wfd, "POST", "/open", "application/json",
@@ -722,6 +731,7 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
     out->config = head_field_dup(head->x_config);
     out->audio = head_field_dup(head->x_audio);
     out->window_action = head_field_dup(head->x_window_action);
+    out->popup = head->x_popup != 0;
     out->clipboard = head->x_clipboard > 0;
 }
 
@@ -999,6 +1009,9 @@ ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out)
     out->config = json_get_str(body, "config");
     out->audio = json_get_str(body, "audio");
     out->window_action = json_get_str(body, "window_action");
+    long popup = 0;
+    json_get_long(body, "popup", &popup);
+    out->popup = popup != 0;
     out->title = json_get_str(body, "title");
     out->url = json_get_str(body, "url");
     long url_pushed = 0;
@@ -1322,6 +1335,38 @@ ns_rproc_http_download_start(ns_rproc_http *r, const char *url)
     json_get_long(body, "id", &id);
     free(body);
     return id;
+}
+
+void
+ns_rproc_http_set_opener(ns_rproc_http *r, const char *token,
+                         const char *origin)
+{
+    if (!r) return;
+    r->popups = 1;
+    free(r->opener_token);
+    free(r->opener_origin);
+    r->opener_token = token && *token ? strdup(token) : NULL;
+    r->opener_origin = origin && *origin ? strdup(origin) : NULL;
+}
+
+char *
+ns_rproc_http_popup_poll(ns_rproc_http *r)
+{
+    if (!r)
+        return NULL;
+    return request(r, "/popup-poll", "{}");
+}
+
+int
+ns_rproc_http_popup_deliver(ns_rproc_http *r, const char *json)
+{
+    if (!r || !json)
+        return -1;
+    char *body = request(r, "/popup-deliver", json);
+    if (!body)
+        return -1;
+    free(body);
+    return 0;
 }
 
 char *
@@ -1991,6 +2036,8 @@ ns_rproc_http_close(ns_rproc_http *r)
 #endif
         free(r->rxbuf);
         g_atomic_rc_box_release(r->map);
+        free(r->opener_token);
+        free(r->opener_origin);
         free(r);
         return;
     }
@@ -2025,5 +2072,7 @@ ns_rproc_http_close(ns_rproc_http *r)
         munmap(r->map, r->map_size);
 #endif
     free(r->rxbuf);
+    free(r->opener_token);
+    free(r->opener_origin);
     free(r);
 }

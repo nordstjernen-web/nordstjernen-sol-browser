@@ -155,6 +155,9 @@ struct ns_js {
     GMainContext *main_context;
     GPtrArray    *workers;
     GHashTable   *shared_workers;
+    GHashTable   *popups;
+    char         *opener_token;
+    char         *opener_origin;
     ns_worker_host *worker_host;
     int           next_timer_id;
     int           timer_nesting_level;

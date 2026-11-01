@@ -28,7 +28,8 @@ typedef enum {
     NS_PROC_EVT_WEBGL,
     NS_PROC_EVT_FULLSCREEN,
     NS_PROC_EVT_ZOOM,
-    NS_PROC_EVT_CONFIG
+    NS_PROC_EVT_CONFIG,
+    NS_PROC_EVT_POPUP
 } NsProcEvent;
 
 typedef void (*NsProcNotify)(NsProcView *view, NsProcEvent evt,
@@ -89,6 +90,9 @@ void     ns_proc_view_remote_eval(NsProcView *view, const char *js,
 NsProcView *ns_proc_view_ref(NsProcView *view);
 void     ns_proc_view_unref(NsProcView *view);
 gboolean ns_proc_view_is_closed(NsProcView *view);
+void ns_proc_view_set_opener(NsProcView *v, const char *token,
+                             const char *origin);
+void ns_proc_view_popup_deliver(NsProcView *v, const char *json);
 void     ns_proc_view_download_start(NsProcView *view, const char *url,
                                      NsProcViewTextFn cb, gpointer user_data);
 void     ns_proc_view_download_poll(NsProcView *view, long id,

@@ -979,6 +979,9 @@ static void browser_js_download(const char *url, const char *filename, gpointer 
     g_free(abs);
 }
 
+static char *g_opener_token;
+static char *g_opener_origin;
+
 static void
 browser_js_window_action(const char *action, gpointer ud)
 {
@@ -1506,6 +1509,8 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_mse_bytes_cb(b->js, browser_mse_bytes, b);
         ns_js_set_media_volume_cb(b->js, browser_media_volume, b);
         ns_js_set_window_action_cb(b->js, browser_js_window_action, b);
+        if (g_opener_token)
+            ns_js_set_opener(b->js, g_opener_token, g_opener_origin);
         ns_js_add_csp_header(b->js, csp_header);
         browser_apply_meta_csp(b->js, doc, 0);
         const ns_config *run_cfg = ns_config_get();
@@ -1583,6 +1588,45 @@ void
 ns_browser_set_next_reload(int reload)
 {
     g_pending_reload = reload != 0;
+}
+
+void
+ns_browser_set_popups_supported(int supported)
+{
+    ns_js_set_popups_supported(supported != 0);
+}
+
+void
+ns_browser_set_opener(const char *token, const char *origin)
+{
+    if (!token || !*token) return;
+    g_free(g_opener_token);
+    g_free(g_opener_origin);
+    g_opener_token = g_strdup(token);
+    g_opener_origin = g_strdup(origin ? origin : "");
+}
+
+int
+ns_browser_popup_pending(void)
+{
+    return ns_js_popup_pending() ? 1 : 0;
+}
+
+char *
+ns_browser_popup_take(void)
+{
+    char *json = ns_js_popup_take_outbox();
+    char *out = json ? strdup(json) : NULL;
+    g_free(json);
+    return out;
+}
+
+void
+ns_browser_popup_deliver(ns_browser *b, const char *json)
+{
+    if (!b || !b->js || !json) return;
+    ns_js_popup_deliver(b->js, json);
+    b->dirty = TRUE;
 }
 
 void
