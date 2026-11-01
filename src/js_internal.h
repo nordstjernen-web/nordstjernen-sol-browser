@@ -154,6 +154,7 @@ struct ns_js {
     GHashTable   *timers;
     GMainContext *main_context;
     GPtrArray    *workers;
+    GHashTable   *shared_workers;
     ns_worker_host *worker_host;
     int           next_timer_id;
     int           timer_nesting_level;

@@ -6,6 +6,15 @@ Changelog:
 * The browser is named "Nordstjernen Sol Explorer" for the 1.0.40 series:
   the window title, About page, menus, desktop entry, installers and
   packages carry the new name.
+* `SharedWorker` is supported. Every `new SharedWorker()` with the same
+  script URL and name from the same origin, in the page or one of its
+  same-origin frames, connects to one shared worker. Each connection
+  gets its own `MessagePort`, delivered to the worker as a `connect`
+  event. Cross-origin script URLs throw `SecurityError`, and CSP
+  `worker-src` applies.
+* Inside a worker, `addEventListener(...)`, `removeEventListener(...)`
+  and `dispatchEvent(...)` called without `self.` now act on the worker
+  global. They used to be silently ignored.
 * `<frame>` elements now load their document. A `<frame>` that a script
   creates or whose `src` changes used to fire no `load` event, and
   `contentDocument`/`contentWindow` were always null. X-Frame-Options
