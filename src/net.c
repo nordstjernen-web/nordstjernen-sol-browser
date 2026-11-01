@@ -2046,7 +2046,8 @@ ns_cookie_store_impl(const char *url, const char *partition_site,
     int jars_lock = ns_cookie_jars_lock();
     if (!from_http) {
         g_autofree char *http_jar_path = ns_net_cookie_path_for_partition(site);
-        if (ns_cookie_jar_has_httponly(http_jar_path, file_domain, path,
+        if (httponly ||
+            ns_cookie_jar_has_httponly(http_jar_path, file_domain, path,
                                        name_dup, now)) {
             ns_cookie_jars_unlock(jars_lock);
             g_mutex_unlock(&ns_cookie_write_mutex);
