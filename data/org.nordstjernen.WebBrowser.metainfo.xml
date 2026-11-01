@@ -60,6 +60,18 @@
   </branding>
 
   <releases>
+    <release version="1.0.40" date="2026-11-01">
+      <description>
+        <p>Security and web standards release, published as Nordstjernen Sol Explorer.</p>
+        <ul>
+          <li>Cross-origin requests send cookies only when credentials are requested, and script can no longer set HttpOnly cookies.</li>
+          <li>Frames obey their own Content-Security-Policy for images, fonts and sandboxing, and forms submitted in a frame stay in that frame.</li>
+          <li>SharedWorker is supported, and frame elements load their documents.</li>
+          <li>Hardware video decoding on Linux, and many memory-safety fixes.</li>
+          <li>QuickJS and lexbor refreshed to their latest upstream versions.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.39" date="2026-10-30">
       <description>
         <p>Compatibility and web standards release.</p>
