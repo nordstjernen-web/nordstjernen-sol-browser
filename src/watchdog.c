@@ -214,7 +214,7 @@ ns_watchdog_report_failure(const char *detail)
         log ? log : "(log file unavailable)");
     wchar_t *wbody = (wchar_t *)g_utf8_to_utf16(body, -1, NULL, NULL, NULL);
     if (wbody) {
-        MessageBoxW(NULL, wbody, L"Nordstjernen Sol",
+        MessageBoxW(NULL, wbody, L"Nordstjernen Sol Explorer",
                     MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
         g_free(wbody);
     }

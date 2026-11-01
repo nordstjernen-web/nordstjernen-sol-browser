@@ -1,7 +1,7 @@
 Nordstjernen web browser
 ========================
 
-Nordstjernen (aka "Sol browser", shipped as **Nordstjernen Sol**) is a web
+Nordstjernen (aka "Sol browser", shipped as **Nordstjernen Sol Explorer**) is a web
 browser written from scratch in C, focused on support for modern HTML, CSS
 and JavaScript standards.
 

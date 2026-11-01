@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Nordstjernen Sol</string>
+    <string name="app_name">Nordstjernen Sol Explorer</string>
     <string name="go">Go</string>
     <string name="back">‹</string>
     <string name="reload">↻</string>

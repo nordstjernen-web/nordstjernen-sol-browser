@@ -256,7 +256,7 @@ ns_report_extract_needed(bool console)
         L"nordstjernen.exe from the extracted nordstjernen-win64 folder.";
     ns_console_line(text);
     if (!console)
-        MessageBoxW(NULL, text, L"Nordstjernen Sol", MB_OK | MB_ICONERROR |
+        MessageBoxW(NULL, text, L"Nordstjernen Sol Explorer", MB_OK | MB_ICONERROR |
                     MB_SETFOREGROUND);
 }
 
@@ -270,7 +270,7 @@ ns_report_start_error(bool console, DWORD error)
     text[511] = L'\0';
     ns_console_line(text);
     if (!console)
-        MessageBoxW(NULL, text, L"Nordstjernen Sol", MB_OK | MB_ICONERROR |
+        MessageBoxW(NULL, text, L"Nordstjernen Sol Explorer", MB_OK | MB_ICONERROR |
                     MB_SETFOREGROUND);
 }
 
@@ -283,7 +283,7 @@ ns_report_runtime_error(bool console)
         L"nordstjernen.exe and the app folder together.";
     ns_console_line(text);
     if (!console)
-        MessageBoxW(NULL, text, L"Nordstjernen Sol", MB_OK | MB_ICONERROR |
+        MessageBoxW(NULL, text, L"Nordstjernen Sol Explorer", MB_OK | MB_ICONERROR |
                     MB_SETFOREGROUND);
 }
 

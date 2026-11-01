@@ -5,8 +5,8 @@
 #define NS_TITLE_ROW_CONTROLS_GAP 6
 #define NS_TITLE_ROW_NAME_GAP 24
 #define NS_TITLE_ROW_TRAILING_GAP 10
-#define NS_TITLE_ROW_FULL_NAME "Nordstjernen Sol Browser " NS_VERSION
-#define NS_TITLE_ROW_SHORT_NAME "Nordstjernen Sol"
+#define NS_TITLE_ROW_FULL_NAME "Nordstjernen Sol Explorer " NS_VERSION
+#define NS_TITLE_ROW_SHORT_NAME "Nordstjernen Sol Explorer"
 
 typedef struct {
     GtkWidget *start_controls;
