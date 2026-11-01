@@ -262,6 +262,8 @@ struct ns_js {
     GString      *document_write_buffer;
     ns_node      *document_write_script;
     gboolean      document_write_parser_open;
+    const ns_node *document_write_body_doc;
+    guint         document_write_body_count;
     GPtrArray    *deferred_script_roots;
     GPtrArray    *async_script_roots;
     guint         async_script_source;
