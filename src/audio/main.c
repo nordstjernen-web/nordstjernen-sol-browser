@@ -43,8 +43,12 @@
 #endif
 
 #define NS_AUDIO_MAX_PLAYERS 16
-#define NS_AUDIO_MAX_SECONDS 1800
+#define NS_AUDIO_MAX_SECONDS (24 * 3600)
 #define NS_AUDIO_DEVICE_RATE 44100
+/* A streamed (container) player keeps only this much decoded audio behind
+ * the play cursor; once twice as much has piled up it is dropped from the
+ * front, so long videos do not grow the helper by ~21 MB per minute. */
+#define NS_AUDIO_KEEP_BEHIND ((size_t)NS_AUDIO_DEVICE_RATE * 30u)
 #define NS_AUDIO_MAX_BYTES   (256u * 1024u * 1024u)
 #define NS_AUDIO_MAX_FLOATS  ((size_t)200u * 1024u * 1024u)
 #define NS_AUDIO_MAX_STREAMS 8
@@ -58,6 +62,10 @@ typedef struct {
     int     playing;
     int     loop;
     float  *pcm;
+    /* frames and cursor are absolute frame indices from the start of the
+     * decoded audio; pcm[0] holds frame base (base > 0 once a streamed
+     * player has dropped audio it already played). */
+    size_t  base;
     size_t  frames;
     size_t  pcm_cap;
     size_t  cursor;
@@ -82,6 +90,7 @@ typedef struct {
     int              in_ch;
     int              in_sfmt;
     int64_t          in_known_size;
+    double           in_origin;
     double           in_resume_target;
     int              in_resume_pending;
     size_t           in_discard_frames;
@@ -227,7 +236,7 @@ audio_cb(void *userdata, Uint8 *stream, int len)
         if (!p->used || !p->playing || !p->pcm) continue;
         for (int f = 0; f < nframes; f++) {
             if (p->cursor >= p->frames) {
-                if (p->loop && p->frames > 0) {
+                if (p->loop && p->frames > 0 && p->base == 0) {
                     p->cursor = 0;
                 } else {
                     p->playing = 0;
@@ -235,8 +244,10 @@ audio_cb(void *userdata, Uint8 *stream, int len)
                     break;
                 }
             }
-            out[f * 2 + 0] += p->pcm[p->cursor * 2 + 0] * p->volume;
-            out[f * 2 + 1] += p->pcm[p->cursor * 2 + 1] * p->volume;
+            if (p->cursor < p->base) p->cursor = p->base;
+            size_t at = p->cursor - p->base;
+            out[f * 2 + 0] += p->pcm[at * 2 + 0] * p->volume;
+            out[f * 2 + 1] += p->pcm[at * 2 + 1] * p->volume;
             p->cursor++;
         }
     }
@@ -886,9 +897,21 @@ static int
 pcm_append(ns_audio_player *p, const float *stereo, size_t nframes)
 {
     if (!nframes) return 1;
-    size_t need = (p->frames + nframes) * 2;
-    if (need > NS_AUDIO_MAX_FLOATS) return 0;
     audio_lock();
+#ifdef NS_HAVE_LIBAV
+    if (p->in_fmt && !p->loop && p->cursor <= p->frames &&
+        p->cursor > p->base + 2 * NS_AUDIO_KEEP_BEHIND) {
+        size_t drop = p->cursor - p->base - NS_AUDIO_KEEP_BEHIND;
+        memmove(p->pcm, p->pcm + drop * 2,
+                (p->frames - p->base - drop) * 2 * sizeof(float));
+        p->base += drop;
+    }
+#endif
+    size_t need = (p->frames - p->base + nframes) * 2;
+    if (need > NS_AUDIO_MAX_FLOATS) {
+        audio_unlock();
+        return 0;
+    }
     if (need > p->pcm_cap) {
         size_t cap = p->pcm_cap ? p->pcm_cap : (size_t)NS_AUDIO_DEVICE_RATE * 2u * 8u;
         while (cap < need) {
@@ -903,7 +926,8 @@ pcm_append(ns_audio_player *p, const float *stereo, size_t nframes)
         p->pcm = grown;
         p->pcm_cap = cap;
     }
-    memcpy(p->pcm + p->frames * 2, stereo, nframes * 2 * sizeof(float));
+    memcpy(p->pcm + (p->frames - p->base) * 2, stereo,
+           nframes * 2 * sizeof(float));
     p->frames += nframes;
     audio_unlock();
     return 1;
@@ -1000,6 +1024,16 @@ ain_open(ns_audio_player *p, const char *path)
     p->in_sidx = av_find_best_stream(p->in_fmt, AVMEDIA_TYPE_AUDIO, -1, -1,
                                      NULL, 0);
     if (p->in_sidx < 0) { ain_close(p); return 0; }
+    /* Media Source appends keep their absolute timestamps, so a file whose
+     * first packet sits at 3562 s decodes into PCM frame 0. in_origin maps
+     * PCM frames back to stream timestamps for seeking. */
+    const AVStream *ast = p->in_fmt->streams[p->in_sidx];
+    p->in_origin = 0.0;
+    if (ast->start_time != AV_NOPTS_VALUE)
+        p->in_origin = (double)ast->start_time * av_q2d(ast->time_base);
+    else if (p->in_fmt->start_time != AV_NOPTS_VALUE)
+        p->in_origin = (double)p->in_fmt->start_time / AV_TIME_BASE;
+    if (!(p->in_origin > 0.0)) p->in_origin = 0.0;
     const AVCodecParameters *par = p->in_fmt->streams[p->in_sidx]->codecpar;
     p->in_os = ah_os_aac_open(par);
     if (p->in_os) {
@@ -1048,9 +1082,12 @@ ain_reopen_resume(ns_audio_player *p)
     char path[PATH_MAX];
     snprintf(path, sizeof path, "%s", p->in_path);
     ain_drain_stream(p);
+    double origin = p->in_origin;
     double decoded_end = (double)p->frames / NS_AUDIO_DEVICE_RATE;
     if (!ain_open(p, path)) return 0;
+    p->in_origin = origin;
     if (decoded_end > 0.05) {
+        decoded_end += origin;
         AVRational tb = p->in_fmt->streams[p->in_sidx]->time_base;
         int64_t ts = (int64_t)(decoded_end / av_q2d(tb));
         if (av_seek_frame(p->in_fmt, p->in_sidx, ts,
@@ -1204,6 +1241,7 @@ load_audio(ns_audio_player *p, const char *path)
 
     audio_lock();
     p->pcm = dev;
+    p->base = 0;
     p->frames = dev_frames;
     p->pcm_cap = dev_frames * 2;
     p->cursor = 0;
@@ -1411,7 +1449,9 @@ cmd_reload(const char *token, const char *url)
         p->in_sfmt = fresh.in_sfmt;
         p->in_known_size = fresh.in_known_size;
         memcpy(p->in_path, fresh.in_path, sizeof p->in_path);
+        p->in_origin = fresh.in_origin;
         p->pcm = fresh.pcm;
+        p->base = 0;
         p->frames = fresh.frames;
         p->pcm_cap = fresh.pcm_cap;
         if (p->seek_pending) audio_apply_pending_seek(p);
@@ -1457,6 +1497,7 @@ cmd_reload(const char *token, const char *url)
     float *old_pcm = p->pcm;
     char *old_tmp = p->tmp_path;
     p->pcm = fresh.pcm;
+    p->base = 0;
     p->frames = fresh.frames;
     p->pcm_cap = fresh.frames * 2;
     if (p->seek_pending) audio_apply_pending_seek(p);
@@ -1515,6 +1556,48 @@ cmd_pause(const char *token)
     emit("paused %s", token);
 }
 
+#ifdef NS_HAVE_LIBAV
+/* A seek back past audio a streamed player already dropped: decode the file
+ * again from that point. The PCM window restarts at the target frame. */
+static void
+ain_restart_at(ns_audio_player *p, double seconds, size_t frame)
+{
+    char path[PATH_MAX];
+    snprintf(path, sizeof path, "%s", p->in_path);
+    double origin = p->in_origin;
+    audio_lock();
+    int was_playing = p->playing;
+    p->playing = 0;
+    audio_unlock();
+    if (!ain_open(p, path)) {
+        emit("error %s decode-failed", p->token);
+        return;
+    }
+    p->in_origin = origin;
+    double target = origin + seconds;
+    AVRational tb = p->in_fmt->streams[p->in_sidx]->time_base;
+    if (av_seek_frame(p->in_fmt, p->in_sidx, (int64_t)(target / av_q2d(tb)),
+                      AVSEEK_FLAG_BACKWARD) >= 0) {
+        if (p->in_os) ns_os_adec_flush(p->in_os);
+        else avcodec_flush_buffers(p->in_dec);
+    }
+    p->in_resume_target = target;
+    p->in_resume_pending = 1;
+    p->in_discard_frames = 0;
+    audio_lock();
+    p->base = frame;
+    p->frames = frame;
+    p->cursor = frame;
+    p->seek_pending = 0;
+    p->reached_end = 0;
+    audio_unlock();
+    ain_pump(p);
+    audio_lock();
+    p->playing = was_playing;
+    audio_unlock();
+}
+#endif
+
 static void
 cmd_seek(const char *token, double seconds)
 {
@@ -1524,6 +1607,12 @@ cmd_seek(const char *token, double seconds)
     if (!(seconds > 0)) seconds = 0;
     if (seconds > NS_AUDIO_MAX_SECONDS) seconds = NS_AUDIO_MAX_SECONDS;
     size_t frame = (size_t)(seconds * NS_AUDIO_DEVICE_RATE);
+#ifdef NS_HAVE_LIBAV
+    if (frame < p->base && p->in_fmt) {
+        ain_restart_at(p, seconds, frame);
+        return;
+    }
+#endif
     audio_lock();
     p->seek_target = seconds;
     p->seek_pending = frame > p->frames;

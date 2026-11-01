@@ -3,6 +3,14 @@ Changelog:
 
 1.0.41-dev:
 ======
+* Media: Media Source audio plays when playback does not start at 0,
+  for example a YouTube video resumed from watch history. The first
+  appended segment's start time was lost (it stayed 0), so the audio
+  helper got no timeline offset and waited for audio that never came.
+  The audio helper also re-decoded from the wrong place when a growing
+  stream file was reopened, and it now keeps only about a minute of
+  decoded audio behind the play position instead of the whole video
+  (~21 MB per minute), so audio no longer stops after about 38 minutes.
 * Media: when the operating system can decode H.264 (Media Foundation
   on Windows, VideoToolbox on macOS, GStreamer on Linux),
   `MediaSource.isTypeSupported()` and `canPlayType()` report AV1, VP9
