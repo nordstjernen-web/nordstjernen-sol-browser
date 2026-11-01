@@ -27406,7 +27406,7 @@ ns_worker_script_text(const guint8 *data, gsize len, gsize *out_len)
 static char *
 ns_worker_fetch_script(ns_worker_host *host, const char *url,
                        gboolean allow_cross_origin,
-                       char **out_final_url, char **out_error)
+                       char **out_final_url, char **out_csp, char **out_error)
 {
     g_autofree char *policy_error = NULL;
     if (!ns_worker_script_url_allowed(host, url, allow_cross_origin,
@@ -27440,6 +27440,7 @@ ns_worker_fetch_script(ns_worker_host *host, const char *url,
             body = ns_worker_script_text(resp->body->data, resp->body->len,
                                          NULL);
             if (out_final_url) *out_final_url = g_strdup(final_url);
+            if (out_csp) *out_csp = g_strdup(resp->csp_header);
         }
     } else if (out_error) {
         const char *why = err ? err->message :
@@ -27849,7 +27850,7 @@ ns_worker_import_scripts(JSContext *ctx, JSValueConst this_val,
         char *final_url = NULL;
         char *error = NULL;
         char *body = ns_worker_import_allowed(js, abs_url)
-            ? ns_worker_fetch_script(host, abs_url, TRUE, &final_url, &error)
+            ? ns_worker_fetch_script(host, abs_url, TRUE, &final_url, NULL, &error)
             : NULL;
         if (body && final_url && !ns_worker_import_allowed(js, final_url))
             g_clear_pointer(&body, g_free);
@@ -29270,9 +29271,20 @@ ns_worker_thread(gpointer data)
 
     char *final_url = NULL;
     char *error = NULL;
+    char *script_csp = NULL;
     char *body = host->inline_script
         ? g_strndup(host->inline_script, host->inline_script_len)
-        : ns_worker_fetch_script(host, host->url, FALSE, &final_url, &error);
+        : ns_worker_fetch_script(host, host->url, FALSE, &final_url,
+                                 &script_csp, &error);
+    if (body && !host->inline_script) {
+        g_strfreev(host->csp_headers);
+        host->csp_headers = NULL;
+        if (script_csp && *script_csp) {
+            host->csp_headers = g_new0(char *, 2);
+            host->csp_headers[0] = g_steal_pointer(&script_csp);
+        }
+    }
+    g_free(script_csp);
     if (!body) {
         ns_worker_post_owner_error(host, error ? error : "Worker load failed",
                                    host->url, 0, 0, TRUE);
