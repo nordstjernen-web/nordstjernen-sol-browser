@@ -8,6 +8,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "engine.h"
 #include "font.h"
 #include "net.h"
 #include "paint.h"
@@ -318,6 +319,12 @@ render_request_fonts(const ns_render_ctx *c, GHashTable *styles)
                 : ns_url_resolve(c->base_url, ff->src_url);
             if (!abs) continue;
             if (c->font_allowed && !c->font_allowed(abs, c->cb_ud)) {
+                g_free(abs);
+                continue;
+            }
+            const ns_node *sheet_doc = c->sheet_docs ? c->sheet_docs[i] : NULL;
+            if (sheet_doc && sheet_doc != c->doc &&
+                !ns_engine_frame_csp_allows(sheet_doc, NS_CSP_FONT, abs)) {
                 g_free(abs);
                 continue;
             }
