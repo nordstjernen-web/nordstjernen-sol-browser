@@ -3,6 +3,9 @@ Changelog:
 
 1.0.40-dev:
 ======
+* A frame whose script assigns `window.location`, `location.href` or calls
+  `location.assign()`/`location.replace()` now loads the new document.
+  It used to only change the URL its `location` object reported.
 * Security: `@font-face` fonts requested by a framed document's style
   sheets now obey that frame's CSP `font-src`.
 * Security: images in a framed document now obey that frame's own

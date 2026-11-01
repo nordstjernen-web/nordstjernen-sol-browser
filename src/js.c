@@ -51309,7 +51309,8 @@ ns_iframe_ensure_content_root(ns_node *iframe)
     "    set: function(v){ var u=mk(v);" \
     "      if(!u) throw new DOMException('location: invalid URL','SyntaxError');" \
     "      var o=vis(); url=u.href; shown='';" \
-    "      if (o!==url && sameDoc(o,url)) fireHash(o,url); } });" \
+    "      if (o!==url && sameDoc(o,url)) fireHash(o,url);" \
+    "      else if (o!==url && typeof frameNavigate==='function') frameNavigate(url); } });" \
     "  Object.defineProperty(loc, 'hash', { configurable:true, enumerable:true," \
     "    get: function(){ var u=mk(vis()); return u ? u.hash : ''; }," \
     "    set: function(v){ var u=mk(vis()); if(!u) return; u.hash=v; var o=vis();" \
@@ -51361,7 +51362,7 @@ ns_iframe_ensure_content_root(ns_node *iframe)
     "  }"
 
 static const char ns_iframe_scope_bootstrap[] =
-    "(function(realWin, iframeDoc, initialURL, sandbox, docURL, frameStorage){"
+    "(function(realWin, iframeDoc, initialURL, sandbox, docURL, frameStorage, frameNavigate){"
     "  var url = initialURL || 'about:blank';"
     "  var shown = docURL || '';"
     "  function vis(){ return shown || url; }"
@@ -51452,9 +51453,32 @@ static const char ns_iframe_scope_bootstrap[] =
     "  return { window: win, location: loc, history: hist };"
     "})";
 
+static gboolean ns_location_target_allowed(const char *s);
+
+static JSValue
+ns_frame_scope_navigate(JSContext *ctx, JSValueConst this_val, int argc,
+                        JSValueConst *argv, int magic, JSValueConst *func_data)
+{
+    (void)this_val; (void)magic;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *frame = (ns_node *)ns_unwrap_element(func_data[0]);
+    if (!js || !frame || argc < 1) return JS_UNDEFINED;
+    const char *url = JS_ToCString(ctx, argv[0]);
+    if (!url) return JS_EXCEPTION;
+    if (ns_location_target_allowed(url)) {
+        if (js->iframe_load_depth > 0 && js->raf_frame_ctx == frame)
+            ns_element_set_attr(frame, "data-nd-frame-nav-pending", "1");
+        gboolean is_object = ns_node_is_element_named(frame, "object");
+        ns_js_set_attr_recorded(js, frame, is_object ? "data" : "src", url);
+        ns_js_schedule_iframe_load_full(js, frame, TRUE);
+    }
+    JS_FreeCString(ctx, url);
+    return JS_UNDEFINED;
+}
+
 static JSValue
 ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url,
-                     const char *doc_url, unsigned sandbox)
+                     const char *doc_url, unsigned sandbox, ns_node *frame)
 {
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue maker = JS_Eval(ctx, ns_iframe_scope_bootstrap,
@@ -51468,9 +51492,15 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
                                            : JS_UNDEFINED;
         JSValue frame_storage = JS_NewCFunction(ctx, ns_frame_storage_new,
                                                 "frameStorage", 0);
-        JSValueConst args[6] = { global, iframe_doc, urlv, sbv, docv,
-                                 frame_storage };
-        scope = JS_Call(ctx, maker, JS_UNDEFINED, 6, args);
+        JSValue frame_el = frame ? ns_make_element(ctx, frame) : JS_UNDEFINED;
+        JSValue navigate = frame
+            ? JS_NewCFunctionData(ctx, ns_frame_scope_navigate, 1, 0, 1, &frame_el)
+            : JS_UNDEFINED;
+        JSValueConst args[7] = { global, iframe_doc, urlv, sbv, docv,
+                                 frame_storage, navigate };
+        scope = JS_Call(ctx, maker, JS_UNDEFINED, 7, args);
+        JS_FreeValue(ctx, navigate);
+        JS_FreeValue(ctx, frame_el);
         JS_FreeValue(ctx, frame_storage);
         if (JS_IsException(scope)) { JS_FreeValue(ctx, JS_GetException(ctx)); scope = JS_NULL; }
         JS_FreeValue(ctx, urlv);
@@ -51484,7 +51514,7 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents, nativeFetch, frameStorage, nativeRealm){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents, nativeFetch, frameStorage, nativeRealm, frameNavigate){"
     "  var url = initialURL || 'about:blank';"
     "  var shown = docURL || '';"
     "  function vis(){ return shown || url; }"
@@ -53003,12 +53033,17 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
                             "dispatchEvent", 1));
         JSValue frame_storage = JS_NewCFunction(fctx, ns_frame_storage_new,
                                                 "frameStorage", 0);
-        JSValueConst args[16] = { fg, parent_global, iframe_doc, urlv, sbv,
+        JSValue frame_navigate = iframe
+            ? JS_NewCFunctionData(fctx, ns_frame_scope_navigate, 1, 0, 1, &frame_el)
+            : JS_UNDEFINED;
+        JSValueConst args[17] = { fg, parent_global, iframe_doc, urlv, sbv,
                                   platform, frame_el, frame_name_v,
                                   child_frame_of, post_message, docv,
                                   realm_clone, window_events, native_fetch,
-                                  frame_storage, JS_NewBool(fctx, native) };
-        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 16, args);
+                                  frame_storage, JS_NewBool(fctx, native),
+                                  frame_navigate };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 17, args);
+        JS_FreeValue(fctx, frame_navigate);
         JS_FreeValue(fctx, frame_storage);
         JS_FreeValue(fctx, native_fetch);
         JS_FreeValue(fctx, window_events);
@@ -68612,7 +68647,7 @@ ns_js_run_iframe_modules(ns_js *js, GPtrArray *modules, const char *origin,
     JSContext *ctx = js->ctx;
     JSValue scope = JS_IsObject(iframe_scope)
         ? JS_DupValue(ctx, iframe_scope)
-        : ns_iframe_make_scope(ctx, iframe_doc, origin, NULL, sandbox);
+        : ns_iframe_make_scope(ctx, iframe_doc, origin, NULL, sandbox, NULL);
     if (!JS_IsObject(scope)) {
         JS_FreeValue(ctx, scope);
         for (guint i = 0; i < modules->len; i++)
@@ -68937,7 +68972,8 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             JSValue scope = JS_IsObject(iframe_scope)
                 ? JS_DupValue(js->ctx, iframe_scope)
                 : ns_iframe_make_scope(js->ctx, iframe_doc, origin,
-                                       ns_iframe_doc_url(iframe), sandbox);
+                                       ns_iframe_doc_url(iframe), sandbox,
+                                       iframe);
             JSValue swin = JS_NULL, sloc = JS_NULL, shist = JS_NULL;
             if (JS_IsObject(scope)) {
                 swin  = JS_GetPropertyStr(js->ctx, scope, "window");
@@ -69123,6 +69159,7 @@ ns_js_wait_for_frame_images(ns_js *js, ns_node *content_root)
 static void
 ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
 {
+    if (iframe) ns_element_remove_attr(iframe, "data-nd-frame-nav-pending");
     if (!js || !iframe || js->halted || !js->current_doc) return;
     if (!ns_js_node_in_page(js, iframe)) return;
 
@@ -69461,7 +69498,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         if (JS_IsObject(realm_doc))
             realm_scope = ns_iframe_make_scope(js->ctx, realm_doc, iorigin,
                                                ns_iframe_doc_url(iframe),
-                                               sandbox);
+                                               sandbox, iframe);
         if (JS_IsObject(realm_doc) && JS_IsObject(realm_scope)) {
             JSValue win = JS_GetPropertyStr(js->ctx, realm_scope, "window");
             if (JS_IsObject(win))
@@ -69566,7 +69603,8 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
     if (content_root)
         ns_js_schedule_static_iframes(js, content_root);
     ns_js_schedule_pending_script_drain(js);
-    ns_js_dispatch_resource_event(js, iframe, "load");
+    if (!ns_element_get_attr(iframe, "data-nd-frame-nav-pending"))
+        ns_js_dispatch_resource_event(js, iframe, "load");
 
     if (resp) ns_response_free(resp);
     g_free(decoded);
