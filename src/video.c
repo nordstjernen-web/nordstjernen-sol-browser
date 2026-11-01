@@ -706,6 +706,35 @@ ns_video_release_node(ns_video_cache *cache, ns_video *v)
     v->dom_node = NULL;
 }
 
+static void
+ns_video_unlink_file_url(char **url)
+{
+    if (!*url) return;
+    if (g_str_has_prefix(*url, "file://")) g_unlink(*url + 7);
+    g_clear_pointer(url, g_free);
+}
+
+/* The element moved on to a new MediaSource, so the old one can never be
+ * played again: drop its appended bytes, decoder, frame queue and audio
+ * file. Layout boxes may still point at v, so the struct itself stays. */
+static void
+ns_video_drop_mse_resources(ns_video_cache *cache, ns_video *v)
+{
+    g_hash_table_remove(cache->mse_streams, GUINT_TO_POINTER(v->mse_id));
+    ns_video_player_free(v->player);
+    v->player = NULL;
+    if (v->mse_window) {
+        g_byte_array_free(v->mse_window, TRUE);
+        v->mse_window = NULL;
+    }
+    ns_texture_unref(v->frame_texture);
+    v->frame_texture = NULL;
+    ns_video_unlink_file_url(&v->audio_file);
+    ns_video_unlink_file_url(&v->pending_audio_file);
+    v->audio_file_len = 0;
+    v->pending_audio_file_len = 0;
+}
+
 gboolean
 ns_video_cache_seek_node(ns_video_cache *cache, const void *dom_node,
                          double seconds, gint64 now_us)
@@ -1894,8 +1923,11 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
     v->mse_id = mse_id;
     if (mse_id && previous && previous->mse_id != mse_id)
         ns_video_inherit_node_playback(v, previous);
-    if (dom && previous && previous->dom_node == dom)
+    if (dom && previous && previous->dom_node == dom) {
         ns_video_release_node(cache, previous);
+        if (mse_id && previous->mse_id && previous->mse_id != mse_id)
+            ns_video_drop_mse_resources(cache, previous);
+    }
     g_hash_table_insert(cache->by_url, key, v);
     if (box) box->media->video = v;
     if (dom) ns_video_apply_node_state(cache, v, dom);
