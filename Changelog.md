@@ -3,6 +3,14 @@ Changelog:
 
 1.0.40-dev:
 ======
+* Security: cross-origin `XMLHttpRequest` without `withCredentials`, and
+  cross-origin `fetch()` without `credentials: 'include'`, no longer send
+  or store cookies. `credentials: 'omit'` is honoured for every request,
+  and `Request.credentials` reports the mode it was given.
+* Security: a form submitted inside a frame now navigates that frame, not
+  the whole tab, and is checked against the frame's own CSP `form-action`
+  and resolved against the frame's URL. A framed page could previously
+  navigate the top window by submitting a form.
 * Security: a document returned by `DOMParser.parseFromString()` and the
   document loaded into an `<iframe>` now own their strings and release the
   lexbor parse tree straight away. Nodes moved from a parsed document into

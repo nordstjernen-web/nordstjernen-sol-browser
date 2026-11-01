@@ -9655,6 +9655,34 @@ ns_cors_exposed_raw_headers(const char *raw)
     return g_string_free(out, FALSE);
 }
 
+static char *
+ns_fetch_credentials_from(JSContext *ctx, JSValueConst holder)
+{
+    if (!JS_IsObject(holder)) return NULL;
+    JSValue v = JS_GetPropertyStr(ctx, holder, "credentials");
+    char *mode = NULL;
+    if (JS_IsString(v)) {
+        const char *s = JS_ToCString(ctx, v);
+        if (s && (!strcmp(s, "omit") || !strcmp(s, "same-origin") ||
+                  !strcmp(s, "include")))
+            mode = g_strdup(s);
+        if (s) JS_FreeCString(ctx, s);
+    }
+    JS_FreeValue(ctx, v);
+    return mode;
+}
+
+static gboolean
+ns_fetch_omits_credentials(JSContext *ctx, int argc, JSValueConst *argv,
+                           const char *top, const char *send_url)
+{
+    g_autofree char *mode = argc >= 2 ? ns_fetch_credentials_from(ctx, argv[1]) : NULL;
+    if (!mode && argc >= 1) mode = ns_fetch_credentials_from(ctx, argv[0]);
+    if (mode && !strcmp(mode, "include")) return FALSE;
+    if (mode && !strcmp(mode, "omit")) return TRUE;
+    return !ns_url_same_origin(top, send_url);
+}
+
 static char **
 ns_strv_with_cors_marker(char **headers)
 {
@@ -10507,6 +10535,8 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 
     g_ptr_array_remove_index(extras, extras->len - 1);
     g_ptr_array_add(extras, g_strdup("X-ND-CORS: 1"));
+    if (ns_fetch_omits_credentials(ctx, argc, argv, top, send_url))
+        g_ptr_array_add(extras, g_strdup("X-ND-Credentials: omit"));
     g_ptr_array_add(extras, NULL);
     ns_net_request_async(send_url, top, use_method,
                          body, body_len,
@@ -22347,6 +22377,12 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         g_ptr_array_add(hdr_terminated, hdrs->pdata[i]);
     }
     g_ptr_array_add(hdr_terminated, (gpointer)"X-ND-CORS: 1");
+    JSValue with_credentials_v = JS_GetPropertyStr(ctx, this_val, "withCredentials");
+    gboolean with_credentials = JS_ToBool(ctx, with_credentials_v) > 0;
+    JS_FreeValue(ctx, with_credentials_v);
+    if (!with_credentials &&
+        !ns_url_same_origin(ns_js_realm_url_or_current(st->js, ctx), st->url))
+        g_ptr_array_add(hdr_terminated, (gpointer)"X-ND-Credentials: omit");
     g_ptr_array_add(hdr_terminated, NULL);
 
     const char *effective_ct = NULL;
@@ -24831,7 +24867,11 @@ ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
     ns_body_apply_inferred_ct(ctx, obj);
     ns_def_ro(ctx, obj, "bodyUsed",       JS_FALSE);
     ns_def_ro(ctx, obj, "mode",           JS_NewString(ctx, "cors"));
-    ns_def_ro(ctx, obj, "credentials",    JS_NewString(ctx, "same-origin"));
+    g_autofree char *credentials = argc >= 2 ? ns_fetch_credentials_from(ctx, argv[1]) : NULL;
+    if (!credentials && argc >= 1)
+        credentials = ns_fetch_credentials_from(ctx, argv[0]);
+    ns_def_ro(ctx, obj, "credentials",
+              JS_NewString(ctx, credentials ? credentials : "same-origin"));
     ns_def_ro(ctx, obj, "cache",          JS_NewString(ctx, "default"));
     ns_def_ro(ctx, obj, "redirect",       JS_NewString(ctx, "follow"));
     ns_def_ro(ctx, obj, "referrer",       JS_NewString(ctx, "about:client"));
@@ -70133,12 +70173,37 @@ ns_js_add_csp_header(ns_js *js, const char *header_value)
     }
 }
 
-gboolean
-ns_js_csp_form_action_allowed(const ns_js *js, const char *action_url)
+const char *
+ns_js_form_frame_url(const ns_js *js, const ns_node *form)
 {
-    if (!js || !js->csp || !action_url) return TRUE;
-    return ns_csp_allows(js->csp, NS_CSP_FORM_ACTION, action_url,
-                         js->current_url);
+    (void)js;
+    const ns_node *frame = form ? ns_js_node_frame(form->parent) : NULL;
+    const char *url = frame ? ns_element_get_attr(frame, "data-nd-frame-url")
+                            : NULL;
+    return url && *url ? url : NULL;
+}
+
+gboolean
+ns_js_csp_form_action_allowed(const ns_js *js, const ns_node *form,
+                              const char *action_url)
+{
+    if (!js || !action_url) return TRUE;
+    const ns_csp *csp = form ? ns_js_node_csp(js, form) : js->csp;
+    if (!csp) return TRUE;
+    const char *self_url = ns_js_form_frame_url(js, form);
+    return ns_csp_allows(csp, NS_CSP_FORM_ACTION, action_url,
+                         self_url ? self_url : js->current_url);
+}
+
+gboolean
+ns_js_navigate_form_frame(ns_js *js, const ns_node *form, const char *url)
+{
+    ns_node *frame = form ? ns_js_node_frame(form->parent) : NULL;
+    if (!js || !frame || !url || !*url) return FALSE;
+    gboolean is_object = ns_node_is_element_named(frame, "object");
+    ns_js_set_attr_recorded(js, frame, is_object ? "data" : "src", url);
+    ns_js_schedule_iframe_load_full(js, frame, TRUE);
+    return TRUE;
 }
 
 void

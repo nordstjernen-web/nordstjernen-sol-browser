@@ -5914,6 +5914,20 @@ ns_fetch_has_user_activation(GPtrArray *extra_headers)
     return FALSE;
 }
 
+static gboolean
+ns_fetch_omits_credentials(GPtrArray *extra_headers)
+{
+    for (guint i = 0; extra_headers && i < extra_headers->len; i++) {
+        const char *h = g_ptr_array_index(extra_headers, i);
+        if (h && g_ascii_strncasecmp(h, "X-ND-Credentials:", 17) == 0) {
+            const char *v = h + 17;
+            while (*v == ' ' || *v == '\t') v++;
+            if (g_ascii_strncasecmp(v, "omit", 4) == 0) return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 static const char *
 ns_fetch_initiator(GPtrArray *extra_headers)
 {
@@ -6606,7 +6620,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     if (cookies_allowed && cookie_policy == NS_COOKIE_FIRST_PARTY &&
         top_url && !ns_url_is_same_site(url, effective_top_url))
         cookies_allowed = FALSE;
-    if (!*partition_key)
+    if (!*partition_key || ns_fetch_omits_credentials(extra_headers))
         cookies_allowed = FALSE;
     int samesite_cross = 0;
     const char *same_site_ref = initiator ? initiator : top_url;
