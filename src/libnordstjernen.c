@@ -3818,7 +3818,7 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
     const char *formtarget = (clicked && !from_text)
                              ? ns_element_get_attr(clicked, "formtarget") : NULL;
     if (formtarget && *formtarget) target = formtarget;
-    const char *frame_url = b->js ? ns_js_form_frame_url(b->js, form) : NULL;
+    const char *frame_url = b->js ? ns_js_node_frame_url(b->js, form) : NULL;
     gboolean in_frame = frame_url && !browser_form_target_leaves_frame(target);
     g_autofree char *base = frame_url ? NULL : browser_document_base(b);
     const char *doc_url = frame_url ? frame_url : b->base_url;

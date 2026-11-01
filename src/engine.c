@@ -12,6 +12,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "csp.h"
 #include "css.h"
 #include "css_syntax.h"
 #include "debuglog.h"
@@ -2001,6 +2002,26 @@ engine_node_frame_base(const ns_node *n, const char *dflt)
 }
 
 static gboolean
+engine_frame_csp_allows_image(const ns_node *n, const char *abs_url)
+{
+    for (const ns_node *p = n ? n->parent : NULL; p; p = p->parent) {
+        if (!ns_node_is_element_named(p, "iframe") &&
+            !ns_node_is_element_named(p, "frame") &&
+            !ns_node_is_element_named(p, "object"))
+            continue;
+        const char *header = ns_element_get_attr(p, "data-nd-frame-csp");
+        if (!header || !*header) return TRUE;
+        ns_csp *csp = ns_csp_parse(header);
+        if (!csp) return TRUE;
+        gboolean ok = ns_csp_allows(csp, NS_CSP_IMG, abs_url,
+                                    ns_element_get_attr(p, "data-nd-frame-url"));
+        ns_csp_free(csp);
+        return ok;
+    }
+    return TRUE;
+}
+
+static gboolean
 engine_image_is_lazy(const ns_box *box)
 {
     if (!box || box->kind != NS_BOX_IMAGE || !box->dom) return FALSE;
@@ -2054,6 +2075,11 @@ engine_collect_wanted_images(ns_box *root, const char *base_url,
             if (g_str_has_prefix(src, "nd-inline-svg:")) continue;
             char *abs = ns_url_resolve(box_base, src);
             if (!abs) continue;
+            if (box_base != base_url &&
+                !engine_frame_csp_allows_image(box->dom, abs)) {
+                g_free(abs);
+                continue;
+            }
             if (ns_image_cache_peek(cache, abs) ||
                 g_hash_table_contains(wanted, abs)) {
                 g_free(abs);
