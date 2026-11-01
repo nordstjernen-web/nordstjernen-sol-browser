@@ -566,6 +566,34 @@ ns_sandbox_parse_tokens(const char *val)
     return flags;
 }
 
+static char *
+ns_csp_header_sandbox_tokens(const char *header)
+{
+    if (!header) return NULL;
+    GString *tokens = NULL;
+    g_auto(GStrv) directives = g_strsplit_set(header, ";,", -1);
+    for (char **d = directives; *d; d++) {
+        const char *s = *d;
+        while (g_ascii_isspace((guchar)*s)) s++;
+        if (g_ascii_strncasecmp(s, "sandbox", 7) != 0) continue;
+        if (s[7] && !g_ascii_isspace((guchar)s[7])) continue;
+        if (!tokens) tokens = g_string_new(NULL);
+        else g_string_append_c(tokens, '\n');
+        g_string_append(tokens, s + 7);
+    }
+    return tokens ? g_string_free(tokens, FALSE) : NULL;
+}
+
+static unsigned
+ns_sandbox_from_policy_lines(const char *lines)
+{
+    unsigned flags = ~0u;
+    g_auto(GStrv) policies = g_strsplit(lines, "\n", -1);
+    for (char **p = policies; *p; p++)
+        flags &= ns_sandbox_parse_tokens(*p);
+    return flags;
+}
+
 static unsigned
 ns_iframe_effective_sandbox(const ns_node *node)
 {
@@ -574,8 +602,11 @@ ns_iframe_effective_sandbox(const ns_node *node)
     for (const ns_node *p = node; p; p = p->parent) {
         if (!ns_node_is_element_named(p, "iframe")) continue;
         const char *val = ns_element_get_attr(p, "sandbox");
-        if (!val) continue;
-        unsigned f = ns_sandbox_parse_tokens(val);
+        const char *csp_val = ns_element_get_attr(p, "data-nd-csp-sandbox");
+        if (!val && !csp_val) continue;
+        unsigned f = ~0u;
+        if (val) f &= ns_sandbox_parse_tokens(val);
+        if (csp_val) f &= ns_sandbox_from_policy_lines(csp_val);
         if (!any) { flags = f; any = TRUE; }
         else flags &= f;
     }
@@ -713,18 +744,38 @@ ns_js_pumped_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     if (pf->loop) g_main_loop_quit(pf->loop);
 }
 
+typedef struct {
+    char  *url;
+    char  *body;
+    gsize  body_len;
+    char  *content_type;
+} ns_frame_post;
+
+static void
+ns_frame_post_free(gpointer p)
+{
+    ns_frame_post *post = p;
+    if (!post) return;
+    g_free(post->url);
+    g_free(post->body);
+    g_free(post->content_type);
+    g_free(post);
+}
+
 static ns_response *
-ns_js_fetch_resource(ns_js *js, const char *url, const char *top_url,
-                     const char *const *headers, GError **error)
+ns_js_fetch_resource_with_body(ns_js *js, const char *url, const char *top_url,
+                               const char *method, const char *body,
+                               gsize body_len, const char *content_type,
+                               const char *const *headers, GError **error)
 {
     if (!js || js->worker_host)
-        return ns_net_request_blocking(url, top_url, "GET", NULL, 0, NULL,
-                                       headers, NULL, error);
+        return ns_net_request_blocking(url, top_url, method, body, body_len,
+                                       content_type, headers, NULL, error);
 
     ns_js_pumped_fetch pf = {0};
     pf.loop = g_main_loop_new(NULL, FALSE);
-    ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, headers, NULL,
-                         ns_js_pumped_fetch_done, &pf);
+    ns_net_request_async(url, top_url, method, body, body_len, content_type,
+                         headers, NULL, ns_js_pumped_fetch_done, &pf);
     gboolean saved = js->in_pump;
     js->in_pump = TRUE;
     gint64 pump_start_us = g_get_monotonic_time();
@@ -738,6 +789,14 @@ ns_js_fetch_resource(ns_js *js, const char *url, const char *top_url,
         else g_error_free(pf.err);
     }
     return pf.resp;
+}
+
+static ns_response *
+ns_js_fetch_resource(ns_js *js, const char *url, const char *top_url,
+                     const char *const *headers, GError **error)
+{
+    return ns_js_fetch_resource_with_body(js, url, top_url, "GET", NULL, 0,
+                                          NULL, headers, error);
 }
 
 static ns_response *
@@ -4742,6 +4801,7 @@ ns_invalidate_wrapper(ns_node *n)
     if (js) ns_parser_hold_forget(js, n);
     if (js && js->frame_urls) g_hash_table_remove(js->frame_urls, n);
     if (js && js->frame_csps) g_hash_table_remove(js->frame_csps, n);
+    if (js && js->frame_posts) g_hash_table_remove(js->frame_posts, n);
     if (js && js->frame_referrers) g_hash_table_remove(js->frame_referrers, n);
     ns_popover_forget_node(js, n);
     n->js_invalidate = NULL;
@@ -60616,6 +60676,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->frame_contexts = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->frame_csps = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                            NULL, (GDestroyNotify)ns_csp_free);
+    js->frame_posts = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                            NULL, ns_frame_post_free);
     js->frame_urls = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                            NULL, g_free);
     js->frame_referrers = g_hash_table_new_full(g_direct_hash, g_direct_equal,
@@ -63734,6 +63796,8 @@ ns_js_reset_runtime_state(ns_js *js)
         g_hash_table_remove_all(js->frame_contexts);
     if (js->frame_csps)
         g_hash_table_remove_all(js->frame_csps);
+    if (js->frame_posts)
+        g_hash_table_remove_all(js->frame_posts);
     if (js->frame_urls)
         g_hash_table_remove_all(js->frame_urls);
     if (js->frame_referrers)
@@ -64777,6 +64841,10 @@ ns_js_free(ns_js *js)
     if (js->frame_csps) {
         g_hash_table_destroy(js->frame_csps);
         js->frame_csps = NULL;
+    }
+    if (js->frame_posts) {
+        g_hash_table_destroy(js->frame_posts);
+        js->frame_posts = NULL;
     }
     if (js->frame_urls) {
         g_hash_table_destroy(js->frame_urls);
@@ -69033,7 +69101,25 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
                 is_object ? object_dest
                 : (iframe->name && g_ascii_strcasecmp(iframe->name, "frame") == 0
                    ? frame_dest : iframe_dest);
-            resp = ns_js_fetch_resource(js, abs_url, origin, dest_headers, &err);
+            ns_frame_post *post = js->frame_posts
+                ? g_hash_table_lookup(js->frame_posts, iframe) : NULL;
+            if (post && g_strcmp0(post->url, abs_url) == 0)
+                resp = ns_js_fetch_resource_with_body(js, abs_url, origin, "POST",
+                                                      post->body, post->body_len,
+                                                      post->content_type,
+                                                      dest_headers, &err);
+            else
+                resp = ns_js_fetch_resource(js, abs_url, origin, dest_headers, &err);
+            if (post) g_hash_table_remove(js->frame_posts, iframe);
+            g_autofree char *csp_sandbox = resp
+                ? ns_csp_header_sandbox_tokens(resp->csp_header) : NULL;
+            if (csp_sandbox)
+                ns_element_set_attr(iframe, "data-nd-csp-sandbox", csp_sandbox);
+            else
+                ns_element_remove_attr(iframe, "data-nd-csp-sandbox");
+            sandbox = ns_iframe_effective_sandbox(iframe);
+            scripts_ok = !(sandbox & NS_SANDBOX_ACTIVE) ||
+                         (sandbox & NS_SANDBOX_ALLOW_SCRIPTS);
             if (!ns_frame_response_is_download(resp)) {
                 ns_perf_resource_info info = { 0 };
                 ns_js_element_perf_info(js, iframe, &info);
@@ -70198,6 +70284,24 @@ ns_js_csp_form_action_allowed(const ns_js *js, const ns_node *form,
     const char *self_url = ns_js_form_frame_url(js, form);
     return ns_csp_allows(csp, NS_CSP_FORM_ACTION, action_url,
                          self_url ? self_url : js->current_url);
+}
+
+gboolean
+ns_js_post_form_frame(ns_js *js, const ns_node *form, const char *url,
+                      char *body, gsize body_len, const char *content_type)
+{
+    ns_node *frame = form ? ns_js_node_frame(form->parent) : NULL;
+    if (!js || !frame || !url || !*url || !js->frame_posts) {
+        g_free(body);
+        return FALSE;
+    }
+    ns_frame_post *post = g_new0(ns_frame_post, 1);
+    post->url = g_strdup(url);
+    post->body = body;
+    post->body_len = body_len;
+    post->content_type = g_strdup(content_type);
+    g_hash_table_replace(js->frame_posts, frame, post);
+    return ns_js_navigate_form_frame(js, form, url);
 }
 
 gboolean

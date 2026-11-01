@@ -3,6 +3,12 @@ Changelog:
 
 1.0.40-dev:
 ======
+* Security: a `Content-Security-Policy: sandbox` directive on a framed
+  document now sandboxes that frame and the frames inside it, just as the
+  `sandbox` attribute does, so it blocks forms, scripts and same-origin
+  access unless its tokens allow them.
+* Security: a POST form submitted inside a frame now loads the response
+  in that frame, instead of navigating the whole tab.
 * Security: a cookie written from script with the `HttpOnly` attribute
   (through `document.cookie` or a frame's document) is now ignored, as
   RFC 6265 requires. It used to be stored without the flag, so script

@@ -68,6 +68,7 @@ struct ns_js {
     GPtrArray    *frame_ctxs;
     GHashTable   *frame_contexts;
     GHashTable   *frame_csps;
+    GHashTable   *frame_posts;
     GHashTable   *frame_windows;
     GArray       *font_ready_resolvers;
     gboolean      fonts_loadingdone_armed;

@@ -138,6 +138,8 @@ gboolean ns_js_csp_form_action_allowed(const ns_js *js, const ns_node *form,
                                        const char *action_url);
 const char *ns_js_form_frame_url(const ns_js *js, const ns_node *form);
 gboolean ns_js_navigate_form_frame(ns_js *js, const ns_node *form, const char *url);
+gboolean ns_js_post_form_frame(ns_js *js, const ns_node *form, const char *url,
+                               char *body, gsize body_len, const char *content_type);
 char    *ns_js_base_url_for_document(ns_js *js, const ns_node *doc,
                                      const char *document_url);
 const char *ns_js_current_url(const ns_js *js);
