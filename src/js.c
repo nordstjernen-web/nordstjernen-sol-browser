@@ -33865,6 +33865,20 @@ ns_node_has_own_unprefixed(ns_js *js, const ns_node *cur, const char *base)
     return FALSE;
 }
 
+static void
+ns_event_set_visible_target(ns_js *js, JSValue event, const ns_node *target,
+                            const ns_node *cur)
+{
+    if (!target || !cur) return;
+    const ns_node *visible = ns_event_retarget_node(target, cur);
+    if (!visible) return;
+    JSValue current = JS_GetPropertyStr(js->ctx, event, "target");
+    const ns_node *shown = ns_unwrap_element(current);
+    JS_FreeValue(js->ctx, current);
+    if (shown == visible || !shown) return;
+    JS_SetPropertyStr(js->ctx, event, "target", ns_make_element(js->ctx, visible));
+}
+
 static gboolean
 ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
                             const ns_node *target, const char *type,
@@ -33901,6 +33915,7 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
         }
     }
 
+    ns_event_set_visible_target(js, event, target, cur);
     if (!capture_phase) {
         if (ns_fire_property_on_handler(js, cur, type, event))
             *fired = TRUE;
@@ -34037,6 +34052,7 @@ ns_invoke_window_listeners_full(ns_js *js, const ns_node *target,
 {
     const ns_node *event_doc = ns_event_document_for_target(js, target);
     JSValue global_obj = ns_event_window_for_document(js, event_doc);
+    ns_event_set_visible_target(js, event, target, event_doc);
     JS_SetPropertyStr(js->ctx, event, "currentTarget",
                       JS_DupValue(js->ctx, global_obj));
     JS_SetPropertyStr(js->ctx, event, "eventPhase",
