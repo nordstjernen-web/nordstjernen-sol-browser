@@ -3845,6 +3845,15 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
         gboolean first = TRUE;
         ns_form_collect_inputs(form, b->doc, b->doc, body, &first, clicked);
         ns_form_set_submission_charset(NULL);
+        if (in_frame) {
+            gsize body_len = body->len;
+            ns_js_post_form_frame(b->js, form, abs_action,
+                                  g_string_free(body, FALSE), body_len,
+                                  "application/x-www-form-urlencoded");
+            g_free(abs_action);
+            b->dirty = TRUE;
+            return;
+        }
         g_free(b->pending_post_body);
         g_free(b->pending_post_ct);
         b->pending_post_len = body->len;
