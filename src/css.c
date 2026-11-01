@@ -36706,6 +36706,20 @@ host_scoped_sheets(const ns_node *node, const ns_css_stylesheet *const *author,
     return all;
 }
 
+/* Elements in a shadow tree match only that shadow root's own stylesheets
+ * (its <style> elements and adopted sheets, recorded against the host), not
+ * the document's or an enclosing tree's (CSS Scoping). The UA sheet still
+ * applies; the host itself is matched one level up, with :host rules. */
+static void
+shadow_own_sheets(const ns_node *wrapper,
+                  const ns_css_stylesheet *const **author, gsize *n_author)
+{
+    if (!g_doc_sheets || !wrapper->parent) return;
+    const GPtrArray *own = g_hash_table_lookup(g_doc_sheets, wrapper->parent);
+    *author = own ? (const ns_css_stylesheet *const *)own->pdata : NULL;
+    *n_author = own ? own->len : 0;
+}
+
 static void
 doc_own_sheets(const ns_node *node, const ns_css_stylesheet *const **author,
                gsize *n_author)
@@ -36826,6 +36840,8 @@ cascade_walk(ns_node *node,
         }
     }
     doc_own_sheets(node, &author, &n_author);
+    if (node->kind == NS_NODE_ELEMENT && ns_element_has_shadow_marker(node))
+        shadow_own_sheets(node, &author, &n_author);
     GPtrArray *host_sheets = host_scoped_sheets(node, author, n_author);
     if (host_sheets) {
         author = (const ns_css_stylesheet *const *)host_sheets->pdata;
@@ -37187,6 +37203,16 @@ cascade_walk(ns_node *node,
             }
         }
     }
+    /* A shadow root is an element here, but it generates no box and its
+     * children inherit from the host (CSS Scoping): pass the host's style
+     * through, for explicit `inherit` and flex/grid blockification too. */
+    gboolean shadow_wrapper = node->kind == NS_NODE_ELEMENT &&
+                              ns_element_has_shadow_marker(node);
+    if (shadow_wrapper) {
+        child_parent_style = parent_style;
+        child_layout_parent = layout_parent;
+        child_parent_changed = child_parent_changed || parent_changed;
+    }
     gboolean pushed = FALSE;
     if (g_cq_map && g_cq_stack) {
         ns_cq_container *info = g_hash_table_lookup(g_cq_map, node);
@@ -37213,7 +37239,8 @@ cascade_walk(ns_node *node,
             g_ptr_array_add(g_inv_active, g_ptr_array_index(inv_pending, i));
     }
     ns_node *outer_parent_node = g_cascade_parent_node;
-    if (node->kind == NS_NODE_ELEMENT) g_cascade_parent_node = node;
+    if (node->kind == NS_NODE_ELEMENT && !shadow_wrapper)
+        g_cascade_parent_node = node;
     for (ns_node *c = node->first_child; c; c = c->next_sibling)
         cascade_walk(c, ua, author, n_author, child_parent_style,
                      child_layout_parent, root_px,

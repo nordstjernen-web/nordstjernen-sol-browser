@@ -3,6 +3,15 @@ Changelog:
 
 1.0.41-dev:
 ======
+* Shadow DOM styling: elements inside a shadow root match only that
+  shadow root's stylesheets (plus the browser's own), as CSS Scoping
+  requires. Document rules such as Reddit's
+  `form, ul, … { margin-bottom: 1rem }` used to apply inside every web
+  component. Elements at the top of a shadow tree now also inherit
+  from the host, including explicit `inherit` (`display: inherit`,
+  `width: inherit`), and are blockified by a flex or grid host. On
+  reddit.com the search bar was 58 px tall instead of 40, and its
+  "r/browsers" filter chip stacked its icon, label and close button.
 * Media (Windows): H.264 video is decoded on the GPU. The Media
   Foundation decoder gets a D3D11 device and decodes through DXVA; the
   frames are read back and shown as before. If the GPU cannot take a
