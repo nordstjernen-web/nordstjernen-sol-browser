@@ -334,6 +334,8 @@ http_read_head(http_conn *c, http_head *out)
             out->x_tiles = atol(val);
         else if (strcasecmp(line, "X-Wake") == 0)
             out->x_wake = atol(val);
+        else if (strcasecmp(line, "X-Popup") == 0)
+            out->x_popup = atol(val);
         else if (strcasecmp(line, "X-Nav") == 0) {
             size_t vlen = strlen(val);
             if (vlen >= sizeof out->x_nav)

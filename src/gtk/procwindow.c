@@ -725,6 +725,15 @@ static void proc_window_add_tab(ProcWindow *pw, const char *url,
 static void proc_window_add_tab_full(ProcWindow *pw, const char *url,
                                      gboolean foreground,
                                      gboolean private_mode);
+static NsProcView *proc_window_add_tab_opener(ProcWindow *pw, const char *url,
+                                              gboolean foreground,
+                                              gboolean private_mode,
+                                              const char *opener_token,
+                                              const char *opener_origin);
+static gboolean find_tab(int id, ProcWindow **out_pw, GtkWidget **out_page);
+static int page_tab_id(GtkWidget *page);
+static void pw_popup_handle(ProcWindow *pw, NsProcView *v, const char *json);
+static void pw_popup_tab_gone(int tab_id);
 
 typedef struct {
     NsProcView *view;
@@ -1447,6 +1456,10 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
             proc_window_add_tab_full(pw, text, FALSE,
                                      ns_proc_view_is_private(v));
         break;
+    case NS_PROC_EVT_POPUP:
+        if (text && *text)
+            pw_popup_handle(pw, v, text);
+        break;
     case NS_PROC_EVT_LOADING: {
         gboolean loading = text && *text == '1';
         if (idx >= 0)
@@ -1535,6 +1548,7 @@ on_tab_clicked(GtkButton *button, gpointer user_data)
 static void
 proc_window_close_page(ProcWindow *pw, GtkWidget *page)
 {
+    pw_popup_tab_gone(page_tab_id(page));
     GtkWidget *wrapper = g_object_get_data(G_OBJECT(page), "ns-strip-tab");
     int idx = gtk_notebook_page_num(GTK_NOTEBOOK(pw->notebook), page);
     if (pw->element_fullscreen && view_for_page(page) == pw->fullscreen_view)
@@ -1560,6 +1574,14 @@ static void
 proc_window_add_tab_full(ProcWindow *pw, const char *url, gboolean foreground,
                          gboolean private_mode)
 {
+    proc_window_add_tab_opener(pw, url, foreground, private_mode, NULL, NULL);
+}
+
+static NsProcView *
+proc_window_add_tab_opener(ProcWindow *pw, const char *url,
+                           gboolean foreground, gboolean private_mode,
+                           const char *opener_token, const char *opener_origin)
+{
     if (!private_mode && ns_rproc_single_process_enabled() &&
         gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook)) > 0) {
         NsProcView *cur = current_view(pw);
@@ -1568,11 +1590,12 @@ proc_window_add_tab_full(ProcWindow *pw, const char *url, gboolean foreground,
             gtk_editable_set_text(GTK_EDITABLE(pw->address), r);
             ns_proc_view_load(cur, r);
             g_free(r);
-            return;
+            return NULL;
         }
     }
 
     NsProcView *v = ns_proc_view_new();
+    ns_proc_view_set_opener(v, opener_token, opener_origin);
     if (private_mode)
         ns_proc_view_set_private(v, TRUE);
     ns_proc_view_set_notify(v, on_view_notify, pw);
@@ -1646,6 +1669,150 @@ proc_window_add_tab_full(ProcWindow *pw, const char *url, gboolean foreground,
     char *resolved = normalize_url(url);
     ns_proc_view_load(v, resolved);
     g_free(resolved);
+    return v;
+}
+
+typedef struct {
+    char *token;
+    int   opener_tab;
+    int   popup_tab;
+} PwPopupLink;
+
+static GPtrArray *g_popup_links;
+
+static void
+pw_popup_link_free(gpointer data)
+{
+    PwPopupLink *l = data;
+    g_free(l->token);
+    g_free(l);
+}
+
+static PwPopupLink *
+pw_popup_link_find(const char *token)
+{
+    for (guint i = 0; token && g_popup_links && i < g_popup_links->len; i++) {
+        PwPopupLink *l = g_ptr_array_index(g_popup_links, i);
+        if (strcmp(l->token, token) == 0) return l;
+    }
+    return NULL;
+}
+
+static NsProcView *
+pw_view_for_tab(int tab_id)
+{
+    ProcWindow *pw = NULL;
+    GtkWidget *page = NULL;
+    if (tab_id <= 0 || !find_tab(tab_id, &pw, &page)) return NULL;
+    return view_for_page(page);
+}
+
+static void
+pw_popup_send(int tab_id, const RjValue *op, const char *kind)
+{
+    NsProcView *target = pw_view_for_tab(tab_id);
+    if (!target) return;
+    GString *out = g_string_new("[{\"op\":");
+    rj_append_str(out, kind);
+    static const char *const fields[] = { "token", "to", "data", "origin", "target" };
+    for (gsize i = 0; i < G_N_ELEMENTS(fields); i++) {
+        const char *val = rj_get_str(op, fields[i]);
+        if (!val) continue;
+        g_string_append_c(out, ',');
+        rj_append_str(out, fields[i]);
+        g_string_append_c(out, ':');
+        rj_append_str(out, val);
+    }
+    g_string_append(out, "}]");
+    ns_proc_view_popup_deliver(target, out->str);
+    g_string_free(out, TRUE);
+}
+
+static void
+pw_popup_notify_closed(PwPopupLink *l)
+{
+    NsProcView *opener = pw_view_for_tab(l->opener_tab);
+    if (!opener) return;
+    GString *out = g_string_new("[{\"op\":\"closed\",\"token\":");
+    rj_append_str(out, l->token);
+    g_string_append(out, "}]");
+    ns_proc_view_popup_deliver(opener, out->str);
+    g_string_free(out, TRUE);
+}
+
+static void
+pw_popup_tab_gone(int tab_id)
+{
+    for (guint i = 0; tab_id > 0 && g_popup_links && i < g_popup_links->len;) {
+        PwPopupLink *l = g_ptr_array_index(g_popup_links, i);
+        if (l->popup_tab == tab_id) {
+            pw_popup_notify_closed(l);
+            g_ptr_array_remove_index(g_popup_links, i);
+            continue;
+        }
+        if (l->opener_tab == tab_id) l->opener_tab = 0;
+        i++;
+    }
+}
+
+static void
+pw_popup_open(ProcWindow *pw, NsProcView *v, const RjValue *op)
+{
+    const char *url = rj_get_str(op, "url");
+    const char *token = rj_get_str(op, "token");
+    if (!url || !*url) return;
+    gboolean linked = token && *token && !pw_popup_link_find(token);
+    NsProcView *popup = proc_window_add_tab_opener(
+        pw, url, TRUE, ns_proc_view_is_private(v), linked ? token : NULL,
+        linked ? rj_get_str(op, "origin") : NULL);
+    if (!popup || !linked) return;
+    PwPopupLink *l = g_new0(PwPopupLink, 1);
+    l->token = g_strdup(token);
+    l->opener_tab = page_tab_id(ns_proc_view_widget(v));
+    l->popup_tab = page_tab_id(ns_proc_view_widget(popup));
+    if (!g_popup_links)
+        g_popup_links = g_ptr_array_new_with_free_func(pw_popup_link_free);
+    g_ptr_array_add(g_popup_links, l);
+}
+
+static void
+pw_popup_handle(ProcWindow *pw, NsProcView *v, const char *json)
+{
+    RjValue *ops = rj_parse(json, strlen(json));
+    if (!ops || ops->type != RJ_ARR) {
+        rj_free(ops);
+        return;
+    }
+    int sender = page_tab_id(ns_proc_view_widget(v));
+    for (guint i = 0; i < ops->items->len; i++) {
+        const RjValue *op = g_ptr_array_index(ops->items, i);
+        const char *kind = rj_get_str(op, "op");
+        if (!kind) continue;
+        if (strcmp(kind, "open") == 0) {
+            pw_popup_open(pw, v, op);
+            continue;
+        }
+        PwPopupLink *l = pw_popup_link_find(rj_get_str(op, "token"));
+        if (!l || (sender != l->opener_tab && sender != l->popup_tab))
+            continue;
+        if (strcmp(kind, "post") == 0) {
+            const char *to = rj_get_str(op, "to");
+            gboolean to_popup = to && strcmp(to, "popup") == 0;
+            if (to_popup && sender == l->opener_tab)
+                pw_popup_send(l->popup_tab, op, "message");
+            else if (!to_popup && sender == l->popup_tab)
+                pw_popup_send(l->opener_tab, op, "message");
+        } else if (strcmp(kind, "close") == 0) {
+            int popup_tab = l->popup_tab;
+            ProcWindow *ppw = NULL;
+            GtkWidget *page = NULL;
+            if (find_tab(popup_tab, &ppw, &page))
+                proc_window_close_page(ppw, page);
+            else
+                pw_popup_tab_gone(popup_tab);
+        }
+    }
+    rj_free(ops);
 }
 
 static void

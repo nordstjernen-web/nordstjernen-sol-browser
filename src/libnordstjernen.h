@@ -152,6 +152,11 @@ void ns_browser_set_next_referrer(const char *url);
 void ns_browser_set_next_initiator(const char *url);
 void ns_browser_set_next_user_activated(int user_activated);
 void ns_browser_set_next_reload(int reload);
+void ns_browser_set_popups_supported(int supported);
+void ns_browser_set_opener(const char *token, const char *origin);
+int  ns_browser_popup_pending(void);
+char *ns_browser_popup_take(void);
+void ns_browser_popup_deliver(ns_browser *b, const char *json);
 
 typedef struct ns_session_storage ns_session_storage;
 ns_session_storage *ns_session_storage_new(void);

@@ -3,6 +3,17 @@ Changelog:
 
 Unreleased:
 ======
+* `window.open()` opens a real popup: a new foreground tab that keeps a
+  link to the page that opened it. It returns a window proxy with
+  `postMessage()`, `close()` and `closed`, and the popup gets a
+  `window.opener` with `postMessage()`. Messages pass between the two
+  tabs with the sender's origin and `source`, and `targetOrigin` is
+  checked. A popup's `window.close()` closes its tab, and the opener sees
+  `closed` become true. `noopener`/`noreferrer` open a tab without the
+  link and return `null`. `window.open()` used to navigate the current
+  tab and `window.opener` was always `null`, so popup sign-in flows
+  ("Sign in with Google" on Reddit) never returned. Headless runs and
+  the Java and Android shells keep the old behaviour.
 * Security: a worker whose script comes from an http(s) URL now runs
   under the Content-Security-Policy of that script's response, as the
   spec requires, instead of inheriting its creator's policy. Blob and

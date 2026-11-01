@@ -48,6 +48,7 @@ typedef struct {
     char                *audio;
     char                *window_action;
     int                  clipboard;
+    int                  popup;
     char                *tiles;
 } ns_rproc_http_frame;
 
@@ -68,6 +69,7 @@ typedef struct {
     char *title;
     char *url;
     int   url_pushed;
+    int   popup;
 } ns_rproc_http_tick;
 
 ns_rproc_http *ns_rproc_http_spawn(const char *renderer_path, int max_width,
@@ -169,6 +171,10 @@ int   ns_rproc_http_set_focused_editable_selection(ns_rproc_http *r,
                                                    size_t caret,
                                                    size_t anchor);
 long  ns_rproc_http_download_start(ns_rproc_http *r, const char *url);
+void  ns_rproc_http_set_opener(ns_rproc_http *r, const char *token,
+                               const char *origin);
+char *ns_rproc_http_popup_poll(ns_rproc_http *r);
+int   ns_rproc_http_popup_deliver(ns_rproc_http *r, const char *json);
 char *ns_rproc_http_download_poll(ns_rproc_http *r, long id);
 int   ns_rproc_http_download_cancel(ns_rproc_http *r, long id);
 int   ns_rproc_http_find(ns_rproc_http *r, const char *query,

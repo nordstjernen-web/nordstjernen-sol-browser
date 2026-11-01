@@ -125,6 +125,11 @@ void   ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb,
 void   ns_js_set_window_action_cb(ns_js *js, ns_js_window_action_cb cb,
                                   gpointer user_data);
 void   ns_js_window_action_applied(ns_js *js);
+void   ns_js_set_popups_supported(gboolean supported);
+void   ns_js_set_opener(ns_js *js, const char *token, const char *origin);
+gboolean ns_js_popup_pending(void);
+char  *ns_js_popup_take_outbox(void);
+void   ns_js_popup_deliver(ns_js *js, const char *json);
 void   ns_js_video_event(ns_js *js, const void *node, const char *kind, double value);
 void   ns_js_audio_feedback(ns_js *js, const char *line);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);

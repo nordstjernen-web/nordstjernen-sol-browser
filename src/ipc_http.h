@@ -28,6 +28,7 @@ typedef struct {
     long  x_w, x_h, x_stride, x_anim, x_unchanged, x_render_rc;
     long  x_page_w, x_page_h, x_scroll_y, x_scroll_x, x_clipboard, x_tiles;
     long  x_wake;
+    long  x_popup;
     char  x_nav[2048];
     char  x_webgl[2048];
     char  x_camera[2048];

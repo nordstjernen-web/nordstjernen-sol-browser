@@ -64,7 +64,7 @@ typedef enum {
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
     REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLLBAR,
     REQ_WEBGL, REQ_CAMERA, REQ_COLOR_SCHEME, REQ_FAVICON,
-    REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_DOWNLOAD, REQ_QUIT
+    REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_DOWNLOAD, REQ_POPUP, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_CONTEXT } LinkAct;
 
@@ -125,7 +125,7 @@ typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
     RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
     RES_CONSOLE, RES_EVAL, RES_DUMP, RES_FAVICON, RES_DROPFILES,
-    RES_SCROLLBAR, RES_TICK, RES_PRINT, RES_DOWNLOAD
+    RES_SCROLLBAR, RES_TICK, RES_PRINT, RES_DOWNLOAD, RES_POPUP
 } ResType;
 
 typedef struct {
@@ -146,6 +146,7 @@ typedef struct {
     char            *config;
     char            *audio;
     char            *window_action;
+    gboolean         popup;
     char            *clipboard;
     GdkTexture      *texture;
     double           texture_scale;
@@ -183,6 +184,9 @@ typedef struct {
 } Res;
 
 struct NsProcView {
+    char            *opener_token;
+    char            *opener_origin;
+    gboolean         popup_poll_pending;
     grefcount   rc;
 
     GtkWidget     *root;
@@ -595,6 +599,8 @@ pv_free(NsProcView *v)
     if (v->history)
         g_ptr_array_unref(v->history);
     g_free(v->renderer_path);
+    g_free(v->opener_token);
+    g_free(v->opener_origin);
     g_free(v->current_url);
     g_free(v->pending_url);
     g_free(v->current_title);
@@ -612,6 +618,8 @@ static void pv_unref(NsProcView *v) { if (g_ref_count_dec(&v->rc)) pv_free(v); }
 static ns_rproc_http *
 pv_swap_proc(NsProcView *v, ns_rproc_http *newp)
 {
+    if (newp)
+        ns_rproc_http_set_opener(newp, v->opener_token, v->opener_origin);
     g_mutex_lock(&v->proc_lock);
     ns_rproc_http *old = v->proc;
     v->proc = newp;
@@ -1177,6 +1185,7 @@ worker_main(gpointer data)
                     res->window_action = g_strdup(fr.window_action);
                     free(fr.window_action);
                 }
+                res->popup = fr.popup ? TRUE : FALSE;
                 if (fr.clipboard && v->proc)
                     res->clipboard = ns_rproc_http_clipboard(v->proc);
             } else if (v->proc) {
@@ -1207,6 +1216,7 @@ worker_main(gpointer data)
                 res->title = tick.title ? g_strdup(tick.title) : NULL;
                 res->url = tick.url ? g_strdup(tick.url) : NULL;
                 res->url_pushed = tick.url_pushed ? TRUE : FALSE;
+                res->popup = tick.popup ? TRUE : FALSE;
                 ns_rproc_http_tick_clear(&tick);
             }
             post(res);
@@ -1389,6 +1399,17 @@ worker_main(gpointer data)
             res->remote_ud = req->remote_ud;
             res->href = v->proc ? ns_rproc_http_eval(v->proc, req->query) : NULL;
             post(res);
+        } else if (req->type == REQ_POPUP) {
+            if (req->kind == 0) {
+                Res *res = g_new0(Res, 1);
+                res->view = pv_ref(v);
+                res->type = RES_POPUP;
+                res->seq = req->seq;
+                res->href = v->proc ? ns_rproc_http_popup_poll(v->proc) : NULL;
+                post(res);
+            } else if (v->proc) {
+                ns_rproc_http_popup_deliver(v->proc, req->query);
+            }
         } else if (req->type == REQ_DOWNLOAD) {
             Res *res = g_new0(Res, 1);
             res->view = pv_ref(v);
@@ -2945,6 +2966,43 @@ pv_apply_window_action(NsProcView *v, const char *action)
         post_emit(v, NS_PROC_EVT_FULLSCREEN, action);
 }
 
+static void
+pv_popup_poll(NsProcView *v)
+{
+    if (!v || v->closed || v->popup_poll_pending) return;
+    v->popup_poll_pending = TRUE;
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_POPUP;
+    req->kind = 0;
+    push_req(v, req);
+}
+
+void
+ns_proc_view_popup_deliver(NsProcView *v, const char *json)
+{
+    if (!v || v->closed || !json) return;
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_POPUP;
+    req->kind = 1;
+    req->query = g_strdup(json);
+    push_req(v, req);
+    request_render(v);
+}
+
+void
+ns_proc_view_set_opener(NsProcView *v, const char *token, const char *origin)
+{
+    if (!v) return;
+    g_free(v->opener_token);
+    g_free(v->opener_origin);
+    v->opener_token = token && *token ? g_strdup(token) : NULL;
+    v->opener_origin = origin && *origin ? g_strdup(origin) : NULL;
+    g_mutex_lock(&v->proc_lock);
+    if (v->proc)
+        ns_rproc_http_set_opener(v->proc, v->opener_token, v->opener_origin);
+    g_mutex_unlock(&v->proc_lock);
+}
+
 static gboolean
 on_result(gpointer data)
 {
@@ -2955,6 +3013,12 @@ on_result(gpointer data)
         res->remote_cb(v->closed ? NULL : res->href, res->remote_ud);
         if (!v->closed)
             request_render(v);
+        goto done;
+    }
+    if (res->type == RES_POPUP) {
+        v->popup_poll_pending = FALSE;
+        if (!v->closed && res->href && *res->href && strcmp(res->href, "[]") != 0)
+            post_emit(v, NS_PROC_EVT_POPUP, res->href);
         goto done;
     }
     if (res->type == RES_DOWNLOAD) {
@@ -3035,6 +3099,8 @@ on_result(gpointer data)
             pv_audio_pump(v, res->audio);
         if (current && res->ok && res->window_action && *res->window_action)
             pv_apply_window_action(v, res->window_action);
+        if (res->ok && res->popup)
+            pv_popup_poll(v);
         if (current && res->ok && !navigated)
             pv_follow_same_document_state(v, res->url, res->url_pushed,
                                           res->title);
@@ -3112,6 +3178,8 @@ on_result(gpointer data)
             pv_audio_pump(v, res->audio);
         if (res->ok && res->window_action && *res->window_action)
             pv_apply_window_action(v, res->window_action);
+        if (res->ok && res->popup)
+            pv_popup_poll(v);
         if (res->ok && res->clipboard && v->area) {
             gdk_clipboard_set_text(gtk_widget_get_clipboard(v->area),
                                    res->clipboard);
