@@ -3,6 +3,14 @@ Changelog:
 
 1.0.41-dev:
 ======
+* Style: a page whose stylesheets contain a `:has()` with nothing to key
+  on (no class, id or type on its own compound or the subject, such as
+  `:has(> .x) [dialog]`) no longer turns off incremental restyling for
+  the whole document. Mutations touching the keys inside that `:has()`
+  restyle the whole document; all other mutations restyle only what
+  they touch. On a YouTube watch page each relayout's cascade fell from
+  ~65 ms to ~1.5 ms (5,400 elements, ~8 relayouts a second while a
+  video plays).
 * Media: Media Source audio plays when playback does not start at 0,
   for example a YouTube video resumed from watch history. The first
   appended segment's start time was lost (it stayed 0), so the audio
