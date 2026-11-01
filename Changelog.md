@@ -3,6 +3,12 @@ Changelog:
 
 Unreleased:
 ======
+* A popup on the same origin as its opener can call functions on it:
+  `window.opener.a.b.fn(args)` runs `a.b.fn` in the opener's window.
+  The opener checks that the caller has its origin, and calls return
+  `undefined`. Google sign-in ("Continue with Google" on Reddit) hands
+  the credential back this way and used to stop on
+  `accounts.google.com/gsi/transform`.
 * `window.open()` opens a real popup: a new foreground tab that keeps a
   link to the page that opened it. It returns a window proxy with
   `postMessage()`, `close()` and `closed`, and the popup gets a
