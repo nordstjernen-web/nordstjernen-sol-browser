@@ -27238,6 +27238,69 @@ ns_popup_close_self(JSContext *ctx, JSValueConst this_val, int argc,
     return JS_UNDEFINED;
 }
 
+static JSValue
+ns_popup_opener_call(JSContext *ctx, JSValueConst this_val, int argc,
+                     JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->opener_token || argc < 2) return JS_UNDEFINED;
+    g_autofree char *sender = ns_popup_realm_origin(js, ctx);
+    if (!js->opener_origin || strcmp(sender, js->opener_origin) != 0)
+        return ns_throw_dom_exception(ctx, "SecurityError", 18,
+            "Blocked a frame from accessing a cross-origin opener.");
+    JSValue path = JS_JSONStringify(ctx, argv[0], JS_UNDEFINED, JS_UNDEFINED);
+    if (JS_IsException(path)) return path;
+    g_autofree char *payload = ns_popup_serialize(ctx, argv[1]);
+    if (!payload) {
+        JS_FreeValue(ctx, path);
+        return JS_EXCEPTION;
+    }
+    JSValue op = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, op, "op", JS_NewString(ctx, "call"));
+    JS_SetPropertyStr(ctx, op, "token", JS_NewString(ctx, js->opener_token));
+    JS_SetPropertyStr(ctx, op, "to", JS_NewString(ctx, "opener"));
+    JS_SetPropertyStr(ctx, op, "path", path);
+    JS_SetPropertyStr(ctx, op, "data", JS_NewString(ctx, payload));
+    JS_SetPropertyStr(ctx, op, "origin", JS_NewString(ctx, sender));
+    ns_popup_emit(ctx, op);
+    JS_FreeValue(ctx, op);
+    js->mutated = TRUE;
+    return JS_UNDEFINED;
+}
+
+static const char ns_popup_opener_src[] =
+    "(function(base, call, sameOrigin){"
+    "  var own = Object.create(null);"
+    "  Object.getOwnPropertyNames(base).forEach(function(k){ own[k] = true; });"
+    "  function member(path){"
+    "    return new Proxy(function(){}, {"
+    "      get: function(t, k){"
+    "        if (typeof k !== 'string' || k === 'then') return undefined;"
+    "        return member(path.concat([k])); },"
+    "      apply: function(t, self, args){ call(path, args); return undefined; }"
+    "    });"
+    "  }"
+    "  return new Proxy(base, {"
+    "    get: function(t, k, r){"
+    "      if (typeof k !== 'string' || own[k]) return Reflect.get(t, k, r);"
+    "      if (k === 'then' || !sameOrigin()) return undefined;"
+    "      return member([k]); }"
+    "  });"
+    "})";
+
+static JSValue
+ns_popup_opener_same_origin(JSContext *ctx, JSValueConst this_val, int argc,
+                            JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->opener_origin) return JS_FALSE;
+    g_autofree char *mine = ns_popup_realm_origin(js, JS_GetCallerRealm(ctx));
+    return JS_NewBool(ctx, strcmp(mine, "null") != 0 &&
+                           strcmp(mine, js->opener_origin) == 0);
+}
+
 void
 ns_js_set_opener(ns_js *js, const char *token, const char *origin)
 {
@@ -27247,7 +27310,32 @@ ns_js_set_opener(ns_js *js, const char *token, const char *origin)
     js->opener_token = g_strdup(token);
     js->opener_origin = g_strdup(origin ? origin : "null");
     JSContext *ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
-    JSValue proxy = ns_popup_proxy_new(ctx, token, NS_POPUP_TO_OPENER);
+    JSValue base = ns_popup_proxy_new(ctx, token, NS_POPUP_TO_OPENER);
+    JSValue proxy = base;
+    JSValue maker = JS_Eval(ctx, ns_popup_opener_src,
+                            sizeof ns_popup_opener_src - 1, "<opener>",
+                            JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsFunction(ctx, maker)) {
+        JSValue args[3] = {
+            base,
+            JS_NewCFunction(ctx, ns_popup_opener_call, "call", 2),
+            JS_NewCFunction(ctx, ns_popup_opener_same_origin, "sameOrigin", 0),
+        };
+        JSValue wrapped = JS_Call(ctx, maker, JS_UNDEFINED, 3, args);
+        JS_FreeValue(ctx, args[1]);
+        JS_FreeValue(ctx, args[2]);
+        if (JS_IsObject(wrapped)) {
+            proxy = wrapped;
+            JS_FreeValue(ctx, base);
+        } else {
+            if (JS_IsException(wrapped))
+                JS_FreeValue(ctx, JS_GetException(ctx));
+            JS_FreeValue(ctx, wrapped);
+        }
+    } else if (JS_IsException(maker)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    JS_FreeValue(ctx, maker);
     JSValue global = JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx, global, "opener", proxy);
     JS_FreeValue(ctx, global);
@@ -27317,6 +27405,97 @@ ns_popup_deliver_message(ns_js *js, JSContext *ctx, JSValueConst op)
     JS_FreeValue(realm, global);
 }
 
+static JSValue
+ns_popup_call_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    if (argc < 3 || !JS_IsFunction(ctx, argv[0])) return JS_UNDEFINED;
+    uint32_t n = JS_IsArray(argv[2]) ? ns_js_array_length(ctx, argv[2]) : 0;
+    if (n > 64) n = 64;
+    JSValue args[64];
+    for (uint32_t i = 0; i < n; i++)
+        args[i] = JS_GetPropertyUint32(ctx, argv[2], i);
+    ns_js *js = js_from_ctx(ctx);
+    ns_budget_guard bg = {0};
+    ns_js_budget_push(js, &bg);
+    JSValue r = JS_Call(ctx, argv[0], argv[1], (int)n, (JSValueConst *)args);
+    if (JS_IsException(r)) {
+        JSValue ex = JS_GetException(ctx);
+        ns_js_report_uncaught(js, ex, "opener call");
+        JS_FreeValue(ctx, ex);
+    }
+    JS_FreeValue(ctx, r);
+    ns_js_budget_pop(js, &bg);
+    for (uint32_t i = 0; i < n; i++) JS_FreeValue(ctx, args[i]);
+    return JS_UNDEFINED;
+}
+
+static void
+ns_popup_deliver_call(ns_js *js, JSContext *ctx, JSValueConst op)
+{
+    g_autofree char *token = NULL, *path = NULL, *origin = NULL, *payload = NULL;
+    const char *keys[] = { "token", "path", "origin", "data" };
+    char **outs[] = { &token, &path, &origin, &payload };
+    for (gsize i = 0; i < G_N_ELEMENTS(keys); i++) {
+        JSValue v = JS_GetPropertyStr(ctx, op, keys[i]);
+        const char *s = JS_IsString(v) ? JS_ToCString(ctx, v) : NULL;
+        if (s) {
+            *outs[i] = g_strdup(s);
+            JS_FreeCString(ctx, s);
+        }
+        JS_FreeValue(ctx, v);
+    }
+    if (!token || !path || !origin) return;
+    ns_popup_link *link = js->popups ? g_hash_table_lookup(js->popups, token)
+                                     : NULL;
+    if (!link) return;
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    JSContext *realm = link->frame && js->frame_contexts
+        ? g_hash_table_lookup(js->frame_contexts, link->frame) : main_ctx;
+    if (!realm) return;
+    g_autofree char *mine = ns_popup_realm_origin(js, realm);
+    if (strcmp(mine, "null") == 0 || strcmp(mine, origin) != 0) return;
+    JSValue keys_v = JS_ParseJSON(realm, path, strlen(path), "<opener-path>");
+    if (JS_IsException(keys_v)) {
+        JS_FreeValue(realm, JS_GetException(realm));
+        return;
+    }
+    uint32_t depth = JS_IsArray(keys_v) ? ns_js_array_length(realm, keys_v) : 0;
+    JSValue holder = JS_GetGlobalObject(realm);
+    JSValue cur = JS_DupValue(realm, holder);
+    for (uint32_t i = 0; i < depth && JS_IsObject(cur); i++) {
+        JSValue key = JS_GetPropertyUint32(realm, keys_v, i);
+        const char *k = JS_IsString(key) ? JS_ToCString(realm, key) : NULL;
+        JS_FreeValue(realm, key);
+        if (!k) {
+            JS_FreeValue(realm, cur);
+            cur = JS_UNDEFINED;
+            break;
+        }
+        JSValue next = JS_GetPropertyStr(realm, cur, k);
+        JS_FreeCString(realm, k);
+        if (JS_IsException(next)) {
+            JS_FreeValue(realm, JS_GetException(realm));
+            next = JS_UNDEFINED;
+        }
+        JS_FreeValue(realm, holder);
+        holder = cur;
+        cur = next;
+    }
+    JS_FreeValue(realm, keys_v);
+    if (depth > 0 && JS_IsFunction(realm, cur)) {
+        JSValue args = ns_popup_deserialize(realm, payload);
+        if (!JS_IsArray(args)) {
+            JS_FreeValue(realm, args);
+            args = JS_NewArray(realm);
+        }
+        JSValueConst job_args[3] = { cur, holder, args };
+        ns_js_queue_message_task(realm, ns_popup_call_job, 3, job_args);
+        JS_FreeValue(realm, args);
+    }
+    JS_FreeValue(realm, cur);
+    JS_FreeValue(realm, holder);
+}
+
 static void
 ns_popup_mark_closed(ns_js *js, const char *token)
 {
@@ -27352,6 +27531,8 @@ ns_js_popup_deliver(ns_js *js, const char *json)
         const char *k = JS_IsString(kind) ? JS_ToCString(ctx, kind) : NULL;
         if (k && strcmp(k, "message") == 0) {
             ns_popup_deliver_message(js, ctx, op);
+        } else if (k && strcmp(k, "call") == 0) {
+            ns_popup_deliver_call(js, ctx, op);
         } else if (k && strcmp(k, "closed") == 0) {
             JSValue tok = JS_GetPropertyStr(ctx, op, "token");
             const char *t = JS_IsString(tok) ? JS_ToCString(ctx, tok) : NULL;
