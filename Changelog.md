@@ -1,6 +1,21 @@
 Changelog:
 ==Significant changes in each release:
 
+Unreleased:
+======
+* `document.write()` from a script in `<head>` now puts body content into
+  the body, ahead of the body's own content, as the HTML parser does. It
+  also copies over attributes from a written `<html>` or `<body>` tag. The
+  written content used to land inside `<head>`, where it was invisible.
+  Google ad creatives delivered through SafeFrame (such as the ads on
+  yahoo.com) now show.
+* `scrollHeight`, `clientWidth` and `clientHeight` of a framed document's
+  root now measure that frame's viewport instead of the top page. Only the
+  document's scrolling element (`<html>`, or `<body>` in quirks mode)
+  gets viewport sizing; in standards mode `<body>` reports its own size.
+  A frame that sizes itself from `document.body.scrollHeight` (yahoo.com's
+  consent banner) no longer grows to the height of the whole page.
+
 1.0.40:
 ======
 * The browser is named "Nordstjernen Sol Explorer" for the 1.0.40 series:

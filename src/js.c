@@ -361,6 +361,8 @@ static const ns_node *ns_node_ancestor_or_self(const ns_node *desc, const ns_nod
 static gboolean ns_node_is_shadow_root(const ns_node *n);
 static void ns_focus_guard_forget(ns_js *js, const ns_node *n);
 static void ns_parser_hold_forget(ns_js *js, const ns_node *n);
+static ns_node *ns_parser_held_child(ns_js *js, const ns_node *parent,
+                                     const char *name);
 static void ns_insert_sibling_before(ns_node *ref, ns_node *newc);
 static JSValue ns_element_getElementById(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
@@ -1605,6 +1607,7 @@ ns_js_realm_url(ns_js *js, JSContext *realm)
 }
 
 static ns_node *ns_js_node_frame(const ns_node *node);
+static void ns_js_node_viewport_size(ns_js *js, const ns_node *n, double *vw, double *vh);
 
 static const ns_csp *
 ns_js_frame_csp(const ns_js *js, const ns_node *frame)
@@ -40836,13 +40839,12 @@ ns_element_get_clientWidth(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     gboolean is_root = n && n->name &&
         (strcmp(n->name, "html") == 0 || strcmp(n->name, "body") == 0);
+    double vw = 0, vh = 0;
+    if (is_root) ns_js_node_viewport_size(js_from_ctx(ctx), n, &vw, &vh);
     const ns_box *b = ns_block_box_for_this(ctx, this_val);
-    if (!b) {
-        if (is_root) return JS_NewInt32(ctx, (int)(ns_css_viewport_w() + 0.5));
-        return JS_NewInt32(ctx, 0);
-    }
+    if (!b) return JS_NewInt32(ctx, is_root ? (int)(vw + 0.5) : 0);
     if (n && n->name && strcmp(n->name, "html") == 0)
-        return JS_NewInt32(ctx, (int)(ns_css_viewport_w() + 0.5));
+        return JS_NewInt32(ctx, (int)(vw + 0.5));
     double w = b->content_width + b->padding.left + b->padding.right;
     if (w < 0) w = 0;
     return JS_NewInt32(ctx, (int)(w + 0.5));
@@ -40854,13 +40856,12 @@ ns_element_get_clientHeight(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     gboolean is_root = n && n->name &&
         (strcmp(n->name, "html") == 0 || strcmp(n->name, "body") == 0);
+    double vw = 0, vh = 0;
+    if (is_root) ns_js_node_viewport_size(js_from_ctx(ctx), n, &vw, &vh);
     const ns_box *b = ns_block_box_for_this(ctx, this_val);
-    if (!b) {
-        if (is_root) return JS_NewInt32(ctx, (int)(ns_css_viewport_h() + 0.5));
-        return JS_NewInt32(ctx, 0);
-    }
+    if (!b) return JS_NewInt32(ctx, is_root ? (int)(vh + 0.5) : 0);
     if (n && n->name && strcmp(n->name, "html") == 0)
-        return JS_NewInt32(ctx, (int)(ns_css_viewport_h() + 0.5));
+        return JS_NewInt32(ctx, (int)(vh + 0.5));
     double h = b->content_height + b->padding.top + b->padding.bottom;
     if (h < 0) h = 0;
     return JS_NewInt32(ctx, (int)(h + 0.5));
@@ -43158,24 +43159,62 @@ ns_scrollable_overflow_size(const ns_box *b, double *out_w, double *out_h)
     *out_h = h > pad_h ? h : legacy_h;
 }
 
+static gboolean
+ns_node_is_viewport_scroller(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
+    const ns_node *html = n;
+    if (strcmp(n->name, "body") == 0)
+        html = n->parent;
+    else if (strcmp(n->name, "html") != 0)
+        return FALSE;
+    if (!html || html->kind != NS_NODE_ELEMENT || !html->name ||
+        strcmp(html->name, "html") != 0)
+        return FALSE;
+    const ns_node *doc = html->parent;
+    if (!doc || doc->kind != NS_NODE_DOCUMENT) return FALSE;
+    gboolean quirks = (doc->flags & NS_NODE_QUIRKS) != 0;
+    return quirks ? n != html : n == html;
+}
+
+static gboolean
+ns_js_frame_viewport_size(ns_js *js, const ns_node *n, double *vw, double *vh)
+{
+    const ns_node *frame = ns_js_node_frame(n);
+    if (!frame || frame == n) return FALSE;
+    const ns_box *fb = js && js->layout_root
+        ? ns_box_find_by_dom(js->layout_root, frame) : NULL;
+    *vw = fb ? fb->content_width + fb->padding.left + fb->padding.right : 0;
+    *vh = fb ? fb->content_height + fb->padding.top + fb->padding.bottom : 0;
+    if (*vw < 0) *vw = 0;
+    if (*vh < 0) *vh = 0;
+    return TRUE;
+}
+
+static void
+ns_js_node_viewport_size(ns_js *js, const ns_node *n, double *vw, double *vh)
+{
+    if (!ns_js_frame_viewport_size(js, n, vw, vh)) {
+        *vw = ns_css_viewport_w();
+        *vh = ns_css_viewport_h();
+    }
+}
+
 static JSValue
 ns_element_get_scrollHeight(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    gboolean is_root = n && n->name &&
-        (strcmp(n->name, "html") == 0 || strcmp(n->name, "body") == 0);
+    ns_js *js = js_from_ctx(ctx);
+    gboolean is_root = ns_node_is_viewport_scroller(n);
+    double vw = 0, vh = 0;
+    if (is_root) ns_js_node_viewport_size(js, n, &vw, &vh);
     const ns_box *b = ns_block_box_for_this(ctx, this_val);
-    if (!b) {
-        if (is_root) return JS_NewInt32(ctx, (int)(ns_css_viewport_h() + 0.5));
-        return JS_NewInt32(ctx, 0);
-    }
+    if (!b) return JS_NewInt32(ctx, is_root ? (int)(vh + 0.5) : 0);
     double w = 0, h = 0;
     ns_scrollable_overflow_size(b, &w, &h);
     if (is_root) {
-        ns_js *js = js_from_ctx(ctx);
-        if (js && js->layout_root)
+        if (js && js->layout_root && !ns_js_node_frame(n))
             h = ns_box_max_bottom(js->layout_root, h);
-        double vh = ns_css_viewport_h();
         if (h < vh) h = vh;
     }
     if (h < 0) h = 0;
@@ -63079,6 +63118,113 @@ ns_document_expose_legacy_named(ns_js *js, const ns_node *root,
     ns_document_expose_legacy_named_in(js->ctx, document, root, 0);
 }
 
+static ns_node *
+ns_node_child_element_named(ns_node *parent, const char *name)
+{
+    for (ns_node *c = parent ? parent->first_child : NULL; c; c = c->next_sibling)
+        if (ns_node_is_element_named(c, name)) return c;
+    return NULL;
+}
+
+static void
+ns_document_write_merge_attrs(ns_js *js, ns_node *live, const ns_node *written)
+{
+    if (!live || !written) return;
+    for (const ns_attr *a = written->attrs; a; a = a->next)
+        if (a->name && !ns_element_get_attr(live, a->name))
+            ns_js_set_attr_recorded(js, live, a->name, a->value ? a->value : "");
+}
+
+static void
+ns_document_write_move_children(ns_js *js, ns_node *from, ns_node *parent,
+                                ns_node *ref, gboolean before,
+                                GPtrArray *inserted)
+{
+    ns_node *c = from ? from->first_child : NULL;
+    while (c) {
+        ns_node *next = c->next_sibling;
+        ns_node_own_strings_deep(c);
+        ns_node_remove(c);
+        if (ref && ref->parent == parent && before)
+            ns_insert_sibling_before(ref, c);
+        else if (ref && ref->parent == parent)
+            ns_insert_sibling_after(ref, c);
+        else
+            ns_node_append_child(parent, c);
+        ns_js_record_child_change(js, parent, c, NULL,
+                                  c->prev_sibling, c->next_sibling);
+        if (!before) ref = c;
+        g_ptr_array_add(inserted, c);
+        c = next;
+    }
+}
+
+static gboolean
+ns_document_write_from_head(ns_js *js, ns_node *head, ns_node *ref,
+                            const char *html, gboolean scripting,
+                            GPtrArray *inserted, ns_node **body_out)
+{
+    ns_node *live_html = head->parent;
+    ns_node *live_body = ns_node_child_element_named(live_html, "body");
+    if (!live_body) live_body = ns_parser_held_child(js, live_html, "body");
+    if (!ns_node_is_element_named(live_html, "html") || !live_body)
+        return FALSE;
+    ns_node *doc = ns_html_parse_with_scripting(html, -1, scripting);
+    if (!doc) return FALSE;
+    ns_node *w_html = ns_node_child_element_named(doc, "html");
+    ns_node *w_head = ns_node_child_element_named(w_html, "head");
+    ns_node *w_body = ns_node_child_element_named(w_html, "body");
+    js->throw_on_dynamic_markup++;
+    ns_document_write_merge_attrs(js, live_html, w_html);
+    if (js->document_write_body_doc != js->current_doc) {
+        js->document_write_body_doc = js->current_doc;
+        js->document_write_body_count = 0;
+    }
+    gboolean in_body = js->document_write_body_count > 0;
+    if (!in_body)
+        ns_document_write_move_children(js, w_head, head, ref, FALSE, inserted);
+    if (in_body || (w_body && w_body->first_child)) {
+        ns_document_write_merge_attrs(js, live_body, w_body);
+        ns_node *anchor = live_body->first_child;
+        for (guint i = 0; anchor && i < js->document_write_body_count; i++)
+            anchor = anchor->next_sibling;
+        guint before = inserted->len;
+        if (in_body)
+            ns_document_write_move_children(js, w_head, live_body, anchor,
+                                            TRUE, inserted);
+        ns_document_write_move_children(js, w_body, live_body, anchor, TRUE,
+                                        inserted);
+        js->document_write_body_count += inserted->len - before;
+        *body_out = live_body;
+    }
+    js->throw_on_dynamic_markup--;
+    ns_node_free(doc);
+    return TRUE;
+}
+
+static void
+ns_document_write_finish(ns_js *js, ns_node *parent, ns_node *body_parent,
+                         GPtrArray *inserted)
+{
+    if (inserted->len > 0) {
+        JSValue global = JS_GetGlobalObject(js->ctx);
+        JSValue document = JS_GetPropertyStr(js->ctx, global, "document");
+        for (guint i = 0; i < inserted->len; i++)
+            ns_document_expose_legacy_named(js, g_ptr_array_index(inserted, i),
+                                            document);
+        JS_FreeValue(js->ctx, document);
+        JS_FreeValue(js->ctx, global);
+        js->mutated = TRUE;
+        js->throw_on_dynamic_markup++;
+        ns_ce_upgrade_subtree_all(js, parent);
+        if (body_parent) ns_ce_upgrade_subtree_all(js, body_parent);
+        js->throw_on_dynamic_markup--;
+        ns_js_run_inserted_scripts(js, parent);
+        if (body_parent) ns_js_run_inserted_scripts(js, body_parent);
+    }
+    g_ptr_array_free(inserted, TRUE);
+}
+
 static void
 ns_js_flush_document_write(ns_js *js)
 {
@@ -63100,11 +63246,22 @@ ns_js_flush_document_write(ns_js *js)
     const ns_node *root = ns_node_root(parent);
     gboolean scripting = !root ||
         !(root->flags & NS_NODE_SCRIPTING_DISABLED);
+    ns_node *body_parent = NULL;
+    GPtrArray *inserted = g_ptr_array_new();
+    if (ref && ns_node_is_element_named(parent, "head") &&
+        ns_document_write_from_head(js, parent, ref, html, scripting,
+                                    inserted, &body_parent)) {
+        g_free(html);
+        ns_document_write_finish(js, parent, body_parent, inserted);
+        return;
+    }
     ns_node *fragment = ns_html_parse_fragment_with_scripting(
         ctx_tag, html, -1, scripting);
     g_free(html);
-    if (!fragment) return;
-    GPtrArray *inserted = g_ptr_array_new();
+    if (!fragment) {
+        g_ptr_array_free(inserted, TRUE);
+        return;
+    }
     js->throw_on_dynamic_markup++;
     ns_node *c = fragment->first_child;
     while (c) {
@@ -63123,22 +63280,8 @@ ns_js_flush_document_write(ns_js *js)
         c = next;
     }
     ns_node_free(fragment);
-    if (inserted->len > 0) {
-        JSValue global = JS_GetGlobalObject(js->ctx);
-        JSValue document = JS_GetPropertyStr(js->ctx, global, "document");
-        for (guint i = 0; i < inserted->len; i++)
-            ns_document_expose_legacy_named(js, g_ptr_array_index(inserted, i),
-                                            document);
-        JS_FreeValue(js->ctx, document);
-        JS_FreeValue(js->ctx, global);
-        js->mutated = TRUE;
-        ns_ce_upgrade_subtree_all(js, parent);
-        js->throw_on_dynamic_markup--;
-        ns_js_run_inserted_scripts(js, parent);
-    } else {
-        js->throw_on_dynamic_markup--;
-    }
-    g_ptr_array_free(inserted, TRUE);
+    js->throw_on_dynamic_markup--;
+    ns_document_write_finish(js, parent, NULL, inserted);
 }
 
 static void
@@ -63158,6 +63301,8 @@ ns_document_open_impl(ns_js *js)
     if (js->document_write_buffer)
         g_string_truncate(js->document_write_buffer, 0);
     js->document_write_script = NULL;
+    js->document_write_body_doc = NULL;
+    js->document_write_body_count = 0;
     js->document_write_parser_open = TRUE;
     js->mutated = TRUE;
     ns_node_arm_js_invalidate(js->current_doc);
@@ -67253,6 +67398,19 @@ ns_parser_hold_forget(ns_js *js, const ns_node *n)
             if (e->node == n) e->node = NULL;
         }
     }
+}
+
+static ns_node *
+ns_parser_held_child(ns_js *js, const ns_node *parent, const char *name)
+{
+    for (ns_parser_hold *h = js->parser_hold; h; h = h->prev)
+        for (guint i = h->next; i < h->held->len; i++) {
+            ns_parser_held *e = &g_array_index(h->held, ns_parser_held, i);
+            if (e->parent == parent && e->node && !e->node->parent &&
+                ns_node_is_element_named(e->node, name))
+                return e->node;
+        }
+    return NULL;
 }
 
 static void
