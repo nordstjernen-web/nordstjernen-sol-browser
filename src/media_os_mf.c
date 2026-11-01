@@ -9,11 +9,14 @@
 #include "media_os.h"
 
 #include <windows.h>
+#include <d3d11.h>
+#include <d3d10.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
 #include <mfobjects.h>
 #include <mftransform.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,6 +27,24 @@ typedef HRESULT (WINAPI *ns_mf_enum_fn)(GUID, UINT32, const MFT_REGISTER_TYPE_IN
 typedef HRESULT (WINAPI *ns_mf_media_type_fn)(IMFMediaType **);
 typedef HRESULT (WINAPI *ns_mf_sample_fn)(IMFSample **);
 typedef HRESULT (WINAPI *ns_mf_buffer_fn)(DWORD, IMFMediaBuffer **);
+typedef HRESULT (WINAPI *ns_mf_dxgi_manager_fn)(UINT *, IMFDXGIDeviceManager **);
+typedef HRESULT (WINAPI *ns_d3d11_create_fn)(IDXGIAdapter *, D3D_DRIVER_TYPE,
+                                             HMODULE, UINT,
+                                             const D3D_FEATURE_LEVEL *, UINT,
+                                             UINT, ID3D11Device **,
+                                             D3D_FEATURE_LEVEL *,
+                                             ID3D11DeviceContext **);
+
+/* Defined here rather than linked from dxguid/mfuuid. */
+static const GUID ns_MF_SA_D3D11_AWARE =
+    { 0x206b4fc8, 0xfcf9, 0x4c51,
+      { 0xaf, 0xe3, 0x97, 0x64, 0x36, 0x9e, 0x33, 0xa0 } };
+static const GUID ns_IID_ID3D10Multithread =
+    { 0x9b7e4e00, 0x342c, 0x4106,
+      { 0xa1, 0x9f, 0x4f, 0x27, 0x04, 0xf6, 0x89, 0xf0 } };
+static const GUID ns_IID_IMFDXGIBuffer =
+    { 0xe7174cfa, 0x1c9e, 0x48b1,
+      { 0x88, 0x66, 0x62, 0x62, 0x26, 0xbf, 0xc2, 0x58 } };
 
 static struct {
     ns_mf_startup_fn    startup;
@@ -31,6 +52,7 @@ static struct {
     ns_mf_media_type_fn create_media_type;
     ns_mf_sample_fn     create_sample;
     ns_mf_buffer_fn     create_memory_buffer;
+    ns_mf_dxgi_manager_fn create_dxgi_manager;
 } g_mf;
 
 struct ns_os_vdec {
@@ -50,6 +72,8 @@ struct ns_os_vdec {
     int           output_ready;
     DWORD         out_buf_size;
     int           provides_samples;
+    int           hw;
+    int           hw_reported;
 };
 
 struct ns_os_adec {
@@ -77,6 +101,8 @@ mf_load(void)
         (ns_mf_sample_fn)(void *)GetProcAddress(mfplat, "MFCreateSample");
     g_mf.create_memory_buffer =
         (ns_mf_buffer_fn)(void *)GetProcAddress(mfplat, "MFCreateMemoryBuffer");
+    g_mf.create_dxgi_manager = (ns_mf_dxgi_manager_fn)(void *)GetProcAddress(
+        mfplat, "MFCreateDXGIDeviceManager");
     return g_mf.startup && g_mf.enum_ex && g_mf.create_media_type &&
            g_mf.create_sample && g_mf.create_memory_buffer;
 }
@@ -247,6 +273,73 @@ vdec_pick_output(ns_os_vdec *d)
     }
 }
 
+/* One D3D11 device with video support, shared by every decoder in the
+ * process. Handing its device manager to a D3D11-aware decoder (Microsoft's
+ * H.264 MFT is one) makes it decode through DXVA on the GPU; its output
+ * samples are then GPU surfaces, which IMF2DBuffer::Lock2D reads back. */
+static INIT_ONCE             g_d3d_once = INIT_ONCE_STATIC_INIT;
+static IMFDXGIDeviceManager *g_d3d_manager;
+
+static BOOL CALLBACK
+mf_d3d_startup(PINIT_ONCE once, PVOID param, PVOID *ctx)
+{
+    (void)once; (void)param; (void)ctx;
+    if (getenv("NS_MEDIA_NO_HW_DECODE") || !g_mf.create_dxgi_manager)
+        return TRUE;
+    HMODULE d3d11 = LoadLibraryW(L"d3d11.dll");
+    ns_d3d11_create_fn create = d3d11
+        ? (ns_d3d11_create_fn)(void *)GetProcAddress(d3d11, "D3D11CreateDevice")
+        : NULL;
+    if (!create) return TRUE;
+    static const D3D_FEATURE_LEVEL levels[] = {
+        D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
+        D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0,
+    };
+    ID3D11Device *dev = NULL;
+    HRESULT hr = create(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
+                        D3D11_CREATE_DEVICE_VIDEO_SUPPORT, levels,
+                        (UINT)(sizeof levels / sizeof levels[0]),
+                        D3D11_SDK_VERSION, &dev, NULL, NULL);
+    if (hr == E_INVALIDARG)
+        hr = create(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
+                    D3D11_CREATE_DEVICE_VIDEO_SUPPORT, levels + 1,
+                    (UINT)(sizeof levels / sizeof levels[0]) - 1,
+                    D3D11_SDK_VERSION, &dev, NULL, NULL);
+    if (FAILED(hr) || !dev) return TRUE;
+    ID3D10Multithread *mt = NULL;
+    if (SUCCEEDED(ID3D11Device_QueryInterface(dev, &ns_IID_ID3D10Multithread,
+                                              (void **)&mt))) {
+        ID3D10Multithread_SetMultithreadProtected(mt, TRUE);
+        ID3D10Multithread_Release(mt);
+    }
+    UINT token = 0;
+    IMFDXGIDeviceManager *mgr = NULL;
+    if (SUCCEEDED(g_mf.create_dxgi_manager(&token, &mgr)) &&
+        SUCCEEDED(IMFDXGIDeviceManager_ResetDevice(mgr, (IUnknown *)dev,
+                                                   token)))
+        g_d3d_manager = mgr;
+    else if (mgr)
+        IMFDXGIDeviceManager_Release(mgr);
+    ID3D11Device_Release(dev);
+    return TRUE;
+}
+
+static int
+mf_use_d3d(IMFTransform *mft)
+{
+    InitOnceExecuteOnce(&g_d3d_once, mf_d3d_startup, NULL, NULL);
+    if (!g_d3d_manager) return 0;
+    IMFAttributes *attrs = NULL;
+    UINT32 aware = 0;
+    if (SUCCEEDED(IMFTransform_GetAttributes(mft, &attrs)) && attrs) {
+        IMFAttributes_GetUINT32(attrs, &ns_MF_SA_D3D11_AWARE, &aware);
+        IMFAttributes_Release(attrs);
+    }
+    if (!aware) return 0;
+    return SUCCEEDED(IMFTransform_ProcessMessage(
+        mft, MFT_MESSAGE_SET_D3D_MANAGER, (ULONG_PTR)g_d3d_manager));
+}
+
 ns_os_vdec *
 ns_os_vdec_new_h264(const uint8_t *avcc, size_t avcc_len, int width, int height)
 {
@@ -264,6 +357,7 @@ ns_os_vdec_new_h264(const uint8_t *avcc, size_t avcc_len, int width, int height)
     d->mft = mf_find_decoder(&MFT_CATEGORY_VIDEO_DECODER, &MFMediaType_Video,
                              &MFVideoFormat_H264);
     if (!d->mft) goto fail;
+    d->hw = mf_use_d3d(d->mft);
     IMFMediaType *in = NULL;
     if (FAILED(g_mf.create_media_type(&in))) goto fail;
     IMFMediaType_SetGUID(in, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
@@ -274,6 +368,13 @@ ns_os_vdec_new_h264(const uint8_t *avcc, size_t avcc_len, int width, int height)
     IMFMediaType_SetUINT32(in, &MF_MT_INTERLACE_MODE,
                            MFVideoInterlace_MixedInterlaceOrProgressive);
     HRESULT hr = IMFTransform_SetInputType(d->mft, 0, in, 0);
+    if (FAILED(hr) && d->hw) {
+        /* The GPU cannot take this stream (profile, size): decode it in
+         * software instead. */
+        IMFTransform_ProcessMessage(d->mft, MFT_MESSAGE_SET_D3D_MANAGER, 0);
+        d->hw = 0;
+        hr = IMFTransform_SetInputType(d->mft, 0, in, 0);
+    }
     IMFMediaType_Release(in);
     if (FAILED(hr)) goto fail;
     vdec_pick_output(d);
@@ -390,6 +491,25 @@ vdec_convert(ns_os_vdec *d, IMFSample *s, ns_os_frame *out)
     return ok;
 }
 
+static void
+vdec_report_path(const ns_os_vdec *d, IMFSample *s)
+{
+    int gpu = 0;
+    IMFMediaBuffer *buf = NULL;
+    if (SUCCEEDED(IMFSample_GetBufferByIndex(s, 0, &buf))) {
+        IUnknown *dxgi = NULL;
+        if (SUCCEEDED(IMFMediaBuffer_QueryInterface(buf, &ns_IID_IMFDXGIBuffer,
+                                                    (void **)&dxgi))) {
+            gpu = 1;
+            IUnknown_Release(dxgi);
+        }
+        IMFMediaBuffer_Release(buf);
+    }
+    if (getenv("NS_DBG_MEDIA"))
+        fprintf(stderr, "[media] MF H.264 %dx%d: %s\n", d->vis_width,
+                d->vis_height, gpu ? "GPU (DXVA)" : "CPU");
+}
+
 ns_os_status
 ns_os_vdec_receive(ns_os_vdec *d, ns_os_frame *out)
 {
@@ -420,6 +540,10 @@ ns_os_vdec_receive(ns_os_vdec *d, ns_os_frame *out)
             return NS_OS_ERROR;
         }
         int ok = ob.pSample && vdec_convert(d, ob.pSample, out);
+        if (ok && !d->hw_reported) {
+            d->hw_reported = 1;
+            vdec_report_path(d, ob.pSample);
+        }
         if (ob.pSample) IMFSample_Release(ob.pSample);
         return ok ? NS_OS_FRAME : NS_OS_ERROR;
     }
