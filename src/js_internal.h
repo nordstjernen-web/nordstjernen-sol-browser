@@ -156,6 +156,7 @@ struct ns_js {
     GPtrArray    *workers;
     GHashTable   *shared_workers;
     GHashTable   *popups;
+    GHashTable   *popup_ports;
     char         *opener_token;
     char         *opener_origin;
     ns_worker_host *worker_host;

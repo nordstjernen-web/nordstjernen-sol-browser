@@ -1715,7 +1715,7 @@ pw_popup_send(int tab_id, const RjValue *op, const char *kind)
     GString *out = g_string_new("[{\"op\":");
     rj_append_str(out, kind);
     static const char *const fields[] = { "token", "to", "data", "origin",
-                                          "target", "path" };
+                                          "target", "path", "ports", "id" };
     for (gsize i = 0; i < G_N_ELEMENTS(fields); i++) {
         const char *val = rj_get_str(op, fields[i]);
         if (!val) continue;
@@ -1806,6 +1806,9 @@ pw_popup_handle(ProcWindow *pw, NsProcView *v, const char *json)
         } else if (strcmp(kind, "call") == 0) {
             if (sender == l->popup_tab)
                 pw_popup_send(l->opener_tab, op, "call");
+        } else if (strcmp(kind, "port") == 0) {
+            pw_popup_send(sender == l->popup_tab ? l->opener_tab : l->popup_tab,
+                          op, "port");
         } else if (strcmp(kind, "close") == 0) {
             int popup_tab = l->popup_tab;
             ProcWindow *ppw = NULL;
