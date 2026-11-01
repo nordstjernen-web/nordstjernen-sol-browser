@@ -3,6 +3,10 @@ Changelog:
 
 1.0.40-dev:
 ======
+* Security: a cookie written from script with the `HttpOnly` attribute
+  (through `document.cookie` or a frame's document) is now ignored, as
+  RFC 6265 requires. It used to be stored without the flag, so script
+  could plant a cookie the server would take for an HTTP-only one.
 * Security: cross-origin `XMLHttpRequest` without `withCredentials`, and
   cross-origin `fetch()` without `credentials: 'include'`, no longer send
   or store cookies. `credentials: 'omit'` is honoured for every request,
