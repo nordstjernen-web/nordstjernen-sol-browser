@@ -3,6 +3,18 @@ Changelog:
 
 Unreleased:
 ======
+* Events dispatched inside a shadow tree are now retargeted. A listener
+  on a shadow host or further out sees `event.target` as the host, not
+  as the node inside the shadow root. Web components that react to
+  `input` events from their own inner `<input>` (Reddit's login fields)
+  now update their state.
+* `ElementInternals` is implemented for form-associated custom
+  elements: `setValidity()` with a real `validity` state,
+  `checkValidity()`/`reportValidity()` firing `invalid`,
+  `validationMessage`, `willValidate`, `setFormValue()`, `form`,
+  `labels` and `states`. `attachInternals()` used to return a stub, and
+  there was no `ElementInternals` interface. Reddit's login button now
+  enables once both fields are filled in.
 * `document.write()` from a script in `<head>` now puts body content into
   the body, ahead of the body's own content, as the HTML parser does. It
   also copies over attributes from a written `<html>` or `<body>` tag. The

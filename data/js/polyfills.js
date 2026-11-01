@@ -14432,4 +14432,153 @@
                 });
             });
     })();
+
+    (function () {
+        var HE = global.HTMLElement;
+        if (!HE || typeof global.ElementInternals === 'function') return;
+        var FLAGS = ['valueMissing', 'typeMismatch', 'patternMismatch', 'tooLong',
+                     'tooShort', 'rangeUnderflow', 'rangeOverflow', 'stepMismatch',
+                     'badInput', 'customError'];
+        var secret = {};
+        var slots = new WeakMap();
+        var attached = new WeakMap();
+        function slot(self) {
+            var s = slots.get(self);
+            if (!s) throw new TypeError('Illegal invocation');
+            return s;
+        }
+        function makeStates() {
+            try {
+                if (typeof global.CustomStateSet === 'function') return new global.CustomStateSet();
+            } catch (e) {}
+            return new Set();
+        }
+        function ElementInternals(key, element) {
+            if (key !== secret) throw new TypeError('Illegal constructor');
+            slots.set(this, {
+                element: element, flags: {}, message: '', anchor: null,
+                value: null, state: null, states: makeStates()
+            });
+        }
+        function accessor(name, get) {
+            Object.defineProperty(ElementInternals.prototype, name, {
+                get: function () { return get(slot(this)); },
+                enumerable: true, configurable: true
+            });
+        }
+        function isValid(s) {
+            return !FLAGS.some(function (f) { return s.flags[f]; });
+        }
+        function formAssociated(s) {
+            var ctor = s.element.constructor;
+            return !!(ctor && ctor.formAssociated);
+        }
+        function barred(s) {
+            var el = s.element;
+            return el.hasAttribute('disabled') || el.hasAttribute('readonly') ||
+                   !!(el.closest && el.closest('datalist'));
+        }
+        function requireFormAssociated(s, what) {
+            if (!formAssociated(s))
+                throw new DOMException("Failed to execute '" + what +
+                    "' on 'ElementInternals': The target element is not a form-associated custom element.",
+                    'NotSupportedError');
+        }
+        accessor('shadowRoot', function (s) {
+            var root = s.element.shadowRoot;
+            return root || null;
+        });
+        accessor('form', function (s) {
+            if (!formAssociated(s)) return null;
+            var id = s.element.getAttribute('form');
+            if (id) {
+                var byId = s.element.ownerDocument.getElementById(id);
+                return byId && byId.localName === 'form' ? byId : null;
+            }
+            return s.element.closest ? s.element.closest('form') : null;
+        });
+        accessor('labels', function (s) {
+            var el = s.element, out = [];
+            if (el.id) {
+                var all = el.ownerDocument.querySelectorAll('label[for]');
+                for (var i = 0; i < all.length; i++)
+                    if (all[i].htmlFor === el.id) out.push(all[i]);
+            }
+            var p = el.parentElement;
+            while (p) {
+                if (p.localName === 'label' && out.indexOf(p) < 0 && !p.htmlFor) out.push(p);
+                p = p.parentElement;
+            }
+            return Object.freeze(out);
+        });
+        accessor('willValidate', function (s) {
+            return formAssociated(s) && !barred(s);
+        });
+        accessor('validity', function (s) {
+            var proto = global.ValidityState && global.ValidityState.prototype;
+            var v = proto ? Object.create(proto) : {};
+            FLAGS.forEach(function (f) {
+                Object.defineProperty(v, f, { value: !!s.flags[f], enumerable: true });
+            });
+            Object.defineProperty(v, 'valid', { value: isValid(s), enumerable: true });
+            return v;
+        });
+        accessor('validationMessage', function (s) {
+            return isValid(s) || barred(s) ? '' : s.message;
+        });
+        accessor('states', function (s) { return s.states; });
+        ElementInternals.prototype.setFormValue = function (value, state) {
+            var s = slot(this);
+            requireFormAssociated(s, 'setFormValue');
+            s.value = value === undefined ? null : value;
+            s.state = state === undefined ? s.value : state;
+        };
+        ElementInternals.prototype.setValidity = function (flags, message, anchor) {
+            var s = slot(this);
+            requireFormAssociated(s, 'setValidity');
+            var next = {};
+            var invalid = false;
+            FLAGS.forEach(function (f) {
+                next[f] = !!(flags && flags[f]);
+                if (next[f]) invalid = true;
+            });
+            if (invalid && (message === undefined || message === ''))
+                throw new TypeError("Failed to execute 'setValidity' on 'ElementInternals': " +
+                    'The second argument should not be empty if one or more flags in the first argument are true.');
+            s.flags = next;
+            s.message = invalid ? String(message) : '';
+            s.anchor = anchor || null;
+        };
+        function check(self, report) {
+            var s = slot(self);
+            requireFormAssociated(s, report ? 'reportValidity' : 'checkValidity');
+            if (barred(s) || isValid(s)) return true;
+            var ev = new Event('invalid', { cancelable: true });
+            s.element.dispatchEvent(ev);
+            return false;
+        }
+        ElementInternals.prototype.checkValidity = function () { return check(this, false); };
+        ElementInternals.prototype.reportValidity = function () { return check(this, true); };
+        Object.defineProperty(ElementInternals.prototype, Symbol.toStringTag,
+                              { value: 'ElementInternals', configurable: true });
+        Object.defineProperty(global, 'ElementInternals', {
+            value: ElementInternals, writable: true, configurable: true
+        });
+        Object.defineProperty(HE.prototype, 'attachInternals', {
+            value: function attachInternals() {
+                if (attached.has(this))
+                    throw new DOMException("Failed to execute 'attachInternals' on 'HTMLElement': " +
+                        'ElementInternals for the specified element was already attached.',
+                        'NotSupportedError');
+                if (this.localName.indexOf('-') < 0 && !this.getAttribute('is'))
+                    throw new DOMException("Failed to execute 'attachInternals' on 'HTMLElement': " +
+                        'Unable to attach ElementInternals to non-custom elements.',
+                        'NotSupportedError');
+                var internals = new ElementInternals(secret, this);
+                attached.set(this, internals);
+                return internals;
+            },
+            writable: true, configurable: true
+        });
+    })();
 })(typeof globalThis !== 'undefined' ? globalThis : this);
