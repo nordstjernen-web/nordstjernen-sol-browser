@@ -9557,6 +9557,7 @@ typedef struct ns_js_fetch_state {
     gboolean       aborted;
     gboolean       settled;
     gboolean       no_cors;
+    gboolean       credentials_included;
     double         fetch_start_ms;
     char          *fb_send_url;
     char          *fb_top;
@@ -9732,12 +9733,26 @@ ns_fetch_credentials_from(JSContext *ctx, JSValueConst holder)
     return mode;
 }
 
+static char *
+ns_fetch_credentials_mode(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    char *mode = argc >= 2 ? ns_fetch_credentials_from(ctx, argv[1]) : NULL;
+    if (!mode && argc >= 1) mode = ns_fetch_credentials_from(ctx, argv[0]);
+    return mode;
+}
+
+static gboolean
+ns_fetch_includes_credentials(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    g_autofree char *mode = ns_fetch_credentials_mode(ctx, argc, argv);
+    return mode && !strcmp(mode, "include");
+}
+
 static gboolean
 ns_fetch_omits_credentials(JSContext *ctx, int argc, JSValueConst *argv,
                            const char *top, const char *send_url)
 {
-    g_autofree char *mode = argc >= 2 ? ns_fetch_credentials_from(ctx, argv[1]) : NULL;
-    if (!mode && argc >= 1) mode = ns_fetch_credentials_from(ctx, argv[0]);
+    g_autofree char *mode = ns_fetch_credentials_mode(ctx, argc, argv);
     if (mode && !strcmp(mode, "include")) return FALSE;
     if (mode && !strcmp(mode, "omit")) return TRUE;
     return !ns_url_same_origin(top, send_url);
@@ -9775,6 +9790,25 @@ cors_allows(const char *doc_url, const char *resp_url, const char *cors_header)
     }
     g_free(trimmed);
     return ok;
+}
+
+static gboolean
+cors_allows_credentialed(const char *doc_url, const char *resp_url,
+                         const char *cors_header, const char *raw_headers,
+                         gboolean credentialed)
+{
+    if (!cors_allows(doc_url, resp_url, cors_header)) return FALSE;
+    if (!credentialed || !cors_header || ns_url_same_origin(doc_url, resp_url))
+        return TRUE;
+    if (resp_url && (g_str_has_prefix(resp_url, "data:") ||
+                     g_str_has_prefix(resp_url, "blob:") ||
+                     g_str_has_prefix(resp_url, "about:"))) return TRUE;
+    g_autofree char *origin = g_strstrip(g_strdup(cors_header));
+    if (strcmp(origin, "*") == 0) return FALSE;
+    g_autofree char *allow_credentials =
+        ns_net_raw_header_values(raw_headers, "Access-Control-Allow-Credentials");
+    return allow_credentials &&
+           strcmp(g_strstrip(allow_credentials), "true") == 0;
 }
 
 typedef struct ns_js_fetch_delivery {
@@ -9915,8 +9949,10 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
     } else {
         const char *origin_url = st->origin_url ? st->origin_url :
                                  (st->js ? st->js->current_url : NULL);
-        gboolean allow = cors_allows(origin_url, resp->final_url,
-                                     resp->cors_allow_origin);
+        gboolean allow = cors_allows_credentialed(origin_url, resp->final_url,
+                                                  resp->cors_allow_origin,
+                                                  resp->raw_headers,
+                                                  st->credentials_included);
         if (!allow && !st->no_cors) {
             JS_ThrowTypeError(st->ctx, "Failed to fetch: CORS request blocked");
             JSValue ex = JS_GetException(st->ctx);
@@ -10465,6 +10501,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     st->reject  = resolving[1];
     st->requested_url = g_strdup(url);
     st->no_cors = no_cors;
+    st->credentials_included = ns_fetch_includes_credentials(ctx, argc, argv);
     st->fetch_start_ms = ns_perf_now_ms(st->js);
     const char *top = base_url && *base_url ? base_url :
                       (st->js ? st->js->current_url : NULL);
@@ -20846,6 +20883,15 @@ ns_window_dom_parser_ctor(JSContext *ctx, JSValueConst this_val,
     return obj;
 }
 
+static gboolean
+ns_xhr_with_credentials(JSContext *ctx, JSValueConst obj)
+{
+    JSValue v = JS_GetPropertyStr(ctx, obj, "withCredentials");
+    gboolean on = JS_ToBool(ctx, v) > 0;
+    JS_FreeValue(ctx, v);
+    return on;
+}
+
 typedef struct ns_xhr_state {
     JSContext *ctx;
     JSContext *timeline;
@@ -21605,8 +21651,10 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
     JSContext *ctx = st->ctx;
     gboolean response_allowed = FALSE;
     if (resp && !err) {
-        gboolean allow = cors_allows(st->origin_url, resp->final_url,
-                                     resp->cors_allow_origin)
+        gboolean allow = cors_allows_credentialed(st->origin_url, resp->final_url,
+                                                  resp->cors_allow_origin,
+                                                  resp->raw_headers,
+                                                  ns_xhr_with_credentials(ctx, st->obj))
                          && !ns_final_url_connect_blocked(js_from_ctx(ctx), ctx,
                                                           resp->final_url);
         response_allowed = allow;
@@ -21838,7 +21886,9 @@ ns_xhr_on_chunk(gpointer user_data, long status, const char *raw_headers,
         return;
     char *allow_origin = ns_xhr_raw_header_value(raw_headers,
                                                  "access-control-allow-origin");
-    gboolean allowed = cors_allows(st->origin_url, st->url, allow_origin);
+    gboolean allowed = cors_allows_credentialed(st->origin_url, st->url,
+                                                allow_origin, raw_headers,
+                                                ns_xhr_with_credentials(ctx, st->obj));
     g_free(allow_origin);
     if (!allowed) return;
     st->last_signal_us = now;
@@ -22437,10 +22487,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         g_ptr_array_add(hdr_terminated, hdrs->pdata[i]);
     }
     g_ptr_array_add(hdr_terminated, (gpointer)"X-ND-CORS: 1");
-    JSValue with_credentials_v = JS_GetPropertyStr(ctx, this_val, "withCredentials");
-    gboolean with_credentials = JS_ToBool(ctx, with_credentials_v) > 0;
-    JS_FreeValue(ctx, with_credentials_v);
-    if (!with_credentials &&
+    if (!ns_xhr_with_credentials(ctx, this_val) &&
         !ns_url_same_origin(ns_js_realm_url_or_current(st->js, ctx), st->url))
         g_ptr_array_add(hdr_terminated, (gpointer)"X-ND-Credentials: omit");
     g_ptr_array_add(hdr_terminated, NULL);

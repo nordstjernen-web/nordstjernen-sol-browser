@@ -3,6 +3,9 @@ Changelog:
 
 1.0.40-dev:
 ======
+* Security: a credentialed cross-origin `XMLHttpRequest` or `fetch()` now
+  reads the response only when the server answers with
+  `Access-Control-Allow-Credentials: true` and names the origin, not `*`.
 * Security: a `Content-Security-Policy: sandbox` directive on a framed
   document now sandboxes that frame and the frames inside it, just as the
   `sandbox` attribute does, so it blocks forms, scripts and same-origin
