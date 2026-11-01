@@ -120,6 +120,7 @@ struct ns_worker_host {
     gsize         inline_script_len;
     gboolean      is_module;
     gboolean      is_service_worker;
+    gboolean      is_shared;
     gint          sw_active;
     gint          terminated;
     char         *scope;
@@ -21314,9 +21315,21 @@ ns_target_is_document_node(const ns_node *n)
 }
 
 static JSValue
+ns_target_call_on_global(JSContext *ctx, JSCFunction *fn, int argc,
+                         JSValueConst *argv)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue r = fn(ctx, global, argc, argv);
+    JS_FreeValue(ctx, global);
+    return r;
+}
+
+static JSValue
 ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    if (JS_IsUndefined(this_val) || JS_IsNull(this_val))
+        return ns_target_call_on_global(ctx, ns_target_addEventListener, argc, argv);
     const ns_node *node = ns_unwrap_element(this_val);
     if (node)
         return ns_target_is_document_node(node)
@@ -21410,6 +21423,8 @@ static JSValue
 ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    if (JS_IsUndefined(this_val) || JS_IsNull(this_val))
+        return ns_target_call_on_global(ctx, ns_target_dispatchEvent, argc, argv);
     if (argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "dispatchEvent: argument is not an Event");
     const ns_node *target_node = ns_unwrap_element(this_val);
@@ -21581,6 +21596,8 @@ static JSValue
 ns_target_removeEventListener(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
+    if (JS_IsUndefined(this_val) || JS_IsNull(this_val))
+        return ns_target_call_on_global(ctx, ns_target_removeEventListener, argc, argv);
     const ns_node *node = ns_unwrap_element(this_val);
     if (node)
         return ns_target_is_document_node(node)
@@ -25938,6 +25955,7 @@ typedef struct ns_worker_message {
     char           *filename;
     int             lineno, colno;
     gboolean        is_load_error;
+    gboolean        is_connect;
     char           *sw_state;
     guint64         port_id;
     guint64        *xfer_ids;
@@ -27133,6 +27151,48 @@ ns_worker_shape_error_event(JSContext *ctx, JSValueConst ev,
 }
 
 static gboolean
+ns_port_bridge_has(JSContext *ctx, guint64 id)
+{
+    JSValue port = ns_port_bridge_lookup(ctx, id);
+    gboolean found = JS_IsObject(port);
+    JS_FreeValue(ctx, port);
+    return found;
+}
+
+static JSContext *
+ns_shared_worker_port_realm(ns_js *js, guint64 id)
+{
+    if (js->frame_contexts) {
+        GHashTableIter it;
+        gpointer key, value;
+        g_hash_table_iter_init(&it, js->frame_contexts);
+        while (g_hash_table_iter_next(&it, &key, &value))
+            if (value && ns_port_bridge_has(value, id)) return value;
+    }
+    return js->ctx;
+}
+
+static void
+ns_shared_worker_fail_clients(ns_worker_host *host)
+{
+    JSContext *ctx = host->owner_ctx;
+    ns_js *js = host->owner;
+    ns_budget_guard bg = {0};
+    ns_js_budget_push(js, &bg);
+    JSValue clients = JS_GetPropertyStr(ctx, host->owner_obj, "_clients");
+    uint32_t n = JS_IsArray(clients) ? ns_js_array_length(ctx, clients) : 0;
+    for (uint32_t i = 0; i < n; i++) {
+        JSValue client = JS_GetPropertyUint32(ctx, clients, i);
+        if (JS_IsObject(client)) ns_target_fire_event(ctx, client, "error");
+        JS_FreeValue(ctx, client);
+    }
+    JS_FreeValue(ctx, clients);
+    JS_SetPropertyStr(ctx, host->owner_obj, "_clients", JS_NewArray(ctx));
+    ns_drain_mutations(js);
+    ns_js_budget_pop(js, &bg);
+}
+
+static gboolean
 ns_worker_deliver_owner(gpointer data)
 {
     ns_worker_message *msg = data;
@@ -27155,8 +27215,15 @@ ns_worker_deliver_owner(gpointer data)
         return G_SOURCE_REMOVE;
     }
 
-    JSContext *ctx = host->owner_ctx;
+    if (host->is_shared && msg->is_error) {
+        if (msg->is_load_error) ns_shared_worker_fail_clients(host);
+        ns_worker_message_free(msg);
+        return G_SOURCE_REMOVE;
+    }
+
     ns_js *js = host->owner;
+    JSContext *ctx = host->is_shared && msg->port_id
+        ? ns_shared_worker_port_realm(js, msg->port_id) : host->owner_ctx;
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
     JSValue data_v = JS_UNDEFINED;
@@ -27576,8 +27643,9 @@ ns_worker_deliver_worker(gpointer data)
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
     JSValue ports = ns_worker_message_ports(ctx, msg, JS_UNDEFINED);
-    JSValue data_v = ns_worker_message_value(ctx, msg, ports);
-    const char *type = "message";
+    JSValue data_v = msg->is_connect ? JS_NewString(ctx, "")
+                                     : ns_worker_message_value(ctx, msg, ports);
+    const char *type = msg->is_connect ? "connect" : "message";
     if (JS_IsException(data_v)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         type = "messageerror";
@@ -27596,6 +27664,8 @@ ns_worker_deliver_worker(gpointer data)
     JSValue ev = ns_worker_event(ctx, type, data_v,
                                  host->is_service_worker ? host->origin : "",
                                  NULL, NULL);
+    if (msg->is_connect)
+        JS_SetPropertyStr(ctx, ev, "source", JS_GetPropertyUint32(ctx, ports, 0));
     JS_FreeValue(ctx, ns_freeze_array(ctx, ports));
     JS_SetPropertyStr(ctx, ev, "ports", ports);
     if (host->is_service_worker) {
@@ -28829,6 +28899,13 @@ static const char ns_worker_global_shape_src[] =
     "      enumerable: true, configurable: true }); }"
     "  ['onerror','onlanguagechange','onrejectionhandled','onunhandledrejection'].forEach(function(n){"
     "    handler(WGS.prototype, n); });"
+    "  if (scopeName === 'SharedWorkerGlobalScope') {"
+    "    handler(G, 'onconnect');"
+    "    var sd = gopd(G, 'name'); var sharedName = sd && 'value' in sd ? sd.value : '';"
+    "    take('name');"
+    "    def(Scope.prototype, 'name', { get: getter('name', function(){ self_of(this); return sharedName; }),"
+    "      enumerable: true, configurable: true });"
+    "  }"
     "  if (scopeName === 'DedicatedWorkerGlobalScope') {"
     "    handler(G, 'onmessage'); handler(G, 'onmessageerror');"
     "    var nd = gopd(G, 'name'); var nameValue = nd && 'value' in nd ? nd.value : '';"
@@ -28853,8 +28930,16 @@ static const char ns_worker_global_shape_src[] =
     "  setProto(G, Scope.prototype);"
     "})";
 
+static const char *
+ns_worker_scope_name(const ns_worker_host *host)
+{
+    if (host->is_service_worker) return "ServiceWorkerGlobalScope";
+    if (host->is_shared) return "SharedWorkerGlobalScope";
+    return "DedicatedWorkerGlobalScope";
+}
+
 static void
-ns_worker_shape_global(JSContext *ctx, gboolean service_worker)
+ns_worker_shape_global(JSContext *ctx, const char *scope_name)
 {
     JSValue fn = JS_Eval(ctx, ns_worker_global_shape_src,
                          sizeof(ns_worker_global_shape_src) - 1,
@@ -28862,11 +28947,7 @@ ns_worker_shape_global(JSContext *ctx, gboolean service_worker)
                          JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsFunction(ctx, fn)) {
         JSValue global = JS_GetGlobalObject(ctx);
-        JSValue args[2] = {
-            global,
-            JS_NewString(ctx, service_worker ? "ServiceWorkerGlobalScope"
-                                             : "DedicatedWorkerGlobalScope"),
-        };
+        JSValue args[2] = { global, JS_NewString(ctx, scope_name) };
         JSValue r = JS_Call(ctx, fn, JS_UNDEFINED, 2, (JSValueConst *)args);
         if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, r);
@@ -28969,7 +29050,8 @@ ns_worker_js_new(ns_worker_host *host)
     ns_bind_fn(ctx, global, "setInterval",   ns_js_setInterval_wrap, 2);
     ns_bind_fn(ctx, global, "clearTimeout",  ns_js_clearTimer, 1);
     ns_bind_fn(ctx, global, "clearInterval", ns_js_clearTimer, 1);
-    ns_bind_fn(ctx, global, "postMessage",   ns_worker_global_post_message, 1);
+    if (!host->is_shared)
+        ns_bind_fn(ctx, global, "postMessage", ns_worker_global_post_message, 1);
     ns_bind_fn(ctx, global, "close",         ns_worker_global_close, 0);
     ns_bind_fn(ctx, global, "importScripts", ns_worker_import_scripts, 1);
     ns_bind_fn(ctx, global, "structuredClone", ns_window_structured_clone, 1);
@@ -29078,7 +29160,7 @@ ns_worker_js_new(ns_worker_host *host)
     JS_SetPropertyStr(ctx, global, "globalThis", JS_DupValue(ctx, global));
     ns_bind_ctor(ctx, global, "WorkerGlobalScope", ns_illegal_constructor, 0);
     if (!host->is_service_worker)
-        ns_bind_ctor(ctx, global, "DedicatedWorkerGlobalScope",
+        ns_bind_ctor(ctx, global, ns_worker_scope_name(host),
                      ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "WorkerLocation", ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "WorkerNavigator", ns_illegal_constructor, 0);
@@ -29171,7 +29253,7 @@ ns_worker_js_new(ns_worker_host *host)
 
     if (host->is_service_worker)
         ns_sw_install_scope(ctx, global, host);
-    ns_worker_shape_global(ctx, host->is_service_worker);
+    ns_worker_shape_global(ctx, ns_worker_scope_name(host));
 
     JS_FreeValue(ctx, global);
     return js;
@@ -29436,6 +29518,168 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     return obj;
 }
 
+static gboolean
+ns_shared_worker_same_origin(ns_js *js, JSContext *ctx, const char *abs_url)
+{
+    if (g_str_has_prefix(abs_url, "data:")) return TRUE;
+    g_autofree char *doc_origin =
+        ns_url_origin_from(ns_js_realm_url_or_current(js, ctx));
+    g_autofree char *url_origin = ns_url_origin_from(abs_url);
+    return doc_origin && url_origin && strcmp(doc_origin, url_origin) == 0;
+}
+
+static ns_worker_host *
+ns_shared_worker_host(ns_js *js, const char *abs_url, const char *name,
+                      const char *base_url)
+{
+    g_autofree char *origin = g_str_has_prefix(abs_url, "data:")
+        ? g_strdup("null") : ns_url_origin_from(base_url);
+    if (!origin) origin = g_strdup("");
+    g_autofree char *key = g_strdup_printf("%s\n%s\n%s", origin, abs_url, name);
+    if (!js->shared_workers)
+        js->shared_workers = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                   g_free, NULL);
+    ns_worker_host *host = g_hash_table_lookup(js->shared_workers, key);
+    if (host && !g_atomic_int_get(&host->closing)) return host;
+
+    host = g_new0(ns_worker_host, 1);
+    g_atomic_int_set(&host->ref_count, 1);
+    g_atomic_int_set(&host->owner_alive, 1);
+    g_mutex_init(&host->lock);
+    host->is_shared = TRUE;
+    host->owner = js;
+    host->owner_ctx = js->ctx;
+    host->owner_obj = JS_NewObjectClass(js->ctx, ns_worker_class_id);
+    JS_SetOpaque(host->owner_obj, host);
+    JS_SetPropertyStr(js->ctx, host->owner_obj, "_clients", JS_NewArray(js->ctx));
+    host->context = g_main_context_new();
+    host->url = g_strdup(abs_url);
+    host->base_url = g_strdup(base_url);
+    host->csp_headers = ns_js_csp_headers_dup(js);
+    host->name = g_strdup(name);
+    host->origin = g_steal_pointer(&origin);
+    host->log_cb = js->log_cb;
+    host->log_user_data = js->log_user_data;
+    if (g_str_has_prefix(abs_url, "data:")) {
+        gsize raw_len = 0;
+        g_autofree char *raw_script = ns_js_decode_data_url(abs_url, &raw_len);
+        host->inline_script = raw_script
+            ? ns_worker_script_text((const guint8 *)raw_script, raw_len,
+                                    &host->inline_script_len)
+            : g_strdup("");
+    }
+    if (!js->workers) js->workers = g_ptr_array_new();
+    g_ptr_array_add(js->workers, host);
+    g_hash_table_replace(js->shared_workers, g_steal_pointer(&key), host);
+    host->thread = ns_worker_thread_start(host, "nd-js-shared-worker");
+    return host;
+}
+
+static void
+ns_shared_worker_connect(JSContext *ctx, ns_worker_host *host, JSValueConst port)
+{
+    JSValue remote = ns_port_new(ctx);
+    JS_SetPropertyStr(ctx, port, "_pair", JS_DupValue(ctx, remote));
+    JS_SetPropertyStr(ctx, remote, "_pair", JS_DupValue(ctx, port));
+    ns_worker_message *msg = ns_worker_message_new(ctx, host, JS_UNDEFINED,
+                                                   JS_UNDEFINED);
+    msg->is_connect = TRUE;
+    ns_worker_transfer_port(ctx, remote, port, msg, host->owner_obj);
+    ns_worker_msg_send(host, msg, FALSE);
+    JS_FreeValue(ctx, remote);
+}
+
+static JSValue
+ns_shared_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc,
+                      JSValueConst *argv)
+{
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "SharedWorker requires a script URL");
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || js->worker_host)
+        return JS_ThrowTypeError(ctx, "SharedWorker is unavailable");
+    const char *raw = JS_ToCString(ctx, argv[0]);
+    if (!raw) return JS_EXCEPTION;
+    g_autofree char *base = ctx == js->ctx
+        ? ns_js_doc_base_url(js)
+        : g_strdup(ns_js_realm_url_or_current(js, ctx));
+    g_autofree char *abs_url = base && *base ? ns_url_resolve(base, raw)
+                                             : ns_url_resolve(NULL, raw);
+    JS_FreeCString(ctx, raw);
+    if (!abs_url)
+        return ns_throw_dom_exception(ctx, "SyntaxError", 12,
+            "Failed to construct 'SharedWorker': the script URL is invalid.");
+    if (!ns_shared_worker_same_origin(js, ctx, abs_url))
+        return ns_throw_dom_exception(ctx, "SecurityError", 18,
+            "Failed to construct 'SharedWorker': the script URL is not "
+            "same-origin with the document.");
+
+    g_autofree char *name = NULL;
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        name = ns_worker_option_string(ctx, argv[1], "name");
+    } else if (argc >= 2 && !JS_IsUndefined(argv[1])) {
+        const char *s = JS_ToCString(ctx, argv[1]);
+        if (!s) return JS_EXCEPTION;
+        name = g_strdup(s);
+        JS_FreeCString(ctx, s);
+    }
+    g_autofree char *type = argc >= 2 ? ns_worker_option_string(ctx, argv[1], "type") : NULL;
+    if (type && *type && g_ascii_strcasecmp(type, "classic") != 0)
+        return JS_ThrowTypeError(ctx, "SharedWorker: unsupported worker type");
+
+    gboolean fails = FALSE;
+    if (!g_str_has_prefix(abs_url, "data:")) {
+        char *policy_error = NULL;
+        ns_worker_host tmp = {0};
+        tmp.base_url = js->current_url;
+        if (!ns_worker_script_url_allowed(&tmp, abs_url, FALSE, &policy_error))
+            fails = TRUE;
+        g_free(policy_error);
+    }
+    if (!fails && ns_js_realm_csp(js, ctx) &&
+        !ns_csp_allows(ns_js_realm_csp(js, ctx), NS_CSP_WORKER, abs_url,
+                       ns_js_realm_url_or_current(js, ctx))) {
+        if (js->log_cb) {
+            char *line = g_strdup_printf(
+                "Blocked SharedWorker %s by Content-Security-Policy worker-src",
+                abs_url);
+            js->log_cb(line, js->log_user_data);
+            g_free(line);
+        }
+        fails = TRUE;
+    }
+
+    JSValue proto = JS_IsObject(this_val)
+        ? JS_GetPropertyStr(ctx, this_val, "prototype") : JS_NULL;
+    JSValue obj = JS_IsObject(proto) ? JS_NewObjectProto(ctx, proto)
+                                     : JS_NewObject(ctx);
+    JS_FreeValue(ctx, proto);
+    JS_SetPropertyStr(ctx, obj, "_listeners", JS_NewArray(ctx));
+    JS_SetPropertyStr(ctx, obj, "onerror", JS_NULL);
+    JSValue port = ns_port_new(ctx);
+    JS_DefinePropertyValueStr(ctx, obj, "port", JS_DupValue(ctx, port),
+                              JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE);
+    if (fails) {
+        JSValueConst job_args[1] = { obj };
+        ns_js_queue_message_task(ctx, ns_worker_fail_job, 1, job_args);
+        JS_FreeValue(ctx, port);
+        return obj;
+    }
+
+    g_autofree char *base_url = g_strdup(ns_js_realm_url_or_current(js, ctx));
+    ns_worker_host *host = ns_shared_worker_host(js, abs_url, name ? name : "",
+                                                 base_url ? base_url : abs_url);
+    JSValue clients = JS_GetPropertyStr(js->ctx, host->owner_obj, "_clients");
+    if (JS_IsArray(clients))
+        JS_SetPropertyUint32(js->ctx, clients,
+                             ns_js_array_length(js->ctx, clients),
+                             JS_DupValue(ctx, obj));
+    JS_FreeValue(js->ctx, clients);
+    ns_shared_worker_connect(ctx, host, port);
+    JS_FreeValue(ctx, port);
+    return obj;
+}
+
 static void
 ns_worker_install_constructor(JSContext *ctx, JSValueConst global)
 {
@@ -29449,6 +29693,13 @@ ns_worker_install_constructor(JSContext *ctx, JSValueConst global)
     ns_bind_fn(ctx, proto, "dispatchEvent", ns_target_dispatchEvent, 1);
     JS_FreeValue(ctx, proto);
     JS_SetPropertyStr(ctx, global, "Worker", ctor);
+
+    JSValue shared = ns_make_ctor(ctx, ns_shared_worker_ctor, "SharedWorker", 1);
+    JSValue shared_proto = JS_GetPropertyStr(ctx, shared, "prototype");
+    ns_bind_event_target_listeners(ctx, shared_proto);
+    ns_bind_fn(ctx, shared_proto, "dispatchEvent", ns_target_dispatchEvent, 1);
+    JS_FreeValue(ctx, shared_proto);
+    JS_SetPropertyStr(ctx, global, "SharedWorker", shared);
 }
 
 static JSValue
@@ -32120,6 +32371,7 @@ ns_event_interface_for(JSContext *ctx, JSValueConst ev)
 {
     static const struct { const char *type; const char *iface; } map[] = {
         { "message", "MessageEvent" }, { "messageerror", "MessageEvent" },
+        { "connect", "MessageEvent" },
         { "error", "ErrorEvent" }, { "hashchange", "HashChangeEvent" },
         { "popstate", "PopStateEvent" }, { "storage", "StorageEvent" },
         { "pageshow", "PageTransitionEvent" },
@@ -64576,6 +64828,7 @@ ns_js_free(ns_js *js)
         g_string_free(js->document_write_buffer, TRUE);
         js->document_write_buffer = NULL;
     }
+    g_clear_pointer(&js->shared_workers, g_hash_table_destroy);
     if (js->workers) {
         for (guint i = 0; i < js->workers->len; i++) {
             ns_worker_host *host = g_ptr_array_index(js->workers, i);
