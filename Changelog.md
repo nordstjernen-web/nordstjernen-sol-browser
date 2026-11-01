@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.40-dev:
+1.0.40:
 ======
 * The browser is named "Nordstjernen Sol Explorer" for the 1.0.40 series:
   the window title, About page, menus, desktop entry, installers and
