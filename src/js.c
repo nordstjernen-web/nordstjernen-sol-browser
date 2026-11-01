@@ -273,6 +273,13 @@ static void ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe,
                                             gboolean force);
 static void ns_js_schedule_static_iframes(ns_js *js, ns_node *n);
 static void ns_js_promote_deferred_iframes(ns_js *js);
+
+static inline gboolean
+ns_node_is_navigable_frame(const ns_node *n)
+{
+    return ns_node_is_element_named(n, "iframe") ||
+           ns_node_is_element_named(n, "frame");
+}
 static void ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin);
 static gboolean ns_node_is_media_element(const ns_node *n);
 static void ns_media_run_load_algorithm(JSContext *ctx, JSValueConst this_val,
@@ -6027,7 +6034,7 @@ ns_element_attr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst val, 
             n->flags &= ~NS_NODE_IMG_LOAD_FIRED;
             ns_js_start_image_load(js, n, s);
         }
-        if (magic == 3 && n->name && strcmp(n->name, "iframe") == 0)
+        if (magic == 3 && ns_node_is_navigable_frame(n))
             ns_js_schedule_iframe_load_full(js, n, TRUE);
         if (magic == 3 && ns_node_is_media_element(n))
             ns_media_run_load_algorithm(ctx, this_val, n);
@@ -37998,7 +38005,7 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         if (g_ascii_strcasecmp(name, "src") == 0 &&
             ns_node_is_media_element(n))
             ns_media_run_load_algorithm(ctx, this_val, n);
-        if (n->name && strcmp(n->name, "iframe") == 0 &&
+        if (ns_node_is_navigable_frame(n) &&
             (g_ascii_strcasecmp(name, "src") == 0 ||
              g_ascii_strcasecmp(name, "srcdoc") == 0))
             ns_js_schedule_iframe_load_full(js_from_ctx(ctx), n, TRUE);
@@ -49023,9 +49030,12 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
         r->ready_idle = g_idle_add(ns_js_image_ready_idle, r);
         return;
     }
-    r->img = ns_image_cache_get(js->image_cache, abs_url,
-                                base ? base : abs_url,
-                                ns_js_on_image_ready, r);
+    const ns_node *owner_doc = el;
+    while (owner_doc && owner_doc->kind != NS_NODE_DOCUMENT)
+        owner_doc = owner_doc->parent;
+    r->img = ns_image_cache_get_for_doc(js->image_cache, abs_url,
+                                        base ? base : abs_url, owner_doc,
+                                        ns_js_on_image_ready, r);
     if (r->img && (r->img->loaded || r->img->failed) && !r->ready_idle)
         r->ready_idle = g_idle_add(ns_js_image_ready_idle, r);
 }
@@ -53264,7 +53274,7 @@ ns_iframe_content_document(JSContext *ctx, JSValueConst this_val, ns_node *n)
     JS_FreeValue(ctx, realm);
     ns_node *doc = ns_iframe_document_node(n);
     if (doc && doc->js_wrapper) return ns_make_element(ctx, doc);
-    if (!ns_node_is_element_named(n, "iframe")) return JS_NULL;
+    if (!ns_node_is_navigable_frame(n)) return JS_NULL;
     return ns_iframe_build_content_document(ctx, n);
 }
 
@@ -53287,7 +53297,7 @@ ns_element_get_contentDocument(JSContext *ctx, JSValueConst this_val)
                !ns_node_is_element_named(n, "frame") &&
                !ns_node_is_element_named(n, "embed")))
         return JS_ThrowTypeError(ctx, "Illegal invocation");
-    if (!ns_node_is_element_named(n, "iframe") &&
+    if (!ns_node_is_navigable_frame(n) &&
         !ns_node_is_element_named(n, "object")) return JS_NULL;
     if (!ns_frame_owner_has_browsing_context(js_from_ctx(ctx), n))
         return JS_NULL;
@@ -53464,7 +53474,7 @@ ns_element_get_contentWindow(JSContext *ctx, JSValueConst this_val)
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!ns_node_is_frame_owner(n))
         return JS_ThrowTypeError(ctx, "Illegal invocation");
-    if (!ns_node_is_element_named(n, "iframe")) return JS_NULL;
+    if (!ns_node_is_navigable_frame(n)) return JS_NULL;
     if (!ns_frame_owner_has_browsing_context(js_from_ctx(ctx), n))
         return JS_NULL;
     if (!ns_iframe_ensure_content_root(n)) return JS_NULL;
@@ -67941,7 +67951,7 @@ ns_js_mark_iframe_source(ns_js *js, ns_node *iframe, const char *origin,
 static const char *
 ns_frame_src_attr(const ns_node *n)
 {
-    if (ns_node_is_element_named(n, "iframe")) return "src";
+    if (ns_node_is_navigable_frame(n)) return "src";
     if (ns_node_is_element_named(n, "object")) return "data";
     return NULL;
 }
@@ -67959,7 +67969,7 @@ ns_js_iframe_source_loaded(ns_js *js, ns_node *iframe)
     const char *attr = ns_frame_src_attr(iframe);
     const char *src = attr ? ns_element_get_attr(iframe, attr) : NULL;
     if (!src || !*src || g_str_has_prefix(src, "about:"))
-        return ns_node_is_element_named(iframe, "iframe");
+        return ns_node_is_navigable_frame(iframe);
     const char *origin = (js->current_url && *js->current_url)
                        ? js->current_url : "inline";
     char *abs_url = ns_url_resolve(origin, src);
@@ -69460,7 +69470,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
 
     gboolean blank_frame = FALSE;
     if (!content_doc && !decoded &&
-        ns_node_is_element_named(iframe, "iframe")) {
+        ns_node_is_navigable_frame(iframe)) {
         content_root = ns_iframe_ensure_content_root(iframe);
         if (content_root) content_doc = content_root->parent;
         if (!abs_url) {

@@ -3,6 +3,13 @@ Changelog:
 
 1.0.40-dev:
 ======
+* `<frame>` elements now load their document. A `<frame>` that a script
+  creates or whose `src` changes used to fire no `load` event, and
+  `contentDocument`/`contentWindow` were always null. X-Frame-Options
+  applies to them like it does to iframes.
+* An image served with `Cache-Control: no-store` is requested again when
+  another document (such as a frame) uses it, instead of reusing the
+  copy fetched for the first document.
 * A frame whose script assigns `window.location`, `location.href` or calls
   `location.assign()`/`location.replace()` now loads the new document.
   It used to only change the URL its `location` object reported.

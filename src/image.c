@@ -613,6 +613,16 @@ on_image_decoded(GObject *src, GAsyncResult *res, gpointer user_data)
     ns_decode_job_free(job);
 }
 
+static gboolean
+ns_response_is_no_store(const ns_response *resp)
+{
+    g_autofree char *cc = ns_net_raw_header_values(resp->raw_headers,
+                                                   "cache-control");
+    if (!cc) return FALSE;
+    g_autofree char *lowered = g_ascii_strdown(cc, -1);
+    return strstr(lowered, "no-store") != NULL;
+}
+
 static void
 on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
 {
@@ -649,6 +659,7 @@ on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     pending->img->timing_allow_origin =
         ns_net_raw_header_values(resp->raw_headers, "timing-allow-origin");
     pending->img->body_size = resp->body ? (gint64)resp->body->len : 0;
+    pending->img->no_store = ns_response_is_no_store(resp);
     if (resp->error) {
         pending->img->failed = TRUE;
         pending->img->failed_at_us = g_get_monotonic_time();
@@ -736,6 +747,24 @@ ns_image_cache_get(ns_image_cache *cache,
                    ns_image_ready_cb cb,
                    gpointer user_data)
 {
+    return ns_image_cache_get_for_doc(cache, url, top_url, NULL, cb, user_data);
+}
+
+static gboolean
+ns_image_stale_for_doc(ns_image_cache *cache, ns_image *img, const void *doc)
+{
+    return doc && img->no_store && img->owner_doc != doc &&
+           (img->loaded || img->failed) && !ns_image_has_pending(cache, img);
+}
+
+ns_image *
+ns_image_cache_get_for_doc(ns_image_cache *cache,
+                           const char *url,
+                           const char *top_url,
+                           const void *doc,
+                           ns_image_ready_cb cb,
+                           gpointer user_data)
+{
     if (!cache || !url) return NULL;
     const ns_config *cfg = ns_config_get();
     ns_image *cached = g_hash_table_lookup(cache->by_url, url);
@@ -744,6 +773,17 @@ ns_image_cache_get(ns_image_cache *cache,
         if (cfg && !cfg->images_enabled) {
             if (cb && (cached->loaded || cached->failed))
                 cb(cached, user_data);
+            return cached;
+        }
+        if (ns_image_stale_for_doc(cache, cached, doc)) {
+            cached->owner_doc = doc;
+            cached->loaded = FALSE;
+            cached->failed = FALSE;
+            cached->http_status = 0;
+            cached->failed_at_us = 0;
+            g_clear_pointer(&cached->error, g_free);
+            ns_image_cache_start_request(cache, cached, url, top_url,
+                                         cb, user_data);
             return cached;
         }
         if (cached->purged && !ns_image_has_pending(cache, cached)) {
@@ -787,6 +827,7 @@ ns_image_cache_get(ns_image_cache *cache,
 
     ns_image *img = g_new0(ns_image, 1);
     img->url = g_strdup(url);
+    img->owner_doc = doc;
     g_hash_table_insert(cache->by_url, g_strdup(url), img);
 
     if (cfg && !cfg->images_enabled) {
