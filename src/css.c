@@ -33941,6 +33941,9 @@ typedef struct {
     GPtrArray *attrs;
     const incr_has_args *args;
     gboolean pending;
+    /* A :has() with no class, id or type to key on, but keyed arguments:
+     * a mutation touching those keys restyles the whole document. */
+    gboolean doc_wide;
     incr_has_reach reach;
     incr_inv_set *inv;
 } incr_has_anchor;
@@ -35192,7 +35195,11 @@ incr_mark_loose_has_subjects(ns_node *doc)
         incr_has_anchor *a = g_ptr_array_index(g_has_subject_anchors, i);
         if (!a->pending) continue;
         a->pending = FALSE;
-        if (a->classes->len > 0) {
+        if (a->doc_wide) {
+            for (ns_node *n = doc->first_child; n; n = n->next_sibling)
+                if (n->kind == NS_NODE_ELEMENT)
+                    g_hash_table_add(g_incr_dirty, n);
+        } else if (a->classes->len > 0) {
             if (!doc->class_index) ns_doc_class_index_build(doc);
             incr_mark_subject_candidates(
                 ns_doc_class_index_lookup(doc,
@@ -36079,9 +36086,21 @@ incr_add_has_subject_anchor(const incr_has_ctx *at)
         return FALSE;
     const ns_css_simple *subject =
         g_ptr_array_index(top->sel->compounds, top->sel->compounds->len - 1);
-    if (!subject || (!subject->id && !subject->type &&
-                     (!subject->classes || subject->classes->len == 0)))
-        return FALSE;
+    if (!subject) return FALSE;
+    if (!subject->id && !subject->type &&
+        (!subject->classes || subject->classes->len == 0)) {
+        if (!g_has_args_cur || g_has_args_cur->loose) return FALSE;
+        incr_has_anchor *wide = g_new0(incr_has_anchor, 1);
+        wide->classes = g_ptr_array_new_with_free_func(g_free);
+        wide->attrs = g_ptr_array_new_with_free_func(incr_attr_dep_free);
+        wide->args = g_has_args_cur;
+        wide->doc_wide = TRUE;
+        if (!g_has_subject_anchors)
+            g_has_subject_anchors =
+                g_ptr_array_new_with_free_func(incr_has_anchor_free);
+        g_ptr_array_add(g_has_subject_anchors, wide);
+        return TRUE;
+    }
     incr_has_anchor *a = incr_has_anchor_from_compound(subject);
     if (!a) return FALSE;
     if (!a->id && !a->type && a->classes->len == 0) {
