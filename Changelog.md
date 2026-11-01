@@ -3,6 +3,13 @@ Changelog:
 
 Unreleased:
 ======
+* `MessagePort`s can be transferred between a popup and its opener. A
+  port in the transfer list of a cross-tab `postMessage()` arrives in
+  `event.ports`, and messages posted on either end reach the other tab.
+  Google sign-in sets up its channel this way: the popup sends
+  `readyForConnect`, the opener answers with a port, and the credential
+  comes back over the port. "Continue with Google" on Reddit used to
+  stop on `accounts.google.com/gsi/transform`.
 * A popup on the same origin as its opener can call functions on it:
   `window.opener.a.b.fn(args)` runs `a.b.fn` in the opener's window.
   The opener checks that the caller has its origin, and calls return
