@@ -52,6 +52,8 @@ struct ns_image {
     gboolean     loaded;
     gboolean     failed;
     gboolean     purged;
+    gboolean     no_store;
+    const void  *owner_doc;
     gint64       bytes;
     guint64      gen;
     GArray      *anim_frames;
@@ -71,6 +73,13 @@ ns_image       *ns_image_cache_get(ns_image_cache *cache,
                                    const char     *top_url,
                                    ns_image_ready_cb cb,
                                    gpointer        user_data);
+
+ns_image       *ns_image_cache_get_for_doc(ns_image_cache *cache,
+                                           const char     *url,
+                                           const char     *top_url,
+                                           const void     *doc,
+                                           ns_image_ready_cb cb,
+                                           gpointer        user_data);
 
 void            ns_image_cache_cancel_cb(ns_image_cache *cache,
                                          gpointer user_data);
