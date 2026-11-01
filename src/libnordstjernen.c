@@ -3790,6 +3790,13 @@ ns_browser_take_post(ns_browser *browser, size_t *out_len, char **out_ct)
     return body;
 }
 
+static gboolean
+browser_form_target_leaves_frame(const char *target)
+{
+    return target && (g_ascii_strcasecmp(target, "_top") == 0 ||
+                      g_ascii_strcasecmp(target, "_blank") == 0);
+}
+
 static void
 browser_perform_form_navigation(ns_browser *b, const ns_node *form,
                                 const ns_node *clicked)
@@ -3807,16 +3814,23 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
     const char *formaction = (clicked && !from_text)
                              ? ns_element_get_attr(clicked, "formaction") : NULL;
     if (formaction && *formaction) action = formaction;
-    g_autofree char *base = browser_document_base(b);
+    const char *target = ns_element_get_attr(form, "target");
+    const char *formtarget = (clicked && !from_text)
+                             ? ns_element_get_attr(clicked, "formtarget") : NULL;
+    if (formtarget && *formtarget) target = formtarget;
+    const char *frame_url = b->js ? ns_js_form_frame_url(b->js, form) : NULL;
+    gboolean in_frame = frame_url && !browser_form_target_leaves_frame(target);
+    g_autofree char *base = frame_url ? NULL : browser_document_base(b);
+    const char *doc_url = frame_url ? frame_url : b->base_url;
     char *abs_action = (action && *action)
-        ? ns_url_resolve(base ? base : b->base_url, action)
-        : g_strdup(b->base_url);
+        ? ns_url_resolve(base ? base : doc_url, action)
+        : g_strdup(doc_url);
     if (!abs_action) return;
     if (!browser_allows_navigation_url(b, abs_action)) {
         g_free(abs_action);
         return;
     }
-    if (b->js && !ns_js_csp_form_action_allowed(b->js, abs_action)) {
+    if (b->js && !ns_js_csp_form_action_allowed(b->js, form, abs_action)) {
         g_free(abs_action);
         return;
     }
@@ -3858,6 +3872,12 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
     }
     g_string_free(query, TRUE);
     g_free(abs_action);
+    if (in_frame) {
+        ns_js_navigate_form_frame(b->js, form, full);
+        g_free(full);
+        b->dirty = TRUE;
+        return;
+    }
     g_free(b->pending_nav);
     b->pending_nav = full;
 }

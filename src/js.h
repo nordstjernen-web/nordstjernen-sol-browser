@@ -134,7 +134,10 @@ void   ns_js_set_viewport_scroll_cb(ns_js *js, ns_js_viewport_scroll_cb cb,
 void   ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer user_data);
 void   ns_js_set_early_inject_src(ns_js *js, const char *src);
 void   ns_js_add_csp_header(ns_js *js, const char *header_value);
-gboolean ns_js_csp_form_action_allowed(const ns_js *js, const char *action_url);
+gboolean ns_js_csp_form_action_allowed(const ns_js *js, const ns_node *form,
+                                       const char *action_url);
+const char *ns_js_form_frame_url(const ns_js *js, const ns_node *form);
+gboolean ns_js_navigate_form_frame(ns_js *js, const ns_node *form, const char *url);
 char    *ns_js_base_url_for_document(ns_js *js, const ns_node *doc,
                                      const char *document_url);
 const char *ns_js_current_url(const ns_js *js);
