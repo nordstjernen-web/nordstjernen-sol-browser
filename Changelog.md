@@ -3,6 +3,11 @@ Changelog:
 
 Unreleased:
 ======
+* Security: a worker whose script comes from an http(s) URL now runs
+  under the Content-Security-Policy of that script's response, as the
+  spec requires, instead of inheriting its creator's policy. Blob and
+  data workers still inherit. The reCAPTCHA worker on Reddit's login
+  page could not `importScripts()` its own code before.
 * Events dispatched inside a shadow tree are now retargeted. A listener
   on a shadow host or further out sees `event.target` as the host, not
   as the node inside the shadow root. Web components that react to
