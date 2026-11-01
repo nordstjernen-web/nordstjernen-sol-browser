@@ -103,6 +103,8 @@ gboolean ns_engine_anim_scroll_sync(ns_anim *anim, const ns_box *layout,
                                     double vw, double vh,
                                     gboolean *out_layout);
 
+gboolean ns_engine_frame_csp_allows(const ns_node *n, ns_csp_kind kind,
+                                    const char *abs_url);
 void ns_engine_fetch_images(ns_box *root, const char *base_url,
                             ns_image_cache *cache);
 

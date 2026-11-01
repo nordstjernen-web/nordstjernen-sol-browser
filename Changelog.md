@@ -3,6 +3,8 @@ Changelog:
 
 1.0.40-dev:
 ======
+* Security: `@font-face` fonts requested by a framed document's style
+  sheets now obey that frame's CSP `font-src`.
 * Security: images in a framed document now obey that frame's own
   Content-Security-Policy, also when the frame runs no script and when
   layout fetches the image. They used to be checked against the top
