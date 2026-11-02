@@ -35593,22 +35593,6 @@ ns_js_has_pending_tasks(const ns_js *js)
 }
 
 gboolean
-ns_js_has_pending_work(const ns_js *js)
-{
-    if (!js) return FALSE;
-    if (js->timers && g_hash_table_size(js->timers) > 0) {
-        GHashTableIter it;
-        gpointer k, v;
-        g_hash_table_iter_init(&it, js->timers);
-        while (g_hash_table_iter_next(&it, &k, &v)) {
-            const ns_timer *t = v;
-            if (!t->is_idle) return TRUE;
-        }
-    }
-    return ns_raf_has_runnable(js) || ns_js_has_pending_tasks(js);
-}
-
-gboolean
 ns_js_has_work_before(const ns_js *js, gint64 deadline_us)
 {
     if (!js) return FALSE;

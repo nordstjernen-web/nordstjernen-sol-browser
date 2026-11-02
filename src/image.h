@@ -68,12 +68,6 @@ typedef void (*ns_image_ready_cb)(ns_image *img, gpointer user_data);
 ns_image_cache *ns_image_cache_new(void);
 void            ns_image_cache_free(ns_image_cache *cache);
 
-ns_image       *ns_image_cache_get(ns_image_cache *cache,
-                                   const char     *url,
-                                   const char     *top_url,
-                                   ns_image_ready_cb cb,
-                                   gpointer        user_data);
-
 ns_image       *ns_image_cache_get_for_doc(ns_image_cache *cache,
                                            const char     *url,
                                            const char     *top_url,

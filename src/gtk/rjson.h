@@ -32,7 +32,6 @@ const RjValue *rj_get(const RjValue *obj, const char *key);
 const char    *rj_get_str(const RjValue *obj, const char *key);
 gboolean       rj_get_num(const RjValue *obj, const char *key, double *out);
 gboolean       rj_get_bool(const RjValue *obj, const char *key, gboolean dflt);
-gboolean       rj_has(const RjValue *obj, const char *key);
 
 void           rj_write(GString *out, const RjValue *v);
 void           rj_append_str(GString *out, const char *s);

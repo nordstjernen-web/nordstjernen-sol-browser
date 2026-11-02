@@ -14,7 +14,6 @@ void     ns_remote_control_request(void);
 void     ns_remote_control_init(void);
 void     ns_remote_control_stop(void);
 void     ns_remote_control_shutdown(void);
-gboolean ns_remote_control_running(void);
 
 G_END_DECLS
 

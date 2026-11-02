@@ -1866,15 +1866,6 @@ ns_browser_open_viewport(const char *url, int viewport_width,
 }
 
 ns_browser *
-ns_browser_open_post(const char *url, int viewport_width, int settle_ms,
-                     const void *body, size_t body_len,
-                     const char *content_type)
-{
-    return browser_open_common(url, viewport_width, 0.0, settle_ms,
-                               body, body_len, content_type);
-}
-
-ns_browser *
 ns_browser_open_post_viewport(const char *url, int viewport_width,
                               double viewport_height, int settle_ms,
                               const void *body, size_t body_len,
@@ -3655,12 +3646,6 @@ ns_browser_contextmenu_full(ns_browser *browser, int x, int y, int *out_edit)
     return prevented ? 1 : 0;
 }
 
-int
-ns_browser_contextmenu(ns_browser *browser, int x, int y)
-{
-    return ns_browser_contextmenu_full(browser, x, y, NULL);
-}
-
 void
 ns_browser_audio_feedback(ns_browser *browser, const char *line)
 {
@@ -5038,12 +5023,6 @@ ns_browser_take_pending_scroll(ns_browser *browser, int *out_scroll_x,
     browser->pending_scroll_x = -1;
     browser->pending_scroll = FALSE;
     return 1;
-}
-
-int
-ns_browser_take_pending_scroll_y(ns_browser *browser, int *out_scroll_y)
-{
-    return ns_browser_take_pending_scroll(browser, NULL, out_scroll_y);
 }
 
 char *

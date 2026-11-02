@@ -9,7 +9,6 @@
 #include <glib.h>
 
 gboolean ns_css_color_resolve(const char *s, const guint8 *current, guint8 rgba[4]);
-gboolean ns_css_color_valid(const char *s);
 char    *ns_css_color_specified(const char *s);
 char    *ns_css_color_computed(const char *s, const guint8 *current);
 gboolean ns_css_color_is_legacy_srgb(const char *s);

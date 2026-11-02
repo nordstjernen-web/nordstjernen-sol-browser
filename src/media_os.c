@@ -139,17 +139,6 @@ ns_os_frame_copy_i420(ns_os_frame *out, const uint8_t *y, int y_stride,
 }
 
 int
-ns_os_frame_copy_bgra(ns_os_frame *out, const uint8_t *src, int stride,
-                      int width, int height)
-{
-    if (!frame_alloc(out, NS_OS_PIX_BGRA, width, height)) return 0;
-    if (plane_copy(out->data, out->stride[0], src, stride, width * 4, height))
-        return 1;
-    ns_os_frame_clear(out);
-    return 0;
-}
-
-int
 ns_os_frame_to_bgra(const ns_os_frame *f, uint8_t **out_bgra, int *out_stride)
 {
     ns_os_frame dst;

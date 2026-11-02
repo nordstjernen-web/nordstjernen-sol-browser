@@ -74,8 +74,6 @@ int  ns_os_frame_copy_nv12(ns_os_frame *out, const uint8_t *y, int y_stride,
 int  ns_os_frame_copy_i420(ns_os_frame *out, const uint8_t *y, int y_stride,
                            const uint8_t *u, int u_stride, const uint8_t *v,
                            int v_stride, int width, int height);
-int  ns_os_frame_copy_bgra(ns_os_frame *out, const uint8_t *src, int stride,
-                           int width, int height);
 int  ns_os_frame_to_bgra(const ns_os_frame *frame, uint8_t **out_bgra,
                          int *out_stride);
 int  ns_os_avcc_parameter_sets(const uint8_t *avcc, size_t avcc_len,

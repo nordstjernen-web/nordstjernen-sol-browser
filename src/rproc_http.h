@@ -148,8 +148,6 @@ char *ns_rproc_http_key(ns_rproc_http *r, int kind, const char *key,
 char *ns_rproc_http_key_full(ns_rproc_http *r, int kind, const char *key,
                              const char *code, int keycode, int mods,
                              int *out_prevented);
-int   ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y,
-                               char **out_href, char **out_cursor);
 int   ns_rproc_http_hover_buttons(ns_rproc_http *r, int x, int y, int mods,
                                   int buttons, char **out_href,
                                   char **out_cursor);
@@ -158,8 +156,6 @@ int   ns_rproc_http_scrollbar(ns_rproc_http *r, int kind, int x, int y);
 int   ns_rproc_http_drop_files(ns_rproc_http *r, int x, int y,
                                const char *const *paths, int n_paths);
 char *ns_rproc_http_release_full(ns_rproc_http *r, int *out_changed);
-char *ns_rproc_http_release_at(ns_rproc_http *r, int x, int y,
-                               int *out_changed);
 char *ns_rproc_http_release_button(ns_rproc_http *r, int x, int y,
                                    int button, int clicks, int *out_changed,
                                    int *out_newtab);

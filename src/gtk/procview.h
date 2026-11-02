@@ -89,7 +89,6 @@ void     ns_proc_view_remote_eval(NsProcView *view, const char *js,
                                   NsProcViewTextFn cb, gpointer user_data);
 NsProcView *ns_proc_view_ref(NsProcView *view);
 void     ns_proc_view_unref(NsProcView *view);
-gboolean ns_proc_view_is_closed(NsProcView *view);
 void ns_proc_view_set_opener(NsProcView *v, const char *token,
                              const char *origin);
 void ns_proc_view_popup_deliver(NsProcView *v, const char *json);
@@ -97,7 +96,6 @@ void     ns_proc_view_download_start(NsProcView *view, const char *url,
                                      NsProcViewTextFn cb, gpointer user_data);
 void     ns_proc_view_download_poll(NsProcView *view, long id,
                                     NsProcViewTextFn cb, gpointer user_data);
-void     ns_proc_view_download_cancel(NsProcView *view, long id);
 void     ns_proc_view_remote_console(NsProcView *view, NsProcViewTextFn cb,
                                      gpointer user_data);
 gboolean ns_proc_view_remote_click(NsProcView *view, double x, double y,

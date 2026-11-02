@@ -202,13 +202,6 @@ rj_get(const RjValue *obj, const char *key)
     return NULL;
 }
 
-gboolean
-rj_has(const RjValue *obj, const char *key)
-{
-    const RjValue *v = rj_get(obj, key);
-    return v && v->type != RJ_NULL;
-}
-
 const char *
 rj_get_str(const RjValue *obj, const char *key)
 {
