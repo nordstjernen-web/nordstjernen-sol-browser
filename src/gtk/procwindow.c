@@ -84,7 +84,7 @@ ns_brand_versioned(void)
     static char brand[128];
     if (!brand[0])
         g_snprintf(brand, sizeof brand, "%s %s",
-                   ns_i18n("Nordstjernen Sol Explorer"), NS_VERSION);
+                   ns_i18n("Nordstjernen Web Browser"), NS_VERSION);
     return brand;
 }
 
@@ -2457,7 +2457,7 @@ task_mgr_refresh(NsTaskMgr *tm)
         char wstate[32] = "";
         long wrss = -1;
         ns_rproc_http_proc_info(wpid, wstate, sizeof wstate, &wrss);
-        char *wname = g_strdup_printf("%s (%s)", ns_i18n("Nordstjernen Sol Explorer"),
+        char *wname = g_strdup_printf("%s (%s)", ns_i18n("Nordstjernen Web Browser"),
                                       ns_i18n("watchdog"));
         task_mgr_add_row(tm, "applications-system-symbolic", wname, wpid,
                          wstate, wrss, NULL);
@@ -2470,7 +2470,7 @@ task_mgr_refresh(NsTaskMgr *tm)
         long grss = -1;
         ns_rproc_http_proc_info(gpid, gstate, sizeof gstate, &grss);
         char *gname = g_strdup_printf("%s (GTK frontend)",
-                                      ns_i18n("Nordstjernen Sol Explorer"));
+                                      ns_i18n("Nordstjernen Web Browser"));
         task_mgr_add_row(tm, "web-browser-symbolic", gname, gpid, gstate,
                          grss, NULL);
         g_free(gname);
@@ -2677,7 +2677,7 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 
     GtkWidget *win = gtk_window_new();
     char *tm_title = g_strdup_printf("%s — %s", ns_i18n("Task Manager"),
-                                     ns_i18n("Nordstjernen Sol Explorer"));
+                                     ns_i18n("Nordstjernen Web Browser"));
     gtk_window_set_title(GTK_WINDOW(win), tm_title);
     g_free(tm_title);
     gtk_window_set_transient_for(GTK_WINDOW(win), GTK_WINDOW(pw->window));
@@ -3063,7 +3063,7 @@ proc_window_new(GtkApplication *app)
     g_menu_append_section(appmenu, NULL, G_MENU_MODEL(sec_tools));
     g_object_unref(sec_tools);
     GMenu *appmenu_about = g_menu_new();
-    g_menu_append(appmenu_about, ns_i18n("About Nordstjernen Sol Explorer"), "win.about");
+    g_menu_append(appmenu_about, ns_i18n("About Nordstjernen Web Browser"), "win.about");
     g_menu_append_section(appmenu, NULL, G_MENU_MODEL(appmenu_about));
     g_object_unref(appmenu_about);
     GtkWidget *menu_button = gtk_menu_button_new();

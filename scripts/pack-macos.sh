@@ -133,9 +133,9 @@ cat > "$STAGE/Contents/Info.plist" <<PLIST_EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Nordstjernen</string>
+    <string>Sol Explorer</string>
     <key>CFBundleDisplayName</key>
-    <string>Nordstjernen Sol Explorer</string>
+    <string>Nordstjernen Web Browser</string>
     <key>CFBundleIdentifier</key>
     <string>org.nordstjernen.Nordstjernen</string>
     <key>CFBundleVersion</key>
