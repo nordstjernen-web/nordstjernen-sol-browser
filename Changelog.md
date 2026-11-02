@@ -1,6 +1,9 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.42-dev:
+======
+
 1.0.41:
 ======
 * The browser is named "Nordstjernen Web Browser", with the short name
