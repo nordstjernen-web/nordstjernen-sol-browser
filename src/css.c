@@ -1955,6 +1955,7 @@ ns_css_named_color(const char *name, guint8 *r, guint8 *g, guint8 *b)
 }
 
 #define NS_CALC_MAX_DEPTH 64
+#define NS_CALC_MAX_ATTEMPTS 4096
 
 static gboolean
 parse_color_depth(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a,
@@ -3908,7 +3909,11 @@ static ns_css_value *
 parse_calc(const char *text)
 {
     static __thread int depth;
-    if (depth > NS_CALC_MAX_DEPTH) return NULL;
+    static __thread int attempts;
+    if (depth == 0) attempts = 0;
+    if (depth > NS_CALC_MAX_DEPTH || attempts >= NS_CALC_MAX_ATTEMPTS)
+        return NULL;
+    attempts++;
     depth++;
     ns_css_value *v = parse_calc_inner(text);
     depth--;

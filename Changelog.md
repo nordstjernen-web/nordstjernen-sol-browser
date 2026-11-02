@@ -3,6 +3,11 @@ Changelog:
 
 1.0.41-dev:
 ======
+* Security: a page can no longer hang the renderer with nested CSS
+  math functions. Every argument that failed to parse was retried
+  wrapped in `calc()`, so about 100 bytes of nested `sqrt()` or
+  `min()` caused billions of re-parses. A math expression now gets a
+  fixed budget of parse attempts.
 * Settings: DuckDuckGo can be chosen as the search engine again. A
   configured `https://duckduckgo.com/?q=%s` (or the DuckDuckGo Lite
   URL) was replaced by Google every time the configuration loaded, a
