@@ -889,6 +889,8 @@ css_unescape_cp(gunichar cp)
     return cp;
 }
 
+#define CSS_HEX_ESCAPE_MAX_LEN 8
+
 static void
 css_append_hex_escape(GString *out, const char **pp, const char *end)
 {
@@ -916,19 +918,7 @@ ns_css_append_unescaped(GString *out, const char **pp)
     if (*p == '\\' && p[1]) {
         p++;
         if (g_ascii_isxdigit(*p)) {
-            gunichar cp = 0;
-            int n = 0;
-            while (n < 6 && g_ascii_isxdigit(*p)) {
-                cp = cp * 16 + (gunichar)g_ascii_xdigit_value(*p);
-                p++;
-                n++;
-            }
-            if (is_ws(*p)) {
-                gboolean cr = *p == '\r';
-                p++;
-                if (cr && *p == '\n') p++;
-            }
-            g_string_append_unichar(out, css_unescape_cp(cp));
+            css_append_hex_escape(out, &p, p + CSS_HEX_ESCAPE_MAX_LEN);
         } else {
             g_string_append_c(out, *p++);
         }
