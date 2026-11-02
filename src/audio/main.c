@@ -631,6 +631,16 @@ bytes_are_container(const unsigned char *b, size_t n)
     return 0;
 }
 
+#define AH_FORMAT_ALLOWLIST "matroska,webm,ogg,mov,mp4,m4a,flac,wav,aac,mp3"
+
+static int
+ah_refuse_io_open(AVFormatContext *s, AVIOContext **pb, const char *url,
+                  int flags, AVDictionary **options)
+{
+    (void)s; (void)pb; (void)url; (void)flags; (void)options;
+    return AVERROR(EPERM);
+}
+
 typedef struct { const unsigned char *data; size_t len; size_t pos; } ah_memsrc;
 
 static int
@@ -762,7 +772,12 @@ decode_libav(const unsigned char *bytes, size_t n,
     fmt = avformat_alloc_context();
     if (!fmt) { av_freep(&avio->buffer); avio_context_free(&avio); return 0; }
     fmt->pb = avio;
-    if (avformat_open_input(&fmt, NULL, NULL, NULL) < 0) {
+    fmt->io_open = ah_refuse_io_open;
+    AVDictionary *opts = NULL;
+    av_dict_set(&opts, "format_whitelist", AH_FORMAT_ALLOWLIST, 0);
+    int rc = avformat_open_input(&fmt, NULL, NULL, &opts);
+    av_dict_free(&opts);
+    if (rc < 0) {
         av_freep(&avio->buffer); avio_context_free(&avio); return 0;
     }
     if (avformat_find_stream_info(fmt, NULL) < 0) goto done;
@@ -1017,6 +1032,7 @@ ain_open(ns_audio_player *p, const char *path)
     ain_close(p);
     AVDictionary *opts = NULL;
     av_dict_set(&opts, "protocol_whitelist", "file", 0);
+    av_dict_set(&opts, "format_whitelist", AH_FORMAT_ALLOWLIST, 0);
     int rc = avformat_open_input(&p->in_fmt, path, NULL, &opts);
     av_dict_free(&opts);
     if (rc < 0) return 0;
