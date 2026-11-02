@@ -6695,6 +6695,8 @@ typedef struct ns_text_measure {
     NsPangoRectangle logical;
     int              lines;
     int              baseline;
+    int              last_line_ascent;
+    int              last_line_height;
 } ns_text_measure;
 
 #define NS_TEXT_MEASURE_CACHE_MAX 32768
@@ -6894,15 +6896,19 @@ text_measure_entry_free(gpointer p)
 }
 
 static int *
-text_measure_compute_line_heights(NsPangoLayout *layout, int lines)
+text_measure_compute_lines(NsPangoLayout *layout, ns_text_measure *m)
 {
-    int *heights = g_new0(int, MAX(lines, 1));
+    int *heights = g_new0(int, MAX(m->lines, 1));
     NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
     int j = 0;
     do {
         NsPangoRectangle logical;
         ns_pango_layout_iter_get_line_extents(it, NULL, &logical);
-        if (j < MAX(lines, 1)) heights[j] = logical.height;
+        if (j < MAX(m->lines, 1)) heights[j] = logical.height;
+        if (j == m->lines - 1) {
+            m->last_line_ascent = ns_pango_layout_iter_get_baseline(it) - logical.y;
+            m->last_line_height = logical.height;
+        }
         j++;
     } while (ns_pango_layout_iter_next_line(it));
     ns_pango_layout_iter_free(it);
@@ -6921,16 +6927,14 @@ text_measure_lines(NsPangoLayout *layout, ns_text_measure *m,
         ? g_hash_table_lookup(g_text_measure_cache, &probe) : NULL;
     if (hit) {
         *m = hit->m;
-        if (!want_line_heights) return NULL;
-        if (!hit->line_heights)
-            hit->line_heights = text_measure_compute_line_heights(layout, m->lines);
-        return hit->line_heights;
+        return want_line_heights ? hit->line_heights : NULL;
     }
     ns_pango_layout_get_extents(layout, NULL, &m->logical);
     m->lines = ns_pango_layout_get_line_count(layout);
     m->baseline = ns_pango_layout_get_baseline(layout);
-    int *heights = want_line_heights
-        ? text_measure_compute_line_heights(layout, m->lines) : NULL;
+    m->last_line_ascent = 0;
+    m->last_line_height = 0;
+    int *heights = text_measure_compute_lines(layout, m);
     if (!keyed) {
         g_free(g_text_measure_uncached_heights);
         g_text_measure_uncached_heights = heights;
@@ -8107,30 +8111,19 @@ inline_run_holds_only_abs_placeholders(const ns_box *box,
 }
 
 static double
-inline_last_baseline(NsPangoLayout *layout, const double *line_heights,
-                     const double *line_offsets, int line_count,
-                     double first_baseline)
+inline_last_baseline(const ns_text_measure *measured,
+                     const double *line_heights, const double *line_offsets,
+                     int line_count, double first_baseline)
 {
     if (line_count < 2) return first_baseline;
-    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    int last = line_count - 1;
     double top = 0;
-    double baseline = first_baseline;
-    for (int j = 0; j < line_count; j++) {
-        if (j == line_count - 1) {
-            NsPangoRectangle logical;
-            ns_pango_layout_iter_get_line_extents(it, NULL, &logical);
-            double ascent = (double)(ns_pango_layout_iter_get_baseline(it) -
-                                     logical.y) / NS_PANGO_SCALE;
-            double shift = line_offsets ? line_offsets[j]
-                : (line_heights[j] - (double)logical.height / NS_PANGO_SCALE) / 2.0;
-            baseline = top + ascent + shift;
-            break;
-        }
-        top += line_heights[j];
-        if (!ns_pango_layout_iter_next_line(it)) break;
-    }
-    ns_pango_layout_iter_free(it);
-    return baseline;
+    for (int j = 0; j < last; j++) top += line_heights[j];
+    double ascent = (double)measured->last_line_ascent / NS_PANGO_SCALE;
+    double shift = line_offsets ? line_offsets[last]
+        : (line_heights[last] -
+           (double)measured->last_line_height / NS_PANGO_SCALE) / 2.0;
+    return top + ascent + shift;
 }
 
 static void
@@ -8319,7 +8312,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         box->first_baseline += line_offsets[0];
     else if (line_heights[0] > measured_h)
         box->first_baseline += (line_heights[0] - measured_h) / 2.0;
-    box->last_baseline = inline_last_baseline(layout, line_heights, line_offsets,
+    box->last_baseline = inline_last_baseline(&measured, line_heights, line_offsets,
                                               line_count, box->first_baseline);
     if (inline_run_holds_only_abs_placeholders(box, parent_style)) {
         box->phantom_line = TRUE;
