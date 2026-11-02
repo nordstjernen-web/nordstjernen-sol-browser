@@ -371,24 +371,26 @@ if is_android
   )
 endif
 
-libnordstjernen_lib = library(
-  'nordstjernen',
-  nordstjernen_embed_sources,
-  dependencies: nordstjernen_deps + ns_sdl_deps,
-  c_args: ns_lib_c_args,
-  link_args: nordstjernen_link_args,
-  install: true,
-)
-
-# A static variant of the engine so the out-of-process renderer links it in
-# and ships as a single self-contained executable (no libnordstjernen.so
-# runtime dependency to bundle in distro packages).
+# The engine is compiled once, into this static library. The renderer and
+# the GTK shell link it in, so each ships as a self-contained executable (no
+# libnordstjernen.so runtime dependency to bundle in distro packages), and
+# the shared libnordstjernen is linked from the same position-independent
+# objects instead of compiling every source a second time.
 libnordstjernen_static = static_library(
   'nordstjernen-static',
   nordstjernen_embed_sources,
   dependencies: nordstjernen_deps + ns_sdl_deps,
   c_args: ns_lib_c_args,
+  pic: true,
   install: false,
+)
+
+libnordstjernen_lib = library(
+  'nordstjernen',
+  objects: libnordstjernen_static.extract_all_objects(recursive: false),
+  dependencies: nordstjernen_deps + ns_sdl_deps,
+  link_args: nordstjernen_link_args,
+  install: true,
 )
 
 install_headers('libnordstjernen.h', subdir: 'nordstjernen')

@@ -3,6 +3,12 @@ Changelog:
 
 1.0.41:
 ======
+* Build: the engine is compiled once instead of three times. The
+  shared libnordstjernen, the static library the renderer links and the
+  GTK shell each compiled every engine source separately; the library
+  and the shell now link the static library's objects. A clean build
+  does about half the compiler work, and a change to an engine header
+  recompiles each file once.
 * Layout: a paragraph found in the text-measure cache is no longer laid
   out again by Pango to find its last baseline or line heights; the
   cache entry now carries them. The cache keeps two generations bounded
