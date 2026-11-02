@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.41-dev:
+1.0.41:
 ======
 * Layout: a paragraph found in the text-measure cache is no longer laid
   out again by Pango to find its last baseline or line heights; the
