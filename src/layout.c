@@ -6699,7 +6699,8 @@ typedef struct ns_text_measure {
     int              last_line_height;
 } ns_text_measure;
 
-#define NS_TEXT_MEASURE_CACHE_MAX 32768
+#define NS_TEXT_MEASURE_GENERATION_BYTES (16u * 1024u * 1024u)
+#define NS_TEXT_MEASURE_GENERATION_ENTRIES 131072
 #define NS_ASCII_MIN_WIDTH_MAX_WORDS 64
 
 typedef struct text_measure_key {
@@ -6711,6 +6712,7 @@ typedef struct text_measure_key {
 
 typedef struct text_measure_head {
     guint serial;
+    int   base_dir;
     int   width, height, indent, spacing, strut_line_height;
     float line_spacing;
     guint flags;
@@ -6719,6 +6721,8 @@ typedef struct text_measure_head {
 } text_measure_head;
 
 static GHashTable *g_text_measure_cache;
+static GHashTable *g_text_measure_cache_old;
+static gsize       g_text_measure_cache_bytes;
 static GByteArray *g_text_measure_scratch;
 
 static guint
@@ -6834,7 +6838,14 @@ text_measure_key_build(NsPangoLayout *layout, text_measure_key *probe)
     NsPangoAttrList *attrs = ns_pango_layout_get_attributes(layout);
     text_measure_head head;
     memset(&head, 0, sizeof head);
-    head.serial = ns_pango_context_get_serial(ns_pango_layout_get_context(layout));
+    NsPangoContext *context = ns_pango_layout_get_context(layout);
+    if (context == ns_paint_text_context()) {
+        head.serial = ns_pango_font_map_get_serial(
+            ns_pango_cairo_font_map_get_default());
+        head.base_dir = (int)ns_pango_context_get_base_dir(context) + 1;
+    } else {
+        head.serial = ns_pango_context_get_serial(context);
+    }
     head.width = ns_pango_layout_get_width(layout);
     head.height = ns_pango_layout_get_height(layout);
     head.indent = ns_pango_layout_get_indent(layout);
@@ -6885,6 +6896,7 @@ text_measure_key_build(NsPangoLayout *layout, text_measure_key *probe)
 typedef struct text_measure_entry {
     ns_text_measure m;
     int            *line_heights;
+    gsize           bytes;
 } text_measure_entry;
 
 static void
@@ -6917,14 +6929,53 @@ text_measure_compute_lines(NsPangoLayout *layout, ns_text_measure *m)
 
 static int *g_text_measure_uncached_heights;
 
+static GHashTable *
+text_measure_table_new(void)
+{
+    return g_hash_table_new_full(text_measure_key_hash, text_measure_key_equal,
+                                 text_measure_key_free, text_measure_entry_free);
+}
+
+static void
+text_measure_cache_add(text_measure_key *key, text_measure_entry *entry)
+{
+    if (!g_text_measure_cache)
+        g_text_measure_cache = text_measure_table_new();
+    if (g_text_measure_cache_bytes + entry->bytes >
+            NS_TEXT_MEASURE_GENERATION_BYTES ||
+        g_hash_table_size(g_text_measure_cache) >=
+            NS_TEXT_MEASURE_GENERATION_ENTRIES) {
+        if (g_text_measure_cache_old)
+            g_hash_table_destroy(g_text_measure_cache_old);
+        g_text_measure_cache_old = g_text_measure_cache;
+        g_text_measure_cache = text_measure_table_new();
+        g_text_measure_cache_bytes = 0;
+    }
+    g_hash_table_insert(g_text_measure_cache, key, entry);
+    g_text_measure_cache_bytes += entry->bytes;
+}
+
+static text_measure_entry *
+text_measure_cache_lookup(const text_measure_key *probe)
+{
+    text_measure_entry *hit = g_text_measure_cache
+        ? g_hash_table_lookup(g_text_measure_cache, probe) : NULL;
+    if (hit || !g_text_measure_cache_old) return hit;
+    gpointer key, value;
+    if (!g_hash_table_steal_extended(g_text_measure_cache_old, probe,
+                                     &key, &value))
+        return NULL;
+    text_measure_cache_add(key, value);
+    return value;
+}
+
 static const int *
 text_measure_lines(NsPangoLayout *layout, ns_text_measure *m,
                    gboolean want_line_heights)
 {
     text_measure_key probe;
     gboolean keyed = text_measure_key_build(layout, &probe);
-    text_measure_entry *hit = keyed && g_text_measure_cache
-        ? g_hash_table_lookup(g_text_measure_cache, &probe) : NULL;
+    text_measure_entry *hit = keyed ? text_measure_cache_lookup(&probe) : NULL;
     if (hit) {
         *m = hit->m;
         return want_line_heights ? hit->line_heights : NULL;
@@ -6940,12 +6991,6 @@ text_measure_lines(NsPangoLayout *layout, ns_text_measure *m,
         g_text_measure_uncached_heights = heights;
         return heights;
     }
-    if (!g_text_measure_cache)
-        g_text_measure_cache = g_hash_table_new_full(
-            text_measure_key_hash, text_measure_key_equal,
-            text_measure_key_free, text_measure_entry_free);
-    if (g_hash_table_size(g_text_measure_cache) >= NS_TEXT_MEASURE_CACHE_MAX)
-        g_hash_table_remove_all(g_text_measure_cache);
     text_measure_key *key = g_new(text_measure_key, 1);
     key->hash = probe.hash;
     key->len = probe.len;
@@ -6954,7 +6999,9 @@ text_measure_lines(NsPangoLayout *layout, ns_text_measure *m,
     text_measure_entry *entry = g_new(text_measure_entry, 1);
     entry->m = *m;
     entry->line_heights = heights;
-    g_hash_table_insert(g_text_measure_cache, key, entry);
+    entry->bytes = sizeof *key + key->len + sizeof *entry +
+                   (gsize)MAX(m->lines, 1) * sizeof *heights;
+    text_measure_cache_add(key, entry);
     return heights;
 }
 
