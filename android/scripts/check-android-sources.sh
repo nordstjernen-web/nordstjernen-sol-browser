@@ -33,10 +33,10 @@ import json, shlex, subprocess, sys
 ccjson, builddir = sys.argv[1], sys.argv[2]
 entries = json.load(open(ccjson))
 
-# The embed library (libnordstjernen.so) compiles exactly the engine source
-# set that the Android build uses, so check those translation units.
-ENGINE_DIRS = ('libnordstjernen.so.p', 'libnordstjernen.dll.p',
-               'libnordstjernen.dylib.p')
+# The static engine library compiles exactly the engine source set that the
+# Android build uses (libnordstjernen.so is linked from its objects), so
+# check those translation units.
+ENGINE_DIRS = ('libnordstjernen-static.a.p',)
 
 def is_engine(e):
     blob = e.get('output', '') + e.get('command', '')
