@@ -294,9 +294,6 @@ load_config(ns_config *c, const char *path)
 {
     apply_default(c);
     load_file(c, path);
-    if (g_strcmp0(c->search_engine, "https://lite.duckduckgo.com/lite/?q=%s") == 0 ||
-        g_strcmp0(c->search_engine, "https://duckduckgo.com/?q=%s") == 0)
-        set_string(&c->search_engine, NS_DEFAULT_SEARCH_ENGINE);
     apply_env(c);
 }
 

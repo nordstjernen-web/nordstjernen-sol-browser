@@ -3,6 +3,11 @@ Changelog:
 
 1.0.41-dev:
 ======
+* Settings: DuckDuckGo can be chosen as the search engine again. A
+  configured `https://duckduckgo.com/?q=%s` (or the DuckDuckGo Lite
+  URL) was replaced by Google every time the configuration loaded, a
+  leftover of the switch of the default engine, so searches from the
+  address bar always went to Google (issue #743).
 * Shadow DOM styling: elements inside a shadow root match only that
   shadow root's stylesheets (plus the browser's own), as CSS Scoping
   requires. Document rules such as Reddit's
