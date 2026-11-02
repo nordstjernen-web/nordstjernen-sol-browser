@@ -6,7 +6,6 @@
 #include <string.h>
 
 static GHashTable *g_catalogue;
-static char       *g_language;
 
 static char *
 catalogue_path_in(const char *dir, const char *lang)
@@ -99,7 +98,6 @@ ns_i18n_init(const char *self_exe)
         g_free(path);
         if (table) {
             g_catalogue = table;
-            g_language = g_strdup(names[i]);
             return;
         }
     }
