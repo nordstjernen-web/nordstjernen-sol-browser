@@ -5,6 +5,14 @@ Nordstjernen (aka "Sol browser", shipped as **Nordstjernen Sol Explorer**) is a 
 browser written from scratch in C, focused on support for modern HTML, CSS
 and JavaScript standards.
 
+**Downloads** of the three browser variants:
+
+| Browser | All releases | Latest release |
+|---------|--------------|----------------|
+| [Nordstjernen Sol](https://github.com/nordstjernen-web/nordstjernen-sol-browser) | [![GitHub All Releases](https://img.shields.io/github/downloads/nordstjernen-web/nordstjernen-sol-browser/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) | [![GitHub Release](https://img.shields.io/github/downloads/nordstjernen-web/nordstjernen-sol-browser/latest/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases/latest) |
+| [Southstar](https://github.com/nordstjernen-web/southstar-browser) | [![GitHub All Releases](https://img.shields.io/github/downloads/nordstjernen-web/southstar-browser/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/southstar-browser/releases) | [![GitHub Release](https://img.shields.io/github/downloads/nordstjernen-web/southstar-browser/latest/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/southstar-browser/releases/latest) |
+| [Northstar Web Browser](https://github.com/nordstjernen-web/northstar-web-browser) | [![GitHub All Releases](https://img.shields.io/github/downloads/nordstjernen-web/northstar-web-browser/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/northstar-web-browser/releases) | [![GitHub Release](https://img.shields.io/github/downloads/nordstjernen-web/northstar-web-browser/latest/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/northstar-web-browser/releases/latest) |
+
 ![Nordstjernen 1.0.40 playing a music video on YouTube](docs/screenshot.png)
 
 Supported platforms:
