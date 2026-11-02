@@ -3,6 +3,14 @@ Changelog:
 
 1.0.41:
 ======
+* SVG: gradient, mask and clip-path references keep their case and may
+  name the document by its full URL. A `fill` or `stroke` of
+  `url(#varkUe-17)` was lowercased by the style cascade, so a
+  mixed-case id found no element; and `url(https://host/page#id)`, which
+  charting libraries write from `location.href`, was looked up as an id
+  of that whole text. A reference is now resolved against the document's
+  base URL and treated as local when it names the document itself. The
+  price chart on Google Finance gets its fading green or red area fill.
 * Build: the engine is compiled once instead of three times. The
   shared libnordstjernen, the static library the renderer links and the
   GTK shell each compiled every engine source separately; the library

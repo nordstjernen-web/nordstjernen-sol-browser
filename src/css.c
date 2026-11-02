@@ -14750,6 +14750,10 @@ parse_value_for(ns_css_prop prop, const char *text)
                    g_str_has_prefix(kw, "url("))) {
             v = g_new0(ns_css_value, 1);
             v->kind = NS_CSS_V_KEYWORD;
+            if (g_str_has_prefix(kw, "url(")) {
+                g_free(kw);
+                kw = g_strdup(t);
+            }
             v->u.keyword = kw;
         } else {
             g_free(kw);
@@ -25003,6 +25007,7 @@ ns_el_is_link(const ns_node *el)
 
 static GHashTable *g_visited_urls = NULL;
 static char       *g_css_doc_base = NULL;
+static char       *g_css_doc_url = NULL;
 static char       *g_css_doc_language = NULL;
 
 static const char *
@@ -25027,6 +25032,25 @@ ns_css_set_doc_base(const char *base_url)
 {
     g_free(g_css_doc_base);
     g_css_doc_base = (base_url && *base_url) ? g_strdup(base_url) : NULL;
+}
+
+const char *
+ns_css_doc_base(void)
+{
+    return g_css_doc_base;
+}
+
+void
+ns_css_set_doc_url(const char *url)
+{
+    g_free(g_css_doc_url);
+    g_css_doc_url = (url && *url) ? g_strdup(url) : NULL;
+}
+
+const char *
+ns_css_doc_url(void)
+{
+    return g_css_doc_url;
 }
 
 void
