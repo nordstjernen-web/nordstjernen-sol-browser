@@ -1,9 +1,9 @@
 # nordstjernen-browser
 
-[Nordstjernen Sol Explorer](https://nordstjernen.org) is a minimal, secure
+[Nordstjernen Web Browser](https://nordstjernen.org) is a minimal, secure
 web browser written from scratch in C with GTK 4.
 
-![Nordstjernen Sol Explorer](https://raw.githubusercontent.com/nordstjernen-web/nordstjernen-sol-browser/main/docs/screenshot.png)
+![Nordstjernen Web Browser](https://raw.githubusercontent.com/nordstjernen-web/nordstjernen-sol-browser/main/docs/screenshot.png)
 
 ```sh
 sudo npm install -g nordstjernen-browser

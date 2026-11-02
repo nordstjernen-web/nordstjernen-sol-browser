@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Nordstjernen Sol Explorer
+Name=Nordstjernen Web Browser
 GenericName=Web Browser
 Comment=A small, hand-written web browser
 Exec=nordstjernen %U

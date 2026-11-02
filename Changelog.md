@@ -3,6 +3,15 @@ Changelog:
 
 1.0.41:
 ======
+* The browser is named "Nordstjernen Web Browser", with the short name
+  "Sol Explorer"; it was "Nordstjernen Sol Explorer" during the 1.0.40
+  series. The window title, About page and menu entry, `--version`,
+  Windows launcher and installer, desktop entry, AppStream metadata,
+  Java shell, MCP server info and package descriptions carry the full
+  name. The short name is used where space is tight: the narrow title
+  row, the Android and iOS home-screen labels and the macOS bundle name.
+  The translated catalogues name it "North Star Web Browser" in each
+  language.
 * SVG: gradient, mask and clip-path references keep their case and may
   name the document by its full URL. A `fill` or `stroke` of
   `url(#varkUe-17)` was lowercased by the style cascade, so a
