@@ -11,7 +11,7 @@ and JavaScript standards.
 
 **Windows:** install Nordstjernen Web Browser from the [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl).
 
-![Nordstjernen 1.0.41 showing the Wikipedia article on Dijkstra's algorithm](docs/screenshot.png)
+![Nordstjernen 1.0.41 showing the Alphabet stock chart on Google Finance](docs/screenshot.png)
 
 Supported platforms:
 * [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)
