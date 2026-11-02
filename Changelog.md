@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.41-dev:
+1.0.41:
 ======
 * Security: a page can no longer hang the renderer with nested CSS
   math functions. Every argument that failed to parse was retried

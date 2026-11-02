@@ -20,7 +20,7 @@ Supported platforms:
 * Java
 * iOS (experimental port, built from source for arm64 devices and the simulator — see [docs/iOS.md](docs/iOS.md))
 
-**Current release:** **1.0.40** (November 2026) — see [Changelog.md](Changelog.md).
+**Current release:** **1.0.41** (November 2026) — see [Changelog.md](Changelog.md).
 
 **Standards.** Behaviour is measured against the spec text, section by
 section, not against another browser. The walk-through of the in-scope

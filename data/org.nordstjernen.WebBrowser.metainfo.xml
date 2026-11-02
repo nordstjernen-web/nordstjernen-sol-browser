@@ -60,6 +60,18 @@
   </branding>
 
   <releases>
+    <release version="1.0.41" date="2026-11-02">
+      <description>
+        <p>Web standards, media and security release.</p>
+        <ul>
+          <li>window.open() opens real popups that keep a link to their opener, and MessagePorts can be passed between them.</li>
+          <li>Shadow DOM styling and event retargeting follow CSS Scoping and the DOM standard, and ElementInternals is implemented.</li>
+          <li>Hardware H.264 decoding on Windows, and Media Source playback fixes for YouTube.</li>
+          <li>DuckDuckGo can be chosen as the search engine again.</li>
+          <li>Security fixes, including a renderer hang from nested CSS math functions.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.40" date="2026-11-01">
       <description>
         <p>Security and web standards release, published as Nordstjernen Sol Explorer.</p>
