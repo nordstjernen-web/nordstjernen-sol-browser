@@ -7,7 +7,6 @@ nordstjernen_gtk_sources = files(
   'remotectl.c',
   'rjson.c',
   'titlerow.c',
-  '../libnordstjernen.c',
   '../renderer_serve.c',
   '../renderer_tiles.c',
   '../rproc_http.c',
@@ -23,6 +22,15 @@ endif
 nordstjernen_gtk_deps = nordstjernen_deps + [gtk4_dep]
 if host_machine.system() != 'windows'
   nordstjernen_gtk_deps += [cc.find_library('rt', required: false)]
+endif
+
+nordstjernen_gtk_sdl_deps = []
+if sdl2_dep.found()
+  if host_machine.system() == 'windows'
+    nordstjernen_gtk_sdl_deps += [cc.find_library('SDL2')]
+  else
+    nordstjernen_gtk_sdl_deps += [sdl2_dep.partial_dependency(links: true)]
+  endif
 endif
 
 nordstjernen_gtk_platform_sources = []
@@ -43,12 +51,12 @@ nordstjernen_icon_resources = gnome.compile_resources(
 
 executable(
   'nordstjernen',
-  nordstjernen_engine_sources + nordstjernen_app_sources +
+  nordstjernen_app_sources +
     nordstjernen_gtk_sources + nordstjernen_gtk_platform_sources +
     nordstjernen_icon_resources +
     nordstjernen_win_resources + [polyfills_h, wpt_hook_h, remote_page_h],
-  dependencies: nordstjernen_gtk_deps,
-  c_args: ['-DNS_HAVE_GTK=1'],
+  link_with: libnordstjernen_static,
+  dependencies: nordstjernen_gtk_deps + nordstjernen_gtk_sdl_deps,
   include_directories: include_directories('..', '.'),
   win_subsystem: nordstjernen_win_subsystem,
   link_args: nordstjernen_exe_link_args + nordstjernen_gtk_platform_link_args,
