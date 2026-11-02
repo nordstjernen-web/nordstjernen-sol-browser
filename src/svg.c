@@ -193,6 +193,28 @@ svg_paint_clear(svg_paint *p)
     g_clear_pointer(&p->ref, g_free);
 }
 
+static gboolean
+svg_url_names_this_document(const char *url, gsize len)
+{
+    if (len == 0) return TRUE;
+    const char *doc = ns_css_doc_url();
+    if (!doc) return FALSE;
+    const char *base = ns_css_doc_base();
+    char *ref = g_strndup(url, len);
+    char *resolved = ns_url_resolve(base ? base : doc, ref);
+    g_free(ref);
+    char *this_doc = ns_url_resolve(doc, "");
+    gboolean same = FALSE;
+    if (resolved && this_doc) {
+        gsize doc_len = strcspn(this_doc, "#");
+        same = strcspn(resolved, "#") == doc_len &&
+               strncmp(resolved, this_doc, doc_len) == 0;
+    }
+    g_free(resolved);
+    g_free(this_doc);
+    return same;
+}
+
 static char *
 svg_url_id(const char *s, const char **rest)
 {
@@ -211,7 +233,10 @@ svg_url_id(const char *s, const char **rest)
     if (*p == ')') p++;
     if (rest) *rest = p;
     while (end > start && svg_is_ws(end[-1])) end--;
-    if (end > start && *start == '#') start++;
+    if (end <= start) return NULL;
+    const char *hash = memchr(start, '#', (gsize)(end - start));
+    if (hash && svg_url_names_this_document(start, (gsize)(hash - start)))
+        start = hash + 1;
     if (end <= start) return NULL;
     char *raw = g_strndup(start, (gsize)(end - start));
     if (!strchr(raw, '%')) return raw;

@@ -1658,6 +1658,7 @@ engine_pass_begin(ns_node *doc, const char *page_url, const char *base_url,
     ns_css_set_frame_viewport_cb(frame_viewport_measured);
     ns_css_relayout_enter();
     ns_css_set_doc_base(base_url);
+    ns_css_set_doc_url(page_url);
     ns_css_style_element_cache_begin();
     *sheets = g_ptr_array_new();
     *sheet_docs = g_ptr_array_new();
