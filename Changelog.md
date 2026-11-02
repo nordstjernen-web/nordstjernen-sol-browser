@@ -3,6 +3,12 @@ Changelog:
 
 1.0.41-dev:
 ======
+* Layout: a paragraph found in the text-measure cache is no longer laid
+  out again by Pango to find its last baseline or line heights; the
+  cache entry now carries them. The cache keeps two generations bounded
+  by memory instead of emptying itself at 32,768 entries, and a single
+  right-to-left paragraph no longer invalidates every cached measurement
+  on the page.
 * Security: a page can no longer hang the renderer with nested CSS
   math functions. Every argument that failed to parse was retried
   wrapped in `calc()`, so about 100 bytes of nested `sqrt()` or
