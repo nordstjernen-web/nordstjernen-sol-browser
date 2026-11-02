@@ -90,12 +90,6 @@ ns_remote_control_file_path(void)
                             NS_REMOTE_CONTROL_FILE, NULL);
 }
 
-gboolean
-ns_remote_control_running(void)
-{
-    return rc.service != NULL;
-}
-
 void
 ns_remote_control_request(void)
 {

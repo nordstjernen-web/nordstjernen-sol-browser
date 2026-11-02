@@ -2237,15 +2237,6 @@ ns_css_color_resolve(const char *s, const guint8 *current, guint8 rgba[4])
     return ok;
 }
 
-gboolean
-ns_css_color_valid(const char *s)
-{
-    cres r;
-    if (!parse_top(s, NULL, &r)) return FALSE;
-    g_string_free(r.spec, TRUE);
-    return TRUE;
-}
-
 char *
 ns_css_color_specified(const char *s)
 {

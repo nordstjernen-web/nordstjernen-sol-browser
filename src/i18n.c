@@ -112,9 +112,3 @@ ns_i18n(const char *text)
     const char *hit = g_hash_table_lookup(g_catalogue, text);
     return hit ? hit : text;
 }
-
-const char *
-ns_i18n_language(void)
-{
-    return g_language;
-}

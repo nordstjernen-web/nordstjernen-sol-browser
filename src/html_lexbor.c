@@ -4,6 +4,7 @@
  */
 
 #include "html.h"
+#include "json_string.h"
 
 #include <string.h>
 
@@ -295,36 +296,11 @@ static char *
 json_string_unescape(const char *p)
 {
     if (!p) return NULL;
-    GString *out = g_string_new(NULL);
-    for (; *p && *p != '"'; p++) {
-        if (*p != '\\') {
-            g_string_append_c(out, *p);
-            continue;
-        }
-        p++;
-        if (!*p) break;
-        if (*p == '/' || *p == '"' || *p == '\\') {
-            g_string_append_c(out, *p);
-        } else if (*p == 'n') {
-            g_string_append_c(out, '\n');
-        } else if (*p == 't') {
-            g_string_append_c(out, '\t');
-        } else if (*p == 'u' &&
-                   g_ascii_isxdigit(p[1]) && g_ascii_isxdigit(p[2]) &&
-                   g_ascii_isxdigit(p[3]) && g_ascii_isxdigit(p[4])) {
-            char hex[5] = { p[1], p[2], p[3], p[4], 0 };
-            gunichar ch = (gunichar)g_ascii_strtoull(hex, NULL, 16);
-            if (ch && g_unichar_validate(ch)) {
-                char buf[8] = {0};
-                gint len = g_unichar_to_utf8(ch, buf);
-                g_string_append_len(out, buf, len);
-            }
-            p += 4;
-        } else {
-            g_string_append_c(out, *p);
-        }
-    }
-    return g_string_free(out, FALSE);
+    const char *stop = p;
+    ns_json_decode_string(p, NULL, NULL, &stop, 0);
+    char *out = g_malloc((gsize)(stop - p) + 1);
+    ns_json_decode_string(p, NULL, out, NULL, 0);
+    return out;
 }
 
 static const char *

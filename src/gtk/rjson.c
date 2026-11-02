@@ -1,6 +1,7 @@
 /* Nordstjernen — minimal JSON tree parser and writer for the remote-control channels. */
 
 #include "rjson.h"
+#include "../json_string.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -55,83 +56,19 @@ rj_literal(RjParser *ps, const char *word)
     return TRUE;
 }
 
-static int
-rj_hex4(const char *s)
-{
-    int v = 0;
-    for (int i = 0; i < 4; i++) {
-        int d = g_ascii_xdigit_value(s[i]);
-        if (d < 0)
-            return -1;
-        v = v * 16 + d;
-    }
-    return v;
-}
-
 static char *
 rj_parse_string(RjParser *ps)
 {
     if (ps->p >= ps->end || *ps->p != '"')
         return NULL;
-    ps->p++;
-    GString *s = g_string_new(NULL);
-    while (ps->p < ps->end && *ps->p != '"') {
-        unsigned char c = (unsigned char)*ps->p++;
-        if (c < 0x20) {
-            g_string_free(s, TRUE);
-            return NULL;
-        }
-        if (c != '\\') {
-            g_string_append_c(s, (char)c);
-            continue;
-        }
-        if (ps->p >= ps->end)
-            break;
-        char e = *ps->p++;
-        switch (e) {
-        case '"':  g_string_append_c(s, '"'); break;
-        case '\\': g_string_append_c(s, '\\'); break;
-        case '/':  g_string_append_c(s, '/'); break;
-        case 'b':  g_string_append_c(s, '\b'); break;
-        case 'f':  g_string_append_c(s, '\f'); break;
-        case 'n':  g_string_append_c(s, '\n'); break;
-        case 'r':  g_string_append_c(s, '\r'); break;
-        case 't':  g_string_append_c(s, '\t'); break;
-        case 'u': {
-            if (ps->end - ps->p < 4) {
-                g_string_free(s, TRUE);
-                return NULL;
-            }
-            int cp = rj_hex4(ps->p);
-            ps->p += 4;
-            if (cp <= 0) {
-                g_string_free(s, TRUE);
-                return NULL;
-            }
-            if (cp >= 0xD800 && cp <= 0xDBFF && ps->end - ps->p >= 6 &&
-                ps->p[0] == '\\' && ps->p[1] == 'u') {
-                int lo = rj_hex4(ps->p + 2);
-                if (lo >= 0xDC00 && lo <= 0xDFFF) {
-                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
-                    ps->p += 6;
-                }
-            }
-            if (cp >= 0xD800 && cp <= 0xDFFF)
-                cp = 0xFFFD;
-            g_string_append_unichar(s, (gunichar)cp);
-            break;
-        }
-        default:
-            g_string_free(s, TRUE);
-            return NULL;
-        }
-    }
-    if (ps->p >= ps->end) {
-        g_string_free(s, TRUE);
+    const char *start = ps->p + 1;
+    const char *stop = start;
+    if (ns_json_decode_string(start, ps->end, NULL, &stop, 1) < 0)
         return NULL;
-    }
-    ps->p++;
-    return g_string_free(s, FALSE);
+    char *s = g_malloc((gsize)(stop - start) + 1);
+    ns_json_decode_string(start, ps->end, s, NULL, 1);
+    ps->p = stop + 1;
+    return s;
 }
 
 static RjValue *
@@ -263,13 +200,6 @@ rj_get(const RjValue *obj, const char *key)
         if (strcmp(g_ptr_array_index(obj->keys, i), key) == 0)
             return g_ptr_array_index(obj->items, i);
     return NULL;
-}
-
-gboolean
-rj_has(const RjValue *obj, const char *key)
-{
-    const RjValue *v = rj_get(obj, key);
-    return v && v->type != RJ_NULL;
 }
 
 const char *

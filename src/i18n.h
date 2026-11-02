@@ -13,7 +13,6 @@ G_BEGIN_DECLS
 
 void        ns_i18n_init(const char *self_exe);
 const char *ns_i18n(const char *text);
-const char *ns_i18n_language(void);
 
 G_END_DECLS
 

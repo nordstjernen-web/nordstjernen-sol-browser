@@ -3787,12 +3787,6 @@ ns_svg_render_bytes(cairo_t *cr, const guchar *data, gsize len,
 }
 
 ns_texture *
-ns_svg_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
-{
-    return ns_svg_decode_bytes_ratio(data, len, out_w, out_h, NULL);
-}
-
-ns_texture *
 ns_svg_decode_bytes_ratio(const guchar *data, gsize len, int *out_w, int *out_h,
                           double *out_ratio_only)
 {

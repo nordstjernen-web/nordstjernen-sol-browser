@@ -127,6 +127,7 @@ nordstjernen_engine_sources = files(
   'webcrypto.c',
   'ws.c',
   'html_lexbor.c',
+  'json_string.c',
   'xml.c',
 )
 

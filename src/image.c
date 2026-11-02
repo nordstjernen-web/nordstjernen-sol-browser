@@ -740,16 +740,6 @@ ns_image_cache_start_request(ns_image_cache *cache,
         on_image_fetched, pending);
 }
 
-ns_image *
-ns_image_cache_get(ns_image_cache *cache,
-                   const char *url,
-                   const char *top_url,
-                   ns_image_ready_cb cb,
-                   gpointer user_data)
-{
-    return ns_image_cache_get_for_doc(cache, url, top_url, NULL, cb, user_data);
-}
-
 static gboolean
 ns_image_stale_for_doc(ns_image_cache *cache, ns_image *img, const void *doc)
 {

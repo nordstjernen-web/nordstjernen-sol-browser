@@ -20,9 +20,6 @@ ns_browser *ns_browser_open(const char *url, int viewport_width, int settle_ms);
 ns_browser *ns_browser_open_viewport(const char *url, int viewport_width,
                                      double viewport_height, int settle_ms);
 
-ns_browser *ns_browser_open_post(const char *url, int viewport_width,
-                                 int settle_ms, const void *body,
-                                 size_t body_len, const char *content_type);
 ns_browser *ns_browser_open_post_viewport(const char *url, int viewport_width,
                                           double viewport_height,
                                           int settle_ms, const void *body,
@@ -121,8 +118,6 @@ char *ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
 
 void ns_browser_audio_feedback(ns_browser *browser, const char *line);
 
-int ns_browser_contextmenu(ns_browser *browser, int x, int y);
-
 enum {
     NS_BROWSER_EDIT_FIELD     = 1,
     NS_BROWSER_EDIT_WRITABLE  = 2,
@@ -170,7 +165,6 @@ int ns_browser_security(ns_browser *browser, const char **out_ip);
 
 char *ns_browser_take_pending_nav(ns_browser *browser);
 int ns_browser_take_soft_nav_pushed(ns_browser *browser);
-int ns_browser_take_pending_scroll_y(ns_browser *browser, int *out_scroll_y);
 int ns_browser_take_pending_scroll(ns_browser *browser, int *out_scroll_x,
                                    int *out_scroll_y);
 

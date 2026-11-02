@@ -5096,12 +5096,6 @@ ns_proc_view_unref(NsProcView *v)
     if (v) pv_unref(v);
 }
 
-gboolean
-ns_proc_view_is_closed(NsProcView *v)
-{
-    return !v || v->closed;
-}
-
 static void
 push_download_req(NsProcView *v, int kind, const char *url, long id,
                   NsProcViewTextFn cb, gpointer user_data)
@@ -5132,12 +5126,6 @@ ns_proc_view_download_poll(NsProcView *v, long id, NsProcViewTextFn cb,
                            gpointer user_data)
 {
     push_download_req(v, 1, NULL, id, cb, user_data);
-}
-
-void
-ns_proc_view_download_cancel(NsProcView *v, long id)
-{
-    push_download_req(v, 2, NULL, id, NULL, NULL);
 }
 
 void

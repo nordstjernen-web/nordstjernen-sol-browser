@@ -1177,12 +1177,6 @@ ns_rproc_http_release_full(ns_rproc_http *r, int *out_changed)
 }
 
 char *
-ns_rproc_http_release_at(ns_rproc_http *r, int x, int y, int *out_changed)
-{
-    return ns_rproc_http_release_button(r, x, y, 0, 1, out_changed, NULL);
-}
-
-char *
 ns_rproc_http_release_button(ns_rproc_http *r, int x, int y, int button,
                              int clicks, int *out_changed, int *out_newtab)
 {
@@ -1267,14 +1261,6 @@ ns_rproc_http_set_focused_editable_selection(ns_rproc_http *r, size_t caret,
     json_get_long(body, "ok", &ok);
     free(body);
     return ok != 0 ? 1 : 0;
-}
-
-int
-ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y, char **out_href,
-                         char **out_cursor)
-{
-    int rc = ns_rproc_http_hover_buttons(r, x, y, 0, -1, out_href, out_cursor);
-    return rc == 2 ? 0 : rc;
 }
 
 int

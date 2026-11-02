@@ -8,6 +8,18 @@ Changelog:
   wrapped in `calc()`, so about 100 bytes of nested `sqrt()` or
   `min()` caused billions of re-parses. A math expression now gets a
   fixed budget of parse attempts.
+* Security: the audio helper's FFmpeg demuxing is limited to the
+  formats it plays (Matroska/WebM, Ogg, MP4, FLAC, WAV, AAC, MP3) and
+  may not open nested files or URLs. With a full system FFmpeg, as on
+  macOS, a page could otherwise run any FFmpeg demuxer on bytes it
+  supplied through Media Source.
+* Structured data: emoji and other characters outside the Basic
+  Multilingual Plane survive in JSON-LD / OpenGraph names and URLs, and
+  `\b`, `\f` and `\r` decode correctly. One JSON string decoder now
+  serves the engine, the shell and the renderer IPC.
+* CSS: escapes in `<img sizes>` decode like everywhere else in CSS
+  (a hex escape ends only on CSS whitespace and swallows a CRLF).
+* Code cleanup: fifteen functions that nothing called were removed.
 * Settings: DuckDuckGo can be chosen as the search engine again. A
   configured `https://duckduckgo.com/?q=%s` (or the DuckDuckGo Lite
   URL) was replaced by Google every time the configuration loaded, a

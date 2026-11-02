@@ -13,24 +13,8 @@ static char *
 sizes_unescape(const char *s)
 {
     GString *out = g_string_new(NULL);
-    for (const char *p = s; *p; ) {
-        if (*p != '\\' || !p[1]) {
-            g_string_append_c(out, *p++);
-            continue;
-        }
-        p++;
-        if (g_ascii_isxdigit(*p)) {
-            gunichar cp = 0;
-            for (int n = 0; n < 6 && g_ascii_isxdigit(*p); n++, p++)
-                cp = cp * 16 + (gunichar)g_ascii_xdigit_value(*p);
-            if (g_ascii_isspace(*p)) p++;
-            if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
-                cp = 0xFFFD;
-            g_string_append_unichar(out, cp);
-        } else {
-            g_string_append_c(out, *p++);
-        }
-    }
+    for (const char *p = s; *p; )
+        ns_css_append_unescaped(out, &p);
     return g_string_free(out, FALSE);
 }
 

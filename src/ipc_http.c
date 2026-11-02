@@ -1,6 +1,7 @@
 /* Nordstjernen — minimal HTTP/1.1 + JSON framing for the IPC experiment. */
 
 #include "ipc_http.h"
+#include "json_string.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -578,46 +579,6 @@ json_get_double(const char *body, const char *key, double *out)
     return 0;
 }
 
-static int
-json_hex4(const char *s)
-{
-    int v = 0;
-    for (int i = 0; i < 4; i++) {
-        int c = (unsigned char)s[i];
-        if (c >= '0' && c <= '9') c -= '0';
-        else if (c >= 'a' && c <= 'f') c -= 'a' - 10;
-        else if (c >= 'A' && c <= 'F') c -= 'A' - 10;
-        else return -1;
-        v = (v << 4) | c;
-    }
-    return v;
-}
-
-static int
-json_utf8_encode(unsigned int cp, char *out)
-{
-    if (cp < 0x80) {
-        out[0] = (char)cp;
-        return 1;
-    }
-    if (cp < 0x800) {
-        out[0] = (char)(0xC0 | (cp >> 6));
-        out[1] = (char)(0x80 | (cp & 0x3F));
-        return 2;
-    }
-    if (cp < 0x10000) {
-        out[0] = (char)(0xE0 | (cp >> 12));
-        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        out[2] = (char)(0x80 | (cp & 0x3F));
-        return 3;
-    }
-    out[0] = (char)(0xF0 | (cp >> 18));
-    out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
-    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
-    out[3] = (char)(0x80 | (cp & 0x3F));
-    return 4;
-}
-
 char *
 json_get_str(const char *body, const char *key)
 {
@@ -625,44 +586,12 @@ json_get_str(const char *body, const char *key)
     if (!v || *v != '"')
         return NULL;
     v++;
-    size_t cap = strlen(v) + 1;
-    char *out = malloc(cap);
+    const char *stop = v;
+    ns_json_decode_string(v, NULL, NULL, &stop, 0);
+    char *out = malloc((size_t)(stop - v) + 1);
     if (!out)
         return NULL;
-    char *w = out;
-    while (*v && *v != '"') {
-        if (*v == '\\' && v[1]) {
-            v++;
-            switch (*v) {
-            case 'n': *w++ = '\n'; break;
-            case 'r': *w++ = '\r'; break;
-            case 't': *w++ = '\t'; break;
-            case 'u': {
-                int hi = json_hex4(v + 1);
-                if (hi < 0)
-                    break;
-                v += 4;
-                unsigned int cp = (unsigned int)hi;
-                if (cp >= 0xD800 && cp <= 0xDBFF &&
-                    v[1] == '\\' && v[2] == 'u') {
-                    int lo = json_hex4(v + 3);
-                    if (lo >= 0xDC00 && lo <= 0xDFFF) {
-                        cp = 0x10000u + ((cp - 0xD800u) << 10) +
-                             ((unsigned int)lo - 0xDC00u);
-                        v += 6;
-                    }
-                }
-                w += json_utf8_encode(cp, w);
-                break;
-            }
-            default: *w++ = *v; break;
-            }
-            v++;
-        } else {
-            *w++ = *v++;
-        }
-    }
-    *w = '\0';
+    ns_json_decode_string(v, NULL, out, NULL, 0);
     return out;
 }
 
