@@ -5885,6 +5885,47 @@ response_restore_policy_headers(ns_response *resp, const char *block)
     }
 }
 
+static gboolean
+cached_header_skipped(const char *line, gsize len)
+{
+    static const char *const skip[] = {
+        "connection", "keep-alive", "transfer-encoding", "content-encoding",
+        "content-length", "proxy-connection", "upgrade", "trailer", "te",
+        "set-cookie", "set-cookie2", "age",
+    };
+    const char *colon = memchr(line, ':', len);
+    if (!colon) return TRUE;
+    gsize n = (gsize)(colon - line);
+    for (gsize i = 0; i < G_N_ELEMENTS(skip); i++)
+        if (n == strlen(skip[i]) && g_ascii_strncasecmp(line, skip[i], n) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static char *
+response_cached_header_block(const char *raw)
+{
+    if (!raw || !*raw) return NULL;
+    GString *out = g_string_new(NULL);
+    for (const char *line = raw; *line; ) {
+        const char *eol = strchr(line, '\n');
+        gsize len = eol ? (gsize)(eol - line) : strlen(line);
+        gsize vis = len;
+        while (vis > 0 && line[vis - 1] == '\r') vis--;
+        if (vis > 0 && !cached_header_skipped(line, vis)) {
+            g_string_append_len(out, line, (gssize)vis);
+            g_string_append_c(out, '\n');
+        }
+        if (!eol) break;
+        line = eol + 1;
+    }
+    if (out->len == 0) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
 static ns_response *
 response_from_cache_entry(ns_cache_entry *e)
 {
@@ -5894,6 +5935,7 @@ response_from_cache_entry(ns_cache_entry *e)
     resp->content_type = g_strdup(e->content_type);
     resp->cors_allow_origin = g_strdup(e->cors_allow_origin);
     response_restore_policy_headers(resp, e->policy_headers);
+    resp->raw_headers  = g_strdup(e->policy_headers);
     resp->body         = e->body;
     e->body = NULL;
     return resp;
@@ -7027,10 +7069,16 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     }
     ns_hop_out_clear(&out);
 
+    gboolean revalidated_from_cache = FALSE;
     if (transport_ok && request_http && is_simple_get(method) &&
         !header_ctx.set_cookie_seen &&
         !resp->tls_warning) {
+        const char *raw_block = header_ctx.raw ? header_ctx.raw->str : NULL;
+        g_autofree char *all_vary = ns_net_raw_header_values(raw_block, "Vary");
+        g_autofree char *all_cache_control =
+            ns_net_raw_header_values(raw_block, "Cache-Control");
         if (resp->status == 304 && cached && cached->body) {
+            revalidated_from_cache = TRUE;
             ns_cache_promote_304(url, cache_partition, cache_request_headers,
                                  header_ctx.cache_control, header_ctx.expires,
                                  header_ctx.date, header_ctx.age,
@@ -7045,16 +7093,21 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             response_restore_policy_headers(resp, cached->policy_headers);
         } else if (resp->status > 0 && resp->status < 300 &&
                    resp->body && resp->body->len > 0) {
-            g_autofree char *policy_headers = response_policy_headers(resp);
+            g_autofree char *policy_headers =
+                response_cached_header_block(raw_block);
+            if (!policy_headers) policy_headers = response_policy_headers(resp);
             ns_cache_put(url, cache_partition,
                          resp->final_url, resp->status,
                          resp->content_type,
                          resp->cors_allow_origin,
                          policy_headers,
                          header_ctx.etag, header_ctx.last_modified,
-                         header_ctx.cache_control, header_ctx.expires,
+                         all_cache_control ? all_cache_control
+                                           : header_ctx.cache_control,
+                         header_ctx.expires,
                          header_ctx.date, header_ctx.age,
-                         header_ctx.vary, cache_request_headers,
+                         all_vary ? all_vary : header_ctx.vary,
+                         cache_request_headers,
                          resp->body->data, resp->body->len);
         }
     }
@@ -7076,7 +7129,11 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         *location_out = header_ctx.location;
     else
         g_free(header_ctx.location);
-    if (header_ctx.raw) {
+    if (revalidated_from_cache && cached && cached->policy_headers) {
+        g_free(resp->raw_headers);
+        resp->raw_headers = g_strdup(cached->policy_headers);
+        if (header_ctx.raw) g_string_free(header_ctx.raw, TRUE);
+    } else if (header_ctx.raw) {
         g_free(resp->raw_headers);
         resp->raw_headers = g_string_free(header_ctx.raw, FALSE);
     }
