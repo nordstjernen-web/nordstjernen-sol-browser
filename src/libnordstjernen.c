@@ -4048,19 +4048,20 @@ ns_browser_press_full(ns_browser *browser, int x, int y, int mods, int button,
     browser->buttons_down |= browser_button_bit(0);
     const ns_node *target = browser->js
         ? ns_js_pointer_event_target(browser->js, node) : node;
+    gboolean mousedown_prevented = FALSE;
     if (browser->js && target) {
         if (first)
             browser_mouse_dispatch(browser, target, "pointerdown", x, y, 0,
                                    -1, mods, NULL, NULL);
         browser_mouse_dispatch(browser, target, "mousedown", x, y, 0,
-                               clicks, mods, NULL, NULL);
+                               clicks, mods, NULL, &mousedown_prevented);
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     }
 
     gboolean in_datalist = FALSE;
     for (const ns_node *a = node; a; a = a->parent)
         if (ns_node_is_element_named(a, "datalist")) { in_datalist = TRUE; break; }
-    if (browser->js && !in_datalist) {
+    if (browser->js && !in_datalist && !mousedown_prevented) {
         const ns_node *focus = NULL;
         for (const ns_node *a = node; a; a = a->parent)
             if (ns_node_is_focusable(a)) { focus = a; break; }
