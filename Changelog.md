@@ -3,6 +3,10 @@ Changelog:
 
 1.0.42-dev:
 ======
+* DOM: `screen`'s attributes (`width`, `availHeight`, `colorDepth`, …)
+  are accessors on `Screen.prototype` and `screen.orientation` is a
+  `ScreenOrientation`, as WebIDL defines them, instead of own data
+  properties on plain objects; `screen.isExtended` exists.
 * HTTP cache: a response served from the cache keeps its response
   headers, so `fetch()`'s `Response.headers` sees the same values as on
   the first load. Only a handful of policy headers survived before;
