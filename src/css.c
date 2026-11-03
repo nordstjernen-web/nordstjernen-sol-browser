@@ -33926,6 +33926,7 @@ static gboolean       g_id_keys_loose;
 static GPtrArray     *g_has_anchors;
 static GPtrArray     *g_has_subject_anchors;
 static gboolean       g_has_cq_loose;
+static gboolean       g_has_ancestor_subjects;
 static gboolean       g_struct_loose;
 static gboolean       g_sib_loose;
 static guint64        g_struct_sig;
@@ -33934,6 +33935,7 @@ typedef struct {
     GHashTable *keys;
     GHashTable *attrs;
     gboolean    loose;
+    gboolean    escapes;
     guint64     relevant_serial;
     gboolean    relevant;
 } incr_has_args;
@@ -34208,6 +34210,14 @@ incr_mark_has_subjects(ns_node *changed)
     if (!changed || !g_incr_eligible || g_has_cq_loose) return;
     if (!g_incr_dirty)
         g_incr_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
+    if (g_has_ancestor_subjects) {
+        if (!g_incr_self_dirty)
+            g_incr_self_dirty = g_hash_table_new(g_direct_hash,
+                                                 g_direct_equal);
+        for (ns_node *a = changed; a; a = a->parent)
+            if (a->kind == NS_NODE_ELEMENT)
+                g_hash_table_add(g_incr_self_dirty, a);
+    }
     incr_defer_loose_has_subjects(changed);
     if (!g_has_anchors || g_has_anchors->len == 0)
         return;
@@ -36147,6 +36157,8 @@ incr_has_arg_note_compound(incr_has_args *args, const ns_css_simple *c)
     if (!keyed || incr_simple_has_structural(c, 0) ||
         (c->has_groups && c->has_groups->len > 0))
         args->loose = TRUE;
+    if (c->has_groups && c->has_groups->len > 0)
+        args->escapes = TRUE;
 }
 
 static void
@@ -36154,7 +36166,13 @@ incr_has_arg_note_selector(incr_has_args *args, const ns_css_selector *sel)
 {
     if (!sel || !sel->compounds || sel->compounds->len == 0) {
         args->loose = TRUE;
+        args->escapes = TRUE;
         return;
+    }
+    if (sel->combinators && sel->combinators->len > 0) {
+        ns_css_comb lead = g_array_index(sel->combinators, ns_css_comb, 0);
+        if (lead == NS_CSS_COMB_ADJACENT || lead == NS_CSS_COMB_SIBLING)
+            args->escapes = TRUE;
     }
     for (guint i = 0; sel->combinators && i < sel->combinators->len; i++) {
         ns_css_comb comb = g_array_index(sel->combinators, ns_css_comb, i);
@@ -36178,8 +36196,13 @@ incr_note_has_groups(const incr_has_ctx *at, int depth, const ns_css_simple *c)
     incr_has_args *outer_args = g_has_args_cur;
     g_has_args_cur = args;
     if (!incr_add_has_anchor_deps(at, depth) &&
-        !incr_add_has_subject_anchor(at))
-        g_has_cq_loose = TRUE;
+        !incr_add_has_subject_anchor(at)) {
+        if (!args->escapes && !at->outer &&
+            at->idx + 1 == at->sel->compounds->len)
+            g_has_ancestor_subjects = TRUE;
+        else
+            g_has_cq_loose = TRUE;
+    }
     g_has_args_cur = outer_args;
 }
 
@@ -38387,6 +38410,7 @@ ns_css_compute(ns_node *doc,
                                                        g_int64_equal,
                                                        g_free, NULL);
             g_has_cq_loose = FALSE;
+            g_has_ancestor_subjects = FALSE;
             if (g_has_args_all) g_ptr_array_set_size(g_has_args_all, 0);
             g_has_args_gateable = FALSE;
         }
