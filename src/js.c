@@ -4900,6 +4900,12 @@ ns_node_kind_proto(ns_js *js, const ns_node *node)
     switch (node->kind) {
     case NS_NODE_ELEMENT:
         if (node->flags & NS_NODE_SVG_NS) {
+            if (node->name && js->per_tag_protos) {
+                char key[64];
+                g_snprintf(key, sizeof key, "svg:%s", node->name);
+                JSValue *slot = g_hash_table_lookup(js->per_tag_protos, key);
+                if (slot) return *slot;
+            }
             if (node->name && g_ascii_strcasecmp(node->name, "a") == 0 &&
                 JS_IsObject(js->proto_svgaelement))
                 return js->proto_svgaelement;
@@ -60067,6 +60073,87 @@ ns_install_mathml_proto(JSContext *ctx, JSValueConst global,
     return proto;
 }
 
+static const struct { const char *iface, *parent, *tags; } ns_svg_ifaces[] = {
+    { "SVGGraphicsElement",        "SVGElement",                NULL },
+    { "SVGGeometryElement",        "SVGGraphicsElement",        NULL },
+    { "SVGPathElement",            "SVGGeometryElement",        "path" },
+    { "SVGRectElement",            "SVGGeometryElement",        "rect" },
+    { "SVGCircleElement",          "SVGGeometryElement",        "circle" },
+    { "SVGEllipseElement",         "SVGGeometryElement",        "ellipse" },
+    { "SVGLineElement",            "SVGGeometryElement",        "line" },
+    { "SVGPolylineElement",        "SVGGeometryElement",        "polyline" },
+    { "SVGPolygonElement",         "SVGGeometryElement",        "polygon" },
+    { "SVGSVGElement",             "SVGGraphicsElement",        "svg" },
+    { "SVGGElement",               "SVGGraphicsElement",        "g" },
+    { "SVGDefsElement",            "SVGGraphicsElement",        "defs" },
+    { "SVGUseElement",             "SVGGraphicsElement",        "use" },
+    { "SVGImageElement",           "SVGGraphicsElement",        "image" },
+    { "SVGForeignObjectElement",   "SVGGraphicsElement",        "foreignObject" },
+    { "SVGSwitchElement",          "SVGGraphicsElement",        "switch" },
+    { "SVGAElement",               "SVGGraphicsElement",        "a" },
+    { "SVGTextContentElement",     "SVGGraphicsElement",        NULL },
+    { "SVGTextPositioningElement", "SVGTextContentElement",     NULL },
+    { "SVGTextElement",            "SVGTextPositioningElement", "text" },
+    { "SVGTSpanElement",           "SVGTextPositioningElement", "tspan" },
+    { "SVGTextPathElement",        "SVGTextContentElement",     "textPath" },
+    { "SVGGradientElement",        "SVGElement",                NULL },
+    { "SVGLinearGradientElement",  "SVGGradientElement",        "linearGradient" },
+    { "SVGRadialGradientElement",  "SVGGradientElement",        "radialGradient" },
+    { "SVGStopElement",            "SVGElement",                "stop" },
+    { "SVGMaskElement",            "SVGElement",                "mask" },
+    { "SVGClipPathElement",        "SVGElement",                "clipPath" },
+    { "SVGPatternElement",         "SVGElement",                "pattern" },
+    { "SVGSymbolElement",          "SVGElement",                "symbol" },
+    { "SVGMarkerElement",          "SVGElement",                "marker" },
+    { "SVGFilterElement",          "SVGElement",                "filter" },
+    { "SVGTitleElement",           "SVGElement",                "title" },
+    { "SVGDescElement",            "SVGElement",                "desc" },
+    { "SVGMetadataElement",        "SVGElement",                "metadata" },
+    { "SVGStyleElement",           "SVGElement",                "style" },
+    { "SVGScriptElement",          "SVGElement",                "script" },
+    { "SVGViewElement",            "SVGElement",                "view" },
+};
+
+static void
+ns_svg_tag_proto_insert(ns_js *js, JSContext *ctx, const char *tag,
+                        JSValueConst proto)
+{
+    char *key = g_strconcat("svg:", tag, NULL);
+    JSValue *old = g_hash_table_lookup(js->per_tag_protos, key);
+    if (old) JS_FreeValue(ctx, *old);
+    JSValue *entry = g_new(JSValue, 1);
+    *entry = JS_DupValue(ctx, proto);
+    g_hash_table_insert(js->per_tag_protos, key, entry);
+}
+
+static void
+ns_install_svg_interfaces(ns_js *js, JSContext *ctx, JSValueConst global)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_svg_ifaces); i++) {
+        JSValue ctor = JS_GetPropertyStr(ctx, global, ns_svg_ifaces[i].iface);
+        gboolean have = JS_IsObject(ctor);
+        JS_FreeValue(ctx, ctor);
+        if (!have)
+            ns_bind_ctor(ctx, global, ns_svg_ifaces[i].iface,
+                         ns_window_event_ctor, 0);
+        JSValue parent = ns_proto_of(ctx, global, ns_svg_ifaces[i].parent);
+        ns_chain_proto(ctx, global, ns_svg_ifaces[i].iface, parent);
+        JS_FreeValue(ctx, parent);
+        JSValue proto = ns_proto_of(ctx, global, ns_svg_ifaces[i].iface);
+        if (JS_IsObject(proto)) {
+            ns_set_tostring_tag(ctx, proto, ns_svg_ifaces[i].iface);
+            if (ns_svg_ifaces[i].tags && js->per_tag_protos) {
+                const char *tag = ns_svg_ifaces[i].tags;
+                ns_svg_tag_proto_insert(js, ctx, tag, proto);
+                g_autofree char *lower = g_ascii_strdown(tag, -1);
+                if (strcmp(lower, tag) != 0)
+                    ns_svg_tag_proto_insert(js, ctx, lower, proto);
+            }
+        }
+        JS_FreeValue(ctx, proto);
+    }
+}
+
 static void
 ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
 {
@@ -60332,6 +60419,8 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
         }
         JS_FreeValue(ctx, proto);
     }
+
+    ns_install_svg_interfaces(js, ctx, global);
 
     JSValue media_proto = ns_proto_of(ctx, global, "HTMLMediaElement");
     if (JS_IsObject(media_proto)) {
