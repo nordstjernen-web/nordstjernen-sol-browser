@@ -3,6 +3,13 @@ Changelog:
 
 1.0.42-dev:
 ======
+* DOM: SVG elements get their own interfaces. `SVGGraphicsElement`,
+  `SVGGeometryElement`, `SVGPathElement`, `SVGRectElement`,
+  `SVGCircleElement`, `SVGGElement`, `SVGUseElement`, `SVGTextElement`,
+  the gradient, mask, clip-path and other SVG element interfaces exist,
+  and an `<svg>` is an `SVGSVGElement` (it was a plain `SVGElement`, so
+  `svg instanceof SVGSVGElement` was false). Facebook's React components
+  threw "SVGGraphicsElement is not defined".
 * `new SharedWorker(url, { type: "module" })` runs the script as a module
   worker, as dedicated workers already did. It threw "unsupported worker
   type", which stopped Facebook's Messenger backend from starting.
