@@ -30380,7 +30380,7 @@ ns_shared_worker_same_origin(ns_js *js, JSContext *ctx, const char *abs_url)
 
 static ns_worker_host *
 ns_shared_worker_host(ns_js *js, const char *abs_url, const char *name,
-                      const char *base_url)
+                      const char *base_url, gboolean is_module)
 {
     g_autofree char *origin = g_str_has_prefix(abs_url, "data:")
         ? g_strdup("null") : ns_url_origin_from(base_url);
@@ -30397,6 +30397,7 @@ ns_shared_worker_host(ns_js *js, const char *abs_url, const char *name,
     g_atomic_int_set(&host->owner_alive, 1);
     g_mutex_init(&host->lock);
     host->is_shared = TRUE;
+    host->is_module = is_module;
     host->owner = js;
     host->owner_ctx = js->ctx;
     host->owner_obj = JS_NewObjectClass(js->ctx, ns_worker_class_id);
@@ -30473,8 +30474,10 @@ ns_shared_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc,
         name = g_strdup(s);
         JS_FreeCString(ctx, s);
     }
-    g_autofree char *type = argc >= 2 ? ns_worker_option_string(ctx, argv[1], "type") : NULL;
-    if (type && *type && g_ascii_strcasecmp(type, "classic") != 0)
+    g_autofree char *type = argc >= 2 && JS_IsObject(argv[1])
+        ? ns_worker_option_string(ctx, argv[1], "type") : NULL;
+    gboolean is_module = type && g_ascii_strcasecmp(type, "module") == 0;
+    if (type && *type && !is_module && g_ascii_strcasecmp(type, "classic") != 0)
         return JS_ThrowTypeError(ctx, "SharedWorker: unsupported worker type");
 
     gboolean fails = FALSE;
@@ -30518,7 +30521,8 @@ ns_shared_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc,
 
     g_autofree char *base_url = g_strdup(ns_js_realm_url_or_current(js, ctx));
     ns_worker_host *host = ns_shared_worker_host(js, abs_url, name ? name : "",
-                                                 base_url ? base_url : abs_url);
+                                                 base_url ? base_url : abs_url,
+                                                 is_module);
     JSValue clients = JS_GetPropertyStr(js->ctx, host->owner_obj, "_clients");
     if (JS_IsArray(clients))
         JS_SetPropertyUint32(js->ctx, clients,
