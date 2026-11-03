@@ -3,6 +3,11 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Calling `preventDefault()` on `mousedown` keeps the focus where it was,
+  as the HTML focus model requires. A click on an autocomplete
+  suggestion that cancels its `mousedown` still blurred the text field,
+  so the field committed what had been typed and closed the list before
+  the click arrived.
 * DOM: SVG elements get their own interfaces. `SVGGraphicsElement`,
   `SVGGeometryElement`, `SVGPathElement`, `SVGRectElement`,
   `SVGCircleElement`, `SVGGElement`, `SVGUseElement`, `SVGTextElement`,
