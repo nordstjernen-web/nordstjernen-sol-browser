@@ -22017,7 +22017,11 @@ ns_box_hit_node(const ns_box *root, double x, double y)
     const ns_node *inline_target = ns_box_hit_inline_dom(root, x, y);
     if (inline_target) target = inline_target;
     const ns_node *form_target = ns_box_hit_form_dom(root, x, y);
-    if (form_target) target = form_target;
+    if (form_target &&
+        (!target || target == form_target ||
+         node_is_ancestor_of(form_target, target) ||
+         node_is_ancestor_of(target, form_target)))
+        target = form_target;
     if (hit && target == hit->dom) {
         const ns_node *area = ns_box_image_map_area(hit, local_x, local_y);
         if (area) target = area;
