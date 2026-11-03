@@ -3,6 +3,12 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Layout: `overflow` on the root element (and on `<body>` when the root's
+  is `visible`) belongs to the viewport, so those boxes no longer become
+  scroll containers of their own. `html { overflow-y: scroll }` made
+  every `position: sticky` element measure against the root box instead
+  of the viewport and scroll away; Facebook's left navigation and right
+  column disappeared as soon as the feed scrolled.
 * SVG: an `<image>` inside inline SVG loads its `href` over the network
   like an `<img>`. Only `data:` URLs were drawn before, so every
   Facebook profile picture (an `<image>` masked to a circle) was a blank
