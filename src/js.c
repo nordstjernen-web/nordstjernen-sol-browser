@@ -59816,8 +59816,13 @@ ns_install_web_api_shapes(JSContext *ctx, JSValueConst global)
     static const char *const source =
         "(function(){"
         " function normalize(name,obj,tag,evented){"
+        "  if(!obj)return;"
         "  var C=globalThis[name];"
-        "  if(typeof C!=='function'||!C.prototype||!obj)return;"
+        "  if(typeof C!=='function'){"
+        "   C=({[name]:function(){throw new TypeError('Illegal constructor');}})[name];"
+        "   try{Object.defineProperty(globalThis,name,{value:C,writable:true,configurable:true,enumerable:false});}catch(e){return;}"
+        "  }"
+        "  if(!C.prototype)return;"
         "  var P=C.prototype;"
         "  if(evented&&typeof EventTarget==='function'&&EventTarget.prototype)"
         "   try{Object.setPrototypeOf(P,EventTarget.prototype);}catch(e){}"
@@ -59842,6 +59847,7 @@ ns_install_web_api_shapes(JSContext *ctx, JSValueConst global)
         " normalize('History',globalThis.history,'History',false);"
         " normalize('Performance',globalThis.performance,'Performance',true);"
         " normalize('Screen',globalThis.screen,'Screen',true);"
+        " normalize('ScreenOrientation',globalThis.screen&&screen.orientation,'ScreenOrientation',true);"
         " normalize('Crypto',globalThis.crypto,'Crypto',false);"
         " normalize('SubtleCrypto',globalThis.crypto&&globalThis.crypto.subtle,'SubtleCrypto',false);"
         " normalize('Permissions',globalThis.navigator&&navigator.permissions,'Permissions',false);"
@@ -61771,6 +61777,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     JS_SetPropertyStr(ctx, screen, "availTop",    JS_NewInt32(ctx, screen_avail_top));
     JS_SetPropertyStr(ctx, screen, "colorDepth",  JS_NewInt32(ctx, 24));
     JS_SetPropertyStr(ctx, screen, "pixelDepth",  JS_NewInt32(ctx, 24));
+    JS_SetPropertyStr(ctx, screen, "isExtended",  JS_FALSE);
     JSValue orientation = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, orientation, "type",
                       JS_NewString(ctx, "landscape-primary"));
