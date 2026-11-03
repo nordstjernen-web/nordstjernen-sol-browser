@@ -3,6 +3,9 @@ Changelog:
 
 1.0.42-dev:
 ======
+* `new SharedWorker(url, { type: "module" })` runs the script as a module
+  worker, as dedicated workers already did. It threw "unsupported worker
+  type", which stopped Facebook's Messenger backend from starting.
 * Layout: `overflow` on the root element (and on `<body>` when the root's
   is `visible`) belongs to the viewport, so those boxes no longer become
   scroll containers of their own. `html { overflow-y: scroll }` made
