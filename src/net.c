@@ -6601,8 +6601,16 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     }
     g_autofree char *vary_accept =
         g_strdup_printf("Accept: %s", request_accept);
+    const char *request_language = accept_language;
+    for (guint i = 0; extra_headers && i < extra_headers->len; i++) {
+        const char *h = g_ptr_array_index(extra_headers, i);
+        if (g_ascii_strncasecmp(h, "Accept-Language:", 16) != 0) continue;
+        for (h += 16; *h == ' ' || *h == '\t'; h++) {}
+        request_language = h;
+        break;
+    }
     g_autofree char *vary_language =
-        g_strdup_printf("Accept-Language: %s", accept_language);
+        g_strdup_printf("Accept-Language: %s", request_language);
     g_autofree char *vary_agent =
         g_strdup_printf("User-Agent: %s", effective_ua);
     const char *request_origin = initiator
@@ -6718,18 +6726,19 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     if (g_hop_stream) fetch_timeout = (long)NS_STREAM_TIMEOUT_S;
 
     gboolean caller_set_accept = FALSE;
+    gboolean caller_set_language = FALSE;
     if (extra_headers) {
         for (guint i = 0; i < extra_headers->len; i++) {
             const char *h = g_ptr_array_index(extra_headers, i);
-            if (h && g_ascii_strncasecmp(h, "Accept:", 7) == 0) {
+            if (h && g_ascii_strncasecmp(h, "Accept:", 7) == 0)
                 caller_set_accept = TRUE;
-                break;
-            }
+            if (h && g_ascii_strncasecmp(h, "Accept-Language:", 16) == 0)
+                caller_set_language = TRUE;
         }
     }
 
     struct curl_slist *headers = NULL;
-    {
+    if (!caller_set_language) {
         char *h = g_strdup_printf("Accept-Language: %s", accept_language);
         headers = curl_slist_append(headers, h);
         g_free(h);

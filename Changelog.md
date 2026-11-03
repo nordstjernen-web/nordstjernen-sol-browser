@@ -3,6 +3,10 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Network: an `Accept-Language` header set by the page (`fetch`, XHR)
+  replaces the browser's default instead of being sent next to it.
+  x.com's sign-in requests went out with two conflicting
+  `Accept-Language` headers.
 * Layout: a text `<input>` that a flex container stretches or grows
   taller than its line keeps its text vertically centred, as one with an
   explicit height already did. The text sat at the top of the box, so
