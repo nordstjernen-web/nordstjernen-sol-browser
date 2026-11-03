@@ -3,6 +3,10 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Hit testing: a form control no longer takes a click meant for an
+  unrelated element painted on top of it. Gmail's recipient suggestions
+  overlay the Subject field, and clicking a contact focused Subject
+  instead of choosing the contact.
 * Calling `preventDefault()` on `mousedown` keeps the focus where it was,
   as the HTML focus model requires. A click on an autocomplete
   suggestion that cancels its `mousedown` still blurred the text field,
