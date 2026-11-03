@@ -2434,6 +2434,8 @@ svg_is_hidden(svg_ctx *ctx, const ns_node *n)
     return d && g_ascii_strcasecmp(d, "none") == 0;
 }
 
+static ns_svg_image_resolver g_image_resolver;
+static void *g_image_resolver_data;
 static ns_svg_foreign_painter g_foreign_painter;
 static void *g_foreign_painter_data;
 
@@ -2442,6 +2444,13 @@ ns_svg_set_foreign_painter(ns_svg_foreign_painter painter, void *user_data)
 {
     g_foreign_painter = painter;
     g_foreign_painter_data = user_data;
+}
+
+void
+ns_svg_set_image_resolver(ns_svg_image_resolver resolver, void *user_data)
+{
+    g_image_resolver = resolver;
+    g_image_resolver_data = user_data;
 }
 
 static gboolean
@@ -2635,6 +2644,25 @@ svg_image_source(const char *href)
     return master ? svg_image_view(master) : NULL;
 }
 
+static cairo_surface_t *
+svg_image_resolved(const ns_node *n)
+{
+    if (!g_image_resolver) return NULL;
+    const ns_image *im = g_image_resolver(n, g_image_resolver_data);
+    if (!im || !im->loaded || !im->texture || !im->url) return NULL;
+    gboolean found = FALSE;
+    cairo_surface_t *master = svg_image_cache_lookup(im->url, &found);
+    if (!found) {
+        int w = ns_texture_get_width(im->texture);
+        int h = ns_texture_get_height(im->texture);
+        master = w > 0 && h > 0 ? svg_texture_surface(im->texture, w, h)
+                                : NULL;
+        if (!master) return NULL;
+        svg_image_cache_store(im->url, master);
+    }
+    return master ? svg_image_view(master) : NULL;
+}
+
 static void
 svg_image_box(svg_ctx *ctx, const ns_node *n, double fs,
               const svg_rect *natural, svg_rect *box)
@@ -2684,6 +2712,7 @@ svg_render_image(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 {
     const char *href = svg_href(n);
     cairo_surface_t *img = href ? svg_image_source(href) : NULL;
+    if (!img && href) img = svg_image_resolved(n);
     if (!img) return;
     svg_rect natural = { 0, 0, cairo_image_surface_get_width(img),
                          cairo_image_surface_get_height(img) };

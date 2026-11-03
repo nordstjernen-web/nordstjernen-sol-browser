@@ -46,6 +46,11 @@ typedef void (*ns_svg_foreign_painter)(cairo_t *cr, const ns_node *fo,
 void ns_svg_set_foreign_painter(ns_svg_foreign_painter painter,
                                 void *user_data);
 
+typedef const struct ns_image *(*ns_svg_image_resolver)(const ns_node *image,
+                                                        void *user_data);
+void ns_svg_set_image_resolver(ns_svg_image_resolver resolver,
+                               void *user_data);
+
 void ns_svg_render_node(cairo_t          *cr,
                         const ns_node    *svg,
                         double            width,

@@ -3,6 +3,10 @@ Changelog:
 
 1.0.42-dev:
 ======
+* SVG: an `<image>` inside inline SVG loads its `href` over the network
+  like an `<img>`. Only `data:` URLs were drawn before, so every
+  Facebook profile picture (an `<image>` masked to a circle) was a blank
+  white disc.
 
 1.0.41:
 ======
