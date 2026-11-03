@@ -12712,6 +12712,27 @@ flex_relayout_after_cross_resize(ns_box *c, double layout_width,
     relayout_at_definite_height(c, layout_width, target_h, child_inherited);
 }
 
+static void
+flex_recenter_input_text(ns_box *c)
+{
+    if (!ns_node_is_element_named(c->dom, "input") || !c->first_child) return;
+    double top = G_MAXDOUBLE, bottom = -G_MAXDOUBLE;
+    for (const ns_box *k = c->first_child; k; k = k->next_sibling) {
+        if (style_is_absolute_or_fixed(k->style)) continue;
+        double kb = k->y + k->margin.top + k->border.top + k->padding.top +
+                    k->content_height + k->padding.bottom +
+                    k->border.bottom + k->margin.bottom;
+        if (k->y < top) top = k->y;
+        if (kb > bottom) bottom = kb;
+    }
+    if (top > bottom) return;
+    double inner_y = c->y + c->margin.top + c->border.top + c->padding.top;
+    double shift = inner_y + (c->content_height - (bottom - top)) * 0.5 - top;
+    if (fabs(shift) < 0.25) return;
+    for (ns_box *k = c->first_child; k; k = k->next_sibling)
+        if (!style_is_absolute_or_fixed(k->style)) shift_box_tree(k, 0, shift);
+}
+
 static gboolean
 flex_align_stretches(const char *align)
 {
@@ -13054,6 +13075,7 @@ layout_flex_row(ns_box *box, double cw,
             if (!cross_preset)
                 flex_relayout_after_cross_resize(c, item_layout_width, a,
                                                  pre_h, child_inherited);
+            flex_recenter_input_text(c);
         }
         if (main_reversed) cursor_x -= gap + between;
         else               cursor_x += outer_main + gap + between;
@@ -13301,6 +13323,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
                         c, item_layout_width,
                         g_array_index(main_arr, double, idx),
                         pre_h, child_inherited);
+                flex_recenter_input_text(c);
             }
             cursor_x += outer + c->margin.left + c->margin.right + gap + between;
         }
@@ -13382,6 +13405,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
                                + g_array_index(extras_arr, double, idx),
                             g_array_index(main_arr, double, idx),
                             pre_h, child_inherited);
+                        flex_recenter_input_text(c);
                     } else if (strcmp(eff_align, "center") == 0) {
                         shift_box_tree(c, 0, per_line / 2.0);
                     } else if (strcmp(eff_align, "flex-end") == 0 ||
@@ -14145,6 +14169,8 @@ layout_flex_column(ns_box *box, double cw,
     }
 
     flex_column_relayout_remeasured(items, lens, child_inherited);
+    for (guint k = 0; k < items->len; k++)
+        flex_recenter_input_text(items->pdata[k]);
     *cursor_y_out = inner_y + main_extent;
     g_free(lens);
     g_array_free(contribs, TRUE);

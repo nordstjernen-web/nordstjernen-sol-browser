@@ -3,6 +3,10 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Layout: a text `<input>` that a flex container stretches or grows
+  taller than its line keeps its text vertically centred, as one with an
+  explicit height already did. The text sat at the top of the box, so
+  Gmail's "To" field was drawn 8 px above its label.
 * Style: a `:has()` on the subject of a selector, with no class, id or
   type to key it by, no longer turns off incremental restyling for the
   whole page. When its argument stays inside the subject's subtree (no
