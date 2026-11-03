@@ -8849,6 +8849,16 @@ overflow_kw_scrolls(const char *ov)
                   g_ascii_strcasecmp(ov, "scroll") == 0);
 }
 
+static gboolean box_overflow_goes_to_viewport(const ns_box *box);
+
+static gboolean
+box_overflow_is_viewports(const ns_box *b)
+{
+    const ns_node *n = b ? b->dom : NULL;
+    if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
+    return !n->parent || n->parent->kind != NS_NODE_ELEMENT;
+}
+
 static gboolean
 box_clips_children(const ns_box *b)
 {
@@ -17744,8 +17754,10 @@ flex_done: ;
         ? overflow_axis_keyword(box->style, NS_CSS_OVERFLOW_X) : NULL;
     const char *ovy = box->style
         ? overflow_axis_keyword(box->style, NS_CSS_OVERFLOW_Y) : NULL;
-    gboolean overflow_scrolls  = overflow_kw_scrolls(ovy);
-    gboolean overflow_scrolls_x = overflow_kw_scrolls(ovx);
+    gboolean viewport_overflow = box_overflow_is_viewports(box) ||
+                                 box_overflow_goes_to_viewport(box);
+    gboolean overflow_scrolls  = !viewport_overflow && overflow_kw_scrolls(ovy);
+    gboolean overflow_scrolls_x = !viewport_overflow && overflow_kw_scrolls(ovx);
     if (legend) box_prepend_child(box, legend);
     double measured = cursor_y - inner_y + legend_extra;
     box->measured_content_height = measured;
