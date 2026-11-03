@@ -2065,6 +2065,10 @@ engine_collect_wanted_images(ns_box *root, const char *base_url,
             g_ptr_array_add(srcs, box->media->border_image_src);
         if (box->media->mask_image_src)
             g_ptr_array_add(srcs, box->media->mask_image_src);
+        for (guint vi = 0; box->media->svg_image_srcs &&
+                           vi < box->media->svg_image_srcs->len; vi++)
+            g_ptr_array_add(srcs,
+                            g_ptr_array_index(box->media->svg_image_srcs, vi));
         for (guint ai = 0; box->attrs && ai < box->attrs->len; ai++) {
             const ns_inline_attr *a =
                 &g_array_index(box->attrs, ns_inline_attr, ai);

@@ -134,6 +134,9 @@ typedef struct ns_box_media {
     double   image_density;
     GPtrArray *svg_foreign;
     double    *svg_foreign_xform;
+    GPtrArray *svg_image_nodes;
+    GPtrArray *svg_image_srcs;
+    GPtrArray *svg_images;
 } ns_box_media;
 
 typedef struct ns_grid_track_edges {

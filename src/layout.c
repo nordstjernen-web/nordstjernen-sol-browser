@@ -971,6 +971,12 @@ ns_box_free(ns_box *box)
                 g_ptr_array_free(cur->media->svg_foreign, TRUE);
             }
             g_free(cur->media->svg_foreign_xform);
+            if (cur->media->svg_image_nodes)
+                g_ptr_array_free(cur->media->svg_image_nodes, TRUE);
+            if (cur->media->svg_image_srcs)
+                g_ptr_array_free(cur->media->svg_image_srcs, TRUE);
+            if (cur->media->svg_images)
+                g_ptr_array_free(cur->media->svg_images, TRUE);
             g_free(cur->media);
         }
         if (g_box_pool_n < (int)G_N_ELEMENTS(g_box_pool))
@@ -5904,6 +5910,47 @@ build_svg_foreign_objects(ns_box *svg_box, const ns_node *svg,
     collect_svg_foreign_objects(svg_box, svg, styles, width > 0 ? width : 300);
 }
 
+static const char *
+svg_image_external_href(const ns_node *n)
+{
+    const char *h = ns_element_get_attr(n, "href");
+    if (!h) h = ns_element_get_attr(n, "xlink:href");
+    if (!h) return NULL;
+    while (*h == ' ' || *h == '\t' || *h == '\n' || *h == '\r' || *h == '\f')
+        h++;
+    if (!*h || *h == '#' || g_ascii_strncasecmp(h, "data:", 5) == 0)
+        return NULL;
+    return h;
+}
+
+static void
+collect_svg_images(ns_box *svg_box, const ns_node *n, GHashTable *styles,
+                   int depth)
+{
+    if (depth > 64) return;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
+        const ns_style *cs = styles ? g_hash_table_lookup(styles, c) : NULL;
+        if (cs && style_is_none(cs)) continue;
+        if (strcmp(c->name, "foreignObject") == 0) continue;
+        if (strcmp(c->name, "image") == 0) {
+            const char *href = svg_image_external_href(c);
+            if (!href) continue;
+            ns_box_media *m = ns_box_media_ensure(svg_box);
+            if (!m->svg_image_nodes) {
+                m->svg_image_nodes = g_ptr_array_new();
+                m->svg_image_srcs = g_ptr_array_new_with_free_func(g_free);
+                m->svg_images = g_ptr_array_new();
+            }
+            g_ptr_array_add(m->svg_image_nodes, (gpointer)c);
+            g_ptr_array_add(m->svg_image_srcs, g_strdup(href));
+            g_ptr_array_add(m->svg_images, collect_peek_image(href));
+            continue;
+        }
+        collect_svg_images(svg_box, c, styles, depth + 1);
+    }
+}
+
 static ns_box *
 build_block(const ns_node *n, GHashTable *styles)
 {
@@ -6400,6 +6447,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         box->content_height = h;
         m->declared_image_size = w > 0 && h > 0;
         build_svg_foreign_objects(box, n, styles, w);
+        collect_svg_images(box, n, styles, 0);
         return box;
     }
 
@@ -20670,7 +20718,8 @@ collect_images_walk(const ns_box *b, GPtrArray *out)
     if (!b) return;
     if (b->kind == NS_BOX_IMAGE) g_ptr_array_add(out, (gpointer)b);
     if (b->media && (b->media->bg_image_src || b->media->marker_image_src ||
-                     b->media->border_image_src || b->media->mask_image_src))
+                     b->media->border_image_src || b->media->mask_image_src ||
+                     b->media->svg_image_srcs))
         g_ptr_array_add(out, (gpointer)b);
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         collect_images_walk(c, out);

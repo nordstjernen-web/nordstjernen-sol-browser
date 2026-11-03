@@ -7737,6 +7737,19 @@ paint_svg_foreign(cairo_t *cr, const ns_node *fo, double width, double height,
     }
 }
 
+static const ns_image *
+paint_svg_image(const ns_node *image, void *user_data)
+{
+    (void)user_data;
+    const ns_box *svg_box = g_svg_foreign_owner;
+    const ns_box_media *m = svg_box ? svg_box->media : NULL;
+    if (!m || !m->svg_image_nodes) return NULL;
+    for (guint i = 0; i < m->svg_image_nodes->len; i++)
+        if (g_ptr_array_index(m->svg_image_nodes, i) == image)
+            return g_ptr_array_index(m->svg_images, i);
+    return NULL;
+}
+
 static void
 paint_svg(cairo_t *cr, const ns_box *b)
 {
@@ -7753,10 +7766,14 @@ paint_svg(cairo_t *cr, const ns_box *b)
     g_svg_foreign_owner = b;
     cairo_get_matrix(cr, &g_svg_foreign_base);
     ns_svg_set_foreign_painter(paint_svg_foreign, NULL);
+    ns_svg_set_image_resolver(paint_svg_image, NULL);
     ns_svg_render_node(cr, b->dom, w, h, b->svg_styles, b->style);
     g_svg_foreign_owner = outer;
     g_svg_foreign_base = outer_base;
-    if (!outer) ns_svg_set_foreign_painter(NULL, NULL);
+    if (!outer) {
+        ns_svg_set_foreign_painter(NULL, NULL);
+        ns_svg_set_image_resolver(NULL, NULL);
+    }
     cairo_restore(cr);
 }
 
