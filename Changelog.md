@@ -3,6 +3,14 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Style: a `:has()` on the subject of a selector, with no class, id or
+  type to key it by, no longer turns off incremental restyling for the
+  whole page. When its argument stays inside the subject's subtree (no
+  leading `+` or `~`), a DOM change can only alter the match of the
+  changed node's ancestors, and those are restyled alone. One Gmail rule,
+  `:has(>:only-child>.GwQ8Bf)`, made every keystroke in the compose
+  window recompute the style of all 5,400 elements about 30 times;
+  the style pass per relayout drops from ~90 ms to ~4 ms.
 * Hit testing: a form control no longer takes a click meant for an
   unrelated element painted on top of it. Gmail's recipient suggestions
   overlay the Subject field, and clicking a contact focused Subject
