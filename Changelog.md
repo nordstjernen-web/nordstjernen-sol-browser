@@ -3,6 +3,14 @@ Changelog:
 
 1.0.42-dev:
 ======
+* HTTP cache: a response served from the cache keeps its response
+  headers, so `fetch()`'s `Response.headers` sees the same values as on
+  the first load. Only a handful of policy headers survived before;
+  x.com's sign-in widget reads `x-jf-presentation` from a response
+  cached for 15 minutes and showed "Something went wrong" on every
+  reload. Repeated `Vary` and `Cache-Control` header lines are combined
+  instead of the last one winning, so a response that varies on both
+  `Origin` and `Accept-Encoding` is no longer reused across origins.
 * Network: an `Accept-Language` header set by the page (`fetch`, XHR)
   replaces the browser's default instead of being sent next to it.
   x.com's sign-in requests went out with two conflicting
