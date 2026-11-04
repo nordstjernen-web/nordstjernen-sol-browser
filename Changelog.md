@@ -3,6 +3,9 @@ Changelog:
 
 1.0.42-dev:
 ======
+* JavaScript: a bytecode cache hit hands out a reference to the cached
+  entry instead of duplicating it, so loading YouTube's application script
+  from the cache no longer allocates and copies a transient 32 MB buffer.
 * Restyle performance: a `:has()` rule whose subject has no class, id or
   type to key on (YouTube has one) made every relevant DOM mutation
   restyle the whole document. Since such a rule's argument uses only

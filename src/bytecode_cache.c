@@ -19,8 +19,7 @@
 #define NS_BYTECODE_CACHE_MAX_BYTES   (512ull * 1024ull * 1024ull)
 
 typedef struct ns_bytecode_cache_entry {
-    guint8 *bytes;
-    gsize   len;
+    GBytes *bytes;
     gint64  used_us;
 } ns_bytecode_cache_entry;
 
@@ -60,7 +59,7 @@ ns_bytecode_cache_entry_free(gpointer data)
 {
     ns_bytecode_cache_entry *e = data;
     if (!e) return;
-    g_free(e->bytes);
+    g_bytes_unref(e->bytes);
     g_free(e);
 }
 
@@ -117,13 +116,13 @@ evict_until_fits(gsize want_bytes)
             }
         }
         if (!oldest_entry) break;
-        g_mem_bytes -= oldest_entry->len;
+        g_mem_bytes -= g_bytes_get_size(oldest_entry->bytes);
         g_hash_table_remove(g_mem, oldest_key);
     }
 }
 
-guint8 *
-ns_bytecode_cache_get(const char *key, gsize key_len, gsize *out_len)
+GBytes *
+ns_bytecode_cache_get(const char *key, gsize key_len)
 {
     if (!key || !key_len) return NULL;
     char digest[65];
@@ -132,14 +131,13 @@ ns_bytecode_cache_get(const char *key, gsize key_len, gsize *out_len)
     g_mutex_lock(&g_lock);
     ns_bytecode_cache_entry *e = g_mem ? g_hash_table_lookup(g_mem, digest)
                                        : NULL;
-    guint8 *copy = NULL;
+    GBytes *bytes = NULL;
     if (e) {
         e->used_us = g_get_monotonic_time();
-        copy = g_memdup2(e->bytes, e->len);
-        if (out_len) *out_len = e->len;
+        bytes = g_bytes_ref(e->bytes);
     }
     g_mutex_unlock(&g_lock);
-    return copy;
+    return bytes;
 }
 
 void
@@ -163,8 +161,7 @@ ns_bytecode_cache_put(const char *key, gsize key_len,
     }
     evict_until_fits(bc_len);
     ns_bytecode_cache_entry *ne = g_new0(ns_bytecode_cache_entry, 1);
-    ne->bytes = g_memdup2(bc, bc_len);
-    ne->len = bc_len;
+    ne->bytes = g_bytes_new(bc, bc_len);
     ne->used_us = g_get_monotonic_time();
     g_hash_table_insert(g_mem, g_strdup(digest), ne);
     g_mem_bytes += bc_len;

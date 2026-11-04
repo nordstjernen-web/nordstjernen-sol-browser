@@ -66540,11 +66540,12 @@ static gboolean
 ns_js_eval_bytecode_cached(ns_js *js, const char *key, gsize key_len,
                            JSValue *out_value)
 {
-    gsize bc_len = 0;
-    guint8 *bc = ns_bytecode_cache_get(key, key_len, &bc_len);
+    GBytes *bc = ns_bytecode_cache_get(key, key_len);
     if (!bc) return FALSE;
-    JSValue fn = JS_ReadObject(js->ctx, bc, bc_len, JS_READ_OBJ_BYTECODE);
-    g_free(bc);
+    gsize bc_len = 0;
+    const guint8 *bc_data = g_bytes_get_data(bc, &bc_len);
+    JSValue fn = JS_ReadObject(js->ctx, bc_data, bc_len, JS_READ_OBJ_BYTECODE);
+    g_bytes_unref(bc);
     if (JS_IsException(fn)) {
         JS_FreeValue(js->ctx, JS_GetException(js->ctx));
         return FALSE;
@@ -67712,11 +67713,13 @@ ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
     char  *key      = g_string_free(key_buf, FALSE);
 
     if (len >= 1024) {
-        gsize bc_len = 0;
-        guint8 *bc = ns_bytecode_cache_get(key, key_len, &bc_len);
+        GBytes *bc = ns_bytecode_cache_get(key, key_len);
         if (bc) {
-            JSValue m = JS_ReadObject(ctx, bc, bc_len, JS_READ_OBJ_BYTECODE);
-            g_free(bc);
+            gsize bc_len = 0;
+            const guint8 *bc_data = g_bytes_get_data(bc, &bc_len);
+            JSValue m = JS_ReadObject(ctx, bc_data, bc_len,
+                                      JS_READ_OBJ_BYTECODE);
+            g_bytes_unref(bc);
             if (!JS_IsException(m) && JS_VALUE_GET_TAG(m) == JS_TAG_MODULE) {
                 if (ns_js_module_set_import_meta(ctx, m, FALSE) < 0) {
                     JS_FreeValue(ctx, m);

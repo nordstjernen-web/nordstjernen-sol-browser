@@ -13,7 +13,7 @@ G_BEGIN_DECLS
 void          ns_bytecode_cache_init(void);
 void          ns_bytecode_cache_shutdown(void);
 
-guint8 *ns_bytecode_cache_get(const char *key, gsize key_len, gsize *out_len);
+GBytes *ns_bytecode_cache_get(const char *key, gsize key_len);
 void    ns_bytecode_cache_put(const char *key, gsize key_len,
                               const guint8 *bc, gsize bc_len);
 
