@@ -3,6 +3,15 @@ Changelog:
 
 1.0.42:
 ======
+* Video on Windows: reading H.264 frames back from the GPU no longer
+  stalls the renderer. Media Foundation decodes through DXVA, and each
+  frame was locked for reading as soon as the decoder returned it, so the
+  renderer's main thread waited for the GPU on every frame: about 8 ms a
+  frame even at 360p, a quarter of every second of playback. Each frame is
+  now copied into a staging texture of the decoder's own and read three
+  frames later, when the GPU has long finished it; the decoder gets its
+  surface back at once. On YouTube the readback fell from ~250 ms to ~3 ms
+  per second of video and the whole decode from ~300 ms to ~20 ms.
 * Video: a playing `<video>` no longer sends its queued frames to the
   window again after every relayout. The renderer re-sent up to 40 decoded
   frames (3.5 MB each at 720p) on each new tile generation, 2-8 times the
