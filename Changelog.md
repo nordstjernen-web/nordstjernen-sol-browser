@@ -3,6 +3,13 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Layout: an absolutely positioned `::before` or `::after` with no
+  insets takes its static position in a flex container from
+  `justify-content` and `align-items`, as an absolutely positioned
+  child element already did. It sat at the container's top-left
+  corner. reddit.com's feed loader draws its pulsing circle that way
+  behind the Reddit logo; the circle stood alone at the left edge of
+  the feed.
 * Layout: an element with `display: contents` is never the containing
   block of an absolutely or fixed positioned descendant, whatever its
   `position`, `transform` or `filter` says, since it has no box. The
