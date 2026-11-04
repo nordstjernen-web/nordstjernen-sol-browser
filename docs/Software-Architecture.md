@@ -109,8 +109,10 @@ serves every tab from one in-process engine over the same IPC protocol
 (`src/rproc_inproc.c`), trading the renderer sandbox and crash
 containment for footprint and debuggability. **Headless** modes
 (`--headless`/`--dump`/`--eval`/`--inspect`/`--wpt`/`--act`) are a
-separate path again: they run the engine in-process with no shell and no
-IPC at all (`ns_run_headless`, `src/gtk/appmain.c:418`). See
+separate path again: the shell hands the command line to
+`nordstjernen-renderer --headless-host …` and waits for it, and the
+renderer executable runs the engine with no shell and no IPC at all
+(`ns_headless_main`, `src/headless_main.c`). See
 [single-process-mode.md](single-process-mode.md).
 
 ---

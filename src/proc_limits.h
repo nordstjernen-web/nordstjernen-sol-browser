@@ -17,5 +17,6 @@
 #define NS_PROC_SETTLE_ENV         "NS_SETTLE_MS"
 #define NS_PROC_SINGLE_PROCESS_ENV "NS_SINGLE_PROCESS"
 #define NS_PROC_RENDERER_NAME "nordstjernen-renderer"
+#define NS_PROC_HEADLESS_FLAG "--headless-host"
 
 #endif

@@ -16,6 +16,8 @@
 #include "security.h"
 #include "net.h"
 #include "renderer_serve.h"
+#include "headless_main.h"
+#include "proc_limits.h"
 #include "threaddump.h"
 
 #include <stdint.h>
@@ -74,6 +76,10 @@ renderer_win32_fontconfig(void)
     }
     if (!g_getenv("PANGOCAIRO_BACKEND"))
         g_setenv("PANGOCAIRO_BACKEND", "fc", TRUE);
+#ifdef NS_USE_WEB_TEXT_LIB
+    if (!g_getenv("NS_PANGOCAIRO_BACKEND"))
+        g_setenv("NS_PANGOCAIRO_BACKEND", "fc", TRUE);
+#endif
     FcInit();
 }
 #endif
@@ -127,6 +133,13 @@ main(int argc, char **argv)
 #endif
     if (argc == 3 && strcmp(argv[1], "--selftest") == 0)
         return renderer_selftest(argv[2]);
+    if (argc >= 2 && strcmp(argv[1], NS_PROC_HEADLESS_FLAG) == 0) {
+#if defined(_WIN32) && defined(NS_HAVE_FONTCONFIG)
+        renderer_win32_fontconfig();
+#endif
+        argv[1] = argv[0];
+        return ns_headless_main(argc - 1, argv + 1);
+    }
     if (ns_security_env_flag("NS_CONFIG_VIA_PARENT")) {
         ns_config_defer_saves(TRUE);
         ns_security_config_dir_read_only();
