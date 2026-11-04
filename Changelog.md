@@ -3,6 +3,13 @@ Changelog:
 
 1.0.42-dev:
 ======
+* JavaScript: a `Map` or `Set` finds a string key whether it was built by
+  concatenation or not. A long string made with `+` or a template literal
+  is held as a rope, and it hashed differently from the same text held
+  flat (by tag, and by mixing each piece's length in), so once a map had
+  more than one bucket `get`, `has` and `delete` missed the equal key.
+  x.com looked up the post data streamed with the page under a key built
+  that way and drew "No posts yet" on every directly opened post.
 * Layout: a row flex container that its own flex parent stretches lays
   its items out in the stretched height when it also has a `min-height`.
   The `min-height` stood in for the definite height, so the items were
