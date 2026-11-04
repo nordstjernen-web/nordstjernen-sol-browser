@@ -74,9 +74,16 @@ struct ns_video_player {
     double      pending_time;
     guint       pending_serial;
     GArray     *ahead;
-    guint       next_serial;
     guint       dropped;
 };
+
+static guint g_video_frame_serial;
+
+static guint
+ns_video_next_serial(void)
+{
+    return (guint)g_atomic_int_add((gint *)&g_video_frame_serial, 1) + 1;
+}
 
 typedef struct ns_vframe {
     ns_texture *tex;
@@ -1117,7 +1124,7 @@ ns_video_player_frame_at(ns_video_player *player, double seconds,
         ns_texture_unref(player->pending_tex);
         player->pending_tex = tex;
         player->pending_time = pts < 0.0 ? 0.0 : pts;
-        player->pending_serial = ++player->next_serial;
+        player->pending_serial = ns_video_next_serial();
     }
 
     return changed ? player->cur_tex : NULL;
@@ -1142,7 +1149,7 @@ ns_video_player_prefetch(ns_video_player *player, double until,
         gboolean eof = FALSE;
         if (!ns_video_backend_next(player, &f.tex, &f.pts, &eof)) break;
         if (f.pts < 0.0) f.pts = 0.0;
-        f.serial = ++player->next_serial;
+        f.serial = ns_video_next_serial();
         g_array_append_val(player->ahead, f);
     }
 }

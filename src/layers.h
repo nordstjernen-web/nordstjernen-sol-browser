@@ -44,6 +44,7 @@ gboolean ns_browser_canvas_color(ns_browser *browser, double rgba_out[4]);
 typedef struct ns_video_layer {
     guint              id;
     double             x, y, w, h;
+    int                slot;
     ns_video_frame_ref frames[NS_VIDEO_LAYER_FRAMES];
     guint              n_frames;
     guint             *sent_serial;

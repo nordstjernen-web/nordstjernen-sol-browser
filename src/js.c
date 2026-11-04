@@ -72100,6 +72100,10 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
         JS_FreeValue(ctx, playing);
         if (kind[0] == 'p')
             ns_js_dispatch_event(js, n, "timeupdate", NULL);
+    } else if (strcmp(kind, "composited") == 0) {
+        int32_t frames = ns_media_int_prop(ctx, el, "_nd_frame_count");
+        JS_SetPropertyStr(ctx, el, "_nd_frame_count",
+                          JS_NewInt32(ctx, frames + (int32_t)value));
     } else if (strcmp(kind, "frame") == 0) {
         int32_t frames = ns_media_int_prop(ctx, el, "_nd_frame_count");
         JS_SetPropertyStr(ctx, el, "_nd_frame_count",

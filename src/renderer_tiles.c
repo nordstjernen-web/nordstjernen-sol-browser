@@ -429,8 +429,9 @@ static void
 tiles_write_video(const ns_video_layer *layer, gpointer data)
 {
     tiles_video_out *vo = data;
-    g_string_append_printf(vo->o->desc, "video %u %.2f %.2f %.2f %.2f\n",
-                           layer->id, layer->x, layer->y, layer->w, layer->h);
+    g_string_append_printf(vo->o->desc, "video %u %.2f %.2f %.2f %.2f %d\n",
+                           layer->id, layer->x, layer->y, layer->w, layer->h,
+                           layer->slot);
     guint sent = *layer->sent_serial;
     for (guint i = 0; i < layer->n_frames; i++) {
         if (!tiles_write_video_frame(vo, &layer->frames[i], sent)) break;

@@ -46,6 +46,7 @@ typedef struct {
 typedef struct {
     guint       id;
     double      x, y, w, h;
+    int         slot;
     GArray     *frames;
     guint       shown;
 } PlVideo;
@@ -240,9 +241,10 @@ static void
 pl_parse_video(NsLayerUpdate *u, const char *line)
 {
     PlVideo v = { 0 };
-    if (sscanf(line, "video %u %lf %lf %lf %lf", &v.id, &v.x, &v.y, &v.w,
-               &v.h) != 5 || !(v.w > 0) || !(v.h > 0))
+    if (sscanf(line, "video %u %lf %lf %lf %lf %d", &v.id, &v.x, &v.y, &v.w,
+               &v.h, &v.slot) < 5 || !(v.w > 0) || !(v.h > 0))
         return;
+    if (v.slot < 0) v.slot = 0;
     v.frames = g_array_new(FALSE, TRUE, sizeof(PlFrame));
     g_array_set_clear_func(v.frames, pl_frame_clear);
     g_ptr_array_add(u->videos, g_memdup2(&v, sizeof v));
@@ -480,7 +482,8 @@ pl_adopt_videos(NsPageLayers *pl, NsLayerUpdate *u)
             v->shown = pl_video_due(v, now);
             changed = TRUE;
         }
-        if (!old || old->x != v->x || old->y != v->y || old->w != v->w ||
+        if (!old || old->slot != v->slot || old->x != v->x ||
+            old->y != v->y || old->w != v->w ||
             old->h != v->h)
             changed = TRUE;
     }
@@ -696,11 +699,12 @@ pl_snapshot_doc_layer(const NsPageLayers *pl, int layer, GtkSnapshot *snapshot,
 }
 
 static void
-pl_snapshot_videos(const NsPageLayers *pl, GtkSnapshot *snapshot,
+pl_snapshot_videos(const NsPageLayers *pl, int slot, GtkSnapshot *snapshot,
                    double raster, double ox, double oy)
 {
     for (guint i = 0; i < pl->videos->len; i++) {
         const PlVideo *v = g_ptr_array_index(pl->videos, i);
+        if (MIN(v->slot, pl->n_vp) != slot) continue;
         GdkTexture *tex = pl_video_frame_texture(v, v->shown);
         if (!tex) continue;
         graphene_rect_t r = GRAPHENE_RECT_INIT(
@@ -725,11 +729,11 @@ ns_page_layers_snapshot(const NsPageLayers *pl, GtkSnapshot *snapshot,
     long k0 = (long)floor(oy / pl->tile_h);
     long k1 = (long)floor((oy + height * raster - 1) / pl->tile_h);
     gtk_snapshot_push_clip(snapshot, &area);
-    pl_snapshot_videos(pl, snapshot, raster, ox, oy);
     for (int layer = 0; layer <= pl->n_vp; layer++) {
         if (layer > 0 && (guint)layer <= pl->vp->len)
             pl_snapshot_view_layer(pl, g_ptr_array_index(pl->vp, layer - 1),
                                    snapshot, raster, ox, oy, scroll_y);
+        pl_snapshot_videos(pl, layer, snapshot, raster, ox, oy);
         pl_snapshot_doc_layer(pl, layer, snapshot, raster, ox, oy, k0, k1);
     }
     gtk_snapshot_pop(snapshot);
