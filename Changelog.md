@@ -3,6 +3,15 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Media: when the operating system's AAC decoder is available (Media
+  Foundation on Windows, AudioToolbox, MediaCodec, GStreamer),
+  `MediaSource.isTypeSupported()` no longer claims Opus or Vorbis, so
+  sites that offer several audio encodings (YouTube) choose AAC and its
+  audio is decoded by the OS instead of in software by FFmpeg. With the
+  earlier H.264 change, YouTube on Windows now plays video and audio
+  through Media Foundation. `canPlayType()` and progressive Ogg/Opus/WebM
+  files are unchanged; `NS_MEDIA_SOFTWARE_CODECS=1` restores the old
+  answer.
 * Hit testing: the descendants of a positioned `z-index: auto` box now
   compete in the enclosing stacking context, as they are painted, instead
   of being resolved inside that box. A `z-index: 1` flex item (Google's

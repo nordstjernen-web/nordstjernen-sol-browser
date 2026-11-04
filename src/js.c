@@ -51303,6 +51303,14 @@ ns_media_source_is_type_supported(JSContext *ctx, JSValueConst this_val,
                          strcmp(container, "audio/mpeg") == 0 ||
                          strcmp(container, "audio/aac")  == 0;
     gboolean ok = segmented && *ns_media_type_support(raw) != '\0';
+    char *codecs = ok ? ns_media_type_codecs(params) : NULL;
+    if (codecs) {
+        char **parts = g_strsplit(codecs, ",", -1);
+        for (int i = 0; parts[i] && ok; i++)
+            ok = !ns_media_source_codec_yields_to_os(g_strstrip(parts[i]));
+        g_strfreev(parts);
+        g_free(codecs);
+    }
     g_free(container);
     g_free(lowered);
     JS_FreeCString(ctx, raw);
