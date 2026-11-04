@@ -60,6 +60,18 @@
   </branding>
 
   <releases>
+    <release version="1.0.42" date="2026-11-04">
+      <description>
+        <p>Architecture, cookies and security release.</p>
+        <ul>
+          <li>The browser window no longer links the web engine: pages, headless modes and single-process mode all run in the renderer.</li>
+          <li>Tabs are kept as session data, and camera, microphone and WebGL permission decisions are remembered per site.</li>
+          <li>Cookies move to a single SQLite store, with SameSite enforced on navigations and WebSocket/EventSource cookies following the page.</li>
+          <li>CSS Shadow Parts (::part()), SVG element interfaces and module SharedWorkers are implemented.</li>
+          <li>Faster restyling, smoother video and many layout fixes.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.41" date="2026-11-02">
       <description>
         <p>Web standards, media and security release.</p>

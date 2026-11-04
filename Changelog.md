@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.42-dev:
+1.0.42:
 ======
 * Architecture: the GTK shell no longer links the browser engine. It links
   a small `libns-platform` library (settings, i18n, debug log, sandbox,
