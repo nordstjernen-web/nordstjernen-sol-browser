@@ -57198,6 +57198,347 @@ ns_document_get_links(JSContext *ctx, JSValueConst this_val)
     return ns_make_live(ctx, this_val, NS_LIVE_LINKS, NULL);
 }
 
+#define NS_CONSOLE_MAX_DEPTH 4
+#define NS_CONSOLE_MAX_KEYS  100
+#define NS_CONSOLE_MAX_BYTES 16384
+
+static void
+ns_console_drop_exception(JSContext *ctx)
+{
+    JS_FreeValue(ctx, JS_GetException(ctx));
+}
+
+static gboolean
+ns_console_data_property(JSContext *ctx, JSValueConst obj, JSAtom atom,
+                         JSValue *value)
+{
+    *value = JS_UNDEFINED;
+    gboolean found = FALSE;
+    JSValue cur = JS_DupValue(ctx, obj);
+    for (int hops = 0; hops < 64 && JS_IsObject(cur) && !JS_IsProxy(cur); hops++) {
+        JSPropertyDescriptor desc;
+        int has = JS_GetOwnProperty(ctx, &desc, cur, atom);
+        if (has < 0) {
+            ns_console_drop_exception(ctx);
+            break;
+        }
+        if (has) {
+            if (desc.flags & JS_PROP_GETSET) {
+                JS_FreeValue(ctx, desc.value);
+            } else {
+                *value = desc.value;
+                found = TRUE;
+            }
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
+            break;
+        }
+        JSValue proto = JS_GetPrototype(ctx, cur);
+        JS_FreeValue(ctx, cur);
+        if (JS_IsException(proto)) {
+            ns_console_drop_exception(ctx);
+            proto = JS_UNDEFINED;
+        }
+        cur = proto;
+    }
+    JS_FreeValue(ctx, cur);
+    return found;
+}
+
+static const char *
+ns_console_data_string(JSContext *ctx, JSValueConst obj, const char *name)
+{
+    JSAtom atom = JS_NewAtom(ctx, name);
+    JSValue v;
+    const char *str = NULL;
+    if (ns_console_data_property(ctx, obj, atom, &v) && JS_IsString(v))
+        str = JS_ToCString(ctx, v);
+    JS_FreeValue(ctx, v);
+    JS_FreeAtom(ctx, atom);
+    return str;
+}
+
+static gboolean
+ns_console_has_own(JSContext *ctx, JSValueConst obj, JSAtom atom)
+{
+    int has = JS_GetOwnProperty(ctx, NULL, obj, atom);
+    if (has < 0) ns_console_drop_exception(ctx);
+    return has != 0;
+}
+
+static gboolean
+ns_console_has_own_conversion(JSContext *ctx, JSValueConst obj)
+{
+    static const char *const names[] = { "toString", "valueOf", "toJSON" };
+    for (gsize i = 0; i < G_N_ELEMENTS(names); i++) {
+        JSAtom atom = JS_NewAtom(ctx, names[i]);
+        gboolean has = ns_console_has_own(ctx, obj, atom);
+        JS_FreeAtom(ctx, atom);
+        if (has) return TRUE;
+    }
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSAtom symbol_atom = JS_NewAtom(ctx, "Symbol");
+    JSAtom to_primitive_atom = JS_NewAtom(ctx, "toPrimitive");
+    JSValue symbol = JS_UNDEFINED;
+    JSValue to_primitive = JS_UNDEFINED;
+    gboolean has = TRUE;
+    if (ns_console_data_property(ctx, global, symbol_atom, &symbol) &&
+        ns_console_data_property(ctx, symbol, to_primitive_atom, &to_primitive) &&
+        JS_IsSymbol(to_primitive)) {
+        JSAtom atom = JS_ValueToAtom(ctx, to_primitive);
+        has = ns_console_has_own(ctx, obj, atom);
+        JS_FreeAtom(ctx, atom);
+    }
+    JS_FreeValue(ctx, to_primitive);
+    JS_FreeValue(ctx, symbol);
+    JS_FreeAtom(ctx, to_primitive_atom);
+    JS_FreeAtom(ctx, symbol_atom);
+    JS_FreeValue(ctx, global);
+    return has;
+}
+
+static void
+ns_console_append_cstring_of(JSContext *ctx, GString *out, JSValueConst val)
+{
+    const char *s = JS_ToCString(ctx, val);
+    if (s) {
+        g_string_append(out, s);
+        JS_FreeCString(ctx, s);
+    } else {
+        ns_console_drop_exception(ctx);
+    }
+}
+
+static void
+ns_console_append_quoted(JSContext *ctx, GString *out, JSValueConst str)
+{
+    JSValue json = JS_JSONStringify(ctx, str, JS_UNDEFINED, JS_UNDEFINED);
+    if (JS_IsException(json)) ns_console_drop_exception(ctx);
+    else ns_console_append_cstring_of(ctx, out, json);
+    JS_FreeValue(ctx, json);
+}
+
+static void
+ns_console_append_atom_key(JSContext *ctx, GString *out, JSAtom atom)
+{
+    JSValue key = JS_AtomToString(ctx, atom);
+    ns_console_append_quoted(ctx, out, key);
+    JS_FreeValue(ctx, key);
+}
+
+static gboolean
+ns_console_json_skips(JSContext *ctx, JSValueConst val)
+{
+    return JS_IsUndefined(val) || JS_IsSymbol(val) || JS_IsFunction(ctx, val);
+}
+
+static void ns_console_append_json(JSContext *ctx, GString *out,
+                                   JSValueConst val, GPtrArray *open);
+
+static void
+ns_console_append_json_array(JSContext *ctx, GString *out, JSValueConst arr,
+                             GPtrArray *open)
+{
+    JSAtom length_atom = JS_NewAtom(ctx, "length");
+    JSValue length_v;
+    uint32_t length = 0;
+    if (ns_console_data_property(ctx, arr, length_atom, &length_v) &&
+        JS_ToUint32(ctx, &length, length_v) < 0)
+        ns_console_drop_exception(ctx);
+    JS_FreeValue(ctx, length_v);
+    JS_FreeAtom(ctx, length_atom);
+    g_string_append_c(out, '[');
+    uint32_t shown = MIN(length, NS_CONSOLE_MAX_KEYS);
+    for (uint32_t i = 0; i < shown && out->len < NS_CONSOLE_MAX_BYTES; i++) {
+        if (i) g_string_append_c(out, ',');
+        JSAtom atom = JS_NewAtomUInt32(ctx, i);
+        JSPropertyDescriptor desc;
+        int has = JS_GetOwnProperty(ctx, &desc, arr, atom);
+        JS_FreeAtom(ctx, atom);
+        if (has < 0) {
+            ns_console_drop_exception(ctx);
+            has = 0;
+        }
+        if (!has) {
+            g_string_append(out, "null");
+            continue;
+        }
+        if (desc.flags & JS_PROP_GETSET)
+            g_string_append(out, "(...)");
+        else if (ns_console_json_skips(ctx, desc.value))
+            g_string_append(out, "null");
+        else
+            ns_console_append_json(ctx, out, desc.value, open);
+        JS_FreeValue(ctx, desc.value);
+        JS_FreeValue(ctx, desc.getter);
+        JS_FreeValue(ctx, desc.setter);
+    }
+    if (length > shown) g_string_append(out, ",…");
+    g_string_append_c(out, ']');
+}
+
+static void
+ns_console_append_json_object(JSContext *ctx, GString *out, JSValueConst obj,
+                              GPtrArray *open)
+{
+    JSPropertyEnum *props = NULL;
+    uint32_t count = 0;
+    if (JS_GetOwnPropertyNames(ctx, &props, &count, obj,
+                               JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) < 0) {
+        ns_console_drop_exception(ctx);
+        g_string_append(out, "{}");
+        return;
+    }
+    g_string_append_c(out, '{');
+    gboolean first = TRUE;
+    uint32_t shown = 0;
+    for (uint32_t i = 0; i < count && out->len < NS_CONSOLE_MAX_BYTES; i++) {
+        JSPropertyDescriptor desc;
+        int has = JS_GetOwnProperty(ctx, &desc, obj, props[i].atom);
+        if (has < 0) ns_console_drop_exception(ctx);
+        if (has <= 0) continue;
+        gboolean accessor = (desc.flags & JS_PROP_GETSET) != 0;
+        if (accessor || !ns_console_json_skips(ctx, desc.value)) {
+            if (shown == NS_CONSOLE_MAX_KEYS) {
+                g_string_append(out, ",…");
+            } else {
+                if (!first) g_string_append_c(out, ',');
+                first = FALSE;
+                ns_console_append_atom_key(ctx, out, props[i].atom);
+                g_string_append_c(out, ':');
+                if (accessor)
+                    g_string_append(out, "(...)");
+                else
+                    ns_console_append_json(ctx, out, desc.value, open);
+            }
+            shown++;
+        }
+        JS_FreeValue(ctx, desc.value);
+        JS_FreeValue(ctx, desc.getter);
+        JS_FreeValue(ctx, desc.setter);
+        if (shown > NS_CONSOLE_MAX_KEYS) break;
+    }
+    JS_FreePropertyEnum(ctx, props, count);
+    g_string_append_c(out, '}');
+}
+
+static void
+ns_console_append_json(JSContext *ctx, GString *out, JSValueConst val,
+                       GPtrArray *open)
+{
+    if (JS_IsString(val)) {
+        ns_console_append_quoted(ctx, out, val);
+        return;
+    }
+    if (JS_IsNumber(val)) {
+        double d = 0;
+        if (JS_ToFloat64(ctx, &d, val) == 0 && isfinite(d))
+            ns_console_append_cstring_of(ctx, out, val);
+        else
+            g_string_append(out, "null");
+        return;
+    }
+    if (!JS_IsObject(val)) {
+        if (JS_IsBool(val) || JS_IsBigInt(val))
+            ns_console_append_cstring_of(ctx, out, val);
+        else
+            g_string_append(out, "null");
+        return;
+    }
+    if (JS_IsProxy(val)) {
+        g_string_append(out, "\"Proxy\"");
+        return;
+    }
+    void *ptr = JS_VALUE_GET_PTR(val);
+    for (guint i = 0; i < open->len; i++) {
+        if (g_ptr_array_index(open, i) == ptr) {
+            g_string_append(out, "\"[Circular]\"");
+            return;
+        }
+    }
+    if (open->len >= NS_CONSOLE_MAX_DEPTH) {
+        g_string_append(out, JS_IsArray(val) ? "[…]" : "{…}");
+        return;
+    }
+    if (JS_IsDate(val) && !ns_console_has_own_conversion(ctx, val)) {
+        JSValue json = JS_JSONStringify(ctx, val, JS_UNDEFINED, JS_UNDEFINED);
+        if (JS_IsException(json)) ns_console_drop_exception(ctx);
+        else ns_console_append_cstring_of(ctx, out, json);
+        JS_FreeValue(ctx, json);
+        return;
+    }
+    g_ptr_array_add(open, ptr);
+    if (JS_IsArray(val))
+        ns_console_append_json_array(ctx, out, val, open);
+    else
+        ns_console_append_json_object(ctx, out, val, open);
+    g_ptr_array_remove_index(open, open->len - 1);
+}
+
+static void
+ns_console_append_error_like(GString *out, const char *name, const char *msg,
+                             const char *stack)
+{
+    if (name && *name) g_string_append(out, name);
+    if (msg && *msg) {
+        if (name && *name) g_string_append(out, ": ");
+        g_string_append(out, msg);
+    }
+    if (stack && *stack) {
+        if ((name && *name) || (msg && *msg)) g_string_append_c(out, '\n');
+        g_string_append(out, stack);
+    }
+}
+
+static void
+ns_console_append_value(JSContext *ctx, GString *out, JSValueConst val)
+{
+    if (!JS_IsObject(val)) {
+        ns_console_append_cstring_of(ctx, out, val);
+        return;
+    }
+    if (JS_IsProxy(val)) {
+        g_string_append(out, "Proxy");
+        return;
+    }
+    if (JS_IsFunction(ctx, val) || JS_IsRegExp(val) || JS_IsDate(val)) {
+        if (!ns_console_has_own_conversion(ctx, val)) {
+            ns_console_append_cstring_of(ctx, out, val);
+            return;
+        }
+        const char *name = JS_IsFunction(ctx, val)
+            ? ns_console_data_string(ctx, val, "name") : NULL;
+        g_string_append(out, JS_IsFunction(ctx, val) ? "function "
+                             : JS_IsDate(val) ? "Date" : "RegExp");
+        if (name) {
+            g_string_append(out, name);
+            JS_FreeCString(ctx, name);
+        }
+        return;
+    }
+    const char *name = ns_console_data_string(ctx, val, "name");
+    const char *msg = ns_console_data_string(ctx, val, "message");
+    const char *stack = ns_console_data_string(ctx, val, "stack");
+    if (JS_IsError(val)) {
+        if (!stack) {
+            JSValue frames = JS_GetErrorFrames(ctx, val);
+            if (JS_IsString(frames)) stack = JS_ToCString(ctx, frames);
+            JS_FreeValue(ctx, frames);
+        }
+        ns_console_append_error_like(out, name && *name ? name : "Error",
+                                     msg, stack);
+    } else if (stack) {
+        ns_console_append_error_like(out, name, msg, stack);
+    } else {
+        GPtrArray *open = g_ptr_array_new();
+        ns_console_append_json(ctx, out, val, open);
+        g_ptr_array_free(open, TRUE);
+    }
+    if (name) JS_FreeCString(ctx, name);
+    if (msg) JS_FreeCString(ctx, msg);
+    if (stack) JS_FreeCString(ctx, stack);
+}
+
 static int
 ns_js_emit_formatted(JSContext *ctx, GString *out, int argc, JSValueConst *argv)
 {
@@ -57222,11 +57563,7 @@ ns_js_emit_formatted(JSContext *ctx, GString *out, int argc, JSValueConst *argv)
         } else if (d == 's' || d == 'd' || d == 'i' || d == 'f' ||
                    d == 'o' || d == 'O' || d == 'j') {
             if (next < argc) {
-                const char *s = JS_ToCString(ctx, argv[next]);
-                if (s) {
-                    g_string_append(out, s);
-                    JS_FreeCString(ctx, s);
-                }
+                ns_console_append_value(ctx, out, argv[next]);
                 next++;
             }
         } else {
@@ -57256,68 +57593,7 @@ ns_js_emit(ns_js *js, const char *prefix, JSContext *ctx, int argc, JSValueConst
     for (int i = start; i < argc; i++) {
         if (i > start || start > 0 || (prefix && *prefix))
             g_string_append_c(out, ' ');
-        if (JS_IsError(argv[i])) {
-            JSValue name_v  = JS_GetPropertyStr(ctx, argv[i], "name");
-            JSValue msg_v   = JS_GetPropertyStr(ctx, argv[i], "message");
-            JSValue stack_v = JS_GetPropertyStr(ctx, argv[i], "stack");
-            const char *name  = JS_IsUndefined(name_v)  ? NULL : JS_ToCString(ctx, name_v);
-            const char *msg   = JS_IsUndefined(msg_v)   ? NULL : JS_ToCString(ctx, msg_v);
-            const char *stack = JS_IsUndefined(stack_v) ? NULL : JS_ToCString(ctx, stack_v);
-            g_string_append(out, name && *name ? name : "Error");
-            if (msg && *msg) { g_string_append(out, ": "); g_string_append(out, msg); }
-            if (stack && *stack) { g_string_append_c(out, '\n'); g_string_append(out, stack); }
-            if (name)  JS_FreeCString(ctx, name);
-            if (msg)   JS_FreeCString(ctx, msg);
-            if (stack) JS_FreeCString(ctx, stack);
-            JS_FreeValue(ctx, name_v);
-            JS_FreeValue(ctx, msg_v);
-            JS_FreeValue(ctx, stack_v);
-        } else if (JS_IsObject(argv[i]) && !JS_IsFunction(ctx, argv[i])) {
-            JSValue name_v = JS_GetPropertyStr(ctx, argv[i], "name");
-            JSValue msg_v = JS_GetPropertyStr(ctx, argv[i], "message");
-            JSValue stack_v = JS_GetPropertyStr(ctx, argv[i], "stack");
-            if (JS_IsString(stack_v)) {
-                const char *name = JS_IsString(name_v) ? JS_ToCString(ctx, name_v) : NULL;
-                const char *msg = JS_IsString(msg_v) ? JS_ToCString(ctx, msg_v) : NULL;
-                const char *stack = JS_ToCString(ctx, stack_v);
-                if (name && *name) g_string_append(out, name);
-                if (msg && *msg) {
-                    if (name && *name) g_string_append(out, ": ");
-                    g_string_append(out, msg);
-                }
-                if ((name && *name) || (msg && *msg)) g_string_append_c(out, '\n');
-                if (stack) {
-                    g_string_append(out, stack);
-                    JS_FreeCString(ctx, stack);
-                }
-                if (name) JS_FreeCString(ctx, name);
-                if (msg) JS_FreeCString(ctx, msg);
-            } else {
-                JSValue json = JS_JSONStringify(ctx, argv[i], JS_UNDEFINED,
-                                                JS_UNDEFINED);
-                if (!JS_IsException(json) && !JS_IsUndefined(json)) {
-                    const char *s = JS_ToCString(ctx, json);
-                    if (s) {
-                        g_string_append(out, s);
-                        JS_FreeCString(ctx, s);
-                    }
-                } else {
-                    const char *s = JS_ToCString(ctx, argv[i]);
-                    if (s) { g_string_append(out, s); JS_FreeCString(ctx, s); }
-                    if (JS_IsException(json)) {
-                        JSValue ex = JS_GetException(ctx);
-                        JS_FreeValue(ctx, ex);
-                    }
-                }
-                JS_FreeValue(ctx, json);
-            }
-            JS_FreeValue(ctx, name_v);
-            JS_FreeValue(ctx, msg_v);
-            JS_FreeValue(ctx, stack_v);
-        } else {
-            const char *s = JS_ToCString(ctx, argv[i]);
-            if (s) { g_string_append(out, s); JS_FreeCString(ctx, s); }
-        }
+        ns_console_append_value(ctx, out, argv[i]);
     }
     js->log_cb(out->str, js->log_user_data);
     g_string_free(out, TRUE);

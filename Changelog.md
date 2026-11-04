@@ -3,6 +3,17 @@ Changelog:
 
 1.0.42-dev:
 ======
+* JavaScript: `console.log()`, `warn()`, `error()` and the `%s`/`%o`
+  substitutions no longer run page code to format what they print. They
+  read an `Error`'s `name`, `message` and `stack` only from data
+  properties (a genuine error's frames come from its internal slot),
+  print a getter as `(...)`, a `Proxy` as `Proxy`, and a function, date
+  or regular expression with its own `toString`/`toJSON` by type alone;
+  objects are written as JSON without `toJSON`, with cycles marked and
+  depth and size bounded. A browser with its developer tools closed runs
+  no page code here, and pages use that to detect open developer tools:
+  x.com's bot check logs an `Error` whose `stack` getter records that it
+  was read, so every Nordstjernen session reported developer tools open.
 * JavaScript: a `Map` or `Set` finds a string key whether it was built by
   concatenation or not. A long string made with `+` or a template literal
   is held as a rope, and it hashed differently from the same text held

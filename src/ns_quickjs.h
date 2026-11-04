@@ -85,6 +85,8 @@ bool JS_IsDate(JSValueConst val);
 bool JS_IsRegExp(JSValueConst val);
 bool JS_IsMap(JSValueConst val);
 bool JS_IsSet(JSValueConst val);
+bool JS_IsProxy(JSValueConst val);
+JSValue JS_GetErrorFrames(JSContext *ctx, JSValueConst val);
 int JS_GetBoxedPrimitiveKind(JSValueConst val);
 bool JS_IsRunningScript(JSContext *ctx);
 int JS_FreezeObject(JSContext *ctx, JSValueConst obj);
