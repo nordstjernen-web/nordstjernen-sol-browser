@@ -2485,6 +2485,16 @@ parse_pseudo_keyword(const char *name, gsize n,
         out->arg = lang;
         return TRUE;
     }
+    if (arg && n == 11 && g_ascii_strncasecmp(name, "-nd-slotted", 11) == 0) {
+        char *host_id = css_trim_dup_range(arg, arg + alen);
+        if (!host_id || !*host_id) {
+            g_free(host_id);
+            return FALSE;
+        }
+        out->kind = NS_CSS_PC_ND_SLOTTED;
+        out->arg = host_id;
+        return TRUE;
+    }
     if (arg && n == 3 && g_ascii_strncasecmp(name, "dir", 3) == 0) {
         char *dir = css_trim_dup_range(arg, arg + alen);
         char *lo = g_ascii_strdown(dir ? dir : "", -1);
@@ -25360,6 +25370,112 @@ ns_dir_auto_resolve(const ns_node *n)
     return d ? d : "ltr";
 }
 
+static const ns_node *
+css_shadow_root_of(const ns_node *host)
+{
+    if (!host || host->kind != NS_NODE_ELEMENT) return NULL;
+    for (const ns_node *c = host->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT && ns_element_has_shadow_marker(c))
+            return c;
+    return NULL;
+}
+
+static const ns_node *
+css_find_slot(const ns_node *scope, const char *name, int depth)
+{
+    if (depth > 64) return NULL;
+    for (const ns_node *c = scope ? scope->first_child : NULL; c;
+         c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || ns_element_has_shadow_marker(c))
+            continue;
+        if (c->name && strcmp(c->name, "slot") == 0) {
+            const char *slot_name = ns_element_get_attr(c, "name");
+            if (g_strcmp0(slot_name ? slot_name : "", name) == 0) return c;
+        }
+        const ns_node *found = css_find_slot(c, name, depth + 1);
+        if (found) return found;
+    }
+    return NULL;
+}
+
+typedef struct {
+    const ns_node *root;
+    GHashTable    *slots;
+} css_host_slots;
+
+static __thread GHashTable *g_slot_lookup;
+
+static void
+css_host_slots_free(gpointer data)
+{
+    css_host_slots *hs = data;
+    if (hs->slots) g_hash_table_destroy(hs->slots);
+    g_free(hs);
+}
+
+static void
+css_slot_lookup_begin(void)
+{
+    if (g_slot_lookup) g_hash_table_remove_all(g_slot_lookup);
+    else g_slot_lookup = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                               NULL, css_host_slots_free);
+}
+
+static void
+css_slot_lookup_end(void)
+{
+    if (g_slot_lookup) g_hash_table_remove_all(g_slot_lookup);
+}
+
+static const ns_node *
+css_assigned_slot(const ns_node *el)
+{
+    const ns_node *host = el ? el->parent : NULL;
+    if (!host || host->kind != NS_NODE_ELEMENT || el->kind != NS_NODE_ELEMENT)
+        return NULL;
+    const char *name = ns_element_get_attr(el, "slot");
+    if (!name) name = "";
+    if (!g_slot_lookup) {
+        const ns_node *root = css_shadow_root_of(host);
+        return root && root != el ? css_find_slot(root, name, 0) : NULL;
+    }
+    css_host_slots *hs = g_hash_table_lookup(g_slot_lookup, host);
+    if (!hs) {
+        hs = g_new0(css_host_slots, 1);
+        hs->root = css_shadow_root_of(host);
+        g_hash_table_insert(g_slot_lookup, (gpointer)host, hs);
+    }
+    if (!hs->root || hs->root == el) return NULL;
+    if (!hs->slots)
+        hs->slots = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                          NULL);
+    gpointer slot;
+    if (g_hash_table_lookup_extended(hs->slots, name, NULL, &slot))
+        return slot;
+    slot = (gpointer)css_find_slot(hs->root, name, 0);
+    g_hash_table_insert(hs->slots, g_strdup(name), slot);
+    return slot;
+}
+
+static gboolean
+css_slotted_into_host(const ns_node *el, const char *host_id)
+{
+    if (!host_id) return FALSE;
+    const ns_node *cur = el;
+    for (int level = 0; level < 32 && cur; level++) {
+        const ns_node *host = cur->parent;
+        if (!host || host->kind != NS_NODE_ELEMENT) return FALSE;
+        const char *id = ns_element_get_attr(host, NS_HOST_SCOPE_ATTR);
+        gboolean host_matches = id && strcmp(id, host_id) == 0;
+        if (level == 0 && host_matches) return TRUE;
+        const ns_node *slot = css_assigned_slot(cur);
+        if (!slot) return FALSE;
+        if (host_matches) return TRUE;
+        cur = slot;
+    }
+    return FALSE;
+}
+
 const char *
 ns_css_node_dir(const ns_node *el)
 {
@@ -25992,6 +26108,9 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
             case NS_CSS_PC_DIR:
                 if (!pc->arg || strcmp(ns_css_node_dir(el), pc->arg) != 0)
                     return FALSE;
+                break;
+            case NS_CSS_PC_ND_SLOTTED:
+                if (!css_slotted_into_host(el, pc->arg)) return FALSE;
                 break;
             case NS_CSS_PC_OPEN:
                 if ((!ns_node_is_element_named(el, "details") &&
@@ -36941,6 +37060,27 @@ host_scoped_sheets(const ns_node *node, const ns_css_stylesheet *const *author,
     return all;
 }
 
+static GPtrArray *
+reslot_host_sheets(const ns_node *node)
+{
+    if (!g_doc_sheets || node->kind != NS_NODE_ELEMENT) return NULL;
+    GPtrArray *out = NULL;
+    const ns_node *slot = css_assigned_slot(node);
+    for (int level = 0; slot && level < 32; level++) {
+        const ns_node *host = slot->parent;
+        if (!host || host->kind != NS_NODE_ELEMENT) break;
+        const ns_node *next = css_assigned_slot(slot);
+        const GPtrArray *own = next
+            ? g_hash_table_lookup(g_doc_sheets, host) : NULL;
+        for (guint i = 0; own && i < own->len; i++) {
+            if (!out) out = g_ptr_array_new();
+            g_ptr_array_add(out, g_ptr_array_index(own, i));
+        }
+        slot = next;
+    }
+    return out;
+}
+
 /* Elements in a shadow tree match only that shadow root's own stylesheets
  * (its <style> elements and adopted sheets, recorded against the host), not
  * the document's or an enclosing tree's (CSS Scoping). The UA sheet still
@@ -37134,6 +37274,11 @@ cascade_walk(ns_node *node,
         guint pe_mask = ua ? ua->pseudo_mask : 0;
         for (gsize i = 0; i < n_author; i++)
             if (author[i]) pe_mask |= author[i]->pseudo_mask;
+        GPtrArray *reslot_sheets = reslot_host_sheets(node);
+        for (guint i = 0; reslot_sheets && i < reslot_sheets->len; i++) {
+            const ns_css_stylesheet *rs = g_ptr_array_index(reslot_sheets, i);
+            if (rs) pe_mask |= rs->pseudo_mask;
+        }
         ns_pe_gather pe_g[9];
         int n_pe = 0;
         gather_dest dests[10];
@@ -37179,6 +37324,12 @@ cascade_walk(ns_node *node,
             gather_matches_multi(author[i], NS_CSS_ORIGIN_AUTHOR,
                                  (int)(i + 1), node, dests,
                                  (guint)n_pe + 1, layer_ranks);
+        for (guint i = 0; reslot_sheets && i < reslot_sheets->len; i++)
+            gather_matches_multi(g_ptr_array_index(reslot_sheets, i),
+                                 NS_CSS_ORIGIN_AUTHOR,
+                                 (int)(n_author + i + 1), node, dests,
+                                 (guint)n_pe + 1, layer_ranks);
+        if (reslot_sheets) g_ptr_array_free(reslot_sheets, TRUE);
 
         char *pres_css = presentational_hints_css(node);
         const ns_css_stylesheet *pres_sheet = NULL;
@@ -37554,6 +37705,13 @@ style_iframe_scope_id(ns_node *style_el)
     return g_strdup(buf);
 }
 
+static gboolean
+rewrite_slotted_compound_end(char c)
+{
+    return c == ':' || c == ' ' || c == '\t' || c == '\n' || c == ',' ||
+           c == '{' || c == '>' || c == '+' || c == '~' || c == '\0';
+}
+
 static char *
 rewrite_host_selectors(const char *css, const char *host_id)
 {
@@ -37570,10 +37728,24 @@ rewrite_host_selectors(const char *css, const char *host_id)
                 else if (*q == ')') { depth--; if (!depth) break; }
                 q++;
             }
-            g_string_append(out, marker);
-            g_string_append(out, " > ");
-            g_string_append_len(out, inner, (gssize)(q - inner));
-            p = (*q == ')') ? q + 1 : q;
+            const char *after = (*q == ')') ? q + 1 : q;
+            gsize inner_len = (gsize)(q - inner);
+            while (inner_len && g_ascii_isspace((guchar)inner[inner_len - 1]))
+                inner_len--;
+            while (inner_len && g_ascii_isspace((guchar)*inner)) {
+                inner++;
+                inner_len--;
+            }
+            if (inner_len == 0 || !rewrite_slotted_compound_end(*after) ||
+                memchr(inner, ' ', inner_len) || memchr(inner, ',', inner_len)) {
+                g_string_append(out, marker);
+                g_string_append(out, " > ");
+                g_string_append_len(out, inner, (gssize)(q - inner));
+            } else {
+                g_string_append_len(out, inner, (gssize)inner_len);
+                g_string_append_printf(out, ":-nd-slotted(%s)", host_id);
+            }
+            p = after;
             continue;
         }
         if (p[0] == ':' && g_ascii_strncasecmp(p, ":host", 5) == 0) {
@@ -38527,6 +38699,7 @@ ns_css_compute(ns_node *doc,
 
     g_css_compute_thread = TRUE;
     g_pragma_valid = FALSE;
+    css_slot_lookup_begin();
 
     const ns_css_stylesheet *cached_ua = ua_sheet_for(doc);
 
@@ -38736,6 +38909,7 @@ ns_css_compute(ns_node *doc,
         g_printerr("[profile]   css.idx=%.1fms css.cascade=%.1fms\n",
                    (t_idx - t0) / 1000.0,
                    (t_cascade - t_idx) / 1000.0);
+    css_slot_lookup_end();
     return out;
 }
 

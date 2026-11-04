@@ -879,6 +879,7 @@ typedef enum ns_css_pseudo {
     NS_CSS_PC_SEEKING,
     NS_CSS_PC_BUFFERING,
     NS_CSS_PC_STALLED,
+    NS_CSS_PC_ND_SLOTTED,
 } ns_css_pseudo;
 
 typedef struct ns_css_pseudo_pred {
