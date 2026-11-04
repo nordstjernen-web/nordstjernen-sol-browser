@@ -100,7 +100,7 @@ the Temporal code in the in-tree QuickJS uses `__int128`, which GCC does
 not offer on 32-bit x86 or ARM.
 
 openSUSE's `%meson` passes `--auto-features=enabled`, so every `auto`
-feature in `meson_options.txt` needs its dependency in `BuildRequires`;
+feature in `meson.options` needs its dependency in `BuildRequires`;
 a missing one fails `meson setup` with `Dependency "…" not found`.
 
 Everything else builds from the declared `BuildRequires`:
