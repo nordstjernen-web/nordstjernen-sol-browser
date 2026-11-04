@@ -34389,6 +34389,15 @@ ns_css_mark_restyle_dirty(ns_node *parent)
     incr_mark_has_subjects(parent);
 }
 
+void
+ns_css_mark_text_dirty(ns_node *parent)
+{
+    if (!parent) return;
+    gboolean gated = incr_has_mut_begin();
+    ns_css_mark_restyle_dirty(parent);
+    incr_has_mut_end(gated);
+}
+
 static gboolean incr_pc_is_structural(ns_css_pseudo k)
 {
     switch (k) {

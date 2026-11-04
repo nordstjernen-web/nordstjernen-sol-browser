@@ -1343,6 +1343,7 @@ void ns_css_selector_cache_begin(void);
 void ns_css_selector_cache_end(void);
 
 void ns_css_mark_restyle_dirty(ns_node *parent);
+void ns_css_mark_text_dirty(ns_node *parent);
 void ns_css_mark_childlist_dirty(ns_node *parent, ns_node *added);
 void ns_css_mark_childlist_replaced(ns_node *parent, ns_node *added,
                                     ns_node *const *removed, guint n_removed);
