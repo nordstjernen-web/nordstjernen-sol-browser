@@ -12,7 +12,7 @@ JDK_PKG=${NS_JDK_PKG:-openjdk-21-jdk-headless}
 
 apt-get update -qq
 apt-get install -y --no-install-recommends \
-    build-essential clang pkg-config ninja-build cmake git zip \
+    build-essential clang pkg-config ninja-build git zip \
     python3-pip ca-certificates "$JDK_PKG" \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libuchardet-dev libpsl-dev \
     libsqlite3-dev libseccomp-dev

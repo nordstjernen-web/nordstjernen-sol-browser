@@ -13,6 +13,20 @@ Changelog:
   cache through the renderer (it used to call into an engine cache the
   shell never opened, so it cleared nothing). Builds against GTK older
   than 4.22 still link the engine for the shell's SVG icon fallback.
+* Build: CMake is no longer installed or required for the desktop
+  builds. Nothing has used it since the llama.cpp integration was removed;
+  it is dropped from the Linux, macOS, Windows and Java CI jobs, the nightly
+  distro and Java-native containers, the Fedora SRPM's `BuildRequires` and
+  the macOS and Linux build docs. Android still uses it for the JNI bridge.
+* Build: the options file is renamed from `meson_options.txt` to
+  `meson.options`, the name current Meson uses. The declared Meson floor
+  rises from 1.0 to 1.3, which the project already needed for its `c_std`
+  fallback list; `debian/control` and the RPM specs follow. Ubuntu 24.04,
+  the oldest supported build host, ships Meson 1.3.2.
+* Windows: the minimal LGPL FFmpeg built for the Windows packages
+  (`scripts/build-ffmpeg-lgpl.sh`) moves from 8.1.3 to 9.0.2
+  (libavcodec 63). VP9 video and Opus and Vorbis audio play through it
+  unchanged.
 * Architecture: `--single-process` no longer runs the engine inside the
   browser shell. The mode was already limited to one tab; that tab now
   gets an ordinary sandboxed renderer process, so the renderer sandbox,

@@ -17,7 +17,7 @@ trap 'rc=$?; echo "nightly-distro-build($DISTRO): FAILED (exit $rc) at line $LIN
 install_apt() {
     apt-get update -qq
     apt-get install -y --no-install-recommends \
-        build-essential clang pkg-config ninja-build cmake git zip unzip curl \
+        build-essential clang pkg-config ninja-build git zip unzip curl \
         python3-pip dpkg-dev patchelf ca-certificates \
         libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev libpsl-dev \
         libsqlite3-dev libseccomp-dev libwebp-dev libavif-dev libsdl2-dev
@@ -50,7 +50,7 @@ install_zypper() {
         sleep $((i * 15))
     done
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
-        gcc gcc-c++ clang pkgconf-pkg-config meson ninja cmake git zip unzip curl \
+        gcc gcc-c++ clang pkgconf-pkg-config meson ninja git zip unzip curl \
         rpm-build patchelf ca-certificates \
         gtk4-devel libepoxy-devel libcurl-devel libopenssl-devel libuchardet-devel libpsl-devel \
         sqlite3-devel libseccomp-devel libwebp-devel libavif-devel
@@ -75,7 +75,7 @@ install_zypper() {
 install_dnf() {
     # curl replaces the image's curl-minimal, hence --allowerasing.
     dnf install -y --setopt=install_weak_deps=False --allowerasing \
-        gcc gcc-c++ clang pkgconf-pkg-config meson ninja-build cmake git zip unzip curl \
+        gcc gcc-c++ clang pkgconf-pkg-config meson ninja-build git zip unzip curl \
         gawk findutils diffutils which rpm-build patchelf ca-certificates \
         gtk4-devel libepoxy-devel libcurl-devel openssl-devel uchardet-devel libpsl-devel \
         sqlite-devel libseccomp-devel libwebp-devel libavif-devel SDL2-devel
@@ -96,7 +96,7 @@ install_dnf() {
 install_apk() {
     apk update -q
     apk add --no-cache \
-        build-base clang pkgconf meson ninja cmake git zip alpine-sdk \
+        build-base clang pkgconf meson ninja git zip alpine-sdk \
         linux-headers gtk4.0-dev libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev \
         libseccomp-dev libwebp-dev sdl2-dev
     apk add --no-cache \

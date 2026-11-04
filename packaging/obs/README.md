@@ -53,7 +53,7 @@ the package eligible for openSUSE:Factory proper, not NonFree. See
 ## Build options
 
 openSUSE's `%meson` passes `--auto-features=enabled`, so every `auto`
-feature in `meson_options.txt` must have its dependency declared in
+feature in `meson.options` must have its dependency declared in
 `BuildRequires`, or `meson setup` fails. The spec disables one feature
 unavailable in OBS:
 

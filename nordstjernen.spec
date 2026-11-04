@@ -21,7 +21,7 @@ ExcludeArch:    %ix86 %arm
 
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
-BuildRequires:  meson >= 1.0
+BuildRequires:  meson >= 1.3
 BuildRequires:  ninja
 BuildRequires:  pkgconfig
 BuildRequires:  hicolor-icon-theme
