@@ -866,6 +866,14 @@ ns_video_probe_chunk_range(const guint8 *init, gsize init_len,
 }
 
 gboolean
+ns_media_source_codec_yields_to_os(const char *codec)
+{
+    if (!codec || g_getenv("NS_MEDIA_SOFTWARE_CODECS")) return FALSE;
+    if (!strstr(codec, "opus") && !strstr(codec, "vorbis")) return FALSE;
+    return ns_os_aac_available() != 0;
+}
+
+gboolean
 ns_video_codec_available(const char *codec)
 {
 #ifdef NS_HAVE_LIBAV

@@ -27,6 +27,7 @@ gboolean ns_video_probe_chunk_range(const guint8 *init, gsize init_len,
                                     const guint8 *chunk, gsize chunk_len,
                                     double *out_start, double *out_end);
 gboolean ns_video_codec_available(const char *codec);
+gboolean ns_media_source_codec_yields_to_os(const char *codec);
 gboolean ns_video_player_extend(ns_video_player *player, const guint8 *bytes,
                                 gsize len);
 
