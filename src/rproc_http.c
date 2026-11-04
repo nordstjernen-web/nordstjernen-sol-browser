@@ -1556,6 +1556,21 @@ ns_rproc_http_resolve_camera(ns_rproc_http *r, const char *origin, int allow)
     return resolve_permission(r, "/camera", origin, allow);
 }
 
+int
+ns_rproc_http_set_permissions(ns_rproc_http *r, const char *entries,
+                              int replace)
+{
+    if (!r || !entries)
+        return -1;
+    char *ee = json_escape(entries);
+    char *json = NULL;
+    if (!ee || asprintf(&json, "{\"entries\":\"%s\",\"replace\":%d}", ee,
+                        replace ? 1 : 0) < 0)
+        json = NULL;
+    free(ee);
+    return request_ok(r, "/permission", json);
+}
+
 char *
 ns_rproc_http_eval(ns_rproc_http *r, const char *src)
 {

@@ -103,17 +103,26 @@ ns_webgl_take_pending_origin(void)
 void
 ns_webgl_set_decision(const char *origin, int allow)
 {
+    ns_webgl_set_state(origin, allow ? 1 : 2);
+}
+
+void
+ns_webgl_set_state(const char *origin, int state)
+{
     if (!origin || !*origin) return;
-    ns_webgl_record_decision(origin, allow ? TRUE : FALSE);
-    if (allow) {
-        ns_config *cfg = ns_config_mut();
-        if (cfg && !cfg->webgl_enabled) {
-            cfg->webgl_enabled = TRUE;
-            ns_config_save(NULL);
-        }
-    }
+    if (state == 1 || state == 2)
+        ns_webgl_record_decision(origin, state == 1);
+    else if (g_webgl_decisions)
+        g_hash_table_remove(g_webgl_decisions, origin);
     if (g_webgl_pending && g_strcmp0(g_webgl_pending, origin) == 0)
         g_clear_pointer(&g_webgl_pending, g_free);
+}
+
+void
+ns_webgl_clear_decisions(void)
+{
+    if (g_webgl_decisions)
+        g_hash_table_remove_all(g_webgl_decisions);
 }
 
 static gboolean
@@ -6178,6 +6187,17 @@ void
 ns_webgl_set_decision(const char *origin, int allow)
 {
     (void)origin; (void)allow;
+}
+
+void
+ns_webgl_set_state(const char *origin, int state)
+{
+    (void)origin; (void)state;
+}
+
+void
+ns_webgl_clear_decisions(void)
+{
 }
 
 #endif

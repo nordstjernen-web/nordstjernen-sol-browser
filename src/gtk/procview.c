@@ -3,6 +3,7 @@
 #include "procview.h"
 #include "i18n.h"
 #include "pagelayers.h"
+#include "permissions.h"
 
 #include "libnordstjernen.h"
 #include "proc_limits.h"
@@ -63,7 +64,7 @@ typedef enum {
     REQ_LOAD, REQ_RENDER, REQ_LINK, REQ_CLICK, REQ_VIEWPORT, REQ_KEY,
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
     REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLLBAR,
-    REQ_WEBGL, REQ_CAMERA, REQ_COLOR_SCHEME, REQ_FAVICON,
+    REQ_PERMISSION, REQ_COLOR_SCHEME, REQ_FAVICON,
     REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_DOWNLOAD, REQ_POPUP, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_CONTEXT } LinkAct;
@@ -266,9 +267,10 @@ struct NsProcView {
     GtkWidget  *overlay;
     GtkWidget  *perm_revealer;
     GtkWidget  *perm_label;
-    ReqType     perm_kind;
+    ns_perm_kind perm_kind;
     gboolean    perm_pending;
     char       *perm_origin;
+    guint       perm_listener;
 
     GtkWidget    *console_window;
     GtkWidget    *console_notebook;
@@ -618,8 +620,13 @@ static void pv_unref(NsProcView *v) { if (g_ref_count_dec(&v->rc)) pv_free(v); }
 static ns_rproc_http *
 pv_swap_proc(NsProcView *v, ns_rproc_http *newp)
 {
-    if (newp)
+    if (newp) {
         ns_rproc_http_set_opener(newp, v->opener_token, v->opener_origin);
+        char *ledger = ns_perm_serialize();
+        if (ledger && *ledger)
+            ns_rproc_http_set_permissions(newp, ledger, 1);
+        g_free(ledger);
+    }
     g_mutex_lock(&v->proc_lock);
     ns_rproc_http *old = v->proc;
     v->proc = newp;
@@ -1437,9 +1444,9 @@ worker_main(gpointer data)
             res->dump_tab = req->dump_tab;
             res->href = v->proc ? ns_rproc_http_dump(v->proc, req->query) : NULL;
             post(res);
-        } else if (req->type == REQ_WEBGL) {
+        } else if (req->type == REQ_PERMISSION) {
             if (v->proc)
-                ns_rproc_http_resolve_webgl(v->proc, req->url, req->mods);
+                ns_rproc_http_set_permissions(v->proc, req->query, 0);
         } else if (req->type == REQ_PRINT) {
             Res *res = g_new0(Res, 1);
             res->view = pv_ref(v);
@@ -1451,9 +1458,6 @@ worker_main(gpointer data)
                                                        &res->print_scale);
             res->ok = res->print_pages != NULL;
             post(res);
-        } else if (req->type == REQ_CAMERA) {
-            if (v->proc)
-                ns_rproc_http_resolve_camera(v->proc, req->url, req->mods);
         } else if (req->type == REQ_COLOR_SCHEME) {
             if (v->proc)
                 ns_rproc_http_set_color_scheme(v->proc, req->mods);
@@ -2900,25 +2904,65 @@ ns_proc_view_zoom_percent(NsProcView *v)
 }
 
 static void
+pv_send_permission(NsProcView *v, const char *origin, ns_perm_kind kind,
+                   ns_perm_state state)
+{
+    if (!v || v->closed || !origin) return;
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_PERMISSION;
+    req->query = ns_perm_entry_line(origin, kind, state);
+    push_req(v, req);
+    request_render(v);
+}
+
+static gboolean
+pv_current_origin_is(NsProcView *v, const char *origin)
+{
+    if (!v->current_url || !origin) return FALSE;
+    char *mine = ns_url_origin_from(v->current_url);
+    gboolean same = mine && g_strcmp0(mine, origin) == 0;
+    g_free(mine);
+    return same;
+}
+
+static void
+pv_on_permission_changed(const char *origin, ns_perm_kind kind,
+                         ns_perm_state state, ns_perm_state previous,
+                         gpointer user_data)
+{
+    NsProcView *v = user_data;
+    if (v->closed) return;
+    pv_send_permission(v, origin, kind, state);
+    if (v->perm_pending && v->perm_kind == kind &&
+        g_strcmp0(v->perm_origin, origin) == 0 && state != NS_PERM_ASK) {
+        v->perm_pending = FALSE;
+        g_clear_pointer(&v->perm_origin, g_free);
+        if (v->perm_revealer)
+            gtk_revealer_set_reveal_child(GTK_REVEALER(v->perm_revealer),
+                                          FALSE);
+    }
+    gboolean blocked_changed =
+        (state == NS_PERM_DENY) != (previous == NS_PERM_DENY);
+    if (kind == NS_PERM_WEBGL && blocked_changed &&
+        pv_current_origin_is(v, origin))
+        ns_proc_view_reload(v);
+}
+
+static void
 pv_perm_resolve(NsProcView *v, gboolean allow)
 {
     if (!v->perm_pending)
         return;
     v->perm_pending = FALSE;
-    ReqType kind = v->perm_kind;
+    ns_perm_kind kind = v->perm_kind;
     char *origin = v->perm_origin;
     v->perm_origin = NULL;
     if (v->perm_revealer)
         gtk_revealer_set_reveal_child(GTK_REVEALER(v->perm_revealer), FALSE);
-    if (!v->closed) {
-        Req *req = g_new0(Req, 1);
-        req->type = kind;
-        req->url = g_strdup(origin);
-        req->mods = allow ? 1 : 0;
-        push_req(v, req);
-        if (kind == REQ_WEBGL && allow && v->current_url)
-            do_load(v, v->current_url, FALSE, FALSE, TRUE);
-    }
+    if (allow)
+        ns_perm_set(origin, kind, NS_PERM_ALLOW);
+    else
+        pv_send_permission(v, origin, kind, NS_PERM_DENY);
     g_free(origin);
 }
 
@@ -2937,7 +2981,7 @@ on_perm_deny(GtkButton *btn, gpointer data)
 }
 
 static void
-pv_perm_bar_show(NsProcView *v, ReqType kind, const char *origin)
+pv_perm_bar_show(NsProcView *v, ns_perm_kind kind, const char *origin)
 {
     if (v->perm_pending && v->perm_kind == kind &&
         g_strcmp0(v->perm_origin, origin) == 0)
@@ -2948,13 +2992,23 @@ pv_perm_bar_show(NsProcView *v, ReqType kind, const char *origin)
     v->perm_kind = kind;
     v->perm_origin = g_strdup(origin);
     const char *what =
-        kind == REQ_WEBGL
+        kind == NS_PERM_WEBGL
             ? ns_i18n("This site wants to use WebGL (3D graphics)")
             : ns_i18n("This site wants to use your camera and microphone");
     char *text = g_strdup_printf("%s — %s", what, origin);
     gtk_label_set_text(GTK_LABEL(v->perm_label), text);
     g_free(text);
     gtk_revealer_set_reveal_child(GTK_REVEALER(v->perm_revealer), TRUE);
+}
+
+static void
+pv_camera_requested(NsProcView *v, const char *origin)
+{
+    ns_perm_state st = ns_perm_get(origin, NS_PERM_CAMERA);
+    if (st == NS_PERM_ASK)
+        pv_perm_bar_show(v, NS_PERM_CAMERA, origin);
+    else
+        pv_send_permission(v, origin, NS_PERM_CAMERA, st);
 }
 
 static void
@@ -3090,7 +3144,7 @@ on_result(gpointer data)
         if (current && res->ok && res->webgl && *res->webgl)
             post_emit(v, NS_PROC_EVT_WEBGL, "1");
         if (current && res->ok && res->camera && *res->camera)
-            pv_perm_bar_show(v, REQ_CAMERA, res->camera);
+            pv_camera_requested(v, res->camera);
         if (current && res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
         if (res->ok && res->config && *res->config)
@@ -3169,7 +3223,7 @@ on_result(gpointer data)
         if (res->ok && res->webgl && *res->webgl)
             post_emit(v, NS_PROC_EVT_WEBGL, "1");
         if (res->ok && res->camera && *res->camera)
-            pv_perm_bar_show(v, REQ_CAMERA, res->camera);
+            pv_camera_requested(v, res->camera);
         if (res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
         if (res->ok && res->config && *res->config)
@@ -4476,6 +4530,10 @@ on_area_destroy(GtkWidget *widget, gpointer data)
     NsProcView *v = data;
     NS_PROC_VIEW_AREA(widget)->view = NULL;
     v->closed = TRUE;
+    if (v->perm_listener) {
+        ns_perm_remove_listener(v->perm_listener);
+        v->perm_listener = 0;
+    }
     g_clear_object(&v->im);
     disarm_anim(v);
     if (v->hover_after_scroll_id) {
@@ -4937,6 +4995,7 @@ ns_proc_view_new(void)
     v->queue = g_async_queue_new();
     v->history = g_ptr_array_new_with_free_func(g_free);
     v->hist_index = -1;
+    v->perm_listener = ns_perm_add_listener(pv_on_permission_changed, v);
     v->link_pending_action = ACT_HOVER;
     v->pending_record = TRUE;
     v->scale = 1.0;

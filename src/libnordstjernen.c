@@ -5081,6 +5081,57 @@ ns_browser_take_pending_camera(ns_browser *browser)
     return ns_camera_take_pending_origin();
 }
 
+static void
+browser_eval_quiet(ns_browser *browser, const char *src, const char *name)
+{
+    if (!browser || !browser->js) return;
+    char *r = ns_js_eval_source(browser->js, src, name);
+    free(r);
+}
+
+static gboolean
+browser_page_has_origin(ns_browser *browser, const char *origin)
+{
+    if (!browser || !browser->js) return FALSE;
+    char *page = ns_url_origin_from(ns_js_current_url(browser->js));
+    gboolean same = page && g_strcmp0(page, origin) == 0;
+    g_free(page);
+    return same;
+}
+
+void
+ns_browser_clear_permissions(void)
+{
+    ns_webgl_clear_decisions();
+    ns_camera_clear_decisions();
+}
+
+int
+ns_browser_set_permission(ns_browser *browser, const char *kind,
+                          const char *state, const char *origin)
+{
+    if (!kind || !state || !origin || !*origin) return -1;
+    int st = strcmp(state, "allow") == 0 ? 1
+           : strcmp(state, "deny") == 0  ? 2 : 0;
+    if (strcmp(kind, "webgl") == 0) {
+        ns_webgl_set_state(origin, st);
+        return 0;
+    }
+    if (strcmp(kind, "camera") != 0) return -1;
+    gboolean answered = ns_camera_set_state(origin, st);
+    if (answered)
+        browser_eval_quiet(browser,
+                           st == 1 ? "__nd_camera_resolve_pending(true)"
+                                   : "__nd_camera_resolve_pending(false)",
+                           "camera-resolve");
+    if (st != 1 && browser_page_has_origin(browser, origin))
+        browser_eval_quiet(browser,
+                           "typeof __nd_camera_revoke === 'function' && "
+                           "__nd_camera_revoke()",
+                           "camera-revoke");
+    return 0;
+}
+
 void
 ns_browser_resolve_camera(ns_browser *browser, const char *origin, int allow)
 {

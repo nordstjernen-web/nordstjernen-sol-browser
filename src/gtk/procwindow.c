@@ -4,6 +4,7 @@
 #include <glib/gstdio.h>
 #include "icons.h"
 #include "procview.h"
+#include "permissions.h"
 #include "remotectl.h"
 #include "titlerow.h"
 #include "i18n.h"
@@ -578,9 +579,10 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
         return;
     }
     ns_icon_entry_set(entry, GTK_ENTRY_ICON_PRIMARY, icon_name);
-    gtk_entry_set_icon_activatable(entry, GTK_ENTRY_ICON_PRIMARY, FALSE);
+    gtk_entry_set_icon_activatable(entry, GTK_ENTRY_ICON_PRIMARY, TRUE);
 
     GString *tip = g_string_new(label);
+    g_string_append_printf(tip, "\n%s", ns_i18n("Click for site permissions"));
     char *host = ns_url_host_from(url);
     if (host && *host)
         g_string_append_printf(tip, "\n%s", host);
@@ -2004,6 +2006,92 @@ on_logo_clicked(GtkButton *b, gpointer ud)
 }
 
 static void
+on_site_permission_selected(GObject *dropdown, GParamSpec *pspec, gpointer ud)
+{
+    (void)pspec; (void)ud;
+    const char *origin = g_object_get_data(dropdown, "ns-perm-origin");
+    ns_perm_kind kind =
+        GPOINTER_TO_INT(g_object_get_data(dropdown, "ns-perm-kind"));
+    guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
+    ns_perm_state state = sel == 1 ? NS_PERM_ALLOW
+                        : sel == 2 ? NS_PERM_DENY : NS_PERM_ASK;
+    ns_perm_set(origin, kind, state);
+}
+
+static void
+site_permission_row(GtkWidget *grid, int row, const char *origin,
+                    ns_perm_kind kind, const char *label)
+{
+    GtkWidget *name = gtk_label_new(label);
+    gtk_widget_set_halign(name, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(name, TRUE);
+    const char *choices[] = {
+        ns_i18n("Ask"), ns_i18n("Allow"), ns_i18n("Block"), NULL
+    };
+    GtkWidget *dd = gtk_drop_down_new_from_strings(choices);
+    ns_perm_state st = ns_perm_get(origin, kind);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(dd),
+                               st == NS_PERM_ALLOW ? 1
+                               : st == NS_PERM_DENY ? 2 : 0);
+    g_object_set_data_full(G_OBJECT(dd), "ns-perm-origin", g_strdup(origin),
+                           g_free);
+    g_object_set_data(G_OBJECT(dd), "ns-perm-kind", GINT_TO_POINTER(kind));
+    g_signal_connect(dd, "notify::selected",
+                     G_CALLBACK(on_site_permission_selected), NULL);
+    set_accessible_label(dd, label);
+    gtk_grid_attach(GTK_GRID(grid), name, 0, row, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), dd, 1, row, 1, 1);
+}
+
+static void on_popover_closed_unparent(GtkPopover *pop, gpointer user_data);
+
+static void
+show_site_permissions(ProcWindow *pw)
+{
+    NsProcView *v = current_view(pw);
+    const char *url = v ? ns_proc_view_url(v) : NULL;
+    char *origin = url ? ns_url_origin_from(url) : NULL;
+    if (!origin || !strstr(origin, "://")) {
+        g_free(origin);
+        return;
+    }
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_margin_top(box, 8);
+    gtk_widget_set_margin_bottom(box, 8);
+    gtk_widget_set_margin_start(box, 8);
+    gtk_widget_set_margin_end(box, 8);
+    GtkWidget *title = gtk_label_new(ns_i18n("Site permissions"));
+    gtk_widget_add_css_class(title, "heading");
+    gtk_widget_set_halign(title, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(box), title);
+    GtkWidget *who = gtk_label_new(origin);
+    gtk_widget_add_css_class(who, "dim-label");
+    gtk_widget_set_halign(who, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(box), who);
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
+    site_permission_row(grid, 0, origin, NS_PERM_CAMERA,
+                        ns_i18n("Camera and microphone"));
+    site_permission_row(grid, 1, origin, NS_PERM_WEBGL,
+                        ns_i18n("WebGL (3D graphics)"));
+    gtk_box_append(GTK_BOX(box), grid);
+    g_free(origin);
+
+    GtkWidget *pop = gtk_popover_new();
+    gtk_popover_set_child(GTK_POPOVER(pop), box);
+    gtk_widget_set_parent(pop, pw->address);
+    gtk_popover_set_position(GTK_POPOVER(pop), GTK_POS_BOTTOM);
+    graphene_rect_t r;
+    GdkRectangle at = { 0, 0, 24, 24 };
+    if (gtk_widget_compute_bounds(pw->address, pw->address, &r))
+        at.height = (int)r.size.height;
+    gtk_popover_set_pointing_to(GTK_POPOVER(pop), &at);
+    g_signal_connect(pop, "closed", G_CALLBACK(on_popover_closed_unparent), NULL);
+    gtk_popover_popup(GTK_POPOVER(pop));
+}
+
+static void
 on_address_icon_press(GtkEntry *entry, GtkEntryIconPosition pos, gpointer ud)
 {
     (void)entry;
@@ -2011,6 +2099,8 @@ on_address_icon_press(GtkEntry *entry, GtkEntryIconPosition pos, gpointer ud)
     if (pos == GTK_ENTRY_ICON_SECONDARY)
         g_action_group_activate_action(G_ACTION_GROUP(pw->window),
                                        "bookmark-page", NULL);
+    else if (pos == GTK_ENTRY_ICON_PRIMARY)
+        show_site_permissions(pw);
 }
 
 static void
@@ -3505,6 +3595,7 @@ ns_procapp_run(const char *startup_url, const char *session_path,
     procapp_clear_http_caches(FALSE);
     if (!private_mode)
         ns_history_init();
+    ns_perm_init(!private_mode);
     ProcAppCtx ctx = {
         .url = g_strdup(startup_url),
         .session_path = g_strdup(session_path),
@@ -3520,6 +3611,7 @@ ns_procapp_run(const char *startup_url, const char *session_path,
     g_procapp = NULL;
     g_object_unref(app);
     ns_history_shutdown();
+    ns_perm_shutdown();
     procapp_clear_http_caches(TRUE);
     g_free(ctx.url);
     g_free(ctx.session_path);

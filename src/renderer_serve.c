@@ -673,6 +673,32 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/permission") == 0) {
+        char *entries = json_get_str(body, "entries");
+        long replace = 0;
+        json_get_long(body, "replace", &replace);
+        if (replace)
+            ns_browser_clear_permissions();
+        char *line = entries;
+        while (line && *line) {
+            char *next = strchr(line, '\n');
+            if (next) *next++ = '\0';
+            char *kind = line;
+            char *state = strchr(kind, ' ');
+            char *origin = state ? strchr(state + 1, ' ') : NULL;
+            if (state && origin) {
+                *state++ = '\0';
+                *origin++ = '\0';
+                ns_browser_set_permission(s->cur, kind, state, origin);
+            }
+            line = next;
+        }
+        s->frame_valid = 0;
+        http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
+        free(entries);
+        return 0;
+    }
+
     if (strcmp(head->path, "/colorscheme") == 0) {
         long dark = 0;
         json_get_long(body, "dark", &dark);
