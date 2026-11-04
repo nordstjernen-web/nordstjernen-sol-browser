@@ -3,6 +3,12 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Layout: a row flex container that its own flex parent stretches lays
+  its items out in the stretched height when it also has a `min-height`.
+  The `min-height` stood in for the definite height, so the items were
+  centred or stretched inside a box as tall as the `min-height` alone;
+  x.com's sign-in page drew its logo cut off at the top of the window
+  instead of centred.
 * JavaScript: on Windows, `Date`'s local time uses the offset in force
   at that date, from the in-tree time zone database. It used today's
   daylight-saving state for every date, so in winter a summer date was
