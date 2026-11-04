@@ -56,7 +56,6 @@ jobs:
           run: |
             set -e
             export CC="ccache cc"
-            export CXX="ccache c++"
             meson setup builddir --buildtype=release -Db_ndebug=true
             meson compile -C builddir
             if ./builddir/src/gtk/nordstjernen --headless --dump=text about:start > about.txt 2>/dev/null \

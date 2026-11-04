@@ -1,11 +1,10 @@
 project(
   'nordstjernen',
-  ['c', 'cpp'],
+  'c',
   version: '1.0.42-dev',
   license: 'LicenseRef-NSL-1.0 OR GPL-3.0-or-later',
   default_options: [
     'c_std=gnu2x,c2x,gnu11,c11',
-    'cpp_std=c++17',
     'warning_level=2',
     'buildtype=release',
     'optimization=3',
@@ -69,11 +68,6 @@ add_project_arguments(
 add_project_link_arguments(
   cc.get_supported_link_arguments(hardening_link_flags),
   language: 'c',
-)
-
-add_project_link_arguments(
-  cc.get_supported_link_arguments(hardening_link_flags),
-  language: 'cpp',
 )
 
 ns_buildtype = get_option('buildtype')
