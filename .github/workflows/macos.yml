@@ -62,7 +62,7 @@ jobs:
 
       - name: Install build dependencies (Homebrew)
         run: |
-          brew install meson ninja pkg-config cmake gtk4 libepoxy curl ccache \
+          brew install meson ninja pkg-config gtk4 libepoxy curl ccache \
               uchardet libpsl sqlite webp libavif jpeg-xl sdl2 dylibbundler nasm
           # Homebrew curl is keg-only, so a plain pkg-config resolves the macOS
           # SDK's system libcurl (LibreSSL) instead of this OpenSSL build. Put

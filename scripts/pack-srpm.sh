@@ -55,7 +55,6 @@ BuildRequires:  gcc
 BuildRequires:  gcc-c++
 BuildRequires:  meson >= 1.3
 BuildRequires:  ninja-build
-BuildRequires:  cmake
 BuildRequires:  pkgconf-pkg-config
 BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(epoxy)
