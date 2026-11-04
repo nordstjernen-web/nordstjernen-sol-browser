@@ -7867,12 +7867,14 @@
         });
     }
 
+    var nativeCookieList = global.__nsCookieList;
+    try { delete global.__nsCookieList; } catch (e) { }
     if (!global.cookieStore) {
         var cookieListNative = function () {
-            if (typeof global.__nsCookieList !== 'function') return null;
+            if (typeof nativeCookieList !== 'function') return null;
             try {
                 var url = typeof document !== 'undefined' ? String(document.URL || '') : '';
-                var list = JSON.parse(global.__nsCookieList(url));
+                var list = JSON.parse(nativeCookieList(url));
                 return Array.isArray(list) ? list : null;
             } catch (e) { return null; }
         };

@@ -64072,12 +64072,18 @@ ns_window_cookie_list(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_NewString(ctx, "[]");
+    const char *doc_url = js->current_url;
+    if (!doc_url || !*doc_url) return JS_NewString(ctx, "[]");
     const char *url_arg = argc > 0 && JS_IsString(argv[0])
                         ? JS_ToCString(ctx, argv[0]) : NULL;
-    const char *url = url_arg && *url_arg ? url_arg : js->current_url;
-    g_autofree char *json = url && *url
-        ? ns_net_cookies_json_for_js(url, ns_js_top_url(js)) : NULL;
+    g_autofree char *resolved = url_arg && *url_arg
+        ? ns_url_resolve(doc_url, url_arg) : NULL;
     if (url_arg) JS_FreeCString(ctx, url_arg);
+    if (resolved && !ns_url_same_origin(resolved, doc_url))
+        return JS_NewString(ctx, "[]");
+    g_autofree char *json =
+        ns_net_cookies_json_for_js(resolved ? resolved : doc_url,
+                                   ns_js_top_url(js));
     return JS_NewString(ctx, json ? json : "[]");
 }
 
