@@ -37,6 +37,10 @@ What the implementation gets right is listed at the end.
 
 ## 1. High: SameSite is not enforced across a redirect that leaves the site
 
+**Status: fixed.** The redirect loop now carries `X-ND-Initiator` and a
+sticky `X-ND-Redirect-Cross-Site` marker into later hops, and a
+navigation's partition is its own destination.
+
 **Where.** `src/net.c`, the redirect loop in `ns_fetch_sync` (the
 `for (;;)` loop that calls `ns_fetch_sync_hop` per hop) and the context
 computation in `ns_fetch_sync_hop`; `src/engine.c`

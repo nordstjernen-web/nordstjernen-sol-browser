@@ -3,6 +3,17 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Security: SameSite is now enforced on a navigation that reaches a
+  cross-site target through a redirect. The redirect loop used to clear
+  the top-level URL for later hops while a same-origin navigation carried
+  no initiator, so the hop after a redirect was treated like a typed URL
+  and sent `SameSite=Strict` cookies to any site an attacker's own open
+  redirect pointed at. The loop now carries the navigation's initiator
+  origin into every hop, marks the chain cross-site once any hop leaves
+  the initiator's site (RFC 6265bis redirect-chain rule, as Chromium
+  does), and a navigation's cookie partition is its own destination
+  rather than the referrer's. `Sec-Fetch-Site` reports `cross-site` on
+  such hops too.
 * Cookies: `docs/cookies-security-report.md` is a source review of the
   cookie store and its callers. It records one high finding (SameSite is
   not enforced on a navigation that reaches a cross-site target through a
