@@ -8024,7 +8024,7 @@ ns_preconnect_thread(GTask *task, gpointer source_object, gpointer task_data,
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, ns_xferinfo_cb);
         ns_net_apply_curl_proxy(curl, url);
         ns_net_apply_curl_tls(curl);
-        curl_easy_perform(curl);
+        ns_net_multi_perform(curl, NULL);
         curl_easy_cleanup(curl);
     }
     g_mutex_lock(&g_fetch_throttle_mutex);
