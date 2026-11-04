@@ -124,7 +124,6 @@ jobs:
 
       - name: Build
         id: build
-        if: hashFiles('meson.build') != ''
         run: |
           set -o pipefail
           export CC="ccache clang"
