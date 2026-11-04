@@ -8,7 +8,6 @@ URL:            https://github.com/nordstjernen-web/nordstjernen-sol-browser
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  gcc
-BuildRequires:  gcc-c++
 BuildRequires:  meson >= 1.0
 %if 0%{?fedora} || 0%{?rhel}
 BuildRequires:  ninja-build

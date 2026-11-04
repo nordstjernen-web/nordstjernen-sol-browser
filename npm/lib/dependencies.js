@@ -249,7 +249,7 @@ function preflight(product, env, { onWarning, onError }) {
   const manager = packageManager();
   const tools = checkTools(product.tools, env);
   if (process.platform === 'darwin' && tools.missing.some((tool) => tool.compiler)) {
-    onError(`${product.name} is built from source on this Mac and needs a C and C++ compiler. Install the Xcode command line tools:\n\n  xcode-select --install\n${reinstall(product).join('\n')}`);
+    onError(`${product.name} is built from source on this Mac and needs a C compiler. Install the Xcode command line tools:\n\n  xcode-select --install\n${reinstall(product).join('\n')}`);
     return;
   }
   if (tools.missing.some((tool) => tool.label === 'pkg-config')) {
