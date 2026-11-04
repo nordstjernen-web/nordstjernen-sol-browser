@@ -832,20 +832,10 @@ static int system_time_zone(JSContext *ctx, char *buf, size_t size)
     }
 #if defined(_WIN32)
     {
-        DYNAMIC_TIME_ZONE_INFORMATION dtzi;
-        if (GetDynamicTimeZoneInformation(&dtzi) != TIME_ZONE_ID_INVALID) {
-            char name[128];
-            int i;
-            for (i = 0; dtzi.TimeZoneKeyName[i] && i < (int)sizeof(name) - 1; i++)
-                name[i] = (char)dtzi.TimeZoneKeyName[i];
-            name[i] = '\0';
-            {
-                const char *iana = intl_windows_zone_to_iana(name);
-                if (iana && intl_find_time_zone(iana, &id, &primary) >= 0) {
-                    snprintf(buf, size, "%s", id);
-                    return 0;
-                }
-            }
+        const char *iana = tp_windows_system_zone();
+        if (iana && intl_find_time_zone(iana, &id, &primary) >= 0) {
+            snprintf(buf, size, "%s", id);
+            return 0;
         }
     }
 #else

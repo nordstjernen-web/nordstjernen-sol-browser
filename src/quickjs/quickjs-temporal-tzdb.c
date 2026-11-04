@@ -841,25 +841,55 @@ static int tzdb_id_from_path(const char *path)
 }
 
 #if defined(_WIN32)
-static int tzdb_windows_system(void)
+static bool tzdb_user_region(char region[3])
+{
+    GEOID geo = GetUserGeoID(GEOCLASS_NATION);
+    char iso[8];
+
+    if (geo == GEOID_NOT_AVAILABLE)
+        return false;
+    if (GetGeoInfoA(geo, GEO_ISO2, iso, sizeof(iso), 0) < 3)
+        return false;
+    region[0] = iso[0];
+    region[1] = iso[1];
+    region[2] = ' ';
+    return true;
+}
+
+const char *tp_windows_system_zone(void)
 {
     DYNAMIC_TIME_ZONE_INFORMATION info;
     char name[128];
+    char region[3];
     size_t i;
 
     if (GetDynamicTimeZoneInformation(&info) == TIME_ZONE_ID_INVALID)
-        return -1;
+        return NULL;
     for (i = 0; i + 1 < sizeof(name) && info.TimeZoneKeyName[i]; i++) {
         if (info.TimeZoneKeyName[i] > 0x7f)
-            return -1;
+            return NULL;
         name[i] = (char)info.TimeZoneKeyName[i];
     }
-    name[i] = '\0';
+    name[i] = ' ';
+    if (tzdb_user_region(region)) {
+        for (i = 0; i < countof(tp_windows_zone_regions); i++) {
+            if (strcmp(tp_windows_zone_regions[i][0], name) == 0 &&
+                strcmp(tp_windows_zone_regions[i][1], region) == 0)
+                return tp_windows_zone_regions[i][2];
+        }
+    }
     for (i = 0; i < countof(tp_windows_zones); i++) {
         if (strcmp(tp_windows_zones[i][0], name) == 0)
-            return tp_tzdb_lookup(tp_windows_zones[i][1], strlen(tp_windows_zones[i][1]));
+            return tp_windows_zones[i][1];
     }
-    return -1;
+    return NULL;
+}
+
+static int tzdb_windows_system(void)
+{
+    const char *iana = tp_windows_system_zone();
+
+    return iana ? tp_tzdb_lookup(iana, strlen(iana)) : -1;
 }
 #endif
 

@@ -3,6 +3,12 @@ Changelog:
 
 1.0.42-dev:
 ======
+* JavaScript: on Windows, the default time zone of `Intl` and
+  `Temporal.Now` follows the user's Windows region when the Windows zone
+  covers several countries, as CLDR's `windowsZones` maps it and Chrome
+  reports it. "W. Europe Standard Time" in Norway is `Europe/Oslo`, no
+  longer `Europe/Berlin` for everyone; x.com sends this zone with its
+  sign-in requests.
 * DOM: `screen`'s attributes (`width`, `availHeight`, `colorDepth`, …)
   are accessors on `Screen.prototype` and `screen.orientation` is a
   `ScreenOrientation`, as WebIDL defines them, instead of own data

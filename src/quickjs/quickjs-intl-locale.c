@@ -2372,14 +2372,6 @@ const char *intl_metazone_for(const char *zone, int64_t epoch_minutes)
     return NULL;
 }
 
-const char *intl_windows_zone_to_iana(const char *windows_name)
-{
-    for (size_t i = 0; i < countof(intl_windows_zones); i++)
-        if (!strcmp(intl_windows_zone_pool + intl_windows_zones[i][0], windows_name))
-            return intl_windows_zone_pool + intl_windows_zones[i][1];
-    return NULL;
-}
-
 const char *intl_time_zone_cldr_id(const char *name)
 {
     const char *id, *primary;
