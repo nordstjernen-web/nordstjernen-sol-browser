@@ -176,6 +176,10 @@ site.
 
 ## 4. Medium: a sandboxed iframe reads its origin's cookies through `cookieStore`
 
+**Status: fixed.** `ns_window_cookie_list` returns `[]` for a realm whose
+frame is sandboxed without `allow-same-origin`, and the denied
+`document.cookie` throws `SecurityError` on get and set.
+
 **Where.** `src/js.c`: the iframe setup around `ns_make_realm_document`
 calls `ns_realmdoc_deny_cookie` for frames whose sandbox lacks
 `allow-same-origin`, but `ns_iframe_build_native_globals` →

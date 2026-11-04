@@ -63487,6 +63487,24 @@ ns_realmdoc_empty_cookie_get(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_realmdoc_denied_cookie_get(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_throw_dom_exception(ctx, "SecurityError", 18,
+        "document.cookie is not available in a sandboxed document");
+}
+
+static JSValue
+ns_realmdoc_denied_cookie_set(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_throw_dom_exception(ctx, "SecurityError", 18,
+        "document.cookie is not available in a sandboxed document");
+}
+
+static JSValue
 ns_realmdoc_ignore_cookie_set(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
@@ -63537,9 +63555,11 @@ ns_realmdoc_deny_cookie(JSContext *ctx, JSValueConst doc)
 {
     if (!JS_IsObject(doc)) return;
     JSAtom atom = JS_NewAtom(ctx, "cookie");
-    JSValue getter = JS_NewCFunction(ctx, ns_realmdoc_empty_cookie_get,
+    JSValue getter = JS_NewCFunction(ctx, ns_realmdoc_denied_cookie_get,
                                      "get cookie", 0);
-    JS_DefinePropertyGetSet(ctx, doc, atom, getter, JS_UNDEFINED,
+    JSValue setter = JS_NewCFunction(ctx, ns_realmdoc_denied_cookie_set,
+                                     "set cookie", 1);
+    JS_DefinePropertyGetSet(ctx, doc, atom, getter, setter,
                             JS_PROP_CONFIGURABLE);
     JS_FreeAtom(ctx, atom);
 }
@@ -64066,6 +64086,14 @@ ns_document_set_cookie(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_iframe_sandbox_denies_cookies(const ns_node *frame)
+{
+    unsigned sandbox = ns_iframe_effective_sandbox(frame);
+    return (sandbox & NS_SANDBOX_ACTIVE) &&
+           !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN);
+}
+
 static JSValue
 ns_window_cookie_list(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
@@ -64073,6 +64101,9 @@ ns_window_cookie_list(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_NewString(ctx, "[]");
+    ns_node *frame = ns_js_frame_of_realm(js, ctx);
+    if (frame && ns_iframe_sandbox_denies_cookies(frame))
+        return JS_NewString(ctx, "[]");
     const char *doc_url = js->current_url;
     if (!doc_url || !*doc_url) return JS_NewString(ctx, "[]");
     const char *url_arg = argc > 0 && JS_IsString(argv[0])
@@ -70997,8 +71028,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
             resp ? resp->content_type : NULL, doc_is_xml, FALSE);
         ns_frame_document_show_url(js->ctx, realm_doc,
                                    ns_iframe_doc_url(iframe));
-        if ((sandbox & NS_SANDBOX_ACTIVE) &&
-            !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
+        if (ns_iframe_sandbox_denies_cookies(iframe))
             ns_realmdoc_deny_cookie(js->ctx, realm_doc);
         JSValue realm_scope = JS_NULL;
         if (JS_IsObject(realm_doc))
