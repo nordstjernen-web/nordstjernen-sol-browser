@@ -42,6 +42,9 @@ static const GUID ns_MF_SA_D3D11_AWARE =
 static const GUID ns_IID_ID3D10Multithread =
     { 0x9b7e4e00, 0x342c, 0x4106,
       { 0xa1, 0x9f, 0x4f, 0x27, 0x04, 0xf6, 0x89, 0xf0 } };
+static const GUID ns_IID_ID3D11Texture2D =
+    { 0x6f15aaf2, 0xd208, 0x4e89,
+      { 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c } };
 static const GUID ns_IID_IMFDXGIBuffer =
     { 0xe7174cfa, 0x1c9e, 0x48b1,
       { 0x88, 0x66, 0x62, 0x62, 0x26, 0xbf, 0xc2, 0x58 } };
@@ -55,8 +58,32 @@ static struct {
     ns_mf_dxgi_manager_fn create_dxgi_manager;
 } g_mf;
 
+#define NS_MF_READBACK_LAG   3
+#define NS_MF_READBACK_SLOTS (NS_MF_READBACK_LAG + 1)
+
+typedef struct {
+    int      slot;
+    LONGLONG pts;
+    int      vis_width;
+    int      vis_height;
+    int      full_range;
+    int      colorspace;
+} mf_held;
+
+typedef struct {
+    ID3D11Texture2D *tex;
+    UINT             width;
+    UINT             height;
+    DXGI_FORMAT      format;
+} mf_staging;
+
 struct ns_os_vdec {
     IMFTransform *mft;
+    mf_staging    staging[NS_MF_READBACK_SLOTS];
+    mf_held       held[NS_MF_READBACK_SLOTS];
+    int           n_held;
+    int           next_slot;
+    int           draining;
     uint8_t      *param_sets;
     size_t        param_sets_len;
     int           nal_len_size;
@@ -434,6 +461,7 @@ ns_os_vdec_send(ns_os_vdec *d, const uint8_t *data, size_t len, int64_t pts_us)
     if (hr == MF_E_NOTACCEPTING) return -1;
     if (FAILED(hr)) return 0;
     d->need_param_sets = 0;
+    d->draining = 0;
     return 1;
 }
 
@@ -492,6 +520,129 @@ vdec_convert(ns_os_vdec *d, IMFSample *s, ns_os_frame *out)
 }
 
 static void
+vdec_release_staging(ns_os_vdec *d)
+{
+    for (int i = 0; i < NS_MF_READBACK_SLOTS; i++) {
+        if (d->staging[i].tex) ID3D11Texture2D_Release(d->staging[i].tex);
+        memset(&d->staging[i], 0, sizeof d->staging[i]);
+    }
+    d->n_held = 0;
+    d->next_slot = 0;
+}
+
+static ID3D11Texture2D *
+mf_sample_texture(IMFSample *s, UINT *subresource)
+{
+    IMFMediaBuffer *buf = NULL;
+    if (FAILED(IMFSample_GetBufferByIndex(s, 0, &buf))) return NULL;
+    IMFDXGIBuffer *dxgi = NULL;
+    ID3D11Texture2D *tex = NULL;
+    if (SUCCEEDED(IMFMediaBuffer_QueryInterface(buf, &ns_IID_IMFDXGIBuffer,
+                                                (void **)&dxgi))) {
+        if (FAILED(IMFDXGIBuffer_GetResource(dxgi, &ns_IID_ID3D11Texture2D,
+                                             (void **)&tex)) ||
+            FAILED(IMFDXGIBuffer_GetSubresourceIndex(dxgi, subresource))) {
+            if (tex) ID3D11Texture2D_Release(tex);
+            tex = NULL;
+        }
+        IMFDXGIBuffer_Release(dxgi);
+    }
+    IMFMediaBuffer_Release(buf);
+    return tex;
+}
+
+static int
+vdec_staging_fit(mf_staging *st, ID3D11Device *dev,
+                 const D3D11_TEXTURE2D_DESC *src)
+{
+    if (st->tex && st->width == src->Width && st->height == src->Height &&
+        st->format == src->Format)
+        return 1;
+    if (st->tex) ID3D11Texture2D_Release(st->tex);
+    memset(st, 0, sizeof *st);
+    D3D11_TEXTURE2D_DESC desc;
+    memset(&desc, 0, sizeof desc);
+    desc.Width = src->Width;
+    desc.Height = src->Height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = src->Format;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    if (FAILED(ID3D11Device_CreateTexture2D(dev, &desc, NULL, &st->tex)))
+        return 0;
+    st->width = src->Width;
+    st->height = src->Height;
+    st->format = src->Format;
+    return 1;
+}
+
+static int
+vdec_stage(ns_os_vdec *d, IMFSample *s)
+{
+    UINT sub = 0;
+    ID3D11Texture2D *tex = mf_sample_texture(s, &sub);
+    if (!tex) return 0;
+    D3D11_TEXTURE2D_DESC desc;
+    ID3D11Texture2D_GetDesc(tex, &desc);
+    ID3D11Device *dev = NULL;
+    ID3D11Texture2D_GetDevice(tex, &dev);
+    mf_staging *st = &d->staging[d->next_slot];
+    int ok = desc.Format == DXGI_FORMAT_NV12 && dev &&
+             vdec_staging_fit(st, dev, &desc);
+    if (ok) {
+        ID3D11DeviceContext *ctx = NULL;
+        ID3D11Device_GetImmediateContext(dev, &ctx);
+        ID3D11DeviceContext_CopySubresourceRegion(
+            ctx, (ID3D11Resource *)st->tex, 0, 0, 0, 0,
+            (ID3D11Resource *)tex, sub, NULL);
+        ID3D11DeviceContext_Release(ctx);
+        LONGLONG t = 0;
+        mf_held h = { d->next_slot,
+                      SUCCEEDED(IMFSample_GetSampleTime(s, &t)) ? t : 0,
+                      d->vis_width, d->vis_height, d->full_range,
+                      d->colorspace };
+        d->held[d->n_held++] = h;
+        d->next_slot = (d->next_slot + 1) % NS_MF_READBACK_SLOTS;
+    }
+    if (dev) ID3D11Device_Release(dev);
+    ID3D11Texture2D_Release(tex);
+    return ok;
+}
+
+static ns_os_status
+vdec_emit_staged(ns_os_vdec *d, ns_os_frame *out)
+{
+    mf_held h = d->held[0];
+    d->n_held--;
+    memmove(d->held, d->held + 1, (size_t)d->n_held * sizeof d->held[0]);
+    mf_staging *st = &d->staging[h.slot];
+    ID3D11Device *dev = NULL;
+    ID3D11Texture2D_GetDevice(st->tex, &dev);
+    ID3D11DeviceContext *ctx = NULL;
+    ID3D11Device_GetImmediateContext(dev, &ctx);
+    D3D11_MAPPED_SUBRESOURCE map;
+    int ok = 0;
+    if (SUCCEEDED(ID3D11DeviceContext_Map(ctx, (ID3D11Resource *)st->tex, 0,
+                                          D3D11_MAP_READ, 0, &map))) {
+        const uint8_t *base = map.pData;
+        int pitch = (int)map.RowPitch;
+        ok = ns_os_frame_copy_nv12(out, base, pitch,
+                                   base + (size_t)pitch * st->height, pitch,
+                                   h.vis_width, h.vis_height);
+        ID3D11DeviceContext_Unmap(ctx, (ID3D11Resource *)st->tex, 0);
+    }
+    ID3D11DeviceContext_Release(ctx);
+    ID3D11Device_Release(dev);
+    if (!ok) return NS_OS_ERROR;
+    out->full_range = h.full_range;
+    out->colorspace = h.colorspace;
+    out->pts_us = h.pts / 10;
+    return NS_OS_FRAME;
+}
+
+static void
 vdec_report_path(const ns_os_vdec *d, IMFSample *s)
 {
     int gpu = 0;
@@ -515,7 +666,8 @@ ns_os_vdec_receive(ns_os_vdec *d, ns_os_frame *out)
 {
     if (!d || !d->mft) return NS_OS_ERROR;
     memset(out, 0, sizeof *out);
-    for (int attempt = 0; attempt < 4; attempt++) {
+    for (int attempt = 0; attempt < 4 + NS_MF_READBACK_SLOTS; attempt++) {
+        if (d->n_held > NS_MF_READBACK_LAG) return vdec_emit_staged(d, out);
         if (!d->output_ready && !vdec_pick_output(d)) return NS_OS_AGAIN;
         MFT_OUTPUT_DATA_BUFFER ob;
         memset(&ob, 0, sizeof ob);
@@ -533,34 +685,46 @@ ns_os_vdec_receive(ns_os_vdec *d, ns_os_frame *out)
         }
         if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
             if (ob.pSample) IMFSample_Release(ob.pSample);
+            if (d->draining && d->n_held > 0) return vdec_emit_staged(d, out);
             return NS_OS_AGAIN;
         }
-        if (FAILED(hr)) {
+        if (FAILED(hr) || !ob.pSample) {
             if (ob.pSample) IMFSample_Release(ob.pSample);
-            return NS_OS_ERROR;
+            return d->n_held > 0 ? vdec_emit_staged(d, out) : NS_OS_ERROR;
         }
-        int ok = ob.pSample && vdec_convert(d, ob.pSample, out);
-        if (ok && !d->hw_reported) {
+        if (!d->hw_reported) {
             d->hw_reported = 1;
             vdec_report_path(d, ob.pSample);
         }
-        if (ob.pSample) IMFSample_Release(ob.pSample);
+        if (d->hw && vdec_stage(d, ob.pSample)) {
+            IMFSample_Release(ob.pSample);
+            continue;
+        }
+        if (d->n_held > 0) {
+            IMFSample_Release(ob.pSample);
+            return vdec_emit_staged(d, out);
+        }
+        int ok = vdec_convert(d, ob.pSample, out);
+        IMFSample_Release(ob.pSample);
         return ok ? NS_OS_FRAME : NS_OS_ERROR;
     }
-    return NS_OS_ERROR;
+    return d->n_held > 0 ? vdec_emit_staged(d, out) : NS_OS_ERROR;
 }
 
 void
 ns_os_vdec_drain(ns_os_vdec *d)
 {
-    if (d && d->mft)
-        IMFTransform_ProcessMessage(d->mft, MFT_MESSAGE_COMMAND_DRAIN, 0);
+    if (!d || !d->mft) return;
+    d->draining = 1;
+    IMFTransform_ProcessMessage(d->mft, MFT_MESSAGE_COMMAND_DRAIN, 0);
 }
 
 void
 ns_os_vdec_flush(ns_os_vdec *d)
 {
     if (!d || !d->mft) return;
+    d->n_held = 0;
+    d->draining = 0;
     IMFTransform_ProcessMessage(d->mft, MFT_MESSAGE_COMMAND_FLUSH, 0);
     IMFTransform_ProcessMessage(d->mft, MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
     d->need_param_sets = 1;
@@ -570,6 +734,7 @@ void
 ns_os_vdec_free(ns_os_vdec *d)
 {
     if (!d) return;
+    vdec_release_staging(d);
     if (d->mft) {
         IMFTransform_ProcessMessage(d->mft, MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
         IMFTransform_Release(d->mft);
