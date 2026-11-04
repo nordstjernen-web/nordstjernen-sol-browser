@@ -3,6 +3,12 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Security: the cookie store's secure-context test matched any hostname
+  beginning with `127.`, so `http://127.bank.example/` received the
+  `Secure` cookies of `bank.example` in cleartext and could set
+  `Secure` and `__Secure-` cookies over plain HTTP. Only a parsed
+  loopback address (`127.0.0.0/8`, `::1`), `localhost` and
+  `*.localhost` count as secure contexts now.
 * Security: SameSite is now enforced on a navigation that reaches a
   cross-site target through a redirect. The redirect loop used to clear
   the top-level URL for later hops while a same-origin navigation carried

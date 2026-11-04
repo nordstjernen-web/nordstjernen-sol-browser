@@ -101,6 +101,9 @@ other site.
 
 ## 2. Medium: hostnames beginning with `127.` are secure contexts
 
+**Status: fixed.** `url_is_secure_context` parses the host with
+`g_inet_address_new_from_string` and asks for a loopback address.
+
 **Where.** `src/cookies.c` `url_is_secure_context`:
 
 ```c

@@ -4,6 +4,7 @@
 #include "db.h"
 
 #include <curl/curl.h>
+#include <gio/gio.h>
 #include <glib/gstdio.h>
 #include <libpsl.h>
 #include <sqlite3.h>
@@ -645,16 +646,27 @@ path_matches(const char *request_path, const char *cookie_path)
 }
 
 static gboolean
+host_is_loopback_address(const char *host)
+{
+    gsize len = strlen(host);
+    g_autofree char *literal = len > 2 && host[0] == '[' && host[len - 1] == ']'
+        ? g_strndup(host + 1, len - 2) : g_strdup(host);
+    GInetAddress *address = g_inet_address_new_from_string(literal);
+    if (!address) return FALSE;
+    gboolean loopback = g_inet_address_get_is_loopback(address);
+    g_object_unref(address);
+    return loopback;
+}
+
+static gboolean
 url_is_secure_context(const char *scheme, const char *host)
 {
     if (g_ascii_strcasecmp(scheme, "https") == 0 ||
         g_ascii_strcasecmp(scheme, "wss") == 0)
         return TRUE;
-    if (g_ascii_strcasecmp(host, "localhost") == 0 ||
-        g_str_has_suffix(host, ".localhost") ||
-        strcmp(host, "[::1]") == 0 || g_str_has_prefix(host, "127."))
-        return TRUE;
-    return FALSE;
+    return g_ascii_strcasecmp(host, "localhost") == 0 ||
+           g_str_has_suffix(host, ".localhost") ||
+           host_is_loopback_address(host);
 }
 
 typedef struct ns_request_url {
