@@ -3,6 +3,11 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Headless: `--act` steps `type` and `key` go to the element page script
+  last focused, as keystrokes in a window do. They went to the field
+  the last `click` step hit, so typing into a field that a page opens
+  and focuses itself — x.com's sign-in moves focus from its inline
+  field into a dialog — left the focused field empty.
 * JavaScript: `console.log()`, `warn()`, `error()` and the `%s`/`%o`
   substitutions no longer run page code to format what they print. They
   read an `Error`'s `name`, `message` and `stack` only from data

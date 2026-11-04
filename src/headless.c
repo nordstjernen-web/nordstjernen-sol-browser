@@ -1203,6 +1203,23 @@ headless_wpt_finish(headless_flush_ctx *fc, const ns_headless_opts *opts)
 }
 
 static void
+headless_follow_js_focus(headless_flush_ctx *fc)
+{
+    if (!fc->js) return;
+    const ns_node *focused = ns_js_focused_node(fc->js);
+    if (focused == fc->focused) return;
+    if (!focused || !ns_node_is_editable(focused)) {
+        fc->focused = NULL;
+        return;
+    }
+    ns_node_flatten_editable((ns_node *)focused);
+    fc->focused = focused;
+    const char *v = ns_node_editable_value(focused);
+    fc->caret = v ? strlen(v) : 0;
+    fc->anchor = fc->caret;
+}
+
+static void
 headless_edit_replace(headless_flush_ctx *fc, gsize lo, gsize hi, const char *ins)
 {
     if (!fc->focused) return;
@@ -1830,10 +1847,12 @@ headless_run_actions(headless_flush_ctx *fc, headless_nav_capture *nav,
             }
         } else if (g_str_has_prefix(a, "type ")) {
             fprintf(stderr, "[headless] type \"%s\"\n", a + 5);
+            headless_follow_js_focus(fc);
             headless_edit_replace(fc, MIN(fc->caret, fc->anchor),
                                   MAX(fc->caret, fc->anchor), a + 5);
         } else if (g_str_has_prefix(a, "key ")) {
             fprintf(stderr, "[headless] key %s\n", a + 4);
+            headless_follow_js_focus(fc);
             headless_key(fc, nav, g_strstrip(a + 4));
         } else if (g_str_has_prefix(a, "eval ")) {
             char *result = ns_js_eval_source(fc->js, a + 5, "headless-act-eval");
