@@ -3,6 +3,13 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Layout: an element with `display: contents` is never the containing
+  block of an absolutely or fixed positioned descendant, whatever its
+  `position`, `transform` or `filter` says, since it has no box. The
+  descendant was placed against the whole page instead of the nearest
+  ancestor that has a box. On reddit.com an ad's link, inside a
+  `display: contents; position: absolute` element, stretched over the
+  entire front page, so a click anywhere opened the advertiser's site.
 * Paint: blurs (`filter: blur()`, `backdrop-filter`, blurred
   `box-shadow` and `text-shadow`) run about twice as fast with the same
   pixels. The box blur behind them walked each colour channel of a row

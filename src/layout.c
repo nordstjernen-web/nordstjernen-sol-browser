@@ -18971,7 +18971,7 @@ static gboolean
 style_creates_abs_cb(const ns_style *s, const ns_node *n)
 {
     static const char *const will_change[] = { "position" };
-    if (!s) return FALSE;
+    if (!s || style_is_contents(s)) return FALSE;
     const ns_css_value *v = s->values[NS_CSS_POSITION];
     if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword) {
         const char *kw = v->u.keyword;
@@ -19035,7 +19035,7 @@ node_is_document_element(const ns_node *n)
 static gboolean
 style_creates_fixed_cb(const ns_style *s, const ns_node *n)
 {
-    if (!s) return FALSE;
+    if (!s || style_is_contents(s)) return FALSE;
     if (style_has_filter_cb(s) && !node_is_document_element(n)) return TRUE;
     return !style_is_non_atomic_inline(s) && style_transforms_or_contains(s);
 }
