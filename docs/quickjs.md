@@ -16,8 +16,8 @@ An existing build directory switches with
 |---|---|---|
 | Source | `src/quickjs/`, an in-tree fork of [quickjs-ng](https://github.com/quickjs-ng/quickjs) | [bellard/quickjs](https://github.com/bellard/quickjs), the original engine |
 | How it gets into the build | always in the tree | fetched at configure time by `subprojects/quickjs.wrap`, never vendored |
-| Version | quickjs-ng 0.17.0 (master `7b5f588`, less the commits the refresh log lists as not taken) plus the browser hooks; refresh history in [`vendored-engine-updates.md`](vendored-engine-updates.md) | master `19d6bd8` (2026-10-26), pinned by commit, plus one sort patch |
-| About page | `QuickJS 0.17.0` | `QuickJS 2026-06-04` |
+| Version | quickjs-ng 0.18.0 (master `1b519fa`, less the commits the refresh log lists as not taken) plus the browser hooks; refresh history in [`vendored-engine-updates.md`](vendored-engine-updates.md) | master `712e8c0` (2026-11-02), pinned by commit, unpatched |
+| About page | `QuickJS 0.18.0` | `QuickJS 2026-06-04` |
 | CI | every workflow | none; build it locally (see below) |
 
 Both builds carry the same Web API surface. The whole binding — `src/js.c`
@@ -41,16 +41,14 @@ compiled; the browser never calls `JS_AddIntrinsicTemporal` or
 `--wrap-mode=nodownload` needs the checkout already in
 `subprojects/quickjs/`.
 
-One source patch rides on top, named by `diff_files`:
-`quickjs-sort-calls-comparator.patch`. The original `Array.prototype.sort`
-skips the comparator when both values are the same, which the fork, V8,
-SpiderMonkey and JavaScriptCore never do. jQuery 4's `uniqueSort` counts on
-that call to spot duplicates, so on the unpatched engine `$(a).add(a)` and
-`.closest()` return the same element twice.
+No source patch rides on top. The one this build used to carry, making
+`Array.prototype.sort` call its comparator for identical values (jQuery 4's
+`uniqueSort` relies on it), is upstream since `1cc74460cb`. A future local
+patch goes in `subprojects/packagefiles/` and is named by `diff_files` in the
+wrap.
 
 To move forward, point `revision` in the wrap at a newer `master` commit,
-delete `subprojects/quickjs/`, reconfigure, regenerate the patch if it no
-longer applies, drop any adapter shim for a call upstream now exports (as
+delete `subprojects/quickjs/`, reconfigure, drop any adapter shim for a call upstream now exports (as
 `JS_ToObject` was dropped at `84e723f`), and rerun the checks below.
 
 ## The adapter: `src/ns_quickjs.h`

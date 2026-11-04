@@ -13,9 +13,7 @@
 typedef struct ns_quickjs_class_ids {
     JSClassID array;
     JSClassID error;
-    JSClassID array_buffer;
     JSClassID data_view;
-    JSClassID typed_array[JS_TYPED_ARRAY_FLOAT64 + 1];
     JSClassID date;
     JSClassID regexp;
     JSClassID map;
@@ -146,12 +144,7 @@ ns_quickjs_learn_class_ids(JSContext *ctx)
         JS_CallConstructor(ctx, data_view, 1, &buffer));
     JS_FreeValue(ctx, data_view);
     JS_FreeValue(ctx, global);
-    ids->array_buffer = ns_quickjs_class_of(ctx, buffer);
-
-    JSValue zero = JS_NewInt32(ctx, 0);
-    for (int type = JS_TYPED_ARRAY_UINT8C; type <= JS_TYPED_ARRAY_FLOAT64; type++)
-        ids->typed_array[type] = ns_quickjs_class_of(ctx,
-            JS_NewTypedArray(ctx, 1, &zero, (JSTypedArrayEnum)type));
+    JS_FreeValue(ctx, buffer);
     ns_quickjs_learn_value_class_ids(ctx);
     ns_quickjs_learn_function_class_ids(ctx);
 }
@@ -184,12 +177,6 @@ bool
 ns_quickjs_is_error(JSValueConst val)
 {
     return ns_quickjs_has_class(val, ns_quickjs_classes.error);
-}
-
-bool
-JS_IsArrayBuffer(JSValueConst val)
-{
-    return ns_quickjs_has_class(val, ns_quickjs_classes.array_buffer);
 }
 
 bool
@@ -259,15 +246,6 @@ JS_GetBoxedPrimitiveKind(JSValueConst val)
         if (ns_quickjs_has_class(val, ns_quickjs_classes.boxed[kind]))
             return kind;
     return JS_BOXED_NONE;
-}
-
-int
-JS_GetTypedArrayType(JSValueConst val)
-{
-    for (int type = JS_TYPED_ARRAY_UINT8C; type <= JS_TYPED_ARRAY_FLOAT64; type++)
-        if (ns_quickjs_has_class(val, ns_quickjs_classes.typed_array[type]))
-            return type;
-    return -1;
 }
 
 static void
