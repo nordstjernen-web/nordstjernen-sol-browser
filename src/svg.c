@@ -1934,6 +1934,18 @@ svg_clip_path_children(svg_ctx *ctx, const ns_node *clip, const svg_state *st)
     }
 }
 
+static gboolean
+svg_mask_type_is_alpha(const ns_node *mask)
+{
+    const char *v = svg_prop(mask, "mask-type");
+    if (!v) return FALSE;
+    while (g_ascii_isspace(*v)) v++;
+    if (g_ascii_strncasecmp(v, "alpha", 5) != 0) return FALSE;
+    v += 5;
+    while (g_ascii_isspace(*v)) v++;
+    return *v == '\0' || *v == '!';
+}
+
 static cairo_surface_t *
 svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 {
@@ -2004,11 +2016,16 @@ svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     unsigned char *dst = cairo_image_surface_get_data(a8);
     int sstride = cairo_image_surface_get_stride(rgb);
     int dstride = cairo_image_surface_get_stride(a8);
+    gboolean alpha_mask = svg_mask_type_is_alpha(mask);
     for (int y = 0; y < h; y++) {
         const guint32 *srow = (const guint32 *)(gconstpointer)(src + (gsize)y * sstride);
         unsigned char *drow = dst + (gsize)y * dstride;
         for (int x = 0; x < w; x++) {
             guint32 px = srow[x];
+            if (alpha_mask) {
+                drow[x] = (unsigned char)(px >> 24);
+                continue;
+            }
             double r = ((px >> 16) & 0xff) / 255.0;
             double g = ((px >> 8) & 0xff) / 255.0;
             double b = (px & 0xff) / 255.0;
@@ -2032,11 +2049,34 @@ svg_filter_blur(svg_ctx *ctx, const ns_node *n)
     g_free(id);
     if (!f || !f->name || strcmp(f->name, "filter") != 0) return 0;
     double variance = 0;
+    const char *transparent_result = NULL, *source_result = NULL;
     for (const ns_node *c = f->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
+        const char *result = ns_element_get_attr(c, "result");
+        if (strcmp(c->name, "feFlood") == 0 && variance == 0) {
+            const char *op = ns_element_get_attr(c, "flood-opacity");
+            double o = 1;
+            if (!op || !svg_num(&op, &o) || o != 0) return 0;
+            transparent_result = result;
+            continue;
+        }
+        if (strcmp(c->name, "feBlend") == 0 && variance == 0) {
+            const char *mode = ns_element_get_attr(c, "mode");
+            const char *in = ns_element_get_attr(c, "in");
+            const char *in2 = ns_element_get_attr(c, "in2");
+            if ((mode && strcmp(mode, "normal") != 0) ||
+                !in || strcmp(in, "SourceGraphic") != 0 ||
+                !in2 || !transparent_result || strcmp(in2, transparent_result) != 0)
+                return 0;
+            source_result = result;
+            continue;
+        }
         if (strcmp(c->name, "feGaussianBlur") != 0) return 0;
         const char *in = ns_element_get_attr(c, "in");
-        if (in && *in && strcmp(in, "SourceGraphic") != 0) return 0;
+        if ((!in || !*in) && transparent_result && !source_result) return 0;
+        if (in && *in && strcmp(in, "SourceGraphic") != 0 &&
+            !(source_result && strcmp(in, source_result) == 0))
+            return 0;
         const char *p = ns_element_get_attr(c, "stdDeviation");
         double sx = 0, sy;
         if (!p || !svg_num(&p, &sx)) continue;

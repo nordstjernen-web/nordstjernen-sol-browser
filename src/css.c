@@ -11656,6 +11656,47 @@ grid_integer_canonical(const char *tok, gboolean *literal, long *value)
     return canon ? canon : g_strdup(tok);
 }
 
+static char *
+grid_placement_fold_math(char *canon)
+{
+    GString *out = g_string_sized_new(strlen(canon));
+    gboolean folded = FALSE;
+    const char *p = canon;
+    while (*p) {
+        gboolean at_token = p == canon || is_ws(p[-1]) || p[-1] == '/';
+        if (!at_token || !is_math_fn_start(p)) {
+            g_string_append_c(out, *p++);
+            continue;
+        }
+        const char *end = p;
+        int depth = 0;
+        while (*end) {
+            if (*end == '(') depth++;
+            else if (*end == ')' && --depth == 0) { end++; break; }
+            end++;
+        }
+        char *fn = g_strndup(p, (gsize)(end - p));
+        ns_css_value *v = parse_calc(fn);
+        if (v && v->kind == NS_CSS_V_LENGTH &&
+            v->u.length.unit == NS_CSS_UNIT_NUMBER && isfinite(v->u.length.v)) {
+            double n = CLAMP(floor(v->u.length.v + 0.5), -100000.0, 100000.0);
+            g_string_append_printf(out, "%ld", (long)n);
+            folded = TRUE;
+        } else {
+            g_string_append(out, fn);
+        }
+        ns_css_value_free(v);
+        g_free(fn);
+        p = end;
+    }
+    if (!folded) {
+        g_string_free(out, TRUE);
+        return canon;
+    }
+    g_free(canon);
+    return g_string_free(out, FALSE);
+}
+
 static int
 grid_line_tokens(const char *text, char **out, int max)
 {
@@ -15707,7 +15748,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         if (!canon) break;
         v = g_new0(ns_css_value, 1);
         v->kind = NS_CSS_V_KEYWORD;
-        v->u.keyword = canon;
+        v->u.keyword = grid_placement_fold_math(canon);
         break;
     }
     default:
@@ -22771,6 +22812,63 @@ css_append_amp_replaced(GString *out, const char *p, const char *end,
     return replaced;
 }
 
+static ns_css_stylesheet *
+css_part_sheet(ns_css_stylesheet *sh)
+{
+    if (!sh->part_sheet) {
+        sh->part_sheet = g_new0(ns_css_stylesheet, 1);
+        sh->part_sheet->rules =
+            g_ptr_array_new_with_free_func((GDestroyNotify)ns_css_rule_free);
+        sh->part_sheet->lazy_decls = sh->lazy_decls;
+    }
+    return sh->part_sheet;
+}
+
+static void
+css_append_part_attrs(GString *out, const char *names, gsize len)
+{
+    const char *p = names, *end = names + len;
+    while (p < end) {
+        while (p < end && is_ws(*p)) p++;
+        const char *word = p;
+        while (p < end && !is_ws(*p)) p++;
+        if (p > word)
+            g_string_append_printf(out, "[part~=\"%.*s\"]",
+                                   (int)(p - word), word);
+    }
+}
+
+static char *
+css_part_selector_list_text(const char *start, const char *end)
+{
+    gboolean found = FALSE;
+    for (const char *s = start; s + 7 <= end && !found; s++)
+        found = g_ascii_strncasecmp(s, "::part(", 7) == 0;
+    if (!found) return NULL;
+    GString *out = g_string_sized_new((gsize)(end - start) + 64);
+    const char *p = start;
+    while (p < end) {
+        if (p + 7 > end || g_ascii_strncasecmp(p, "::part(", 7) != 0) {
+            g_string_append_c(out, *p++);
+            continue;
+        }
+        const char *names = p + 7;
+        const char *close = memchr(names, ')', (gsize)(end - names));
+        if (!close) {
+            g_string_append_len(out, p, end - p);
+            break;
+        }
+        char prev = out->len ? out->str[out->len - 1] : ' ';
+        if (is_ws(prev) || prev == ',' || prev == '>' || prev == '+' ||
+            prev == '~' || prev == '(')
+            g_string_append_c(out, '*');
+        g_string_append(out, " > [" NS_SHADOW_ATTR "] *");
+        css_append_part_attrs(out, names, (gsize)(close - names));
+        p = close + 1;
+    }
+    return g_string_free(out, FALSE);
+}
+
 static char *
 css_scope_selector_list_text(const char *start, const char *end)
 {
@@ -23666,6 +23764,14 @@ parse_rules_until(const char **pp, const char *end,
         }
         char *scoped_sel = rule->scopes
             ? css_scope_selector_list_text(sel_start, sel_end) : NULL;
+        char *part_sel = css_part_selector_list_text(
+            scoped_sel ? scoped_sel : sel_start,
+            scoped_sel ? scoped_sel + strlen(scoped_sel) : sel_end);
+        gboolean part_rule = part_sel != NULL;
+        if (part_sel) {
+            g_free(scoped_sel);
+            scoped_sel = part_sel;
+        }
         const char *parse_p = scoped_sel ? scoped_sel : sel_start;
         const char *parse_end = scoped_sel ? scoped_sel + strlen(scoped_sel)
                                            : sel_end;
@@ -23705,7 +23811,7 @@ parse_rules_until(const char **pp, const char *end,
         }
         p = sel_end + 1;
         parse_rule_declarations(&p, end, sel_end, rule, sh->lazy_decls);
-        g_ptr_array_add(sh->rules, rule);
+        g_ptr_array_add(part_rule ? css_part_sheet(sh)->rules : sh->rules, rule);
     }
     *pp = p;
     if (nested) at_depth--;
@@ -24276,6 +24382,7 @@ ns_css_stylesheet_free(ns_css_stylesheet *s)
     g_clear_pointer(&s->page_rule, g_free);
     g_clear_pointer(&s->resolved_base, g_free);
     if (s->index) ns_css_rule_index_free(s->index);
+    if (s->part_sheet) ns_css_stylesheet_free(s->part_sheet);
     s->rules = NULL;
     s->imports = NULL;
     s->layers = NULL;
@@ -37104,6 +37211,23 @@ shadow_own_sheets(const ns_node *wrapper,
     *n_author = own ? own->len : 0;
 }
 
+static const ns_style *
+css_flat_tree_parent_style(const ns_node *child, const ns_node *shadow_root,
+                           GHashTable *styles, const ns_style *fallback)
+{
+    if (!shadow_root || child->kind != NS_NODE_ELEMENT) return fallback;
+    const ns_node *slot = css_assigned_slot(child);
+    const ns_style *slot_style = slot ? g_hash_table_lookup(styles, slot) : NULL;
+    return slot_style ? slot_style : fallback;
+}
+
+typedef struct css_part_scope {
+    const ns_css_stylesheet *const *sheets;
+    gsize n;
+} css_part_scope;
+
+static __thread css_part_scope g_part_scope;
+
 static void
 doc_own_sheets(const ns_node *node, const ns_css_stylesheet *const **author,
                gsize *n_author)
@@ -37224,8 +37348,14 @@ cascade_walk(ns_node *node,
         }
     }
     doc_own_sheets(node, &author, &n_author);
-    if (node->kind == NS_NODE_ELEMENT && ns_element_has_shadow_marker(node))
+    css_part_scope outer_part_scope = g_part_scope;
+    if (node->kind == NS_NODE_DOCUMENT)
+        g_part_scope = (css_part_scope){ 0 };
+    if (node->kind == NS_NODE_ELEMENT && ns_element_has_shadow_marker(node)) {
+        g_part_scope.sheets = author;
+        g_part_scope.n = n_author;
         shadow_own_sheets(node, &author, &n_author);
+    }
     GPtrArray *host_sheets = host_scoped_sheets(node, author, n_author);
     if (host_sheets) {
         author = (const ns_css_stylesheet *const *)host_sheets->pdata;
@@ -37338,7 +37468,14 @@ cascade_walk(ns_node *node,
                                  NS_CSS_ORIGIN_AUTHOR,
                                  (int)(n_author + i + 1), node, dests,
                                  (guint)n_pe + 1, layer_ranks);
+        guint n_reslot = reslot_sheets ? reslot_sheets->len : 0;
         if (reslot_sheets) g_ptr_array_free(reslot_sheets, TRUE);
+        for (gsize i = 0; i < g_part_scope.n; i++)
+            if (g_part_scope.sheets[i] && g_part_scope.sheets[i]->part_sheet)
+                gather_matches_multi(g_part_scope.sheets[i]->part_sheet,
+                                     NS_CSS_ORIGIN_AUTHOR,
+                                     (int)(n_author + n_reslot + i + 1), node,
+                                     dests, (guint)n_pe + 1, layer_ranks);
 
         char *pres_css = presentational_hints_css(node);
         const ns_css_stylesheet *pres_sheet = NULL;
@@ -37636,11 +37773,22 @@ cascade_walk(ns_node *node,
     ns_node *outer_parent_node = g_cascade_parent_node;
     if (node->kind == NS_NODE_ELEMENT && !shadow_wrapper)
         g_cascade_parent_node = node;
-    for (ns_node *c = node->first_child; c; c = c->next_sibling)
-        cascade_walk(c, ua, author, n_author, child_parent_style,
+    ns_node *shadow_child = node->kind == NS_NODE_ELEMENT && !shadow_wrapper
+        ? (ns_node *)css_shadow_root_of(node) : NULL;
+    if (shadow_child)
+        cascade_walk(shadow_child, ua, author, n_author, child_parent_style,
                      child_layout_parent, root_px,
                      layer_ranks, out, nd_recurse_dirty,
                      child_parent_changed);
+    for (ns_node *c = node->first_child; c; c = c->next_sibling) {
+        if (c == shadow_child) continue;
+        cascade_walk(c, ua, author, n_author,
+                     css_flat_tree_parent_style(c, shadow_child, out,
+                                                child_parent_style),
+                     child_layout_parent, root_px,
+                     layer_ranks, out, nd_recurse_dirty,
+                     child_parent_changed);
+    }
     g_cascade_parent_node = outer_parent_node;
     if (g_inv_active) g_ptr_array_set_size(g_inv_active, inv_mark);
     if (filter_element) css_ancestor_filter_update(node, -1);
@@ -37654,6 +37802,7 @@ cascade_walk(ns_node *node,
         g_viewport_h = frame_vh;
     }
     if (host_sheets) g_ptr_array_free(host_sheets, TRUE);
+    g_part_scope = outer_part_scope;
     depth--;
 }
 
