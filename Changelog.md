@@ -3,6 +3,13 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Security: an iframe sandboxed without `allow-same-origin` could list
+  the cookies of its URL's origin through `cookieStore.get()`/`getAll()`
+  (the internal `__nsCookieList()` hook had no sandbox check; only the
+  `document.cookie` getter was denied). The hook now answers `[]` for
+  such a frame, and `document.cookie` throws `SecurityError` on read
+  and write there, as the HTML standard requires, instead of returning
+  an empty string and dropping the write.
 * Security: WebSocket and EventSource connections now take their cookie
   partition, the first-party policy decision and the SameSite context
   from the top-level page, as fetches do. They used the opening
