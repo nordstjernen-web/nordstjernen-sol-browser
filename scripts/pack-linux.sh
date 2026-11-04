@@ -132,8 +132,8 @@ cp "$ROOT"/data/icons/hicolor/scalable/apps/nordstjernen*.svg \
 cp "$ROOT/data/nordstjernen.desktop" "$STAGE/data/"
 
 # When WebGPU was built, ship libwgpu_native.so beside the binaries and point
-# their rpath at $ORIGIN so the renderer (and the GTK shell, which links
-# the engine) load it from the bundle rather than a system path. WebGPU still
+# their rpath at $ORIGIN so the renderer loads it from the bundle rather
+# than a system path (the GTK shell no longer links the engine or wgpu). WebGPU still
 # stays dormant at runtime until the browser is launched with --enable-webgpu.
 WEBGPU_BUNDLED=0
 if [ -n "$WGPU_ROOT" ] && [ -e "$WGPU_ROOT/lib/libwgpu_native.so" ]; then
@@ -148,7 +148,7 @@ if [ -n "$WGPU_ROOT" ] && [ -e "$WGPU_ROOT/lib/libwgpu_native.so" ]; then
         for bin in nordstjernen nordstjernen-renderer; do
             [ -e "$STAGE/$bin" ] || continue
             cur=$(patchelf --print-needed "$STAGE/$bin" \
-                  | grep -E '(^|/)libwgpu_native\.so$' | head -1)
+                  | { grep -E '(^|/)libwgpu_native\.so$' || true; } | head -1)
             if [ -n "$cur" ] && [ "$cur" != libwgpu_native.so ]; then
                 patchelf --replace-needed "$cur" libwgpu_native.so "$STAGE/$bin"
             fi
