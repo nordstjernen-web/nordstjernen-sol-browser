@@ -3,6 +3,11 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Images: the vendored Wuffs moves from 0.4.0-alpha.10 to alpha.12, which
+  fixes an out-of-bounds read in its number parsing, parses PNG cICP
+  chunks and corrects some pixel-format conversions. The local change
+  accepting 16-bit JPEG quantization tables, which upstream still rejects,
+  is carried over.
 * QuickJS: the fork reports quickjs-ng 0.18.0 and takes three upstream
   memory-safety fixes (`Array.prototype.find` value ownership, RegExp
   bytecode lifetime on recompile, BJSON RegExp references). The original
