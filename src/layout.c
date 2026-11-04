@@ -15384,7 +15384,13 @@ grid_used_content_height(const ns_box *box, double cw)
 {
     if (box_height_flexed_in_column(box)) return box->definite_height;
     double eh = box_style_definite_height(box, cw);
-    if (eh < 0) return -1;
+    if (eh < 0) {
+        const ns_css_value *mnv = box->style->values[NS_CSS_MIN_HEIGHT];
+        if (!mnv || (mnv->kind != NS_CSS_V_LENGTH && mnv->kind != NS_CSS_V_CALC))
+            return -1;
+        double min_h = resolve_used_height(box, mnv, cw, -1);
+        return min_h > 0 ? specified_height_to_content(box, min_h) : -1;
+    }
     eh = clamp_height_minmax_px(box->style, eh);
     if (keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box"))
         eh -= box->padding.top + box->padding.bottom +
@@ -15870,6 +15876,21 @@ grid_relayout_stretched_item(ns_box *c, double pre_h,
     if (fabs(target_h - laid_out_h) < 0.01) return;
     relayout_at_definite_height(c, c->last_layout_width, target_h,
                                 child_inherited);
+}
+
+static void
+grid_relayout_percent_height_item(ns_box *c, double area_h,
+                                  const ns_style *child_inherited)
+{
+    if (c->kind != NS_BOX_BLOCK || !c->style || area_h <= 0 ||
+        c->cb_height_override > 0)
+        return;
+    if (!value_is_percent(c->style->values[NS_CSS_HEIGHT])) return;
+    c->cb_height_override = area_h;
+    double sx = c->x, sy = c->y;
+    layout_box(c, c->last_layout_width, child_inherited);
+    if (c->x != sx || c->y != sy)
+        shift_box_tree(c, sx - c->x, sy - c->y);
 }
 
 static void
@@ -16734,6 +16755,7 @@ layout_grid(ns_box *box, double cw,
             row_h += gk->height + row_extra[r + k];
             if (k > 0) row_h += row_gap + row_between;
         }
+        grid_relayout_percent_height_item(c, row_h, child_inherited);
         const char *a_eff = flex_item_align(
             c, keyword_or(box->style, NS_CSS_ALIGN_ITEMS, "stretch"));
         double item_outer = c->content_height +
@@ -17770,13 +17792,27 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             const ns_css_value *ta = child_inherited
                 ? child_inherited->values[NS_CSS_TEXT_ALIGN] : NULL;
             gboolean self_center = FALSE, self_right = FALSE;
+            const ns_css_value *ml = c->style ? c->style->values[NS_CSS_MARGIN_LEFT] : NULL;
+            const ns_css_value *mr = c->style ? c->style->values[NS_CSS_MARGIN_RIGHT] : NULL;
             if (c->kind == NS_BOX_TABLE) {
                 const char *al = c->dom ? ns_element_get_attr(c->dom, "align") : NULL;
                 if (al && g_ascii_strcasecmp(al, "center") == 0) self_center = TRUE;
                 else if (al && g_ascii_strcasecmp(al, "right") == 0) self_right = TRUE;
-                const ns_css_value *ml = c->style ? c->style->values[NS_CSS_MARGIN_LEFT] : NULL;
-                const ns_css_value *mr = c->style ? c->style->values[NS_CSS_MARGIN_RIGHT] : NULL;
                 if (keyword_is(ml, "auto") && keyword_is(mr, "auto")) self_center = TRUE;
+            } else if (c->style && !style_is_absolute_or_fixed(c->style) &&
+                       ns_css_display_of(c->style).outer == NS_DISPLAY_OUTER_BLOCK &&
+                       (keyword_is(ml, "auto") || keyword_is(mr, "auto"))) {
+                outer += c->padding.left + c->padding.right +
+                         c->border.left + c->border.right;
+                if (!keyword_is(ml, "auto")) outer += c->margin.left;
+                if (!keyword_is(mr, "auto")) outer += c->margin.right;
+                double free_w = cw - outer;
+                double dx = keyword_is(ml, "auto") && keyword_is(mr, "auto")
+                    ? free_w / 2.0
+                    : keyword_is(ml, "auto") ? free_w : 0;
+                if (free_w > 0)
+                    shift_box_tree(c, inner_x + dx - c->x, 0);
+                continue;
             }
             if ((keyword_is(ta, "center") || self_center) && outer < cw)
                 shift_box_tree(c, inner_x + (cw - outer) / 2.0 - c->x, 0);
