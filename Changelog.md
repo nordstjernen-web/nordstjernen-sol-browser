@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.42-dev:
+1.0.42:
 ======
 * Permissions: the shell now honours a camera request only when the
   origin the renderer reports is the tab's own origin, and refuses others
