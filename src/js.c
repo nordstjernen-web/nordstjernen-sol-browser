@@ -1651,6 +1651,25 @@ ns_js_realm_url_or_current(ns_js *js, JSContext *realm)
     return url ? url : js->current_url;
 }
 
+#define NS_JS_CONSOLE_SCRIPT "devtools-console"
+
+static gboolean
+ns_js_stack_is_console_only(JSContext *ctx)
+{
+    gboolean seen = FALSE;
+    for (int level = 0; level < 256; level++) {
+        JSAtom atom = JS_GetScriptOrModuleName(ctx, level);
+        if (atom == JS_ATOM_NULL) continue;
+        const char *name = JS_AtomToCString(ctx, atom);
+        gboolean console = name && strcmp(name, NS_JS_CONSOLE_SCRIPT) == 0;
+        if (name) JS_FreeCString(ctx, name);
+        JS_FreeAtom(ctx, atom);
+        if (!console) return FALSE;
+        seen = TRUE;
+    }
+    return seen;
+}
+
 static bool
 ns_js_string_compile_allowed(JSContext *ctx, gboolean wasm)
 {
@@ -1658,6 +1677,8 @@ ns_js_string_compile_allowed(JSContext *ctx, gboolean wasm)
     const ns_csp *csp = ns_js_realm_csp(js, ctx);
     if (!csp) return true;
     if (ns_csp_eval_allowed(csp, wasm)) return true;
+    if (js && js->console_eval_depth > 0 && ns_js_stack_is_console_only(ctx))
+        return true;
     if (js->log_cb) {
         char *line = g_strdup_printf("CSP blocked: %s on %s",
                                      wasm ? "WebAssembly compile" : "eval",
@@ -72243,7 +72264,10 @@ ns_js_eval_source(ns_js *js, const char *src, const char *origin)
     if (js->halted || js->in_pump) return NULL;
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
+    gboolean console = origin && strcmp(origin, NS_JS_CONSOLE_SCRIPT) == 0;
+    if (console) js->console_eval_depth++;
     JSValue v = JS_Eval(js->ctx, src, strlen(src), origin ? origin : "console", JS_EVAL_TYPE_GLOBAL);
+    if (console) js->console_eval_depth--;
     char *out = NULL;
     if (JS_IsException(v)) {
         JSValue ex = JS_GetException(js->ctx);
