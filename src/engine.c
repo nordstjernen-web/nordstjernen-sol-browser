@@ -1234,7 +1234,7 @@ style_text_fingerprint(const ns_node *n, guint64 *hash, gsize *len, int depth)
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind == NS_NODE_TEXT && c->text) {
             *hash = (*hash * 1099511628211ULL) ^
-                    adopted_text_hash(c->text, c->text_len);
+                    ns_node_text_hash((ns_node *)c);
             *len += c->text_len;
         } else if (c->kind == NS_NODE_ELEMENT) {
             style_text_fingerprint(c, hash, len, depth + 1);

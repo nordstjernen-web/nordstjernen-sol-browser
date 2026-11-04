@@ -945,10 +945,64 @@ ns_node_set_name_owned(ns_node *n, char *name)
     n->flags |= NS_NODE_OWN_NAME;
 }
 
+G_LOCK_DEFINE_STATIC(node_text_hashes);
+static GHashTable *g_node_text_hashes;
+
+static guint64
+node_text_hash_compute(const char *s, gsize n)
+{
+    guint64 h = 1469598103934665603ULL;
+    gsize i = 0;
+    for (; i + 8 <= n; i += 8) {
+        guint64 w;
+        memcpy(&w, s + i, 8);
+        h = (h ^ w) * 1099511628211ULL;
+        h ^= h >> 29;
+    }
+    for (; i < n; i++)
+        h = (h ^ (guchar)s[i]) * 1099511628211ULL;
+    return h ^ n;
+}
+
+static void
+node_text_hash_forget(ns_node *n)
+{
+    if (!(n->flags & NS_NODE_TEXT_HASHED)) return;
+    n->flags &= ~NS_NODE_TEXT_HASHED;
+    G_LOCK(node_text_hashes);
+    if (g_node_text_hashes) g_hash_table_remove(g_node_text_hashes, n);
+    G_UNLOCK(node_text_hashes);
+}
+
+guint64
+ns_node_text_hash(ns_node *n)
+{
+    if (!n || !n->text) return 0;
+    if (n->flags & NS_NODE_TEXT_HASHED) {
+        G_LOCK(node_text_hashes);
+        const guint64 *cached = g_node_text_hashes
+            ? g_hash_table_lookup(g_node_text_hashes, n) : NULL;
+        guint64 h = cached ? *cached : 0;
+        G_UNLOCK(node_text_hashes);
+        if (cached) return h;
+    }
+    guint64 h = node_text_hash_compute(n->text, n->text_len);
+    G_LOCK(node_text_hashes);
+    if (!g_node_text_hashes)
+        g_node_text_hashes = g_hash_table_new_full(g_direct_hash,
+                                                   g_direct_equal, NULL,
+                                                   g_free);
+    g_hash_table_replace(g_node_text_hashes, n, g_memdup2(&h, sizeof h));
+    G_UNLOCK(node_text_hashes);
+    n->flags |= NS_NODE_TEXT_HASHED;
+    return h;
+}
+
 void
 ns_node_set_text_borrow(ns_node *n, const char *text)
 {
     if (!n) return;
+    node_text_hash_forget(n);
     if (n->flags & NS_NODE_OWN_TEXT)
         g_free(n->text);
     n->text = (char *)text;
@@ -963,6 +1017,7 @@ ns_node_replace_text_len_owned(ns_node *n, char *text, guint32 len)
         g_free(text);
         return;
     }
+    node_text_hash_forget(n);
     if (n->flags & NS_NODE_OWN_TEXT)
         g_free(n->text);
     n->text = text;
@@ -1200,6 +1255,7 @@ ns_node_free(ns_node *node)
         if (cur->js_invalidate)
             cur->js_invalidate(cur);
         ns_css_forget_node(cur);
+        node_text_hash_forget(cur);
         if (cur->flags & NS_NODE_OWN_NAME) g_free(cur->name);
         if (cur->flags & NS_NODE_OWN_TEXT) g_free(cur->text);
         ns_class_set_clear(cur);
