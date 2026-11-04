@@ -450,7 +450,8 @@ Networking is built on **libcurl** (`src/net.c`, ~7,000 lines):
 - **HTTP cache**: a **SQLite-indexed** cache with on-disk bodies
   (`src/cache.c`), honouring ETag/Last-Modified.
 - **Cookies** partitioned per site; JS-set cookies persisted in a
-  sibling file curl never overwrites.
+  sibling file curl never overwrites. [cookies.md](cookies.md) proposes
+  replacing the jar files with a browser-owned SQLite store.
 
 The renderer performs its own fetching, cookie, and cache I/O today;
 [tab-isolation.md](tab-isolation.md) records browser-process brokering of

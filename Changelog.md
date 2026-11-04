@@ -3,6 +3,12 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Docs: `docs/cookies.md` proposes replacing the per-site cookie jar
+  files with one SQLite cookie database owned by browser code: the
+  in-memory cookies are the source of truth, writes are batched to disk
+  off the transfer thread, and libcurl no longer reads cookie files, so
+  the browser behaves the same on a distribution libcurl as on a bundled
+  one. Nothing is implemented yet.
 * Video: a `<video>` that paints above a fixed or sticky element, like
   the feed and post players on reddit.com, now plays through the
   compositor as videos lower in the page already did. Such a video used to
