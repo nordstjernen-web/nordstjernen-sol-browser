@@ -3,6 +3,12 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Style: collecting the page's stylesheets before a layout no longer
+  re-hashes the text of every `<style>` element. A text node now keeps
+  the hash of its text until the text changes or the node is freed.
+  reddit.com carries the same 251 KB stylesheet in about 60 shadow
+  roots, and each layout hashed all of it again: 11% of the renderer's
+  time while scrolling and hovering the front page, now under 0.1%.
 * Paint: a `backdrop-filter` whose backdrop has not changed since an
   earlier paint reuses the filtered result instead of filtering again.
   The last few backdrops are kept with the pixels they were made from

@@ -71,6 +71,7 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_NODE_STYLE_USES_ATTR (1u << 21)
 #define NS_NODE_ATTR_MAYBE_ID  (1u << 22)
 #define NS_NODE_ATTR_MAYBE_SHADOW (1u << 23)
+#define NS_NODE_TEXT_HASHED    (1u << 24)
 
 struct ns_node {
     ns_node_kind kind;
@@ -122,6 +123,7 @@ ns_node *ns_node_new_comment_len(char *text, guint32 len);
 void ns_node_set_name_borrow(ns_node *n, const char *name);
 void ns_node_set_name_owned(ns_node *n, char *name);
 void ns_node_set_text_borrow(ns_node *n, const char *text);
+guint64 ns_node_text_hash(ns_node *n);
 void ns_node_replace_text_owned(ns_node *n, char *text);
 void ns_node_replace_text_len_owned(ns_node *n, char *text, guint32 len);
 char *ns_node_collect_all_text_len(const ns_node *root, size_t *out_len);
