@@ -3410,15 +3410,32 @@ static uint32_t hash_string(JSString *str, uint32_t h)
     return h;
 }
 
-static uint32_t hash_string_rope(JSValueConst val, uint32_t h)
+static uint32_t hash_string_rope_chars(JSValueConst val, uint32_t h)
 {
     if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING) {
-        return hash_string(JS_VALUE_GET_STRING(val), h);
+        JSString *p = JS_VALUE_GET_STRING(val);
+        uint32_t i;
+        if (p->is_wide_char) {
+            for(i = 0; i < p->len; i++)
+                h = h * 263 + str16(p)[i];
+        } else {
+            for(i = 0; i < p->len; i++)
+                h = h * 263 + str8(p)[i];
+        }
+        return h;
     } else {
         JSStringRope *r = JS_VALUE_GET_STRING_ROPE(val);
-        h = hash_string_rope(r->left, h);
-        return hash_string_rope(r->right, h);
+        h = hash_string_rope_chars(r->left, h);
+        return hash_string_rope_chars(r->right, h);
     }
+}
+
+static uint32_t hash_string_rope(JSValueConst val, uint32_t h)
+{
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING)
+        return hash_string(JS_VALUE_GET_STRING(val), h);
+    return hash_string_rope_chars(val, h) ^
+        hash32(JS_VALUE_GET_STRING_ROPE(val)->len);
 }
 
 static __maybe_unused void JS_DumpString(JSRuntime *rt, JSString *p)
@@ -57510,6 +57527,7 @@ static uint32_t map_hash_key(JSContext *ctx, JSValueConst key)
         break;
     case JS_TAG_STRING_ROPE:
         h = hash_string_rope(key, 0);
+        tag = JS_TAG_STRING;
         break;
     case JS_TAG_OBJECT:
     case JS_TAG_SYMBOL:
