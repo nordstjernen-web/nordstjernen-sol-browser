@@ -10,10 +10,13 @@ Changelog:
   ancestors can change their match, so just those are restyled now. On a
   YouTube watch page this removes about a hundred full restyles of ~6,000
   elements (20-75 ms each) per navigation.
-* JavaScript: the in-memory bytecode cache holds scripts whose bytecode is
-  up to 20 MB (was 4 MB) within a 64 MB budget (was 16 MB), so YouTube's
-  9.7 MB application script is compiled once per renderer instead of on
-  every load.
+* JavaScript: the in-memory bytecode cache budget is sized from physical
+  RAM (1/64, clamped to 32-512 MB; 256 MB on a 16 GB machine) instead of a
+  fixed 16 MB, and one script may use up to half of it instead of 4 MB.
+  QuickJS bytecode is about 3.3x its source, so YouTube's 2.7 MB player
+  script (9.6 MB of bytecode) and 9.7 MB application script (31.8 MB) were
+  both refused; they are now cached per renderer, cutting their evaluation
+  on a repeat load from 227 ms to 40 ms and from 949 ms to 440 ms.
 * Media: when the operating system's AAC decoder is available (Media
   Foundation on Windows, AudioToolbox, MediaCodec, GStreamer),
   `MediaSource.isTypeSupported()` no longer claims Opus or Vorbis, so
