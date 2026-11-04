@@ -18,7 +18,7 @@ LibJS is a spec-tracking engine that passes >90% of test262.
 
 | Engine  | Identity | Source |
 | ------- | -------- | ------ |
-| QuickJS | quickjs-ng **0.17.0** (`QJS_VERSION_*` in `src/quickjs/quickjs.h`) | in-tree fork at `src/quickjs/` |
+| QuickJS | quickjs-ng **0.18.0** (`QJS_VERSION_*` in `src/quickjs/quickjs.h`) | in-tree fork at `src/quickjs/` |
 | LibJS   | Ladybird `master` (June 2026) | upstream, not vendored |
 
 ## What the bundled QuickJS already covers

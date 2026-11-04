@@ -33,6 +33,31 @@ not compiled; the build is the final gate. After a QuickJS refresh, also build
 `-Dquickjs=quickjs` and fix the adapter if the binding changed (see
 [`quickjs.md`](quickjs.md)).
 
+## 2026-11-04 — QuickJS 7b5f588 → 1b519fa (0.18.0)
+
+| | value |
+|---|---|
+| Fork base | `7b5f588` |
+| Updated to | `1b519fa` (master, "Fix BJSON RegExp reference registration (#1809)"), less the commits the 2026-10-30 entry lists as not taken |
+| Reported version | `0.18.0` (was `0.17.0`) |
+
+Upstream tagged `v0.18.0` on `7b5f588` plus its version bump, so the
+reported version moves to `0.18.0`. Three later commits are taken, applied
+to `src/quickjs/quickjs.c` as upstream's patches (their tests are not
+carried), all memory safety:
+
+- `Array.prototype.find`, `findLast` and friends no longer keep a reference
+  to the found value they had already released (`e22ce4d`, #1826).
+- Deleting `lastIndex` and recompiling a RegExp no longer frees bytecode the
+  object still points at (`3d5cb14`, #1827).
+- BJSON registers a RegExp it reads as an object reference, so a later
+  back-reference to it resolves (`1b519fa`, #1809).
+
+The original engine's pin moved in the same change, from `19d6bd8` to
+`712e8c0` (2026-11-02). It now carries the sort fix our local patch used to
+add (`1cc7446`), so the patch is gone. It also exports `JS_IsArrayBuffer` and
+`JS_GetTypedArrayType`, so their adapter shims are gone.
+
 ## 2026-10-30 — QuickJS 270b8c9 → 7b5f588, Lexbor f4cbbcd → 145872a
 
 ### QuickJS

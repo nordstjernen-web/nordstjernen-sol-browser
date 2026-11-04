@@ -80,7 +80,6 @@ enum {
     JS_BOXED_BIGINT, JS_BOXED_SYMBOL,
 };
 
-bool JS_IsArrayBuffer(JSValueConst val);
 bool JS_IsDate(JSValueConst val);
 bool JS_IsRegExp(JSValueConst val);
 bool JS_IsMap(JSValueConst val);
@@ -92,7 +91,6 @@ bool JS_IsRunningScript(JSContext *ctx);
 int JS_FreezeObject(JSContext *ctx, JSValueConst obj);
 JSContext *JS_GetPendingJobRealm(JSRuntime *rt);
 bool JS_IsDataView(JSValueConst val);
-int JS_GetTypedArrayType(JSValueConst val);
 bool JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom);
 JSValue JS_EvalThis2(JSContext *ctx, JSValueConst this_obj, const char *input,
                      size_t input_len, JSEvalOptions *options);

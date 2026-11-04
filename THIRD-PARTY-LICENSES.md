@@ -386,9 +386,7 @@ These are linked only when present on the build host (meson
   and Charlie Gordon. <https://github.com/bellard/quickjs>. Linked
   statically, in place of the quickjs-ng fork, only into builds
   configured with `-Dquickjs=quickjs`; it is fetched at configure time
-  through `subprojects/quickjs.wrap` and never vendored, with one local
-  patch, `subprojects/packagefiles/quickjs-sort-calls-comparator.patch`,
-  so `Array.prototype.sort` calls its comparator for identical values. Its
+  through `subprojects/quickjs.wrap` and never vendored, unmodified. Its
   license text is the MIT text in the quickjs-ng section above.
 
 ---

@@ -15215,7 +15215,7 @@ ns_window_origin_of(JSContext *ctx, JSValueConst win)
             return g_strdup(js->document_origin);
         }
     }
-    const char *frame_url = frame && js->frame_urls
+    const char *frame_url = frame && js && js->frame_urls
         ? g_hash_table_lookup(js->frame_urls, frame) : NULL;
     if (frame_url) {
         char *origin = ns_url_origin_from(frame_url);

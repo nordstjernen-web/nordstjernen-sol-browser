@@ -348,7 +348,7 @@ plugin-loaded decoder.
 ## 8. The JavaScript engine
 
 The engine is an in-tree fork of **quickjs-ng** (`src/quickjs/`, version
-0.17.0), a compact **bytecode interpreter with no JIT**. `-Dquickjs=quickjs`
+0.18.0), a compact **bytecode interpreter with no JIT**. `-Dquickjs=quickjs`
 builds the same binding on Fabrice Bellard's original QuickJS instead,
 through the `src/ns_quickjs.h` adapter ([quickjs.md](quickjs.md)). Each browsing
 context gets one `JSRuntime` + `JSContext`, created in `ns_js_new`
