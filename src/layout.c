@@ -13840,7 +13840,10 @@ flex_column_own_height(ns_box *box, double cw, gboolean *is_content,
     *from_ratio = FALSE;
     if (box_height_flexed_in_column(box)) return box->definite_height;
     double h = box_style_definite_height(box, cw);
-    if (h < 0) h = flex_column_inset_height(box);
+    if (h < 0) {
+        double inset_h = flex_column_inset_height(box);
+        if (inset_h >= 0) return inset_h;
+    }
     if (h < 0) {
         h = box_aspect_ratio_height(box, cw);
         *from_ratio = h >= 0;

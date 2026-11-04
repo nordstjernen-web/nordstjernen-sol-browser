@@ -3,6 +3,14 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Layout: an absolutely positioned column flex container sized by its
+  `top` and `bottom` (or `inset: 0`) gives its items the whole height
+  inside its padding and border under `box-sizing: border-box`. The
+  height the insets produce already excludes them, and they were
+  subtracted a second time, so a growing item came up short by the
+  vertical padding and border and a `max-height` capped it too low.
+  x.com's sign-in dialog left an 8 px gap under its form, and its
+  scroll area reported overflow and drew a scrollbar.
 * Network: `<link rel=preconnect>` and `dns-prefetch` connect through
   the shared transfer handle instead of a handle of their own, so they
   reuse its parsed certificate store. Each hint made OpenSSL read and
