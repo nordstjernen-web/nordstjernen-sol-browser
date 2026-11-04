@@ -12,7 +12,7 @@ project(
     'b_ndebug=true',
     'b_pie=true',
   ],
-  meson_version: '>=1.0',
+  meson_version: '>=1.3',
 )
 
 cc = meson.get_compiler('c')

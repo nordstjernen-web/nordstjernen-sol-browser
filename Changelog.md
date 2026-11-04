@@ -3,6 +3,11 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Build: the options file is renamed from `meson_options.txt` to
+  `meson.options`, the name current Meson uses. The declared Meson floor
+  rises from 1.0 to 1.3, which the project already needed for its `c_std`
+  fallback list; `debian/control` and the RPM specs follow. Ubuntu 24.04,
+  the oldest supported build host, ships Meson 1.3.2.
 * Windows: the minimal LGPL FFmpeg built for the Windows packages
   (`scripts/build-ffmpeg-lgpl.sh`) moves from 8.1.3 to 9.0.2
   (libavcodec 63). VP9 video and Opus and Vorbis audio play through it
