@@ -51,6 +51,7 @@ typedef struct {
     char                *window_action;
     int                  clipboard;
     int                  popup;
+    int                  pointer_lock;
     unsigned long        session_gen;
     char                *tiles;
 } ns_rproc_http_frame;
@@ -73,6 +74,7 @@ typedef struct {
     char *url;
     int   url_pushed;
     int   popup;
+    int   pointer_lock;
     unsigned long session_gen;
 } ns_rproc_http_tick;
 
@@ -153,6 +155,8 @@ char *ns_rproc_http_key(ns_rproc_http *r, int kind, const char *key,
 char *ns_rproc_http_key_full(ns_rproc_http *r, int kind, const char *key,
                              const char *code, int keycode, int mods,
                              int *out_prevented);
+int   ns_rproc_http_hover_locked(ns_rproc_http *r, int x, int y, int mods,
+                                 int buttons, int dx, int dy);
 int   ns_rproc_http_hover_buttons(ns_rproc_http *r, int x, int y, int mods,
                                   int buttons, char **out_href,
                                   char **out_cursor);

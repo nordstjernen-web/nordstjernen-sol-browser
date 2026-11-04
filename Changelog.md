@@ -3,6 +3,18 @@ Changelog:
 
 1.0.43-dev:
 ======
+* Pointer lock: `element.requestPointerLock()` now takes over the mouse
+  pointer for real. It used to only record the element. The renderer
+  grants the lock only with a user gesture (otherwise
+  `pointerlockerror`), reports it to the window, and while it is held
+  mouse events go to the locked element with `movementX`/`movementY`
+  taken from the window's relative motion. The window hides the pointer
+  and shows "This page has taken over the mouse pointer. Press Esc to get
+  it back." for a few seconds; on Windows it also confines the pointer to
+  the page and re-centres it, so movement never runs into the edge.
+  Escape (which still reaches the page), leaving the page or the window
+  losing focus releases the lock. Right-click while locked goes to the
+  page instead of opening the context menu.
 * Keyboard: Escape reaches the page. The window registered Escape as an
   application shortcut, which GTK fires before the focused widget sees
   the key, so a page never received it (the LibreQuake menu on

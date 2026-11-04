@@ -552,6 +552,9 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
              tiles ? "X-Tiles: 1\r\n" : "");
     if (ns_browser_popup_pending() && hn > 0 && (size_t)hn < sizeof hdrs)
         hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn, "X-Popup: 1\r\n");
+    if (ns_browser_pointer_locked(s->cur) && hn > 0 && (size_t)hn < sizeof hdrs)
+        hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
+                       "X-Pointer-Lock: 1\r\n");
     if (ns_session_storage_generation() && hn > 0 && (size_t)hn < sizeof hdrs)
         hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                        "X-Session-Gen: %lu\r\n",
@@ -901,14 +904,17 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             "\"webgl\":\"%s\",\"camera\":\"%s\","
             "\"download\":\"%s\",\"config\":\"%s\",\"audio\":\"%s\","
             "\"window_action\":\"%s\",\"title\":\"%s\",\"url\":\"%s\","
-            "\"url_pushed\":%d,\"popup\":%d,\"session_gen\":%lu}",
+            "\"url_pushed\":%d,\"popup\":%d,\"pointer_lock\":%d,"
+            "\"session_gen\":%lu}",
             changed != 0, session_animating(s) ? 1 : 0, session_wake_ms(s),
             page_w, page_h, nav_e ? nav_e : "", webgl_e ? webgl_e : "",
             camera_e ? camera_e : "", download_e ? download_e : "",
             config_e ? config_e : "",
             audio_e ? audio_e : "", window_action_e ? window_action_e : "",
             title_e ? title_e : "", url_e ? url_e : "", url_pushed,
-            ns_browser_popup_pending(), ns_session_storage_generation());
+            ns_browser_popup_pending(),
+            ns_browser_pointer_locked(s->cur) ? 1 : 0,
+            ns_session_storage_generation());
         if (n >= 0)
             http_write_response(ctrl_w, 200, "application/json", NULL, json,
                                 (size_t)n);
@@ -1074,13 +1080,20 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
 
     if (strcmp(head->path, "/hover") == 0) {
         long x = 0, y = 0, mods = 0, buttons = -1;
+        long locked = 0, dx = 0, dy = 0;
         json_get_long(body, "x", &x);
         json_get_long(body, "y", &y);
         json_get_long(body, "mods", &mods);
         json_get_long(body, "buttons", &buttons);
-        int changed = s->cur ? ns_browser_hover_full(s->cur, (int)x, (int)y,
-                                                     (int)mods, (int)buttons)
-                             : 0;
+        json_get_long(body, "locked", &locked);
+        json_get_long(body, "dx", &dx);
+        json_get_long(body, "dy", &dy);
+        int changed = !s->cur ? 0
+            : locked ? ns_browser_hover_locked(s->cur, (int)x, (int)y,
+                                               (int)mods, (int)buttons,
+                                               (int)dx, (int)dy)
+                     : ns_browser_hover_full(s->cur, (int)x, (int)y,
+                                             (int)mods, (int)buttons);
         if (changed > 0)
             s->frame_valid = 0;
         char *href = s->cur ? ns_browser_link_under(s->cur, (int)x, (int)y)

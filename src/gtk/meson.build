@@ -3,6 +3,7 @@ nordstjernen_gtk_sources = files(
   'mcp.c',
   'pagelayers.c',
   'permissions.c',
+  'pointerlock.c',
   'sessionstore.c',
   'procview.c',
   'procwindow.c',
