@@ -12855,6 +12855,19 @@ bool JS_IsError(JSValueConst val)
     return JS_CLASS_ERROR == JS_GetClassID(val);
 }
 
+/* The stack frames an Error object captured when it was created, read
+   without running any getter; undefined when it has none. */
+JSValue JS_GetErrorFrames(JSContext *ctx, JSValueConst val)
+{
+    JSObject *p;
+    if (!JS_IsError(val))
+        return JS_UNDEFINED;
+    p = JS_VALUE_GET_OBJ(val);
+    if (!JS_IsString(p->u.object_data))
+        return JS_UNDEFINED;
+    return js_dup(p->u.object_data);
+}
+
 /* used to avoid catching interrupt exceptions */
 bool JS_IsUncatchableError(JSValueConst val)
 {

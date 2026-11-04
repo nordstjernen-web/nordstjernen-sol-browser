@@ -20,6 +20,7 @@ typedef struct ns_quickjs_class_ids {
     JSClassID regexp;
     JSClassID map;
     JSClassID set;
+    JSClassID proxy;
     JSClassID boxed[JS_BOXED_SYMBOL + 1];
     JSClassID bytecode_function;
     JSClassID c_function;
@@ -113,6 +114,11 @@ ns_quickjs_learn_value_class_ids(JSContext *ctx)
     JS_FreeValue(ctx, pattern);
     ids->map = ns_quickjs_class_of(ctx, ns_quickjs_construct(ctx, "Map", 0, NULL));
     ids->set = ns_quickjs_class_of(ctx, ns_quickjs_construct(ctx, "Set", 0, NULL));
+    JSValue proxy_args[2] = { JS_NewObject(ctx), JS_NewObject(ctx) };
+    ids->proxy = ns_quickjs_class_of(ctx,
+        ns_quickjs_construct(ctx, "Proxy", 2, proxy_args));
+    JS_FreeValue(ctx, proxy_args[0]);
+    JS_FreeValue(ctx, proxy_args[1]);
     ids->boxed[JS_BOXED_NUMBER] = ns_quickjs_boxed_class_of(ctx, JS_NewInt32(ctx, 0));
     ids->boxed[JS_BOXED_STRING] = ns_quickjs_boxed_class_of(ctx, JS_NewString(ctx, ""));
     ids->boxed[JS_BOXED_BOOLEAN] = ns_quickjs_boxed_class_of(ctx, JS_FALSE);
@@ -214,6 +220,36 @@ bool
 JS_IsSet(JSValueConst val)
 {
     return ns_quickjs_has_class(val, ns_quickjs_classes.set);
+}
+
+bool
+JS_IsProxy(JSValueConst val)
+{
+    return ns_quickjs_has_class(val, ns_quickjs_classes.proxy);
+}
+
+JSValue
+JS_GetErrorFrames(JSContext *ctx, JSValueConst val)
+{
+    if (!ns_quickjs_is_error(val))
+        return JS_UNDEFINED;
+    JSAtom atom = JS_NewAtom(ctx, "stack");
+    JSPropertyDescriptor desc;
+    int has = JS_GetOwnProperty(ctx, &desc, val, atom);
+    JS_FreeAtom(ctx, atom);
+    if (has < 0) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return JS_UNDEFINED;
+    }
+    if (!has)
+        return JS_UNDEFINED;
+    JS_FreeValue(ctx, desc.getter);
+    JS_FreeValue(ctx, desc.setter);
+    if ((desc.flags & JS_PROP_GETSET) || !JS_IsString(desc.value)) {
+        JS_FreeValue(ctx, desc.value);
+        return JS_UNDEFINED;
+    }
+    return desc.value;
 }
 
 int
