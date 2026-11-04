@@ -3,6 +3,12 @@ Changelog:
 
 1.0.42-dev:
 ======
+* QuickJS: the fork reports quickjs-ng 0.18.0 and takes three upstream
+  memory-safety fixes (`Array.prototype.find` value ownership, RegExp
+  bytecode lifetime on recompile, BJSON RegExp references). The original
+  engine behind `-Dquickjs=quickjs` moves to master `712e8c0`, which carries
+  the comparator fix the local sort patch added, so that patch and two
+  adapter shims are gone. CI's NetBSD VM action moves to v1.5.3.
 * JavaScript: a bytecode cache hit hands out a reference to the cached
   entry instead of duplicating it, so loading YouTube's application script
   from the cache no longer allocates and copies a transient 32 MB buffer.
