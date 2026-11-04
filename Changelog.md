@@ -3,6 +3,16 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Video: `requestVideoFrameCallback` runs once per presented video
+  frame, with that frame's own `mediaTime` and a real `presentedFrames`
+  count, rather than on every animation frame with a time that moved in
+  0.2 s steps. Players on x.com and reddit.com that draw or sync on video
+  frames now run their callbacks at the frame rate, about half as often
+  as before. `currentTime` advances on every renderer tick instead of
+  five times a second, and `getVideoPlaybackQuality()` counts the frames
+  actually presented and dropped, where it used to report
+  `currentTime × 30` and no drops. Adaptive players read the drop count
+  when they choose a quality.
 * Media Source Extensions: a video fed by a MediaSource now reports its
   real duration on reddit.com and other players that keep the `<video>`
   in a shadow root or name the object URL on a `<source>` child. The

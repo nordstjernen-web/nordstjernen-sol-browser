@@ -83,6 +83,9 @@ typedef struct ns_video {
     gint64       preroll_since_us;
     gint64       last_tick_us;
     double       stall_peak_s;
+    const void  *presented_player;
+    guint        presented_serial;
+    guint        dropped_frames;
 } ns_video;
 
 #define NS_VIDEO_LAYER_FRAMES 48
