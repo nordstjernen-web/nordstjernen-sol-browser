@@ -3,6 +3,27 @@ Changelog:
 
 1.0.42-dev:
 ======
+* CSS Grid: a line number or span written with `calc()`
+  (`grid-column: 2 / span calc(5)`) is now evaluated to its integer;
+  layout read it as `span 1`, collapsing such grids into one narrow track
+  per item. A grid item with a percentage height in an auto-sized row
+  now resolves it against the grid area once the row is sized, and
+  `align-content: normal` stretches auto rows to a definite `min-height`
+  of the grid container, as the Grid spec's "stretch auto tracks" step
+  requires.
+* CSS Shadow Parts: `::part()` is implemented. Outer-tree rules such as
+  `x-nav::part(navigation)` now style the matching `part` elements in the
+  host's shadow tree, where before they were parsed and dropped. Slotted
+  light-DOM children inherit from their assigned `<slot>` (the flat tree)
+  instead of from the shadow host, so a shadow `ul { list-style: none }`
+  reaches the `<li>` elements slotted into it.
+* Block-level images, video and SVG honour `margin-left`/`margin-right:
+  auto` in block flow, so `img { display: block; margin: 0 auto }` centres.
+* SVG: `mask-type: alpha` masks use the mask's alpha instead of its
+  luminance, and the transparent `feFlood` + normal `feBlend` prefix that
+  design tools emit before an `feGaussianBlur` no longer disables the
+  blur. These make workspace.google.com's product-logo strip render the
+  Drive and Gemini marks.
 * Cookies: a nameless cookie (`Set-Cookie: =value`) is rejected when its
   value starts with `__Secure-` or `__Host-` or contains `=`, since the
   `Cookie` header carries a nameless cookie as its bare value and script on

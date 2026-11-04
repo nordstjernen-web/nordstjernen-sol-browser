@@ -1070,6 +1070,7 @@ typedef struct ns_css_stylesheet {
     guint64    serial;
     char      *resolved_base;
     struct ns_css_rule_index *index;
+    struct ns_css_stylesheet *part_sheet;
 } ns_css_stylesheet;
 
 gboolean ns_css_stylesheet_has_container_rules(const ns_css_stylesheet *sh);
