@@ -93,20 +93,25 @@ A silent relaunch to a blank page would throw away your work, so the
 supervisor restores it — the way Chrome and Firefox reopen your tabs after
 an "Aw, Snap!" / `about:tabcrashed`.
 
-While the shell runs it records the URLs of its open `http(s)`/`ftp`/`file`
-tabs (private tabs excluded) to a small session file every four seconds
-(`write_session_cb` in `src/gtk/procwindow.c`). When a crash or hang triggers a restart, the
-supervisor sets `NS_WATCHDOG_RECOVER=1` on the respawned child; that
-child reopens the saved pages and shows a status-bar note that it
-recovered after an unexpected exit. A clean shutdown deletes the session
-file, so a normal launch never offers to recover. `about:` pages are not
-recorded, so a recovered window that had only `about:start` simply opens
-the home page.
+Tabs are not kept in a watchdog file. The shell writes every tab (its
+back/forward list with each entry's title and scroll position, and the
+tab's `sessionStorage`) to the profile's `session.db` as it changes
+(`src/gtk/sessionstore.c`, synced each second by `session_sync_cb` in
+`src/gtk/procwindow.c`), so nothing has to be saved at exit and a crash
+loses at most the last second. Each running shell owns its rows through
+an instance id and refreshes a heartbeat in the same database.
 
-The session file (`nordstjernen-watchdog-<uuid>.session`) lives in the
-per-user runtime directory (`g_get_user_runtime_dir()`: `$XDG_RUNTIME_DIR`
-on Linux, falling back to the user cache directory), not in the
-world-readable system temp directory.
+The supervisor hands the child a fresh instance id with
+`--watchdog-session=<id>` and reuses it for every restart. When a crash or
+hang triggers a restart, it also sets `NS_WATCHDOG_RECOVER=1`; the
+respawned child, carrying the same id, reopens exactly the tabs the
+crashed one owned and shows a status-bar note that it recovered after an
+unexpected exit. A normal launch without a URL reopens the tabs of every
+shell that is no longer running (no heartbeat for 15 seconds, or a clean
+exit); a launch with a URL opens just that URL and leaves the stored tabs
+for the next plain launch. Private windows never touch the database.
+`about:` pages are not stored, so a window that had only `about:start`
+simply opens the home page.
 
 ## Shutting it down
 
@@ -123,6 +128,6 @@ also asks for `SIGTERM` when the supervisor itself dies
   It does not initialise the network stack, the sandbox, the seccomp
   filter, or any UI — those belong to the child.
 - The child is launched with the internal `--watchdog-child` and
-  `--watchdog-session=<path>` flags, and recovery is signalled with the
+  `--watchdog-session=<id>` flags, and recovery is signalled with the
   `NS_WATCHDOG_RECOVER` environment variable; you never set these
   yourself.

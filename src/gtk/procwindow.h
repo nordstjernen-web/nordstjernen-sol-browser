@@ -12,8 +12,9 @@
 
 G_BEGIN_DECLS
 
-int ns_procapp_run(const char *startup_url, const char *session_path,
-                   gboolean recover, gboolean private_mode);
+int ns_procapp_run(const char *startup_url, gboolean explicit_url,
+                   const char *instance_id, gboolean recover,
+                   gboolean private_mode);
 
 void ns_procapp_set_window_size(int width, int height);
 

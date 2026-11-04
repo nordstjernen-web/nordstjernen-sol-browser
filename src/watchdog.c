@@ -11,7 +11,6 @@
 #include <string.h>
 
 #include <gio/gio.h>
-#include <glib/gstdio.h>
 
 #ifdef G_OS_WIN32
 #include <windows.h>
@@ -189,7 +188,7 @@ ns_watchdog_should_supervise(int argc, char **argv, gboolean enabled_by_default)
 
 typedef struct {
     char      **child_argv;
-    char       *session_path;
+    char       *session_id;
     GMainLoop  *loop;
     GPid        pid;
     gboolean    have_pid;
@@ -526,7 +525,7 @@ ns_watchdog_signal_cb(gpointer user_data)
 
 static char **
 ns_watchdog_build_child_argv(const char *self_exe, int argc, char **argv,
-                             const char *session_path)
+                             const char *session_id)
 {
     GPtrArray *args = g_ptr_array_new();
     g_ptr_array_add(args, g_strdup(self_exe));
@@ -539,7 +538,7 @@ ns_watchdog_build_child_argv(const char *self_exe, int argc, char **argv,
         g_ptr_array_add(args, g_strdup(argv[i]));
     }
     g_ptr_array_add(args, g_strdup(NS_WATCHDOG_CHILD_FLAG));
-    g_ptr_array_add(args, g_strconcat(NS_WATCHDOG_SESSION_PREFIX, session_path, NULL));
+    g_ptr_array_add(args, g_strconcat(NS_WATCHDOG_SESSION_PREFIX, session_id, NULL));
     g_ptr_array_add(args, NULL);
     return (char **)g_ptr_array_free(args, FALSE);
 }
@@ -549,14 +548,9 @@ ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
 {
     ns_watchdog wd = { 0 };
 
-    char *uuid = g_uuid_string_random();
-    char *name = g_strconcat("nordstjernen-watchdog-", uuid, ".session", NULL);
-    wd.session_path = g_build_filename(g_get_user_runtime_dir(), name, NULL);
-    g_free(name);
-    g_free(uuid);
-
+    wd.session_id = g_uuid_string_random();
     wd.child_argv = ns_watchdog_build_child_argv(self_exe, argc, argv,
-                                                 wd.session_path);
+                                                 wd.session_id);
     wd.loop = g_main_loop_new(NULL, FALSE);
     wd.burst_start_us = g_get_monotonic_time();
 
@@ -576,8 +570,7 @@ ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
         g_spawn_close_pid(wd.pid);
     }
     g_main_loop_unref(wd.loop);
-    g_unlink(wd.session_path);
     g_strfreev(wd.child_argv);
-    g_free(wd.session_path);
+    g_free(wd.session_id);
     return wd.exit_status;
 }

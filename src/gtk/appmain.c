@@ -543,7 +543,7 @@ ns_run_headless(ns_headless_opts *hopts)
 
 static int
 ns_run_proc_gui(int argc, char **argv, const char *url,
-                const char *gsk_renderer_override, const char *session_path,
+                const char *gsk_renderer_override, const char *instance_id,
                 gboolean recover, gboolean private_mode)
 {
     (void)argc; (void)argv;
@@ -563,7 +563,8 @@ ns_run_proc_gui(int argc, char **argv, const char *url,
         g_free(abs_path);
         if (file_url) start = file_url;
     }
-    int status = ns_procapp_run(start, session_path, recover, private_mode);
+    int status = ns_procapp_run(start, url && *url, instance_id, recover,
+                                private_mode);
     g_free(file_url);
     g_free(g_self_exe);
     g_self_exe = NULL;

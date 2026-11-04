@@ -3800,6 +3800,13 @@ ns_session_bucket_lookup(ns_js *js, const char *key)
 }
 
 static GHashTable *g_next_session_storage_area;
+static guint64 g_session_storage_generation;
+
+guint64
+ns_js_session_storage_generation(void)
+{
+    return g_session_storage_generation;
+}
 
 GHashTable *
 ns_js_session_storage_area_new(void)
@@ -3832,6 +3839,10 @@ ns_session_bucket_save(ns_js *js)
     g_hash_table_iter_init(&it, js->session_storage);
     while (g_hash_table_iter_next(&it, &k, &v))
         g_hash_table_replace(bucket, g_strdup(k), g_strdup(v));
+    if (!g_session_storage_generation)
+        g_session_storage_generation =
+            (guint64)((g_get_real_time() / 1000) & 0x3fffffff);
+    g_session_storage_generation++;
 }
 
 static void

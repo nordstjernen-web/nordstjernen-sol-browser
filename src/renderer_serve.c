@@ -551,6 +551,10 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
              tiles ? "X-Tiles: 1\r\n" : "");
     if (ns_browser_popup_pending() && hn > 0 && (size_t)hn < sizeof hdrs)
         hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn, "X-Popup: 1\r\n");
+    if (ns_session_storage_generation() && hn > 0 && (size_t)hn < sizeof hdrs)
+        hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
+                       "X-Session-Gen: %lu\r\n",
+                       ns_session_storage_generation());
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Nav", nav, 2000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-WebGL", webgl, 2000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Camera", camera, 2000);
@@ -696,6 +700,24 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         s->frame_valid = 0;
         http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
         free(entries);
+        return 0;
+    }
+
+    if (strcmp(head->path, "/session-storage") == 0) {
+        char *op = json_get_str(body, "op");
+        if (!s->session_storage) s->session_storage = ns_session_storage_new();
+        if (op && strcmp(op, "set") == 0) {
+            char *data = json_get_str(body, "data");
+            ns_session_storage_load(s->session_storage, data);
+            free(data);
+            http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
+        } else {
+            char *text = ns_session_storage_serialize(s->session_storage);
+            http_write_response(ctrl_w, 200, "text/plain", NULL, text,
+                                text ? strlen(text) : 0);
+            free(text);
+        }
+        free(op);
         return 0;
     }
 
@@ -872,14 +894,14 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             "\"webgl\":\"%s\",\"camera\":\"%s\","
             "\"download\":\"%s\",\"config\":\"%s\",\"audio\":\"%s\","
             "\"window_action\":\"%s\",\"title\":\"%s\",\"url\":\"%s\","
-            "\"url_pushed\":%d,\"popup\":%d}",
+            "\"url_pushed\":%d,\"popup\":%d,\"session_gen\":%lu}",
             changed != 0, session_animating(s) ? 1 : 0, session_wake_ms(s),
             page_w, page_h, nav_e ? nav_e : "", webgl_e ? webgl_e : "",
             camera_e ? camera_e : "", download_e ? download_e : "",
             config_e ? config_e : "",
             audio_e ? audio_e : "", window_action_e ? window_action_e : "",
             title_e ? title_e : "", url_e ? url_e : "", url_pushed,
-            ns_browser_popup_pending());
+            ns_browser_popup_pending(), ns_session_storage_generation());
         if (n >= 0)
             http_write_response(ctrl_w, 200, "application/json", NULL, json,
                                 (size_t)n);

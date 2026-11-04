@@ -65,7 +65,8 @@ typedef enum {
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
     REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLLBAR,
     REQ_PERMISSION, REQ_COLOR_SCHEME, REQ_FAVICON,
-    REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_DOWNLOAD, REQ_POPUP, REQ_QUIT
+    REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_DOWNLOAD, REQ_POPUP,
+    REQ_SESSION_PULL, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_CONTEXT } LinkAct;
 
@@ -120,13 +121,14 @@ typedef struct {
     NsProcViewTextFn remote_cb;
     gpointer remote_ud;
     long    download_id;
+    unsigned long session_gen;
 } Req;
 
 typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
     RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
     RES_CONSOLE, RES_EVAL, RES_DUMP, RES_FAVICON, RES_DROPFILES,
-    RES_SCROLLBAR, RES_TICK, RES_PRINT, RES_DOWNLOAD, RES_POPUP
+    RES_SCROLLBAR, RES_TICK, RES_PRINT, RES_DOWNLOAD, RES_POPUP, RES_SESSION
 } ResType;
 
 typedef struct {
@@ -148,6 +150,7 @@ typedef struct {
     char            *audio;
     char            *window_action;
     gboolean         popup;
+    unsigned long    session_gen;
     char            *clipboard;
     GdkTexture      *texture;
     double           texture_scale;
@@ -291,6 +294,12 @@ struct NsProcView {
 
     GPtrArray  *history;
     int         hist_index;
+    int         restore_scroll_x, restore_scroll_y;
+    char       *session_storage;
+    unsigned long session_gen_seen;
+    gboolean    session_pull_inflight;
+    guint       state_serial;
+    gint64      session_tab_id;
     gboolean    pending_record;
 
     char       *deferred_url;
@@ -601,6 +610,7 @@ pv_free(NsProcView *v)
     if (v->history)
         g_ptr_array_unref(v->history);
     g_free(v->renderer_path);
+    g_free(v->session_storage);
     g_free(v->opener_token);
     g_free(v->opener_origin);
     g_free(v->current_url);
@@ -626,6 +636,12 @@ pv_swap_proc(NsProcView *v, ns_rproc_http *newp)
         if (ledger && *ledger)
             ns_rproc_http_set_permissions(newp, ledger, 1);
         g_free(ledger);
+        g_mutex_lock(&v->proc_lock);
+        char *storage = g_strdup(v->session_storage);
+        g_mutex_unlock(&v->proc_lock);
+        if (storage && *storage)
+            ns_rproc_http_session_storage_set(newp, storage);
+        g_free(storage);
     }
     g_mutex_lock(&v->proc_lock);
     ns_rproc_http *old = v->proc;
@@ -1193,6 +1209,7 @@ worker_main(gpointer data)
                     free(fr.window_action);
                 }
                 res->popup = fr.popup ? TRUE : FALSE;
+                res->session_gen = fr.session_gen;
                 if (fr.clipboard && v->proc)
                     res->clipboard = ns_rproc_http_clipboard(v->proc);
             } else if (v->proc) {
@@ -1224,6 +1241,7 @@ worker_main(gpointer data)
                 res->url = tick.url ? g_strdup(tick.url) : NULL;
                 res->url_pushed = tick.url_pushed ? TRUE : FALSE;
                 res->popup = tick.popup ? TRUE : FALSE;
+                res->session_gen = tick.session_gen;
                 ns_rproc_http_tick_clear(&tick);
             }
             post(res);
@@ -1443,6 +1461,17 @@ worker_main(gpointer data)
             res->seq = req->seq;
             res->dump_tab = req->dump_tab;
             res->href = v->proc ? ns_rproc_http_dump(v->proc, req->query) : NULL;
+            post(res);
+        } else if (req->type == REQ_SESSION_PULL) {
+            Res *res = g_new0(Res, 1);
+            res->view = pv_ref(v);
+            res->type = RES_SESSION;
+            res->session_gen = req->session_gen;
+            char *text = v->proc ? ns_rproc_http_session_storage_get(v->proc)
+                                 : NULL;
+            res->ok = text != NULL;
+            res->href = text ? g_strdup(text) : NULL;
+            free(text);
             post(res);
         } else if (req->type == REQ_PERMISSION) {
             if (v->proc)
@@ -2531,18 +2560,102 @@ maybe_update_viewport(NsProcView *v)
     return TRUE;
 }
 
+typedef struct {
+    char *url;
+    char *title;
+    int   scroll_x, scroll_y;
+} PvEntry;
+
+static void
+pv_entry_free(gpointer data)
+{
+    PvEntry *e = data;
+    g_free(e->url);
+    g_free(e->title);
+    g_free(e);
+}
+
+static PvEntry *
+pv_entry_new(const char *url, const char *title, int scroll_x, int scroll_y)
+{
+    PvEntry *e = g_new0(PvEntry, 1);
+    e->url = g_strdup(url);
+    e->title = g_strdup(title);
+    e->scroll_x = scroll_x;
+    e->scroll_y = scroll_y;
+    return e;
+}
+
+static PvEntry *
+pv_entry_at(NsProcView *v, int i)
+{
+    if (i < 0 || i >= (int)v->history->len) return NULL;
+    return g_ptr_array_index(v->history, i);
+}
+
+static void
+pv_remember_scroll(NsProcView *v)
+{
+    PvEntry *e = pv_entry_at(v, v->hist_index);
+    if (!e || !v->opened) return;
+    if (e->scroll_x != v->scroll_x || e->scroll_y != v->scroll_y) {
+        e->scroll_x = v->scroll_x;
+        e->scroll_y = v->scroll_y;
+        v->state_serial++;
+    }
+}
+
+static void
+pv_restore_scroll_of(NsProcView *v, const PvEntry *e)
+{
+    v->restore_scroll_x = e ? e->scroll_x : 0;
+    v->restore_scroll_y = e ? e->scroll_y : 0;
+}
+
+static void
+pv_set_entry_title(NsProcView *v, const char *title)
+{
+    PvEntry *e = pv_entry_at(v, v->hist_index);
+    if (!e || g_strcmp0(e->title, title) == 0) return;
+    g_free(e->title);
+    e->title = g_strdup(title);
+    v->state_serial++;
+}
+
+static void
+pv_set_entry_url(NsProcView *v, const char *url)
+{
+    PvEntry *e = pv_entry_at(v, v->hist_index);
+    if (!e || !url || g_strcmp0(e->url, url) == 0) return;
+    g_free(e->url);
+    e->url = g_strdup(url);
+    v->state_serial++;
+}
+
+static void
+pv_apply_restore_scroll(NsProcView *v)
+{
+    int x = v->restore_scroll_x, y = v->restore_scroll_y;
+    v->restore_scroll_x = v->restore_scroll_y = 0;
+    if (x > 0)
+        gtk_adjustment_set_value(v->hadj, x);
+    if (y > 0)
+        gtk_adjustment_set_value(v->vadj, y);
+}
+
 static void
 push_history(NsProcView *v, const char *url)
 {
     if (!url || !*url)
         return;
-    if (v->hist_index >= 0 &&
-        g_strcmp0(g_ptr_array_index(v->history, v->hist_index), url) == 0)
+    PvEntry *cur = pv_entry_at(v, v->hist_index);
+    if (cur && g_strcmp0(cur->url, url) == 0)
         return;
     while ((int)v->history->len > v->hist_index + 1)
         g_ptr_array_remove_index(v->history, v->history->len - 1);
-    g_ptr_array_add(v->history, g_strdup(url));
+    g_ptr_array_add(v->history, pv_entry_new(url, NULL, 0, 0));
     v->hist_index = (int)v->history->len - 1;
+    v->state_serial++;
     post_emit(v, NS_PROC_EVT_HISTORY, NULL);
 }
 
@@ -2562,10 +2675,10 @@ pv_follow_same_document_state(NsProcView *v, const char *url, gboolean pushed,
     if (url && *url && g_strcmp0(url, v->current_url) != 0 &&
         pv_same_document_url(v->current_url, url)) {
         if (pushed || v->hist_index < 0) {
+            pv_remember_scroll(v);
             push_history(v, url);
         } else {
-            g_free(g_ptr_array_index(v->history, v->hist_index));
-            g_ptr_array_index(v->history, v->hist_index) = g_strdup(url);
+            pv_set_entry_url(v, url);
         }
         g_free(v->current_url);
         v->current_url = g_strdup(url);
@@ -2574,6 +2687,7 @@ pv_follow_same_document_state(NsProcView *v, const char *url, gboolean pushed,
     if (title && g_strcmp0(title, v->current_title) != 0) {
         g_free(v->current_title);
         v->current_title = g_strdup(title);
+        pv_set_entry_title(v, title);
         post_emit(v, NS_PROC_EVT_TITLE, v->current_title);
     }
 }
@@ -2616,6 +2730,10 @@ do_load_full(NsProcView *v, const char *url, gboolean record,
 {
     if (!url || !*url)
         return;
+    if (!history && !reload) {
+        pv_remember_scroll(v);
+        v->restore_scroll_x = v->restore_scroll_y = 0;
+    }
     pv_perm_resolve(v, FALSE);
     pv_audio_shutdown(v);
     drop_stale_requests(v);
@@ -2697,6 +2815,83 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
     do_load_full(v, url, record, history, user_activated, FALSE);
 }
 
+int
+ns_proc_view_history_length(NsProcView *v)
+{
+    return v ? (int)v->history->len : 0;
+}
+
+int
+ns_proc_view_history_index(NsProcView *v)
+{
+    return v ? v->hist_index : -1;
+}
+
+gboolean
+ns_proc_view_history_entry(NsProcView *v, int index, NsProcHistoryEntry *out)
+{
+    PvEntry *e = v ? pv_entry_at(v, index) : NULL;
+    if (!e || !out) return FALSE;
+    out->url = e->url;
+    out->title = e->title;
+    out->scroll_x = e->scroll_x;
+    out->scroll_y = e->scroll_y;
+    if (index == v->hist_index && v->opened) {
+        out->scroll_x = v->scroll_x;
+        out->scroll_y = v->scroll_y;
+    }
+    return TRUE;
+}
+
+const char *
+ns_proc_view_session_storage(NsProcView *v)
+{
+    return v ? v->session_storage : NULL;
+}
+
+guint
+ns_proc_view_state_serial(NsProcView *v)
+{
+    return v ? v->state_serial : 0;
+}
+
+void
+ns_proc_view_set_session_tab(NsProcView *v, gint64 id)
+{
+    if (v) v->session_tab_id = id;
+}
+
+gint64
+ns_proc_view_session_tab(NsProcView *v)
+{
+    return v ? v->session_tab_id : 0;
+}
+
+void
+ns_proc_view_restore(NsProcView *v, const NsProcHistoryEntry *entries,
+                     int n_entries, int index, const char *session_storage)
+{
+    if (!v || !entries || n_entries <= 0) return;
+    g_ptr_array_set_size(v->history, 0);
+    for (int i = 0; i < n_entries; i++)
+        g_ptr_array_add(v->history,
+                        pv_entry_new(entries[i].url, entries[i].title,
+                                     entries[i].scroll_x,
+                                     entries[i].scroll_y));
+    v->hist_index = CLAMP(index, 0, n_entries - 1);
+    g_mutex_lock(&v->proc_lock);
+    g_free(v->session_storage);
+    v->session_storage = g_strdup(session_storage);
+    g_mutex_unlock(&v->proc_lock);
+    PvEntry *e = pv_entry_at(v, v->hist_index);
+    if (!e)
+        return;
+    pv_restore_scroll_of(v, e);
+    v->render_restarts = 0;
+    post_emit(v, NS_PROC_EVT_HISTORY, NULL);
+    do_load(v, e->url, FALSE, TRUE, FALSE);
+}
+
 void
 ns_proc_view_load(NsProcView *v, const char *url)
 {
@@ -2717,10 +2912,16 @@ ns_proc_view_back(NsProcView *v)
 {
     if (!ns_proc_view_can_back(v))
         return;
+    pv_remember_scroll(v);
     v->hist_index--;
     v->render_restarts = 0;
+    v->state_serial++;
     post_emit(v, NS_PROC_EVT_HISTORY, NULL);
-    do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, TRUE, TRUE);
+    PvEntry *e = pv_entry_at(v, v->hist_index);
+    if (!e)
+        return;
+    pv_restore_scroll_of(v, e);
+    do_load(v, e->url, FALSE, TRUE, TRUE);
 }
 
 void
@@ -2728,10 +2929,16 @@ ns_proc_view_forward(NsProcView *v)
 {
     if (!ns_proc_view_can_forward(v))
         return;
+    pv_remember_scroll(v);
     v->hist_index++;
     v->render_restarts = 0;
+    v->state_serial++;
     post_emit(v, NS_PROC_EVT_HISTORY, NULL);
-    do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, TRUE, TRUE);
+    PvEntry *e = pv_entry_at(v, v->hist_index);
+    if (!e)
+        return;
+    pv_restore_scroll_of(v, e);
+    do_load(v, e->url, FALSE, TRUE, TRUE);
 }
 
 static void
@@ -2755,12 +2962,16 @@ ns_proc_view_reload(NsProcView *v)
     char *url = NULL;
     if (v->pending_url)
         url = g_strdup(v->pending_url);
-    else if (v->hist_index >= 0 && v->hist_index < (int)v->history->len)
-        url = g_strdup(g_ptr_array_index(v->history, v->hist_index));
+    else if (pv_entry_at(v, v->hist_index))
+        url = g_strdup(pv_entry_at(v, v->hist_index)->url);
     else if (v->current_url)
         url = g_strdup(v->current_url);
     if (!url)
         return;
+    if (!v->pending_url && v->opened) {
+        v->restore_scroll_x = v->scroll_x;
+        v->restore_scroll_y = v->scroll_y;
+    }
     gboolean record = v->pending_url != NULL && v->pending_record;
     do_load_full(v, url, record, FALSE, TRUE, TRUE);
     g_free(url);
@@ -3021,6 +3232,19 @@ pv_apply_window_action(NsProcView *v, const char *action)
 }
 
 static void
+pv_note_session_gen(NsProcView *v, unsigned long gen)
+{
+    if (!gen || gen == v->session_gen_seen || v->session_pull_inflight ||
+        v->closed || v->private_mode)
+        return;
+    v->session_pull_inflight = TRUE;
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_SESSION_PULL;
+    req->session_gen = gen;
+    push_req(v, req);
+}
+
+static void
 pv_popup_poll(NsProcView *v)
 {
     if (!v || v->closed || v->popup_poll_pending) return;
@@ -3067,6 +3291,18 @@ on_result(gpointer data)
         res->remote_cb(v->closed ? NULL : res->href, res->remote_ud);
         if (!v->closed)
             request_render(v);
+        goto done;
+    }
+    if (res->type == RES_SESSION) {
+        v->session_pull_inflight = FALSE;
+        if (res->ok && !v->closed) {
+            g_mutex_lock(&v->proc_lock);
+            g_free(v->session_storage);
+            v->session_storage = g_strdup(res->href ? res->href : "");
+            g_mutex_unlock(&v->proc_lock);
+            v->session_gen_seen = res->session_gen;
+            v->state_serial++;
+        }
         goto done;
     }
     if (res->type == RES_POPUP) {
@@ -3126,6 +3362,10 @@ on_result(gpointer data)
         configure_adjustments(v);
         if (v->pending_record)
             push_history(v, v->current_url);
+        else
+            pv_set_entry_url(v, v->current_url);
+        pv_set_entry_title(v, v->current_title);
+        pv_apply_restore_scroll(v);
         post_emit(v, NS_PROC_EVT_URL, v->current_url);
         post_emit(v, NS_PROC_EVT_TITLE, v->current_title);
         post_emit(v, NS_PROC_EVT_STATUS, "");
@@ -3133,6 +3373,8 @@ on_result(gpointer data)
         request_render(v);
         request_favicon(v);
     } else if (res->type == RES_TICK) {
+        if (res->ok)
+            pv_note_session_gen(v, res->session_gen);
         gboolean current = res->seq == v->load_seq;
         gboolean navigated = FALSE;
         if (current && res->ok && res->nav && *res->nav &&
@@ -3174,6 +3416,8 @@ on_result(gpointer data)
             request_tick(v);
         }
     } else if (res->type == RES_FRAME) {
+        if (res->ok)
+            pv_note_session_gen(v, res->session_gen);
         gboolean current = res->seq == v->render_seq;
         if (res->ok && res->wheel_snapped)
             stop_wheel_animation(v);
@@ -3247,7 +3491,10 @@ on_result(gpointer data)
             if (v->render_restarts < NS_PROC_MAX_RESTARTS) {
                 v->render_restarts++;
                 post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Renderer restarted"));
+                int keep_x = v->scroll_x, keep_y = v->scroll_y;
                 do_load(v, v->current_url, FALSE, FALSE, FALSE);
+                v->restore_scroll_x = keep_x;
+                v->restore_scroll_y = keep_y;
             } else {
                 post_emit(v, NS_PROC_EVT_STATUS,
                           ns_i18n("This tab's renderer keeps failing — "
@@ -4993,7 +5240,7 @@ ns_proc_view_new(void)
     g_mutex_init(&v->proc_lock);
     v->renderer_path = ns_proc_renderer_path();
     v->queue = g_async_queue_new();
-    v->history = g_ptr_array_new_with_free_func(g_free);
+    v->history = g_ptr_array_new_with_free_func(pv_entry_free);
     v->hist_index = -1;
     v->perm_listener = ns_perm_add_listener(pv_on_permission_changed, v);
     v->link_pending_action = ACT_HOVER;

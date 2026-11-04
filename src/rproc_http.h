@@ -49,6 +49,7 @@ typedef struct {
     char                *window_action;
     int                  clipboard;
     int                  popup;
+    unsigned long        session_gen;
     char                *tiles;
 } ns_rproc_http_frame;
 
@@ -70,6 +71,7 @@ typedef struct {
     char *url;
     int   url_pushed;
     int   popup;
+    unsigned long session_gen;
 } ns_rproc_http_tick;
 
 ns_rproc_http *ns_rproc_http_spawn(const char *renderer_path, int max_width,
@@ -184,6 +186,8 @@ int   ns_rproc_http_resolve_webgl(ns_rproc_http *r, const char *origin,
                                   int allow);
 int   ns_rproc_http_set_permissions(ns_rproc_http *r, const char *entries,
                                     int replace);
+char *ns_rproc_http_session_storage_get(ns_rproc_http *r);
+int   ns_rproc_http_session_storage_set(ns_rproc_http *r, const char *data);
 int   ns_rproc_http_set_color_scheme(ns_rproc_http *r, int dark);
 int   ns_rproc_http_audio_event(ns_rproc_http *r, const char *line);
 char *ns_rproc_http_eval(ns_rproc_http *r, const char *src);

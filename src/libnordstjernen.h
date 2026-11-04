@@ -157,6 +157,9 @@ typedef struct ns_session_storage ns_session_storage;
 ns_session_storage *ns_session_storage_new(void);
 void ns_session_storage_free(ns_session_storage *storage);
 void ns_browser_set_next_session_storage(ns_session_storage *storage);
+unsigned long ns_session_storage_generation(void);
+char *ns_session_storage_serialize(ns_session_storage *storage);
+int   ns_session_storage_load(ns_session_storage *storage, const char *text);
 
 void ns_browser_set_color_scheme(int dark);
 void ns_browser_set_reduced_motion(int reduce);
