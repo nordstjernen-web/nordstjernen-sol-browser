@@ -393,6 +393,8 @@ static JSValue ns_window_mse_append(JSContext *ctx, JSValueConst this_val,
                                     int argc, JSValueConst *argv);
 static JSValue ns_window_mse_eos(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv);
+static JSValue ns_window_media_by_src(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv);
 static JSValue ns_window_mse_buffered(JSContext *ctx, JSValueConst this_val,
                                       int argc, JSValueConst *argv);
 static JSValue ns_window_mse_buffered_start(JSContext *ctx,
@@ -29475,7 +29477,8 @@ ns_net_add_private_names(JSContext *ctx)
         "__ndBlobBytes", "__ndBlobType", "__ndFileName", "__ndFileMtime",
         "__ndHeaderMap", "__ndSetCookies", "__ndPairs", "__ndOwner",
         "__ndNotify", "__ndReady", "__ndSync", "__ndSetSearchRaw", "__nd",
-        "__ndSP", "__ndMediaSourceObjectURL", "__ns_port_bridge",
+        "__ndSP", "__ndMediaSourceObjectURL", "__ndMediaBySrc",
+        "__ns_port_bridge",
         "__ns_broadcast_channels",
     };
     for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
@@ -61410,6 +61413,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
     ns_bind_fn(ctx, global, "__ndMseAppend",         ns_window_mse_append,             3);
     ns_bind_fn(ctx, global, "__ndMseEos",            ns_window_mse_eos,                1);
+    ns_bind_fn(ctx, global, "__ndMediaBySrc",        ns_window_media_by_src,           1);
     ns_bind_fn(ctx, global, "__ndMseBuffered",       ns_window_mse_buffered,           2);
     ns_bind_fn(ctx, global, "__ndMseBufferedStart",  ns_window_mse_buffered_start,     2);
     ns_bind_fn(ctx, global, "__ndMseRemove",         ns_window_mse_remove,             4);
@@ -71807,6 +71811,49 @@ ns_window_mse_eos(JSContext *ctx, JSValueConst this_val,
     return JS_TRUE;
 }
 
+static void
+ns_media_by_src_collect(JSContext *ctx, const ns_node *n, const char *url,
+                        JSValue out, uint32_t *count, int depth)
+{
+    if (depth > 1024) return;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            (strcmp(c->name, "video") == 0 || strcmp(c->name, "audio") == 0)) {
+            const char *src = ns_element_get_attr(c, "src");
+            gboolean match = src && strcmp(src, url) == 0;
+            for (const ns_node *s = c->first_child; !match && s;
+                 s = s->next_sibling) {
+                if (!ns_node_is_element_named(s, "source")) continue;
+                const char *source_src = ns_element_get_attr(s, "src");
+                match = source_src && strcmp(source_src, url) == 0;
+            }
+            if (match)
+                JS_SetPropertyUint32(ctx, out, (*count)++,
+                                     ns_make_element(ctx, c));
+        }
+        if (c->first_child)
+            ns_media_by_src_collect(ctx, c, url, out, count, depth + 1);
+    }
+}
+
+static JSValue
+ns_window_media_by_src(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    JSValue out = JS_NewArray(ctx);
+    if (!js || !js->current_doc || argc < 1 || !JS_IsString(argv[0]))
+        return out;
+    const char *url = JS_ToCString(ctx, argv[0]);
+    if (!url) return out;
+    uint32_t count = 0;
+    if (*url)
+        ns_media_by_src_collect(ctx, js->current_doc, url, out, &count, 0);
+    JS_FreeCString(ctx, url);
+    return out;
+}
+
 static double
 ns_mse_buffered_query(JSContext *ctx, int argc, JSValueConst *argv,
                       gboolean want_start)
@@ -71955,19 +72002,30 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
         if (JS_IsNumber(previous))
             JS_ToFloat64(ctx, &previous_duration, previous);
         JS_FreeValue(ctx, previous);
+        JSValue ready = JS_GetPropertyStr(ctx, el, "_nd_readyState");
+        int32_t previous_ready = 0;
+        if (JS_IsNumber(ready)) JS_ToInt32(ctx, &previous_ready, ready);
+        JS_FreeValue(ctx, ready);
         if (!isnan(previous_duration) && previous_duration > value)
             value = previous_duration;
+        gboolean duration_changed = isnan(previous_duration) ||
+                                    previous_duration != value;
         JS_SetPropertyStr(ctx, el, "_nd_duration", JS_NewFloat64(ctx, value));
         JS_SetPropertyStr(ctx, el, "_nd_readyState", JS_NewInt32(ctx, 4));
         JS_SetPropertyStr(ctx, el, "_nd_networkState", JS_NewInt32(ctx, 1));
         JS_DefinePropertyValueStr(ctx, el, "readyState", JS_NewInt32(ctx, 4),
                                   JS_PROP_C_W_E);
         ns_rvfc_wake(js, n);
-        ns_js_dispatch_event(js, n, "durationchange", NULL);
-        ns_js_dispatch_event(js, n, "loadedmetadata", NULL);
-        ns_js_dispatch_event(js, n, "loadeddata", NULL);
-        ns_js_dispatch_event(js, n, "canplay", NULL);
-        ns_js_dispatch_event(js, n, "canplaythrough", NULL);
+        if (duration_changed)
+            ns_js_dispatch_event(js, n, "durationchange", NULL);
+        if (previous_ready < 1)
+            ns_js_dispatch_event(js, n, "loadedmetadata", NULL);
+        if (previous_ready < 2)
+            ns_js_dispatch_event(js, n, "loadeddata", NULL);
+        if (previous_ready < 3)
+            ns_js_dispatch_event(js, n, "canplay", NULL);
+        if (previous_ready < 4)
+            ns_js_dispatch_event(js, n, "canplaythrough", NULL);
     } else if (strcmp(kind, "vwidth") == 0) {
         JS_DefinePropertyValueStr(ctx, el, "videoWidth",
                                   JS_NewInt32(ctx, (int)value), JS_PROP_C_W_E);

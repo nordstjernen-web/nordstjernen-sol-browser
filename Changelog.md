@@ -3,6 +3,19 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Media Source Extensions: a video fed by a MediaSource now reports its
+  real duration on reddit.com and other players that keep the `<video>`
+  in a shadow root or name the object URL on a `<source>` child. The
+  polyfill looked media elements up with `document.querySelectorAll`,
+  which does not reach into shadow roots and only matched `src`
+  attributes, so the duration from the appended segments never reached
+  the element and the player showed 0:00 or a duration far too short.
+  A native lookup now walks the whole tree, including `<source>`
+  children, and the duration is pushed to the element after every
+  append. The metadata events (`durationchange`, `loadedmetadata`,
+  `loadeddata`, `canplay`, `canplaythrough`) fire once each instead of
+  again for every decoder restart, so players no longer reset their UI
+  when a segment boundary or seek re-opened the decoder.
 * Remote control: the MCP `javascript` tool works on pages whose
   Content-Security-Policy forbids `eval`, such as x.com and reddit.com.
   The page helper compiles the agent's code with an indirect `eval`, and

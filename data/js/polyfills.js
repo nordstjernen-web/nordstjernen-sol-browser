@@ -1049,7 +1049,12 @@
     }
 
     function mediaSourceMedia(url) {
-        if (!url || !global.document || !global.document.querySelectorAll) return [];
+        if (!url) return [];
+        if (typeof global.__ndMediaBySrc === 'function') {
+            try { return Array.prototype.slice.call(global.__ndMediaBySrc(url)); }
+            catch (e) { return []; }
+        }
+        if (!global.document || !global.document.querySelectorAll) return [];
         var nodes;
         try { nodes = global.document.querySelectorAll('video,audio'); }
         catch (e) { nodes = []; }
@@ -1064,22 +1069,26 @@
         return out;
     }
 
-    function mediaSourceSetDuration(ms, value) {
+    function mediaSourceSyncMedia(ms) {
         var s = mediaSources.get(ms);
-        s.duration = value;
+        var value = s.duration;
+        if (!(value >= 0)) return;
         var media = mediaSourceMedia(s.url);
         for (var i = 0; i < media.length; i++) {
             var el = media[i];
             try {
-                var prev = el._nd_duration;
-                if (!(prev > value)) {
-                    el._nd_duration = value;
-                    if (typeof el.dispatchEvent === 'function' &&
-                        typeof Event === 'function')
-                        el.dispatchEvent(new Event('durationchange'));
-                }
+                if (el._nd_duration === value) continue;
+                el._nd_duration = value;
+                if (typeof el.dispatchEvent === 'function' &&
+                    typeof Event === 'function')
+                    el.dispatchEvent(new Event('durationchange'));
             } catch (e) {}
         }
+    }
+
+    function mediaSourceSetDuration(ms, value) {
+        mediaSources.get(ms).duration = value;
+        mediaSourceSyncMedia(ms);
     }
 
     function mediaSourceDecodeError(ms) {
@@ -1478,6 +1487,7 @@
                     var nativeEnd = Number(global.__ndMseBuffered(ms.mseId, sourceBufferKind(s)));
                     if (nativeEnd > 0 && (isNaN(ms.duration) || nativeEnd > ms.duration))
                         ms.duration = nativeEnd;
+                    mediaSourceSyncMedia(s.mediaSource);
                 } else {
                     var seconds = s.bytes > 0 ? Math.max(0.001, s.bytes / 262144) : 0;
                     s.buffered = new ndTimeRanges(0, seconds);
