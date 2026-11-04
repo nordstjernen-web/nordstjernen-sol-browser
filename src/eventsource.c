@@ -17,6 +17,7 @@
 struct ns_es {
     char     *url;
     char     *origin;
+    char     *top_url;
     ns_csp   *csp;
     char     *last_event_id;
     gint64    reconnect_ms;
@@ -42,6 +43,7 @@ ns_es_destroy(ns_es *es)
 {
     g_free(es->url);
     g_free(es->origin);
+    g_free(es->top_url);
     if (es->csp) ns_csp_free(es->csp);
     g_free(es->last_event_id);
     g_mutex_clear(&es->lock);
@@ -369,7 +371,7 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
 
     curl_easy_setopt(curl, CURLOPT_URL, es->url);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, NS_USER_AGENT);
-    ns_net_curl_apply_cookies(curl, es->url, es->origin);
+    ns_net_curl_apply_cookies(curl, es->url, es->origin, es->top_url);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     ns_net_apply_curl_tls(curl);
     ns_net_apply_curl_proxy(curl, es->url);
@@ -448,13 +450,14 @@ ns_es_worker(gpointer data)
 }
 
 ns_es *
-ns_es_new(const char *url, const char *origin, const char *last_event_id,
-          const char *const *csp_headers,
+ns_es_new(const char *url, const char *origin, const char *top_url,
+          const char *last_event_id, const char *const *csp_headers,
           const ns_es_callbacks *cbs, gpointer user_data)
 {
     ns_es *es = g_new0(ns_es, 1);
     es->url = g_strdup(url);
     es->origin = g_strdup(origin);
+    es->top_url = top_url ? g_strdup(top_url) : NULL;
     for (const char *const *h = csp_headers; h && *h; h++) {
         ns_csp *parsed = ns_csp_parse(*h);
         if (!parsed) continue;

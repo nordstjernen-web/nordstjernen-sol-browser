@@ -3,6 +3,14 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Security: WebSocket and EventSource connections now take their cookie
+  partition, the first-party policy decision and the SameSite context
+  from the top-level page, as fetches do. They used the opening
+  document's own origin, so a cross-site iframe that the first-party
+  policy kept cookieless over HTTP could open a socket to its own site
+  and send its first-party cookies, `SameSite=Strict` ones included,
+  and under the `always` policy could link the partitioned and the
+  unpartitioned jars.
 * Security: the cookie store's secure-context test matched any hostname
   beginning with `127.`, so `http://127.bank.example/` received the
   `Secure` cookies of `bank.example` in cleartext and could set

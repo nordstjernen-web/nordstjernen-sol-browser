@@ -35,6 +35,7 @@ struct ns_ws {
 
     char             *url;
     char             *origin;
+    char             *top_url;
     GPtrArray        *protocols;
 
     ns_ws_callbacks   cbs;
@@ -68,6 +69,7 @@ ns_ws_destroy(ns_ws *ws)
     if (!ws) return;
     g_free(ws->url);
     g_free(ws->origin);
+    g_free(ws->top_url);
     if (ws->protocols) g_ptr_array_free(ws->protocols, TRUE);
     while (!g_queue_is_empty(&ws->out_queue)) {
         ns_ws_out_msg *m = g_queue_pop_head(&ws->out_queue);
@@ -444,7 +446,7 @@ ns_ws_worker_curl(gpointer data)
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     ns_net_apply_curl_tls(curl);
     ns_net_apply_curl_proxy(curl, ws->url);
-    ns_net_curl_apply_cookies(curl, ws->url, ws->origin);
+    ns_net_curl_apply_cookies(curl, ws->url, ws->origin, ws->top_url);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
@@ -608,6 +610,7 @@ ns_ws_available(void)
 ns_ws *
 ns_ws_new(const char        *url,
           const char        *origin,
+          const char        *top_url,
           const char *const *protocols,
           const ns_ws_callbacks *cbs,
           gpointer           user_data)
@@ -619,6 +622,7 @@ ns_ws_new(const char        *url,
     ws->refcount = 1;
     ws->url    = g_strdup(url);
     ws->origin = origin ? g_strdup(origin) : NULL;
+    ws->top_url = top_url ? g_strdup(top_url) : NULL;
     if (protocols && protocols[0]) {
         ws->protocols = g_ptr_array_new_with_free_func(g_free);
         for (int i = 0; protocols[i]; i++)
