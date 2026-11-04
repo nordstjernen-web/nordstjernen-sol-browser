@@ -207,24 +207,17 @@ ns_perm_entry_line(const char *origin, ns_perm_kind kind, ns_perm_state state)
 }
 
 char *
-ns_perm_serialize(void)
+ns_perm_serialize_origin(const char *origin)
 {
     GString *out = g_string_new(NULL);
-    g_mutex_lock(&g_perm_lock);
-    if (g_perm_entries) {
-        GHashTableIter it;
-        gpointer key, value;
-        g_hash_table_iter_init(&it, g_perm_entries);
-        while (g_hash_table_iter_next(&it, &key, &value)) {
-            const char *sp = strchr(key, ' ');
-            if (!sp) continue;
-            g_string_append_len(out, key, sp - (const char *)key);
-            g_string_append_printf(out, " %s %s\n",
-                                   perm_state_name(GPOINTER_TO_INT(value)),
-                                   sp + 1);
+    for (int k = 0; origin && *origin && k < NS_PERM_N_KINDS; k++) {
+        ns_perm_state st = ns_perm_get(origin, (ns_perm_kind)k);
+        if (st != NS_PERM_ASK) {
+            char *line = ns_perm_entry_line(origin, (ns_perm_kind)k, st);
+            g_string_append(out, line);
+            g_free(line);
         }
     }
-    g_mutex_unlock(&g_perm_lock);
     return g_string_free(out, FALSE);
 }
 

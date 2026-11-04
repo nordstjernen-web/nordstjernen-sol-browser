@@ -274,6 +274,7 @@ struct NsProcView {
     gboolean    perm_pending;
     char       *perm_origin;
     guint       perm_listener;
+    char       *camera_deferred_origin;
 
     GtkWidget    *console_window;
     GtkWidget    *console_notebook;
@@ -619,6 +620,7 @@ pv_free(NsProcView *v)
     g_free(v->remote_ip);
     g_free(v->deferred_url);
     g_free(v->perm_origin);
+    g_free(v->camera_deferred_origin);
     if (v->hourglass_cursor)
         g_object_unref(v->hourglass_cursor);
     g_mutex_clear(&v->proc_lock);
@@ -632,10 +634,6 @@ pv_swap_proc(NsProcView *v, ns_rproc_http *newp)
 {
     if (newp) {
         ns_rproc_http_set_opener(newp, v->opener_token, v->opener_origin);
-        char *ledger = ns_perm_serialize();
-        if (ledger && *ledger)
-            ns_rproc_http_set_permissions(newp, ledger, 1);
-        g_free(ledger);
         g_mutex_lock(&v->proc_lock);
         char *storage = g_strdup(v->session_storage);
         g_mutex_unlock(&v->proc_lock);
@@ -1155,6 +1153,11 @@ pv_open(NsProcView *v, const Req *req, int settle, ns_rproc_http_page *pg)
 {
     if (!v->proc)
         return -1;
+    char *origin = ns_proc_url_origin(req->url);
+    char *entries = ns_perm_serialize_origin(origin);
+    ns_rproc_http_set_permissions(v->proc, entries, 1);
+    g_free(entries);
+    g_free(origin);
     if (req->reload)
         return ns_rproc_http_reload(v->proc, req->url, req->vw, req->vh,
                                     settle, pg);
@@ -1564,7 +1567,7 @@ worker_main(gpointer data)
             post(res);
         } else if (req->type == REQ_PERMISSION) {
             if (v->proc)
-                ns_rproc_http_set_permissions(v->proc, req->query, 0);
+                ns_rproc_http_set_permissions(v->proc, req->query, req->mods);
         } else if (req->type == REQ_PRINT) {
             Res *res = g_new0(Res, 1);
             res->view = pv_ref(v);
@@ -3235,12 +3238,25 @@ pv_current_origin_is(NsProcView *v, const char *origin)
 }
 
 static void
+pv_push_page_permissions(NsProcView *v)
+{
+    if (!v || v->closed) return;
+    char *origin = ns_proc_url_origin(v->current_url);
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_PERMISSION;
+    req->query = ns_perm_serialize_origin(origin);
+    req->mods = 1;
+    push_req(v, req);
+    g_free(origin);
+}
+
+static void
 pv_on_permission_changed(const char *origin, ns_perm_kind kind,
                          ns_perm_state state, ns_perm_state previous,
                          gpointer user_data)
 {
     NsProcView *v = user_data;
-    if (v->closed) return;
+    if (v->closed || !pv_current_origin_is(v, origin)) return;
     pv_send_permission(v, origin, kind, state);
     if (v->perm_pending && v->perm_kind == kind &&
         g_strcmp0(v->perm_origin, origin) == 0 && state != NS_PERM_ASK) {
@@ -3252,8 +3268,7 @@ pv_on_permission_changed(const char *origin, ns_perm_kind kind,
     }
     gboolean blocked_changed =
         (state == NS_PERM_DENY) != (previous == NS_PERM_DENY);
-    if (kind == NS_PERM_WEBGL && blocked_changed &&
-        pv_current_origin_is(v, origin))
+    if (kind == NS_PERM_WEBGL && blocked_changed)
         ns_proc_view_reload(v);
 }
 
@@ -3313,6 +3328,15 @@ pv_perm_bar_show(NsProcView *v, ns_perm_kind kind, const char *origin)
 static void
 pv_camera_requested(NsProcView *v, const char *origin)
 {
+    if (!pv_current_origin_is(v, origin)) {
+        if (v->pending_url) {
+            g_free(v->camera_deferred_origin);
+            v->camera_deferred_origin = g_strdup(origin);
+        } else {
+            pv_send_permission(v, origin, NS_PERM_CAMERA, NS_PERM_DENY);
+        }
+        return;
+    }
     ns_perm_state st = ns_perm_get(origin, NS_PERM_CAMERA);
     if (st == NS_PERM_ASK)
         pv_perm_bar_show(v, NS_PERM_CAMERA, origin);
@@ -3464,6 +3488,13 @@ on_result(gpointer data)
             pv_set_entry_url(v, v->current_url);
         pv_set_entry_title(v, v->current_title);
         pv_apply_restore_scroll(v);
+        pv_push_page_permissions(v);
+        if (v->camera_deferred_origin) {
+            char *origin = v->camera_deferred_origin;
+            v->camera_deferred_origin = NULL;
+            pv_camera_requested(v, origin);
+            g_free(origin);
+        }
         post_emit(v, NS_PROC_EVT_URL, v->current_url);
         post_emit(v, NS_PROC_EVT_TITLE, v->current_title);
         post_emit(v, NS_PROC_EVT_STATUS, "");

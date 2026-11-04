@@ -20,7 +20,6 @@ Source0:        https://github.com/nordstjernen-web/nordstjernen-sol-browser/arc
 ExcludeArch:    %ix86 %arm
 
 BuildRequires:  gcc
-BuildRequires:  gcc-c++
 BuildRequires:  meson >= 1.3
 BuildRequires:  ninja
 BuildRequires:  pkgconfig

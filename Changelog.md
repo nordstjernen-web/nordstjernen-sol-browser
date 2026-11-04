@@ -3,6 +3,13 @@ Changelog:
 
 1.0.42:
 ======
+* Permissions: the shell now honours a camera request only when the
+  origin the renderer reports is the tab's own origin, and refuses others
+  for that tab without prompting or storing anything, so a misbehaving
+  renderer cannot get a lasting grant recorded for another site. A
+  renderer also receives only the decisions for the site it is loading,
+  instead of the whole permission list, so a cross-origin iframe no
+  longer inherits a site's camera grant.
 * Architecture: the GTK shell no longer links the browser engine. It links
   a small `libns-platform` library (settings, i18n, debug log, sandbox,
   history, bookmarks, the profile databases, address-bar helpers), and the

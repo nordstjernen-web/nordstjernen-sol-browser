@@ -50,7 +50,7 @@ jobs:
             'Acquire::https::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/80-ci-retries
           sudo apt-get update
           sudo apt-get install -y \
-            ccache clang gcc g++ make pkg-config meson ninja-build \
+            ccache clang gcc make pkg-config meson ninja-build \
             libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev \
             libuchardet-dev libpsl-dev libsqlite3-dev \
             libwebp-dev libavif-dev libjxl-dev libsdl2-dev libseccomp-dev ca-certificates \
@@ -73,11 +73,9 @@ jobs:
       - name: Select compiler
         run: |
           if [ "${{ matrix.compiler }}" = "gcc" ]; then
-            echo "CC=ccache gcc"  >> $GITHUB_ENV
-            echo "CXX=ccache g++" >> $GITHUB_ENV
+            echo "CC=ccache gcc" >> $GITHUB_ENV
           else
-            echo "CC=ccache clang"    >> $GITHUB_ENV
-            echo "CXX=ccache clang++" >> $GITHUB_ENV
+            echo "CC=ccache clang" >> $GITHUB_ENV
           fi
 
       - name: Show toolchain versions
