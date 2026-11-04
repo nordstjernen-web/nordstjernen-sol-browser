@@ -233,9 +233,8 @@ struct ns_js {
     guint         local_storage_flush_source;
     gboolean      local_storage_disabled;
     char         *cookie_value;
-    guint64       cookie_version;
+    guint         cookie_generation;
     GHashTable   *session_storage_buckets;
-    GHashTable   *cookie_buckets;
     char         *partition_key;
     guint64       opaque_counter;
     char         *referrer;

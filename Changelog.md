@@ -3,12 +3,36 @@ Changelog:
 
 1.0.42-dev:
 ======
-* Docs: `docs/cookies.md` proposes replacing the per-site cookie jar
-  files with one SQLite cookie database owned by browser code: the
-  in-memory cookies are the source of truth, writes are batched to disk
-  off the transfer thread, and libcurl no longer reads cookie files, so
-  the browser behaves the same on a distribution libcurl as on a bundled
-  one. Nothing is implemented yet.
+* Cookies: the per-site Netscape cookie jar files, their `.js.txt`
+  siblings and the SameSite sidecars are replaced by one SQLite database
+  per profile, `cookies/cookies.db`, owned by browser code
+  (`src/cookies.c`). The in-memory cookie set is the source of truth and
+  the database is a write-behind backing store: a `Set-Cookie` is one hash
+  table update on the transfer thread instead of two fsynced file rewrites
+  under a global lock, and the rows reach the disk in one transaction half
+  a second later on a worker thread. libcurl no longer reads or writes any
+  cookie file; the browser builds every `Cookie` header and parses every
+  `Set-Cookie` itself per RFC 6265bis (public-suffix and domain checks,
+  default path, the `__Secure-`/`__Host-` prefixes, `SameSite=None`
+  requiring `Secure`, HttpOnly protection against script, "leave secure
+  cookies alone", 4096-byte pairs, 180 cookies per domain and 3000 per
+  site), so the browser behaves the same on a distribution libcurl as on
+  any other and the forked libcurl's `CURLOPT_COOKIE_SITE` is no longer
+  probed for. Every renderer process shares the database over WAL and
+  reloads a site's cookies when `PRAGMA data_version` shows another
+  process wrote, so a login in one tab is seen by the next tab at once.
+  `about:settings` gained a Cookies section listing sites with their
+  cookie counts and removing one site's cookies or all of them.
+  `cookieStore.getAll()` now reports each cookie's real domain, path,
+  expiry, `Secure` and `SameSite`, `set()`/`delete()` use the Cookie Store
+  API defaults (path `/`, `SameSite=Strict`, `Secure` in a secure context)
+  and fire `change` events, and nameless cookies (`Set-Cookie: =value`)
+  are stored. The jar files of earlier versions are deleted on the first
+  start and not migrated, so sites ask for a fresh login once. Values are
+  stored in the clear, like Firefox; `docs/cookies.md` explains why no
+  keychain encryption was added. The site helper no longer runs IP hosts
+  through the public-suffix list, which had made `127.0.0.1` and
+  `10.0.0.1` the same site `0.1` for cookie partitioning.
 * Video: a `<video>` that paints above a fixed or sticky element, like
   the feed and post players on reddit.com, now plays through the
   compositor as videos lower in the page already did. Such a video used to
