@@ -58,6 +58,8 @@ typedef struct paint_layers_state {
     ns_paint_upper_fn upper;
     gpointer upper_data;
     int n_upper;
+    cairo_t *last_upper;
+    int last_slot;
 } paint_layers_state;
 
 static paint_layers_state g_layers;
@@ -7383,11 +7385,16 @@ texture_fit(const ns_box *b, int iw, int ih, double *out_sx, double *out_sy,
 }
 
 static gboolean
-video_layer_target(cairo_t *cr, const ns_box *b)
+video_layer_target(cairo_t *cr, const ns_box *b, int *out_slot)
 {
     if (!g_paint_video_layer_gen || g_layers.mode != PAINT_LAYERS_DOC ||
-        cr != g_layers.doc ||
         cairo_get_group_target(cr) != cairo_get_target(cr))
+        return FALSE;
+    if (cr == g_layers.doc)
+        *out_slot = 0;
+    else if (cr == g_layers.last_upper)
+        *out_slot = g_layers.last_slot;
+    else
         return FALSE;
     cairo_matrix_t m;
     cairo_get_matrix(cr, &m);
@@ -7405,8 +7412,9 @@ paint_video_layer_hole(cairo_t *cr, const ns_box *b, ns_video *v,
 {
     int iw = ns_texture_get_width(tex);
     int ih = ns_texture_get_height(tex);
+    int slot = 0;
     if (iw <= 0 || ih <= 0 || b->content_width <= 0 ||
-        b->content_height <= 0 || !video_layer_target(cr, b))
+        b->content_height <= 0 || !video_layer_target(cr, b, &slot))
         return FALSE;
     double sx, sy, ox, oy;
     texture_fit(b, iw, ih, &sx, &sy, &ox, &oy);
@@ -7428,6 +7436,7 @@ paint_video_layer_hole(cairo_t *cr, const ns_box *b, ns_video *v,
     v->layer_y = y0 + g_paint_video_tile_y;
     v->layer_w = x1 - x0;
     v->layer_h = y1 - y0;
+    v->layer_slot = slot;
     v->layer_gen = g_paint_video_layer_gen;
     return TRUE;
 }
@@ -8896,7 +8905,10 @@ layers_target(cairo_t *cr, const deferred_capture *cap, double dx, double dy)
     if (g_layers.vp_seen == 0 || g_layers.n_upper == 0) return g_layers.doc;
     int i = MIN(g_layers.vp_seen, g_layers.n_upper) - 1;
     cairo_t *upper = g_layers.upper(i, g_layers.upper_data);
-    return upper ? upper : g_layers.doc;
+    if (!upper) return g_layers.doc;
+    g_layers.last_upper = upper;
+    g_layers.last_slot = i + 1;
+    return upper;
 }
 
 static void

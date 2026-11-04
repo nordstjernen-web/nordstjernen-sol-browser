@@ -3,6 +3,20 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Video: a `<video>` that paints above a fixed or sticky element, like
+  the feed and post players on reddit.com, now plays through the
+  compositor as videos lower in the page already did. Such a video used to
+  be repainted into the page tiles on every frame. While the page was busy
+  re-laying itself out, which reddit's player triggers many times a second
+  as it moves its progress bar, playback fell to about ten frames a second.
+  The renderer now punches the video's hole in the upper layer it belongs
+  to, and the shell draws the frame between that layer and the one below.
+  Queued frames keep playing on time while the page works: reddit videos
+  show 30 frames a second on screen. Frame serials are now unique across
+  decoders, so after a seek rebuilds the decoder the compositor no longer
+  mistakes new frames for old ones and shows a stale picture. Frames the
+  compositor showed are no longer counted as dropped in
+  `getVideoPlaybackQuality()`.
 * Video and styles: changing a text node no longer restyles the whole
   page when a stylesheet carries a `:has()` rule whose subject has no
   class, id or type, such as `:root:has([data-x])`. A text change cannot

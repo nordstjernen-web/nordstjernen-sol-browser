@@ -77,13 +77,13 @@ typedef struct ns_video {
     gboolean     sampled;
     char        *cors_allow_origin;
     guint        layer_gen;
+    int          layer_slot;
     double       layer_x, layer_y, layer_w, layer_h;
     guint        layer_sent_serial;
     gboolean     prerolled;
     gint64       preroll_since_us;
     gint64       last_tick_us;
     double       stall_peak_s;
-    const void  *presented_player;
     guint        presented_serial;
     guint        dropped_frames;
 } ns_video;

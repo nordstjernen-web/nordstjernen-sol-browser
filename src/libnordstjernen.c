@@ -2706,6 +2706,7 @@ video_layer_visit_one(ns_video *v, gpointer data)
     video_layer_visit *visit = data;
     ns_video_layer layer = { .id = v->seq, .x = v->layer_x, .y = v->layer_y,
                              .w = v->layer_w, .h = v->layer_h,
+                             .slot = v->layer_slot,
                              .sent_serial = &v->layer_sent_serial };
     layer.n_frames = ns_video_layer_frames(v, layer.frames,
                                            NS_VIDEO_LAYER_FRAMES);

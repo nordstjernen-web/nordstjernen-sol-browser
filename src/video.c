@@ -742,10 +742,8 @@ ns_video_take_presented(ns_video *v, double *out_pts)
     guint serial = ns_video_player_current_serial(v->player);
     double pts = ns_video_player_current_time(v->player);
     if (serial == 0 || pts < 0.0) return FALSE;
-    if (serial == v->presented_serial && v->player == v->presented_player)
-        return FALSE;
+    if (serial == v->presented_serial) return FALSE;
     v->presented_serial = serial;
-    v->presented_player = v->player;
     *out_pts = pts;
     return TRUE;
 }
@@ -2141,10 +2139,17 @@ ns_video_queue_emit(GArray *q, ns_video *v, const char *kind, double value)
 static void
 ns_video_queue_presented(GArray *q, ns_video *v)
 {
+    guint previous = v->presented_serial;
     double pts = 0.0;
-    if (ns_video_take_presented(v, &pts))
-        ns_video_queue_emit(q, v, "frame", pts);
+    gboolean presented = ns_video_take_presented(v, &pts);
     guint dropped = ns_video_player_take_dropped(v->player);
+    if (dropped && presented && v->layer_sent_serial > previous) {
+        guint composited = MIN(dropped, v->layer_sent_serial - previous);
+        ns_video_queue_emit(q, v, "composited", (double)composited);
+        dropped -= composited;
+    }
+    if (presented)
+        ns_video_queue_emit(q, v, "frame", pts);
     if (dropped) {
         v->dropped_frames += dropped;
         ns_video_queue_emit(q, v, "dropped", (double)v->dropped_frames);
