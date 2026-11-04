@@ -1,6 +1,9 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.43-dev:
+======
+
 1.0.42:
 ======
 * Video on Windows: reading H.264 frames back from the GPU no longer
