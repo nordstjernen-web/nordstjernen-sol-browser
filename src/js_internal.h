@@ -285,6 +285,7 @@ struct ns_js {
     int           listener_snapshots;
     guint         listener_tombstones;
     int           callback_depth;
+    int           console_eval_depth;
     int           synthetic_click_depth;
     GPtrArray    *mutation_observers;
     gboolean      mutation_drain_scheduled;

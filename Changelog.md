@@ -3,6 +3,14 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Remote control: the MCP `javascript` tool works on pages whose
+  Content-Security-Policy forbids `eval`, such as x.com and reddit.com.
+  The page helper compiles the agent's code with an indirect `eval`, and
+  CSP refused it, so every call failed with "code generation from strings
+  is disallowed". While the browser runs such an evaluation, string
+  compilation is allowed when every script on the stack is the
+  evaluation's own; page scripts, including page functions the agent's
+  code calls, stay bound by the policy.
 * Layout: an `auto` grid track holding an item with a definite `width`
   is never narrower than that item, even when the tracks do not fit
   the container. `auto` tracks that overflow were all scaled down to
