@@ -177,6 +177,30 @@ if have_os_mp4
   nordstjernen_engine_sources += files('mp4.c', 'video_mp4.c')
 endif
 
+nordstjernen_platform_sources = files(
+  'bookmarks.c',
+  'config.c',
+  'db.c',
+  'debuglog.c',
+  'history.c',
+  'i18n.c',
+  'json_string.c',
+  'netutil.c',
+  'security.c',
+)
+
+nordstjernen_platform_deps = [glib, gobject, gio, sqlite3]
+if have_seccomp
+  nordstjernen_platform_deps += [libseccomp]
+endif
+
+libns_platform = static_library(
+  'ns-platform',
+  nordstjernen_platform_sources,
+  dependencies: nordstjernen_platform_deps,
+  install: false,
+)
+
 nordstjernen_win_resources = []
 if host_machine.system() == 'windows'
   windows = import('windows')
@@ -371,8 +395,10 @@ if is_android
   )
 endif
 
-# The engine is compiled once, into this static library. The renderer and
-# the GTK shell link it in, so each ships as a self-contained executable (no
+# The engine is compiled once, into this static library. The renderer links
+# it in (the GTK shell only on GTK < 4.22, for its SVG icon fallback; it
+# otherwise links just libns-platform), so each ships as a self-contained
+# executable (no
 # libnordstjernen.so runtime dependency to bundle in distro packages), and
 # the shared libnordstjernen is linked from the same position-independent
 # objects instead of compiling every source a second time.

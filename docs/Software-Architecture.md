@@ -85,7 +85,9 @@ bounded by a crash-loop limit of 5 restarts per 60 s
 supervisor can recover. See [watchdog.md](watchdog.md).
 
 **GTK shell.** The shell (`src/gtk/appmain.c`, `src/gtk/procview.c`) is
-deliberately thin and **engine-free**: it owns windows, tabs, the
+deliberately thin and **engine-free**: with GTK 4.22 or newer it does not
+even link the engine, only the small `libns-platform` library (settings,
+i18n, sandbox, history, bookmarks, the profile databases). It owns windows, tabs, the
 address bar, and input, but it never parses HTML, runs CSS, or executes
 JavaScript. Each tab (`NsProcView`) blits a shared-memory framebuffer
 and forwards input to its renderer.
