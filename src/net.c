@@ -5443,6 +5443,19 @@ ns_fetch_initiator(GPtrArray *extra_headers)
 }
 
 static gboolean
+ns_fetch_chain_cross_site(GPtrArray *extra_headers)
+{
+    if (!extra_headers) return FALSE;
+    for (guint i = 0; i < extra_headers->len; i++) {
+        const char *header = g_ptr_array_index(extra_headers, i);
+        if (header &&
+            g_ascii_strncasecmp(header, "X-ND-Redirect-Cross-Site:", 25) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
 ns_fetch_is_reload(GPtrArray *extra_headers)
 {
     if (!extra_headers) return FALSE;
@@ -5992,8 +6005,10 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     gboolean user_activated = ns_fetch_has_user_activation(extra_headers);
     gboolean reload = (is_navigation && ns_fetch_is_reload(extra_headers)) ||
                       ns_fetch_is_revalidation(extra_headers);
-    const char *initiator = is_navigation && !top_url
+    const char *initiator = is_navigation
         ? ns_fetch_initiator(extra_headers) : NULL;
+    gboolean chain_cross_site = is_navigation &&
+                                ns_fetch_chain_cross_site(extra_headers);
     const char *request_site_url = initiator ? initiator : top_url;
     ns_response *resp = g_new0(ns_response, 1);
     resp->body = g_byte_array_new();
@@ -6060,12 +6075,13 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             : ns_user_agent_for_mode(cfg ? cfg->compat_mode : NULL);
     const char *effective_ua = configured_ua;
     const char *accept_language = ns_net_effective_accept_language();
-    const char *effective_top_url = top_url ? top_url : url;
+    const char *effective_top_url = is_navigation || !top_url ? url : top_url;
     char *top_origin = ns_url_origin_from(effective_top_url);
     char *top_site   = ns_url_site_from(effective_top_url);
     const char *partition_key = (top_site && *top_site) ? top_site
                               : (top_origin ? top_origin : "");
-    char *cache_partition = ns_net_partition_key(url, top_url);
+    char *cache_partition = ns_net_partition_key(url, is_navigation ? NULL
+                                                                    : top_url);
     const char *request_accept = "*/*";
     for (guint i = 0; extra_headers && i < extra_headers->len; i++) {
         const char *h = g_ptr_array_index(extra_headers, i);
@@ -6108,8 +6124,10 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         cookies_allowed = FALSE;
     int samesite_cross = 0;
     const char *same_site_ref = initiator ? initiator : top_url;
-    if (cookies_allowed && same_site_ref && *same_site_ref &&
-        !ns_url_is_same_site(url, same_site_ref))
+    gboolean cross_site_request = chain_cross_site ||
+        (same_site_ref && *same_site_ref &&
+         !ns_url_is_same_site(url, same_site_ref));
+    if (cookies_allowed && cross_site_request)
         samesite_cross = is_navigation && is_simple_get(method) ? 1 : 2;
     const char *cookie_partition = cookies_allowed ? partition_key : NULL;
     int priority_urgency = -1;
@@ -6244,6 +6262,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         const char *fetch_site;
         if (!request_site_url || !*request_site_url) {
             fetch_site = "none";
+        } else if (chain_cross_site) {
+            fetch_site = "cross-site";
         } else if (ns_url_same_origin(request_site_url, url)) {
             fetch_site = "same-origin";
         } else if (ns_url_is_same_site(request_site_url, url)) {
@@ -6865,6 +6885,14 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
     gsize cur_len = body_len;
     const char *cur_ct = content_type;
     gboolean started_https = g_str_has_prefix(url, "https://");
+    gboolean navigation = ns_fetch_is_navigation(top_url, extra_headers);
+    const char *header_initiator = navigation
+        ? ns_fetch_initiator(extra_headers) : NULL;
+    g_autofree char *chain_initiator = header_initiator
+        ? g_strdup(header_initiator)
+        : navigation && top_url ? ns_url_origin_from(top_url) : NULL;
+    g_autofree char *chain_initiator_header = NULL;
+    gboolean chain_cross_site = FALSE;
     int hops = 0;
     ns_response *resp = NULL;
 
@@ -6951,8 +6979,20 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
                 else i++;
             }
         }
-        if (ns_fetch_is_navigation(cur_top, extra_headers) &&
-            g_ascii_strcasecmp(cur_method, "GET") == 0) {
+        if (navigation && chain_initiator && *chain_initiator && hop_headers) {
+            if (!ns_url_is_same_site(cur_url, chain_initiator) ||
+                !ns_url_is_same_site(next, chain_initiator))
+                chain_cross_site = TRUE;
+            if (!chain_initiator_header && !ns_fetch_initiator(hop_headers)) {
+                chain_initiator_header =
+                    g_strdup_printf("X-ND-Initiator: %s", chain_initiator);
+                g_ptr_array_add(hop_headers, chain_initiator_header);
+            }
+            if (chain_cross_site && !ns_fetch_chain_cross_site(hop_headers))
+                g_ptr_array_add(hop_headers,
+                                (gpointer)"X-ND-Redirect-Cross-Site: 1");
+        }
+        if (navigation && g_ascii_strcasecmp(cur_method, "GET") == 0) {
             g_free(cur_top);
             cur_top = NULL;
         }

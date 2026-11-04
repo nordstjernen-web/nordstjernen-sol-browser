@@ -3,6 +3,26 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Security: SameSite is now enforced on a navigation that reaches a
+  cross-site target through a redirect. The redirect loop used to clear
+  the top-level URL for later hops while a same-origin navigation carried
+  no initiator, so the hop after a redirect was treated like a typed URL
+  and sent `SameSite=Strict` cookies to any site an attacker's own open
+  redirect pointed at. The loop now carries the navigation's initiator
+  origin into every hop, marks the chain cross-site once any hop leaves
+  the initiator's site (RFC 6265bis redirect-chain rule, as Chromium
+  does), and a navigation's cookie partition is its own destination
+  rather than the referrer's. `Sec-Fetch-Site` reports `cross-site` on
+  such hops too.
+* Cookies: `docs/cookies-security-report.md` is a source review of the
+  cookie store and its callers. It records one high finding (SameSite is
+  not enforced on a navigation that reaches a cross-site target through a
+  redirect, because the redirect loop drops the top URL without carrying
+  an initiator), three medium ones (any hostname starting with `127.` is
+  a secure context; WebSocket and EventSource cookies are keyed by the
+  frame origin rather than the top-level site; a sandboxed iframe can
+  list its origin's cookies through `cookieStore`), and the low and
+  informational items, each with the code path and a suggested fix.
 * CSS Grid: a line number or span written with `calc()`
   (`grid-column: 2 / span calc(5)`) is now evaluated to its integer;
   layout read it as `span 1`, collapsing such grids into one narrow track
