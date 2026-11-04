@@ -76,6 +76,7 @@ nordstjernen_engine_sources = files(
   'bookmarks.c',
   'cache.c',
   'config.c',
+  'cookies.c',
   'csp.c',
   'css.c',
   'css_color.c',

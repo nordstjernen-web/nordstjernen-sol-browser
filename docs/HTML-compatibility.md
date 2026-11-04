@@ -40,7 +40,7 @@ implemented · 31 🟡 partial · 0 ❌ absent · 7 🚫 absent by design**.
 | Layout (block/inline/flex/grid/table) | `src/layout.c`, `src/layout.h` |
 | Paint (Cairo) / text (Pango) | `src/paint.c`, `src/render.c`, `src/font.c` |
 | JavaScript (QuickJS-ng, interpreter) | `src/js.c`, `src/js.h` |
-| Networking | `src/net.c`, cookies/cache in `src/cache.c` |
+| Networking | `src/net.c`, cookies in `src/cookies.c`, cache in `src/cache.c` |
 | Images / media | `src/image*.c`, `src/video.c`, `src/video_decode.c`, `src/webaudio.c`, `src/audio/` |
 | Security (CSP/SOP/sandbox) | `src/csp.c`, `src/security.c` |
 
@@ -360,7 +360,7 @@ surface).
 | `AbortSignal` + `fetch(url, {signal})` | ✅ | `AbortSignal.abort(reason)` and `AbortController().abort(reason)` cancel an in-flight `fetch` — the in-progress curl transfer is interrupted via `GCancellable` (xferinfo callback), the promise is rejected with the signal's `reason` (or a synthetic `AbortError`), and the abort listener is cleaned up when the state is freed. A pre-aborted signal rejects synchronously without touching the network. `AbortSignal.timeout(ms)` schedules a real `g_timeout_add` that flips the signal and fires `abort` with a `TimeoutError`. `AbortSignal.any([s1, s2, …])` returns a composite signal that aborts as soon as any input does, copying the firing signal's `reason` (and is immediately aborted if any input is already aborted) |
 | `navigator.sendBeacon(url, body?)` | ✅ | fire-and-forget HTTP POST through the regular fetch pipeline (`ns_navigator_sendBeacon` in `src/js.c`); body type is inferred and the Content-Type chosen accordingly — string → `text/plain;charset=UTF-8`, `Blob`/`File` → `blob.type`, `URLSearchParams` → urlencoded, `FormData` → multipart with CSPRNG boundary, `ArrayBuffer`/typed array → raw bytes. Same-origin policy and the rest of the fetch security pipeline apply. Returns `false` on non-string URL or non-`http(s)` scheme; otherwise `true` |
 | `navigator.clipboard.writeText(text)` | 🟡 | in a windowed context, writes through the GTK clipboard (`gdk_clipboard_set_text`) and resolves; in headless / no-clipboard contexts rejects with `NotAllowedError`. Other clipboard methods (`readText`/`read`/`write`) still reject — read access is intentionally not exposed |
-| Cookie Store API | 🟡 | `cookieStore` exposes promise-based `get`/`getAll`/`set`/`delete` over the document cookie jar and chains to the non-constructible `CookieStore.prototype`; change events and service-worker exposure are not implemented |
+| Cookie Store API | 🟡 | `cookieStore` exposes promise-based `get`/`getAll`/`set`/`delete` over the cookie store (`src/cookies.c`) with each cookie's real `domain`, `path`, `expires`, `secure` and `sameSite`; `set`/`delete` apply the API defaults (path `/`, `SameSite=Strict`, `Secure` in a secure context) and fire `change` events with `changed`/`deleted` lists; changes made by HTTP responses or `document.cookie` do not fire events and the service-worker exposure is not implemented |
 | `navigator.*` device APIs (geolocation, sensors, …) | 🚫 | by design |
 
 ## §9 Communication

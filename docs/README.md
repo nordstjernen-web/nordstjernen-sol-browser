@@ -36,7 +36,7 @@ reporting in [SECURITY.md](../SECURITY.md), and licensing in
 - [Software-Architecture.md](Software-Architecture.md) — the whole system, from the process model down to each engine subsystem.
 - [Rendering.md](Rendering.md) — rendering and scrolling.
 - [preloading.md](preloading.md) — the speculative preload scan, the request key that identifies a fetch, and the four layers that keep a subresource from being fetched twice.
-- [cookies.md](cookies.md) — proposal: a browser-owned SQLite cookie store replacing the per-site jar files, write-behind, with the in-memory set as the source of truth.
+- [cookies.md](cookies.md) — the browser-owned SQLite cookie store: one database per profile, in-memory set as the source of truth, write-behind flushes, libcurl kept out of cookies.
 - [tab-isolation.md](tab-isolation.md) — process-per-tab renderers and the sandbox boundary.
 - [single-process-mode.md](single-process-mode.md) — the `--single-process` fallback.
 - [threading.md](threading.md) — the threading model.

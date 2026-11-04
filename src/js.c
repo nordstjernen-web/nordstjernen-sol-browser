@@ -48,6 +48,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "camera.h"
 #include "mic.h"
 #include "config.h"
+#include "cookies.h"
 #include "css.h"
 #include "css_anchor.h"
 #include "css_color.h"
@@ -395,6 +396,8 @@ static JSValue ns_window_mse_eos(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv);
 static JSValue ns_window_media_by_src(JSContext *ctx, JSValueConst this_val,
                                       int argc, JSValueConst *argv);
+static JSValue ns_window_cookie_list(JSContext *ctx, JSValueConst this_val,
+                                     int argc, JSValueConst *argv);
 static JSValue ns_window_mse_buffered(JSContext *ctx, JSValueConst this_val,
                                       int argc, JSValueConst *argv);
 static JSValue ns_window_mse_buffered_start(JSContext *ctx,
@@ -3850,14 +3853,8 @@ ns_partition_apply(ns_js *js, const char *new_url)
         return;
     }
 
-    if (js->partition_key && js->session_storage_buckets) {
+    if (js->partition_key && js->session_storage_buckets)
         ns_session_bucket_save(js);
-        if (js->cookie_buckets) {
-            g_hash_table_replace(js->cookie_buckets,
-                                 g_strdup(js->partition_key),
-                                 g_strdup(js->cookie_value ? js->cookie_value : ""));
-        }
-    }
 
     g_hash_table_remove_all(js->session_storage);
     GHashTable *next = ns_session_bucket_lookup(js, new_key);
@@ -3869,13 +3866,8 @@ ns_partition_apply(ns_js *js, const char *new_url)
                                  g_strdup(k), g_strdup(v));
     }
 
-    g_free(js->cookie_value);
-    js->cookie_value = NULL;
-    js->cookie_version = 0;
-    if (js->cookie_buckets) {
-        const char *cv = g_hash_table_lookup(js->cookie_buckets, new_key);
-        if (cv) js->cookie_value = g_strdup(cv);
-    }
+    g_clear_pointer(&js->cookie_value, g_free);
+    js->cookie_generation = 0;
 
     g_free(js->partition_key);
     js->partition_key = new_key;
@@ -61436,6 +61428,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "__ndMseAppend",         ns_window_mse_append,             3);
     ns_bind_fn(ctx, global, "__ndMseEos",            ns_window_mse_eos,                1);
     ns_bind_fn(ctx, global, "__ndMediaBySrc",        ns_window_media_by_src,           1);
+    ns_bind_fn(ctx, global, "__nsCookieList",        ns_window_cookie_list,            1);
     ns_bind_fn(ctx, global, "__ndMseBuffered",       ns_window_mse_buffered,           2);
     ns_bind_fn(ctx, global, "__ndMseBufferedStart",  ns_window_mse_buffered_start,     2);
     ns_bind_fn(ctx, global, "__ndMseRemove",         ns_window_mse_remove,             4);
@@ -62365,8 +62358,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->session_storage_buckets = g_next_session_storage_area
         ? g_hash_table_ref(g_next_session_storage_area)
         : ns_js_session_storage_area_new();
-    js->cookie_buckets = g_hash_table_new_full(
-        g_str_hash, g_str_equal, g_free, g_free);
     {
         const ns_config *c = ns_config_get();
         js->local_storage_disabled = c ? !c->local_storage_enabled : FALSE;
@@ -64041,18 +64032,13 @@ ns_document_is_realm_document(JSContext *ctx, JSValueConst doc)
 static void
 ns_document_refresh_cookie(ns_js *js)
 {
-    guint64 version;
-    if (!js->current_url || !*js->current_url ||
-        !ns_net_cookie_jar_version(js->current_url, ns_js_top_url(js),
-                                   &version) ||
-        version == js->cookie_version)
-        return;
-    char *visible = ns_net_cookies_for_js(js->current_url, ns_js_top_url(js));
-    if (visible) {
-        g_free(js->cookie_value);
-        js->cookie_value = visible;
-    }
-    js->cookie_version = version;
+    guint generation = ns_cookie_store_generation();
+    if (js->cookie_value && generation == js->cookie_generation) return;
+    g_free(js->cookie_value);
+    js->cookie_value = js->current_url && *js->current_url
+        ? ns_net_cookies_for_js(js->current_url, ns_js_top_url(js)) : NULL;
+    if (!js->cookie_value) js->cookie_value = g_strdup("");
+    js->cookie_generation = generation;
 }
 
 static JSValue
@@ -64065,116 +64051,6 @@ ns_document_get_cookie(JSContext *ctx, JSValueConst this_val)
     return JS_NewString(ctx, js->cookie_value ? js->cookie_value : "");
 }
 
-static void
-ns_cookie_remove_named(char **jar, const char *name, gsize name_len)
-{
-    if (!jar || !*jar || !**jar || !name || name_len == 0) return;
-    char *needle = g_strdup_printf("%.*s=", (int)name_len, name);
-    gsize nlen = strlen(needle);
-    char *scan = *jar;
-    while ((scan = strstr(scan, needle)) != NULL) {
-        if (scan == *jar || *(scan - 1) == ' ' || *(scan - 1) == ';') {
-            char *end = strstr(scan, "; ");
-            char *rest = end ? end + 2 : NULL;
-            *scan = '\0';
-            char *merged = g_strconcat(*jar, rest ? rest : "", NULL);
-            gsize off = (gsize)(scan - *jar);
-            g_free(*jar);
-            *jar = merged;
-            scan = *jar + off;
-        } else {
-            scan += nlen;
-        }
-    }
-    g_free(needle);
-    gsize len = strlen(*jar);
-    while (len > 0 && ((*jar)[len - 1] == ';' || (*jar)[len - 1] == ' '))
-        (*jar)[--len] = '\0';
-}
-
-typedef struct {
-    gboolean expired;
-    gboolean secure;
-    gboolean has_domain;
-    gboolean samesite_none;
-    gboolean path_is_root;
-    gboolean has_max_age;
-    gboolean httponly;
-} ns_cookie_attrs;
-
-static void
-ns_cookie_parse_attrs(const char *attrs, ns_cookie_attrs *out)
-{
-    out->expired       = FALSE;
-    out->secure        = FALSE;
-    out->has_domain    = FALSE;
-    out->samesite_none = FALSE;
-    out->path_is_root  = FALSE;
-    out->has_max_age   = FALSE;
-    out->httponly      = FALSE;
-    if (!attrs) return;
-    while (*attrs) {
-        while (*attrs == ';' || *attrs == ' ' || *attrs == '\t') attrs++;
-        if (!*attrs) break;
-        const char *end = strchr(attrs, ';');
-        gsize alen = end ? (gsize)(end - attrs) : strlen(attrs);
-        while (alen > 0 && (attrs[alen - 1] == ' ' || attrs[alen - 1] == '\t'))
-            alen--;
-        const char *eq = memchr(attrs, '=', alen);
-        gsize klen = eq ? (gsize)(eq - attrs) : alen;
-        const char *vp = eq ? eq + 1 : NULL;
-        gsize vlen = eq ? (gsize)(attrs + alen - vp) : 0;
-        while (vlen && (vp[0] == ' ' || vp[0] == '\t')) { vp++; vlen--; }
-        if (klen == 6 && g_ascii_strncasecmp(attrs, "secure", 6) == 0) {
-            out->secure = TRUE;
-        } else if (klen == 8 && g_ascii_strncasecmp(attrs, "httponly", 8) == 0) {
-            out->httponly = TRUE;
-        } else if (klen == 7 && g_ascii_strncasecmp(attrs, "max-age", 7) == 0 && eq) {
-            const char *p = vp;
-            while (*p == ' ') p++;
-            char *endp = NULL;
-            gint64 ma = g_ascii_strtoll(p, &endp, 10);
-            if (endp != p) {
-                out->has_max_age = TRUE;
-                out->expired = ma <= 0;
-            }
-        } else if (klen == 7 && g_ascii_strncasecmp(attrs, "expires", 7) == 0 &&
-                   eq && vlen && !out->has_max_age) {
-            g_autofree char *date = g_strndup(vp, vlen);
-            time_t expiry = curl_getdate(date, NULL);
-            if (expiry != (time_t)-1 &&
-                expiry <= (time_t)(g_get_real_time() / G_USEC_PER_SEC))
-                out->expired = TRUE;
-        } else if (klen == 6 && g_ascii_strncasecmp(attrs, "domain", 6) == 0 &&
-                   eq && vlen) {
-            out->has_domain = TRUE;
-        } else if (klen == 4 && g_ascii_strncasecmp(attrs, "path", 4) == 0 && eq) {
-            out->path_is_root = (vlen == 1 && vp[0] == '/');
-        } else if (klen == 8 && g_ascii_strncasecmp(attrs, "samesite", 8) == 0 &&
-                   eq && vlen == 4 && g_ascii_strncasecmp(vp, "none", 4) == 0) {
-            out->samesite_none = TRUE;
-        }
-        if (!end) break;
-        attrs = end + 1;
-    }
-}
-
-static gboolean
-ns_cookie_prefix_ok(const char *name, gsize name_len,
-                    const ns_cookie_attrs *attrs, gboolean is_https)
-{
-    if (name_len >= 9 && g_ascii_strncasecmp(name, "__Secure-", 9) == 0) {
-        if (!attrs->secure || !is_https) return FALSE;
-    }
-    if (name_len >= 7 && g_ascii_strncasecmp(name, "__Host-", 7) == 0) {
-        if (!attrs->secure || !is_https) return FALSE;
-        if (attrs->has_domain) return FALSE;
-        if (!attrs->path_is_root) return FALSE;
-    }
-    if (attrs->samesite_none && !attrs->secure) return FALSE;
-    return TRUE;
-}
-
 static JSValue
 ns_document_set_cookie(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
@@ -64182,49 +64058,27 @@ ns_document_set_cookie(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     if (!js || ns_document_is_realm_document(ctx, this_val)) return JS_UNDEFINED;
     const char *s = JS_ToCString(ctx, val);
     if (!s) return JS_UNDEFINED;
-    if (strlen(s) > 4096) { JS_FreeCString(ctx, s); return JS_UNDEFINED; }
-    const char *eq = strchr(s, '=');
-    if (!eq || eq == s) { JS_FreeCString(ctx, s); return JS_UNDEFINED; }
-    const char *semi = strchr(s, ';');
-    gsize key_len  = (gsize)(eq - s);
-    gsize pair_len = semi ? (gsize)(semi - s) : strlen(s);
-    ns_cookie_attrs attrs = { FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE };
-    if (semi) ns_cookie_parse_attrs(semi, &attrs);
-    if (attrs.httponly) { JS_FreeCString(ctx, s); return JS_UNDEFINED; }
-
-    gboolean is_https = js->partition_key &&
-                        g_str_has_prefix(js->partition_key, "https://");
-    if (attrs.secure && !is_https) { JS_FreeCString(ctx, s); return JS_UNDEFINED; }
-    if (!ns_cookie_prefix_ok(s, key_len, &attrs, is_https)) {
-        JS_FreeCString(ctx, s);
-        return JS_UNDEFINED;
-    }
-
-    char *jar = js->cookie_value ? g_strdup(js->cookie_value) : g_strdup("");
-    ns_cookie_remove_named(&jar, s, key_len);
-
-    if (!attrs.expired) {
-        g_autofree char *pair = g_strndup(s, pair_len);
-        char *merged = *jar ? g_strconcat(jar, "; ", pair, NULL) : g_strdup(pair);
-        g_free(jar);
-        jar = merged;
-    }
-
-    g_free(js->cookie_value);
-    js->cookie_value = jar;
-    if (js->current_url && *js->current_url) {
+    if (js->current_url && *js->current_url)
         ns_net_cookie_store_from_js(js->current_url, ns_js_top_url(js), s);
-        ns_net_cookie_jar_version(js->current_url, ns_js_top_url(js),
-                                  &js->cookie_version);
-        char *visible = ns_net_cookies_for_js(js->current_url,
-                                              ns_js_top_url(js));
-        if (visible) {
-            g_free(js->cookie_value);
-            js->cookie_value = visible;
-        }
-    }
     JS_FreeCString(ctx, s);
+    g_clear_pointer(&js->cookie_value, g_free);
     return JS_UNDEFINED;
+}
+
+static JSValue
+ns_window_cookie_list(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_NewString(ctx, "[]");
+    const char *url_arg = argc > 0 && JS_IsString(argv[0])
+                        ? JS_ToCString(ctx, argv[0]) : NULL;
+    const char *url = url_arg && *url_arg ? url_arg : js->current_url;
+    g_autofree char *json = url && *url
+        ? ns_net_cookies_json_for_js(url, ns_js_top_url(js)) : NULL;
+    if (url_arg) JS_FreeCString(ctx, url_arg);
+    return JS_NewString(ctx, json ? json : "[]");
 }
 
 static JSValue
@@ -65583,56 +65437,6 @@ ns_js_reset_runtime_state(ns_js *js)
     JS_RunGC(js->rt);
 }
 
-static gboolean
-ns_cookie_jar_has_name(const char *jar, const char *name, gsize name_len)
-{
-    if (!jar || !name || name_len == 0) return FALSE;
-    const char *scan = jar;
-    while ((scan = strstr(scan, name)) != NULL) {
-        gboolean at_start = (scan == jar) ||
-                            (*(scan - 1) == ' ' || *(scan - 1) == ';');
-        if (at_start && scan[name_len] == '=') return TRUE;
-        scan += name_len;
-    }
-    return FALSE;
-}
-
-static void
-ns_js_seed_cookies_from_jar(ns_js *js)
-{
-    if (!js || !js->current_url || !*js->current_url) return;
-    ns_net_cookie_jar_version(js->current_url, ns_js_top_url(js),
-                                  &js->cookie_version);
-    char *jar = ns_net_cookies_for_js(js->current_url, ns_js_top_url(js));
-    if (!jar) return;
-    if (!*jar) { g_free(jar); return; }
-
-    char *existing = js->cookie_value;
-    if (!existing || !*existing) {
-        g_free(js->cookie_value);
-        js->cookie_value = jar;
-        return;
-    }
-
-    GString *merged = g_string_new(existing);
-    char **pairs = g_strsplit(jar, "; ", -1);
-    for (int i = 0; pairs[i]; i++) {
-        const char *eq = strchr(pairs[i], '=');
-        if (!eq) continue;
-        gsize nlen = (gsize)(eq - pairs[i]);
-        char *name = g_strndup(pairs[i], nlen);
-        gboolean dup = ns_cookie_jar_has_name(merged->str, name, nlen);
-        g_free(name);
-        if (dup) continue;
-        g_string_append(merged, "; ");
-        g_string_append(merged, pairs[i]);
-    }
-    g_strfreev(pairs);
-    g_free(jar);
-    g_free(js->cookie_value);
-    js->cookie_value = g_string_free(merged, FALSE);
-}
-
 static void
 ns_document_lift_methods_to_proto(JSContext *ctx, JSValueConst document)
 {
@@ -66053,7 +65857,8 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
                       js->current_url ? js->current_url : "(none)");
 
     ns_storage_load_for(js, js->current_url);
-    ns_js_seed_cookies_from_jar(js);
+    g_clear_pointer(&js->cookie_value, g_free);
+    js->cookie_generation = 0;
 
     JSContext *ctx = js->ctx;
     JSValue global = JS_GetGlobalObject(ctx);
@@ -66540,8 +66345,6 @@ ns_js_free(ns_js *js)
     if (js->frame_storages) g_ptr_array_free(js->frame_storages, TRUE);
     if (js->session_storage_buckets)
         g_hash_table_unref(js->session_storage_buckets);
-    if (js->cookie_buckets)
-        g_hash_table_destroy(js->cookie_buckets);
     g_free(js->partition_key);
     if (js->nodelist_decorator_set) {
         JS_FreeValue(js->ctx, js->nodelist_decorator);

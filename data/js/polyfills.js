@@ -7868,64 +7868,156 @@
     }
 
     if (!global.cookieStore) {
-        var cookiePairFor = function (name) {
-            var key = String(name || '');
-            var parts = String(document.cookie || '').split(/;\s*/);
+        var cookieListNative = function () {
+            if (typeof global.__nsCookieList !== 'function') return null;
+            try {
+                var url = typeof document !== 'undefined' ? String(document.URL || '') : '';
+                var list = JSON.parse(global.__nsCookieList(url));
+                return Array.isArray(list) ? list : null;
+            } catch (e) { return null; }
+        };
+        var cookieItem = function (c) {
+            return {
+                name: c.name,
+                value: c.value,
+                domain: c.hostOnly ? null : c.domain,
+                path: c.path,
+                expires: c.expires == null ? null : c.expires,
+                secure: !!c.secure,
+                sameSite: c.sameSite || 'lax',
+                partitioned: false
+            };
+        };
+        var cookieList = function () {
+            var native = cookieListNative();
+            if (native) return native.map(cookieItem);
+            var parts = String(typeof document !== 'undefined' ? document.cookie || '' : '').split(/;\s*/);
+            var out = [];
             for (var i = 0; i < parts.length; i++) {
+                if (!parts[i]) continue;
                 var eq = parts[i].indexOf('=');
-                var n = eq >= 0 ? parts[i].slice(0, eq) : parts[i];
-                if (n === key) {
-                    return {
-                        name: n,
-                        value: eq >= 0 ? parts[i].slice(eq + 1) : '',
-                        domain: '',
-                        path: '/',
-                        expires: null,
-                        secure: false,
-                        sameSite: 'lax'
-                    };
-                }
+                out.push(cookieItem({
+                    name: eq >= 0 ? parts[i].slice(0, eq) : '',
+                    value: eq >= 0 ? parts[i].slice(eq + 1) : parts[i],
+                    hostOnly: true, domain: '', path: '/', expires: null,
+                    secure: false, sameSite: 'strict'
+                }));
             }
-            return null;
+            return out;
+        };
+        var cookieQueryName = function (query) {
+            if (query && typeof query === 'object') return query.name == null ? null : String(query.name);
+            return query == null ? null : String(query);
+        };
+        var cookieIsSecureContext = function () {
+            try {
+                var proto = global.location ? global.location.protocol : '';
+                var host = global.location ? global.location.hostname : '';
+                return proto === 'https:' || host === 'localhost' || host === '127.0.0.1' ||
+                       host === '[::1]' || /\.localhost$/.test(host);
+            } catch (e) { return false; }
+        };
+        var cookieChangeTarget = typeof global.EventTarget === 'function'
+            ? new global.EventTarget() : null;
+        var cookieFire = function (changed, deleted) {
+            if (!cookieChangeTarget) return;
+            try {
+                var ev;
+                if (typeof global.CookieChangeEvent === 'function') {
+                    ev = new global.CookieChangeEvent('change', { changed: changed, deleted: deleted });
+                } else {
+                    ev = new global.Event('change');
+                    ev.changed = changed;
+                    ev.deleted = deleted;
+                }
+                cookieChangeTarget.dispatchEvent(ev);
+                if (typeof global.cookieStore.onchange === 'function') global.cookieStore.onchange(ev);
+            } catch (e) {}
+        };
+        var cookieSerialize = function (opts, value, erase) {
+            var name = opts.name == null ? '' : String(opts.name);
+            var val = value == null ? '' : String(value);
+            var bad = /[;\u0000-\u001f\u007f]/;
+            if (bad.test(name) || bad.test(val) || name.indexOf('=') >= 0)
+                throw new TypeError('Cookie name or value contains an invalid character');
+            if (!name && !erase && (!val || val.indexOf('=') >= 0))
+                throw new TypeError('A cookie without a name needs a value without "="');
+            var out = name + '=' + val;
+            if (erase) {
+                out += '; max-age=0';
+            } else if (opts.expires != null) {
+                var when = opts.expires instanceof Date ? opts.expires : new Date(Number(opts.expires));
+                if (isNaN(when.getTime())) throw new TypeError('Invalid cookie expiry');
+                out += '; expires=' + when.toUTCString();
+            }
+            if (opts.domain) out += '; domain=' + String(opts.domain);
+            out += '; path=' + (opts.path == null ? '/' : String(opts.path));
+            var sameSite = opts.sameSite == null ? 'strict' : String(opts.sameSite).toLowerCase();
+            if (sameSite !== 'strict' && sameSite !== 'lax' && sameSite !== 'none')
+                throw new TypeError('Invalid sameSite value');
+            out += '; samesite=' + sameSite;
+            if (cookieIsSecureContext()) out += '; secure';
+            return out;
+        };
+        var cookieWrite = function (text) {
+            if (typeof document === 'undefined') throw new TypeError('No document');
+            document.cookie = text;
+        };
+        var cookieSameEntry = function (a, b) {
+            return a.name === b.name && a.value === b.value && a.path === b.path && a.domain === b.domain;
         };
         try {
             Object.defineProperty(global, 'cookieStore', {
                 configurable: true, enumerable: true,
                 value: {
-                    get: function (name) {
-                        if (name && typeof name === 'object') name = name.name;
-                        return Promise.resolve(cookiePairFor(name));
+                    get: function (query) {
+                        var name = cookieQueryName(query);
+                        var list = cookieList();
+                        for (var i = 0; i < list.length; i++)
+                            if (name === null || list[i].name === name) return Promise.resolve(list[i]);
+                        return Promise.resolve(null);
                     },
                     getAll: function (query) {
-                        var parts = String(document.cookie || '').split(/;\s*/);
-                        var out = [];
-                        var wanted = query && typeof query === 'object' ? query.name : query;
-                        for (var i = 0; i < parts.length; i++) {
-                            if (!parts[i]) continue;
-                            var eq = parts[i].indexOf('=');
-                            var name = eq >= 0 ? parts[i].slice(0, eq) : parts[i];
-                            if (wanted && name !== String(wanted)) continue;
-                            var item = cookiePairFor(name);
-                            if (item) out.push(item);
-                        }
-                        return Promise.resolve(out);
+                        var name = cookieQueryName(query);
+                        return Promise.resolve(cookieList().filter(function (c) {
+                            return name === null || c.name === name;
+                        }));
                     },
-                    set: function (name, value) {
-                        if (name && typeof name === 'object') {
-                            value = name.value;
-                            name = name.name;
-                        }
-                        document.cookie = String(name || '') + '=' + String(value == null ? '' : value);
+                    set: function (nameOrOptions, value) {
+                        var isOptions = nameOrOptions && typeof nameOrOptions === 'object';
+                        var opts = isOptions ? nameOrOptions : { name: nameOrOptions, value: value };
+                        var before = cookieList();
+                        try { cookieWrite(cookieSerialize(opts, opts.value, false)); }
+                        catch (e) { return Promise.reject(e); }
+                        var changed = cookieList().filter(function (c) {
+                            return !before.some(function (b) { return cookieSameEntry(b, c); });
+                        });
+                        if (changed.length) cookieFire(changed, []);
                         return Promise.resolve();
                     },
-                    delete: function (name) {
-                        if (name && typeof name === 'object') name = name.name;
-                        document.cookie = String(name || '') + '=; Max-Age=0';
+                    delete: function (nameOrOptions) {
+                        var opts = nameOrOptions && typeof nameOrOptions === 'object'
+                            ? nameOrOptions : { name: nameOrOptions };
+                        var before = cookieList();
+                        try { cookieWrite(cookieSerialize(opts, '', true)); }
+                        catch (e) { return Promise.reject(e); }
+                        var after = cookieList();
+                        var deleted = before.filter(function (b) {
+                            return !after.some(function (c) { return cookieSameEntry(b, c); });
+                        });
+                        if (deleted.length) cookieFire([], deleted);
                         return Promise.resolve();
                     },
-                    addEventListener: function () {},
-                    removeEventListener: function () {},
-                    dispatchEvent: function () { return true; }
+                    addEventListener: function (type, fn, opts) {
+                        if (cookieChangeTarget) cookieChangeTarget.addEventListener(type, fn, opts);
+                    },
+                    removeEventListener: function (type, fn, opts) {
+                        if (cookieChangeTarget) cookieChangeTarget.removeEventListener(type, fn, opts);
+                    },
+                    dispatchEvent: function (ev) {
+                        return cookieChangeTarget ? cookieChangeTarget.dispatchEvent(ev) : true;
+                    },
+                    onchange: null
                 }
             });
         } catch (e) {}

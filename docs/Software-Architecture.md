@@ -449,9 +449,11 @@ Networking is built on **libcurl** (`src/net.c`, ~7,000 lines):
   `https_first` config key).
 - **HTTP cache**: a **SQLite-indexed** cache with on-disk bodies
   (`src/cache.c`), honouring ETag/Last-Modified.
-- **Cookies** partitioned per site; JS-set cookies persisted in a
-  sibling file curl never overwrites. [cookies.md](cookies.md) proposes
-  replacing the jar files with a browser-owned SQLite store.
+- **Cookies** partitioned per top-level site in one SQLite database
+  per profile (`src/cookies.c`), with the in-memory set as the source of
+  truth and write-behind flushes; the browser builds the `Cookie` header
+  and parses `Set-Cookie` itself, libcurl's cookie engine is unused. See
+  [cookies.md](cookies.md).
 
 The renderer performs its own fetching, cookie, and cache I/O today;
 [tab-isolation.md](tab-isolation.md) records browser-process brokering of

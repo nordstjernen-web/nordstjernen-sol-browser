@@ -18,6 +18,7 @@
 #include "safebrowsing.h"
 #include "security.h"
 #include "about_logo_gif.h"
+#include "cookies.h"
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -45,9 +46,7 @@
 #include <fcntl.h>
 #ifdef G_OS_WIN32
 #include <windows.h>
-#include <io.h>
 #else
-#include <sys/file.h>
 #include <unistd.h>
 #endif
 
@@ -98,7 +97,7 @@ typedef struct ns_header_ctx {
     gboolean http1;
     gboolean set_cookie_seen;
     CURL    *cookie_curl;
-    const char *cookie_jar_path;
+    const char *cookie_partition;
     const char *url;
     gboolean   early_hints;
     GPtrArray *early_links;
@@ -118,11 +117,8 @@ typedef struct ns_hop_req {
     long               connect_timeout_s;
     const char        *proxy;
     const char        *no_proxy;
-    const char        *cookie_jar_path;
-    const char        *cookie_js_path;
+    const char        *cookie_partition;
     int                samesite_cross;
-    const char        *cookie_site;
-    gboolean           cookie_navigation;
     gboolean           top_level_navigation;
     int                priority_urgency;
     gboolean           priority_incremental;
@@ -1127,35 +1123,15 @@ ns_url_site_from(const char *url)
     g_autoptr(ns_url_parts) p = ns_url_parts_new(url);
     if (!p || !p->protocol || !p->hostname) return NULL;
     g_autofree char *lower = g_ascii_strdown(p->hostname, -1);
-    const psl_ctx_t *psl = psl_builtin();
-    const char *reg = psl ? psl_registrable_domain(psl, lower) : NULL;
-    const char *site_host = (reg && *reg) ? reg : p->hostname;
-    if (p->port && *p->port)
-        return g_strdup_printf("%s://%s:%s", p->protocol, site_host, p->port);
-    return g_strdup_printf("%s://%s", p->protocol, site_host);
-}
-
-/* The site of a URL in the form libcurl's CURLOPT_COOKIE_SITE expects:
- * scheme, "://" and the registrable domain, or the host itself for an IP
- * address. Unlike ns_url_site_from() this is not used as a partition key. */
-static char *
-ns_net_curl_site_from(const char *url)
-{
-    if (!url || !*url || !ns_url_is_http_or_https(url)) return NULL;
-    g_autoptr(ns_url_parts) p = ns_url_parts_new(url);
-    if (!p || !p->protocol || !p->hostname || !*p->hostname) return NULL;
-    size_t plen = strlen(p->protocol);
-    if (plen && p->protocol[plen - 1] == ':') plen--;
-    g_autofree char *lower = g_ascii_strdown(p->hostname, -1);
-    const char *site_host = lower;
-    if (!g_hostname_is_ip_address(lower)) {
+    const char *site_host = p->hostname;
+    if (!g_hostname_is_ip_address(lower) && lower[0] != '[') {
         const psl_ctx_t *psl = psl_builtin();
         const char *reg = psl ? psl_registrable_domain(psl, lower) : NULL;
         if (reg && *reg) site_host = reg;
     }
-    if (strchr(site_host, ':'))
-        return g_strdup_printf("%.*s://[%s]", (int)plen, p->protocol, site_host);
-    return g_strdup_printf("%.*s://%s", (int)plen, p->protocol, site_host);
+    if (p->port && *p->port)
+        return g_strdup_printf("%s://%s:%s", p->protocol, site_host, p->port);
+    return g_strdup_printf("%s://%s", p->protocol, site_host);
 }
 
 gboolean
@@ -1493,29 +1469,10 @@ ns_net_cookie_dir(void)
     return g_cookie_dir;
 }
 
-static void
-ns_net_empty_dir(const char *dir)
-{
-    if (!dir) return;
-    GDir *d = g_dir_open(dir, 0, NULL);
-    if (!d) return;
-    const char *name;
-    while ((name = g_dir_read_name(d))) {
-        char *child = g_build_filename(dir, name, NULL);
-        if (g_file_test(child, G_FILE_TEST_IS_DIR) &&
-            !g_file_test(child, G_FILE_TEST_IS_SYMLINK))
-            ns_rmrf(child);
-        else
-            g_unlink(child);
-        g_free(child);
-    }
-    g_dir_close(d);
-}
-
 void
 ns_net_cookies_clear(void)
 {
-    ns_net_empty_dir(ns_net_cookie_dir());
+    ns_cookie_store_clear();
 }
 
 void
@@ -1529,210 +1486,6 @@ ns_net_site_storage_clear(void)
     g_free(localstorage);
     g_free(indexeddb);
     g_free(base);
-}
-
-static char *
-ns_net_cookie_path_for_partition(const char *top_origin)
-{
-    const char *dir = ns_net_cookie_dir();
-    const char *key = (top_origin && *top_origin) ? top_origin : "default";
-    char *digest = g_compute_checksum_for_string(G_CHECKSUM_SHA256, key, -1);
-    char short_hex[33];
-    g_strlcpy(short_hex, digest, sizeof(short_hex));
-    g_free(digest);
-    char *fname = g_strdup_printf("%s.txt", short_hex);
-    char *path = g_build_filename(dir, fname, NULL);
-    g_free(fname);
-    return path;
-}
-
-static char *
-ns_net_cookie_js_path_for_partition(const char *top_origin)
-{
-    const char *dir = ns_net_cookie_dir();
-    const char *key = (top_origin && *top_origin) ? top_origin : "default";
-    char *digest = g_compute_checksum_for_string(G_CHECKSUM_SHA256, key, -1);
-    char short_hex[33];
-    g_strlcpy(short_hex, digest, sizeof(short_hex));
-    g_free(digest);
-    char *fname = g_strdup_printf("%s.js.txt", short_hex);
-    char *path = g_build_filename(dir, fname, NULL);
-    g_free(fname);
-    return path;
-}
-
-enum {
-    NS_COOKIE_SAMESITE_NONE,
-    NS_COOKIE_SAMESITE_LAX,
-    NS_COOKIE_SAMESITE_STRICT,
-};
-
-static char *
-ns_cookie_samesite_path(const char *jar_path)
-{
-    return jar_path ? g_strconcat(jar_path, ".samesite", NULL) : NULL;
-}
-
-static GHashTable *
-ns_cookie_samesite_load(const char *jar_path)
-{
-    GHashTable *t = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                          g_free, NULL);
-    g_autofree char *p = ns_cookie_samesite_path(jar_path);
-    char *contents = NULL;
-    if (p && g_file_get_contents(p, &contents, NULL, NULL)) {
-        char **lines = g_strsplit(contents, "\n", -1);
-        for (int i = 0; lines[i]; i++) {
-            char *tab = strrchr(lines[i], '\t');
-            if (!tab || tab == lines[i]) continue;
-            int level = tab[1] - '0';
-            if (level < 0 || level > 2) continue;
-            g_hash_table_replace(t, g_strndup(lines[i], tab - lines[i]),
-                                 GINT_TO_POINTER(level + 1));
-        }
-        g_strfreev(lines);
-        g_free(contents);
-    }
-    return t;
-}
-
-static void
-ns_cookie_samesite_record(const char *jar_path, const char *domain,
-                          const char *path, const char *name, int level,
-                          gboolean remove)
-{
-    g_autofree char *p = ns_cookie_samesite_path(jar_path);
-    if (!p) return;
-    g_autofree char *key = g_strdup_printf("%s\t%s\t%s", domain, path, name);
-    GHashTable *t = ns_cookie_samesite_load(jar_path);
-    if (remove)
-        g_hash_table_remove(t, key);
-    else
-        g_hash_table_replace(t, g_strdup(key), GINT_TO_POINTER(level + 1));
-    GString *out = g_string_new(NULL);
-    GHashTableIter it;
-    gpointer k, v;
-    g_hash_table_iter_init(&it, t);
-    while (g_hash_table_iter_next(&it, &k, &v))
-        g_string_append_printf(out, "%s\t%d\n", (const char *)k,
-                               GPOINTER_TO_INT(v) - 1);
-    g_file_set_contents_full(p, out->str, (gssize)out->len,
-                             G_FILE_SET_CONTENTS_CONSISTENT |
-                             G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, NULL);
-    g_string_free(out, TRUE);
-    g_hash_table_unref(t);
-}
-
-static gboolean
-ns_cookie_samesite_excluded(GHashTable *levels, const char *domain,
-                            const char *path, const char *name,
-                            int samesite_cross)
-{
-    if (samesite_cross <= 0) return FALSE;
-    g_autofree char *key = g_strdup_printf("%s\t%s\t%s", domain, path, name);
-    gpointer v = levels ? g_hash_table_lookup(levels, key) : NULL;
-    int level = v ? GPOINTER_TO_INT(v) - 1 : NS_COOKIE_SAMESITE_LAX;
-    if (level == NS_COOKIE_SAMESITE_STRICT) return TRUE;
-    return samesite_cross >= 2 && level == NS_COOKIE_SAMESITE_LAX;
-}
-
-static char *
-ns_cookie_collect(const char *url, const char *jar_path, const char *js_path,
-                  gboolean include_httponly, int samesite_cross)
-{
-    if (!url || !*url) return NULL;
-    g_autoptr(ns_url_parts) parts = ns_url_parts_new(url);
-    if (!parts || !parts->hostname || !*parts->hostname) return NULL;
-    const char *host = parts->hostname;
-    const char *path = (parts->pathname && *parts->pathname)
-                       ? parts->pathname : "/";
-    gboolean is_https = parts->protocol &&
-                        g_ascii_strcasecmp(parts->protocol, "https:") == 0;
-
-    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
-    gsize hl = strlen(host);
-    GPtrArray *order = g_ptr_array_new_with_free_func(g_free);
-    GHashTable *vals = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                             g_free, g_free);
-
-    for (int pass = 0; pass < 2; pass++) {
-        const char *fp = pass == 0 ? jar_path : js_path;
-        char *contents = NULL;
-        if (!fp || !g_file_get_contents(fp, &contents, NULL, NULL)) {
-            g_free(contents);
-            continue;
-        }
-        GHashTable *levels = samesite_cross > 0
-            ? ns_cookie_samesite_load(fp) : NULL;
-        char **lines = g_strsplit(contents, "\n", -1);
-        for (int i = 0; lines[i]; i++) {
-            char *line = g_strchomp(lines[i]);
-            if (!*line) continue;
-            if (line[0] == '#') {
-                if (include_httponly && g_str_has_prefix(line, "#HttpOnly_"))
-                    line += strlen("#HttpOnly_");
-                else
-                    continue;
-            }
-            char **f = g_strsplit(line, "\t", 7);
-            int nf = 0;
-            while (f[nf]) nf++;
-            if (nf < 7) { g_strfreev(f); continue; }
-            const char *cdomain = f[0];
-            const char *cpath   = f[2];
-            gboolean csecure = g_ascii_strcasecmp(f[3], "TRUE") == 0;
-            gint64 cexpiry = g_ascii_strtoll(f[4], NULL, 10);
-            const char *cname = f[5];
-            const char *cval  = f[6];
-
-            gboolean match;
-            if (cdomain[0] == '.') {
-                gsize dl = strlen(cdomain);
-                match = (hl >= dl &&
-                         g_ascii_strcasecmp(host + hl - dl, cdomain) == 0) ||
-                        g_ascii_strcasecmp(host, cdomain + 1) == 0;
-            } else {
-                match = g_ascii_strcasecmp(host, cdomain) == 0;
-            }
-            if (match && cpath && *cpath) {
-                gsize cl = strlen(cpath);
-                if (!g_str_has_prefix(path, cpath))
-                    match = FALSE;
-                else if (path[cl] != '\0' && path[cl] != '/' &&
-                         cpath[cl - 1] != '/')
-                    match = FALSE;
-            }
-            if (match && csecure && !is_https) match = FALSE;
-            if (match && cexpiry != 0 && cexpiry < now) match = FALSE;
-            if (match && ns_cookie_samesite_excluded(levels, cdomain, cpath,
-                                                     cname, samesite_cross))
-                match = FALSE;
-            if (match && cname && *cname) {
-                if (!g_hash_table_contains(vals, cname))
-                    g_ptr_array_add(order, g_strdup(cname));
-                g_hash_table_replace(vals, g_strdup(cname),
-                                     g_strdup(cval ? cval : ""));
-            }
-            g_strfreev(f);
-        }
-        if (levels) g_hash_table_unref(levels);
-        g_strfreev(lines);
-        g_free(contents);
-    }
-
-    GString *out = g_string_new(NULL);
-    for (guint i = 0; i < order->len; i++) {
-        const char *nm = g_ptr_array_index(order, i);
-        const char *vv = g_hash_table_lookup(vals, nm);
-        if (out->len) g_string_append(out, "; ");
-        g_string_append(out, nm);
-        g_string_append_c(out, '=');
-        g_string_append(out, vv ? vv : "");
-    }
-    g_ptr_array_free(order, TRUE);
-    g_hash_table_destroy(vals);
-    if (out->len == 0) return g_string_free(out, TRUE), NULL;
-    return g_string_free(out, FALSE);
 }
 
 static char *
@@ -1754,9 +1507,15 @@ ns_net_cookies_for_js(const char *url, const char *top_url)
 {
     g_autofree char *site = ns_cookie_js_partition(url, top_url);
     if (!site || !*site) return NULL;
-    g_autofree char *jar_path = ns_net_cookie_path_for_partition(site);
-    g_autofree char *js_path  = ns_net_cookie_js_path_for_partition(site);
-    return ns_cookie_collect(url, jar_path, js_path, FALSE, 0);
+    return ns_cookie_store_header(site, url, 0, FALSE);
+}
+
+char *
+ns_net_cookies_json_for_js(const char *url, const char *top_url)
+{
+    g_autofree char *site = ns_cookie_js_partition(url, top_url);
+    if (!site || !*site) return g_strdup("[]");
+    return ns_cookie_store_visible_json(site, url);
 }
 
 void
@@ -1781,374 +1540,11 @@ ns_net_curl_apply_cookies(void *curl_handle, const char *url,
     const char *partition_key = (site && *site) ? site
                               : (top_origin ? top_origin : "");
     if (!*partition_key) return;
-    g_autofree char *jar_path = ns_net_cookie_path_for_partition(partition_key);
-    g_autofree char *js_path = ns_net_cookie_js_path_for_partition(partition_key);
-#ifdef NS_CURL_HAVE_COOKIE_SITE
-    g_autofree char *curl_site = ns_net_curl_site_from(origin);
-    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, jar_path);
-    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, js_path);
-    if (curl_site && *curl_site)
-        curl_easy_setopt(curl, CURLOPT_COOKIE_SITE, curl_site);
-#else
-    g_autofree char *cookie = ns_cookie_collect(url, jar_path, js_path, TRUE,
-                                                ns_url_is_same_site(url, origin)
-                                                    ? 0 : 2);
+    int samesite_cross = ns_url_is_same_site(url, origin) ? 0 : 2;
+    g_autofree char *cookie = ns_cookie_store_header(partition_key, url,
+                                                     samesite_cross, TRUE);
     if (cookie && *cookie)
         curl_easy_setopt(curl, CURLOPT_COOKIE, cookie);
-#endif
-}
-
-static char *
-ns_net_cookies_for_request(const char *url, const char *jar_path,
-                           const char *js_path, int samesite_cross)
-{
-    return ns_cookie_collect(url, jar_path, js_path, TRUE, samesite_cross);
-}
-
-static gboolean
-ns_cookie_jar_has_httponly(const char *jar_path, const char *domain,
-                           const char *path, const char *name, gint64 now)
-{
-    char *contents = NULL;
-    if (!jar_path || !g_file_get_contents(jar_path, &contents, NULL, NULL))
-        return FALSE;
-    gboolean found = FALSE;
-    char **lines = g_strsplit(contents, "\n", -1);
-    for (int i = 0; lines[i] && !found; i++) {
-        if (!g_str_has_prefix(lines[i], "#HttpOnly_")) continue;
-        char **f = g_strsplit(lines[i] + strlen("#HttpOnly_"), "\t", 7);
-        int nf = 0;
-        while (f[nf]) nf++;
-        if (nf >= 7) {
-            gint64 expiry = g_ascii_strtoll(f[4], NULL, 10);
-            found = g_ascii_strcasecmp(f[0], domain) == 0 &&
-                    strcmp(f[2], path) == 0 &&
-                    strcmp(f[5], name) == 0 &&
-                    (expiry == 0 || expiry >= now);
-        }
-        g_strfreev(f);
-    }
-    g_strfreev(lines);
-    g_free(contents);
-    return found;
-}
-
-static GMutex ns_cookie_write_mutex;
-static gint ns_cookie_writes;
-
-static int
-ns_cookie_jars_lock(void)
-{
-    g_autofree char *path = g_build_filename(ns_net_cookie_dir(), ".lock", NULL);
-    int fd = g_open(path, O_RDWR | O_CREAT, 0600);
-    if (fd < 0) return -1;
-#ifdef G_OS_WIN32
-    OVERLAPPED whole = {0};
-    if (!LockFileEx((HANDLE)_get_osfhandle(fd), LOCKFILE_EXCLUSIVE_LOCK, 0,
-                    1, 0, &whole)) {
-        close(fd);
-        return -1;
-    }
-#else
-    if (flock(fd, LOCK_EX) != 0) {
-        close(fd);
-        return -1;
-    }
-#endif
-    return fd;
-}
-
-static void
-ns_cookie_jars_unlock(int fd)
-{
-    if (fd < 0) return;
-#ifdef G_OS_WIN32
-    OVERLAPPED whole = {0};
-    UnlockFileEx((HANDLE)_get_osfhandle(fd), 0, 1, 0, &whole);
-#endif
-    close(fd);
-}
-
-gboolean
-ns_net_cookie_jar_version(const char *url, const char *top_url,
-                          guint64 *version)
-{
-    if (!url) return FALSE;
-    g_autofree char *site = ns_cookie_js_partition(url, top_url);
-    if (!site) {
-        *version = G_MAXUINT64;
-        return TRUE;
-    }
-    if (!*site) return FALSE;
-    g_autofree char *jar_path = ns_net_cookie_path_for_partition(site);
-    g_autofree char *js_path = ns_net_cookie_js_path_for_partition(site);
-    guint64 v = (guint64)(guint)g_atomic_int_get(&ns_cookie_writes) + 1;
-    const char *paths[] = { jar_path, js_path };
-    for (gsize i = 0; i < G_N_ELEMENTS(paths); i++) {
-        GStatBuf st;
-        if (g_stat(paths[i], &st) != 0) continue;
-        v = v * 1000003u ^ (guint64)st.st_size;
-        v = v * 1000003u ^ (guint64)st.st_mtime;
-#if defined(__linux__)
-        v = v * 1000003u ^ (guint64)st.st_mtim.tv_nsec;
-#endif
-    }
-    *version = v ? v : 1;
-    return TRUE;
-}
-
-static void
-ns_cookie_store_impl(const char *url, const char *partition_site,
-                     const char *cookie, gboolean from_http,
-                     const char *jar_override)
-{
-    if (!url || !*url || !cookie) return;
-    if (!g_str_has_prefix(url, "http://") && !g_str_has_prefix(url, "https://"))
-        return;
-    for (const char *c = cookie; *c; c++)
-        if ((unsigned char)*c < 0x20) return;
-    g_autoptr(ns_url_parts) parts = ns_url_parts_new(url);
-    if (!parts || !parts->hostname || !*parts->hostname) return;
-
-    const char *semi = strchr(cookie, ';');
-    const char *pair_end = semi ? semi : cookie + strlen(cookie);
-    const char *eq = memchr(cookie, '=', (gsize)(pair_end - cookie));
-    if (!eq || eq == cookie) return;
-    const char *name = cookie;
-    gsize name_len = (gsize)(eq - cookie);
-    const char *value = eq + 1;
-    gsize value_len = (gsize)(pair_end - value);
-    while (name_len && (name[0] == ' ' || name[0] == '\t')) { name++; name_len--; }
-    while (name_len && (name[name_len - 1] == ' ' || name[name_len - 1] == '\t'))
-        name_len--;
-    while (value_len && (value[0] == ' ' || value[0] == '\t')) { value++; value_len--; }
-    while (value_len && (value[value_len - 1] == ' ' || value[value_len - 1] == '\t'))
-        value_len--;
-    if (name_len == 0) return;
-
-    char *domain_attr = NULL, *path_attr = NULL;
-    gboolean secure = FALSE, has_expiry = FALSE, expired = FALSE;
-    gboolean httponly = FALSE;
-    int samesite = NS_COOKIE_SAMESITE_LAX;
-    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
-    gint64 expiry = 0;
-    for (const char *p = semi; p && *p; ) {
-        while (*p == ';' || *p == ' ' || *p == '\t') p++;
-        if (!*p) break;
-        const char *e = strchr(p, ';');
-        gsize alen = e ? (gsize)(e - p) : strlen(p);
-        while (alen && (p[alen - 1] == ' ' || p[alen - 1] == '\t')) alen--;
-        const char *aeq = memchr(p, '=', alen);
-        gsize klen = aeq ? (gsize)(aeq - p) : alen;
-        const char *av = aeq ? aeq + 1 : NULL;
-        gsize avlen = aeq ? (gsize)(p + alen - av) : 0;
-        while (avlen && (av[0] == ' ' || av[0] == '\t')) { av++; avlen--; }
-        if (klen == 6 && g_ascii_strncasecmp(p, "secure", 6) == 0) {
-            secure = TRUE;
-        } else if (klen == 8 && g_ascii_strncasecmp(p, "httponly", 8) == 0) {
-            httponly = TRUE;
-        } else if (klen == 8 && g_ascii_strncasecmp(p, "samesite", 8) == 0 && aeq) {
-            if (avlen == 4 && g_ascii_strncasecmp(av, "none", 4) == 0)
-                samesite = NS_COOKIE_SAMESITE_NONE;
-            else if (avlen == 6 && g_ascii_strncasecmp(av, "strict", 6) == 0)
-                samesite = NS_COOKIE_SAMESITE_STRICT;
-            else
-                samesite = NS_COOKIE_SAMESITE_LAX;
-        } else if (klen == 7 && g_ascii_strncasecmp(p, "max-age", 7) == 0 && aeq) {
-            g_autofree char *tmp = g_strndup(av, avlen);
-            char *end = NULL;
-            gint64 ma = g_ascii_strtoll(tmp, &end, 10);
-            if (end != tmp) {
-                has_expiry = TRUE;
-                expired = ma <= 0;
-                if (ma > 0) expiry = now + ma;
-            }
-        } else if (klen == 7 && g_ascii_strncasecmp(p, "expires", 7) == 0 && aeq &&
-                   !has_expiry) {
-            g_autofree char *tmp = g_strndup(av, avlen);
-            time_t t = curl_getdate(tmp, NULL);
-            if (t != (time_t)-1) {
-                has_expiry = TRUE;
-                expiry = (gint64)t;
-                if (expiry <= now) expired = TRUE;
-            }
-        } else if (klen == 6 && g_ascii_strncasecmp(p, "domain", 6) == 0 && aeq) {
-            g_free(domain_attr);
-            domain_attr = g_strndup(av, avlen);
-        } else if (klen == 4 && g_ascii_strncasecmp(p, "path", 4) == 0 && aeq) {
-            g_free(path_attr);
-            path_attr = g_strndup(av, avlen);
-        }
-        if (!e) break;
-        p = e + 1;
-    }
-
-    gboolean is_https = parts->protocol &&
-                        g_ascii_strcasecmp(parts->protocol, "https:") == 0;
-    if (secure && !is_https) { g_free(domain_attr); g_free(path_attr); return; }
-
-    if (name_len >= 9 && g_ascii_strncasecmp(name, "__Secure-", 9) == 0 &&
-        !(secure && is_https)) {
-        g_free(domain_attr); g_free(path_attr); return;
-    }
-    if (name_len >= 7 && g_ascii_strncasecmp(name, "__Host-", 7) == 0 &&
-        (!secure || !is_https || (domain_attr && *domain_attr) ||
-         (path_attr && *path_attr && strcmp(path_attr, "/") != 0))) {
-        g_free(domain_attr); g_free(path_attr); return;
-    }
-
-    const char *host = parts->hostname;
-    char *file_domain;
-    const char *tail;
-    if (domain_attr && *domain_attr) {
-        const char *d = domain_attr[0] == '.' ? domain_attr + 1 : domain_attr;
-        gsize dl = strlen(d), hl = strlen(host);
-        gboolean ok = g_ascii_strcasecmp(host, d) == 0 ||
-                      (!g_hostname_is_ip_address(host) &&
-                       hl > dl && host[hl - dl - 1] == '.' &&
-                       g_ascii_strcasecmp(host + hl - dl, d) == 0);
-        if (!ok || !dl) { g_free(domain_attr); g_free(path_attr); return; }
-        g_autofree char *d_lower = g_ascii_strdown(d, -1);
-        const psl_ctx_t *psl = psl_builtin();
-        if (psl && psl_is_public_suffix(psl, d_lower)) {
-            g_free(domain_attr); g_free(path_attr); return;
-        }
-        file_domain = g_strconcat(".", d, NULL);
-        tail = "TRUE";
-    } else {
-        file_domain = g_strdup(host);
-        tail = "FALSE";
-    }
-    g_autofree char *default_path = NULL;
-    const char *path;
-    if (path_attr && path_attr[0] == '/') {
-        path = path_attr;
-    } else {
-        const char *request_path = parts->pathname;
-        const char *last_slash = request_path ? strrchr(request_path, '/') : NULL;
-        default_path = !last_slash || last_slash == request_path
-            ? g_strdup("/")
-            : g_strndup(request_path, (gsize)(last_slash - request_path));
-        path = default_path;
-    }
-
-    g_autofree char *site = partition_site ? g_strdup(partition_site)
-                                           : ns_url_site_from(url);
-    if (!site || !*site) {
-        g_free(file_domain); g_free(domain_attr); g_free(path_attr);
-        return;
-    }
-    g_autofree char *jar_path = jar_override ? g_strdup(jar_override)
-        : from_http ? ns_net_cookie_path_for_partition(site)
-        : ns_net_cookie_js_path_for_partition(site);
-    g_autofree char *name_dup = g_strndup(name, name_len);
-    g_mutex_lock(&ns_cookie_write_mutex);
-    int jars_lock = ns_cookie_jars_lock();
-    if (!from_http) {
-        g_autofree char *http_jar_path = ns_net_cookie_path_for_partition(site);
-        if (httponly ||
-            ns_cookie_jar_has_httponly(http_jar_path, file_domain, path,
-                                       name_dup, now)) {
-            ns_cookie_jars_unlock(jars_lock);
-            g_mutex_unlock(&ns_cookie_write_mutex);
-            g_free(file_domain); g_free(domain_attr); g_free(path_attr);
-            return;
-        }
-    }
-
-    char *contents = NULL;
-    g_file_get_contents(jar_path, &contents, NULL, NULL);
-    GString *out = g_string_new(NULL);
-    gboolean blocked_httponly = FALSE;
-    char *attrs = NULL;
-    if (contents) {
-        char **lines = g_strsplit(contents, "\n", -1);
-        for (int i = 0; lines[i]; i++) {
-            char *line = lines[i];
-            if (!*line) continue;
-            if (g_str_has_prefix(line, "#curl:")) {
-                g_free(attrs);
-                attrs = g_strdup(line);
-                continue;
-            }
-            if (line[0] == '#') {
-                gboolean drop = FALSE;
-                if (g_str_has_prefix(line, "#HttpOnly_")) {
-                    char **hf = g_strsplit(line + 10, "\t", 7);
-                    int hn = 0;
-                    while (hf[hn]) hn++;
-                    gboolean match = hn >= 7 &&
-                        g_ascii_strcasecmp(hf[0], file_domain) == 0 &&
-                        strcmp(hf[2], path) == 0 &&
-                        strcmp(hf[5], name_dup) == 0;
-                    g_strfreev(hf);
-                    if (match) {
-                        if (from_http) drop = TRUE;
-                        else blocked_httponly = TRUE;
-                    }
-                }
-                if (!drop) {
-                    if (attrs && g_str_has_prefix(line, "#HttpOnly_")) {
-                        g_string_append(out, attrs);
-                        g_string_append_c(out, '\n');
-                    }
-                    g_string_append(out, line);
-                    g_string_append_c(out, '\n');
-                }
-                g_clear_pointer(&attrs, g_free);
-                continue;
-            }
-            char **f = g_strsplit(line, "\t", 7);
-            int nf = 0;
-            while (f[nf]) nf++;
-            if (nf < 7) { g_strfreev(f); g_clear_pointer(&attrs, g_free); continue; }
-            gint64 cexp = g_ascii_strtoll(f[4], NULL, 10);
-            gboolean dup = g_ascii_strcasecmp(f[0], file_domain) == 0 &&
-                           strcmp(f[2], path) == 0 &&
-                           strcmp(f[5], name_dup) == 0;
-            gboolean dead = cexp != 0 && cexp < now;
-            if (!dup && !dead) {
-                if (attrs) {
-                    g_string_append(out, attrs);
-                    g_string_append_c(out, '\n');
-                }
-                g_string_append(out, line);
-                g_string_append_c(out, '\n');
-            }
-            g_clear_pointer(&attrs, g_free);
-            g_strfreev(f);
-        }
-        g_strfreev(lines);
-        g_free(contents);
-    }
-    g_free(attrs);
-    if (!expired && !blocked_httponly) {
-        g_autofree char *vdup = g_strndup(value, value_len);
-        const char *samesite_name =
-            samesite == NS_COOKIE_SAMESITE_NONE ? "None"
-            : samesite == NS_COOKIE_SAMESITE_STRICT ? "Strict" : NULL;
-        if (samesite_name)
-            g_string_append_printf(out, "#curl: SameSite=%s\n", samesite_name);
-        g_string_append_printf(out,
-            "%s%s\t%s\t%s\t%s\t%" G_GINT64_FORMAT "\t%s\t%s\n",
-            (from_http && httponly) ? "#HttpOnly_" : "",
-            file_domain, tail, path, secure ? "TRUE" : "FALSE",
-            expiry, name_dup, vdup);
-    }
-    if (g_file_set_contents_full(jar_path, out->str, out->len,
-                                 G_FILE_SET_CONTENTS_CONSISTENT |
-                                 G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, NULL))
-        g_chmod(jar_path, 0600);
-    if (!blocked_httponly)
-        ns_cookie_samesite_record(jar_path, file_domain, path, name_dup,
-                                  samesite, expired);
-    g_atomic_int_inc(&ns_cookie_writes);
-    ns_cookie_jars_unlock(jars_lock);
-    g_mutex_unlock(&ns_cookie_write_mutex);
-    g_string_free(out, TRUE);
-    g_free(file_domain);
-    g_free(domain_attr);
-    g_free(path_attr);
 }
 
 void
@@ -2157,7 +1553,7 @@ ns_net_cookie_store_from_js(const char *url, const char *top_url,
 {
     g_autofree char *site = ns_cookie_js_partition(url, top_url);
     if (!site || !*site) return;
-    ns_cookie_store_impl(url, site, cookie, FALSE, NULL);
+    ns_cookie_store_set(site, url, cookie, FALSE);
 }
 
 static const char *
@@ -2432,7 +1828,10 @@ ns_net_init(void)
 
     ns_net_hsts_curl_path();
     ns_net_altsvc_path();
-    ns_net_cookie_dir();
+    if (ns_net_is_private())
+        ns_cookie_store_init(NULL, TRUE);
+    else
+        ns_cookie_store_init(ns_net_cookie_dir(), FALSE);
 }
 
 gboolean
@@ -2492,6 +1891,7 @@ ns_net_shutdown(void)
     g_accept_encoding = NULL;
     g_free(g_proxy_override);
     g_proxy_override = NULL;
+    ns_cookie_store_shutdown();
     g_free(g_cookie_dir);
     g_cookie_dir = NULL;
     g_free(g_hsts_curl_path);
@@ -3167,13 +2567,12 @@ static void
 ns_header_store_cookie(ns_header_ctx *hc, const char *line, size_t len)
 {
     char *url = NULL;
-    if (!hc->cookie_curl || !hc->cookie_jar_path ||
+    if (!hc->cookie_curl || !hc->cookie_partition ||
         curl_easy_getinfo(hc->cookie_curl, CURLINFO_EFFECTIVE_URL, &url) != CURLE_OK ||
         !url)
         return;
     g_autofree char *value = g_strndup(line + 11, len - 11);
-    ns_cookie_store_impl(url, NULL, g_strstrip(value), TRUE,
-                         hc->cookie_jar_path);
+    ns_cookie_store_set(hc->cookie_partition, url, g_strstrip(value), TRUE);
 }
 
 #define NS_EARLY_HINTS_MAX_LINKS 32
@@ -5212,6 +4611,11 @@ static const char k_about_settings_html[] =
 "gap:20px;padding:16px 0}\n"
 "#custom_wrap[hidden]{display:none}\n"
 ".save-row{display:flex;justify-content:flex-end;padding:14px 0}\n"
+".site-row{display:flex;align-items:center;justify-content:space-between;"
+"gap:20px;padding:12px 0}\n"
+".site-row .lbl{word-break:break-all}\n"
+".btn.small{height:32px;padding:0 14px;font-size:13px}\n"
+".empty{padding:14px 0}\n"
 ".toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);"
 "padding:10px 18px;border-radius:999px;background:var(--text);"
 "color:var(--bg);font-size:13.5px;font-weight:600;"
@@ -5235,6 +4639,11 @@ static const char k_about_settings_html[] =
     "<rect x=\"2.25\" y=\"2.75\" width=\"11.5\" height=\"10.5\""
     " rx=\"2\"/><path d=\"M2.25 6h11.5\"/>")
     "Content</a>"
+"<a href=\"#cookies\">" SETTINGS_NAV_ICON(
+    "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/>"
+    "<circle cx=\"6\" cy=\"6.5\" r=\".6\"/><circle cx=\"9.5\" cy=\"9.5\" r=\".6\"/>"
+    "<circle cx=\"6.5\" cy=\"10\" r=\".6\"/>")
+    "Cookies</a>"
 "<a href=\"#data\">" SETTINGS_NAV_ICON(
     "<path d=\"M3.25 4.5h9.5M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.75h5.8l.6-8.75\"/>")
     "Browsing data</a></nav>\n"
@@ -5300,6 +4709,13 @@ SETTINGS_SWITCH("cache_enabled",
 "cache and site storage on this device.</span></span>"
 "<button id=\"clear\" class=\"btn danger\">Clear data</button></div>"
 "</div></section>\n"
+"<section id=\"cookies\"><h2>Cookies</h2><div class=\"card\">"
+"<div class=\"danger-row\"><span class=\"txt\"><span class=\"lbl\">"
+"Cookies by site</span><span class=\"desc\">Cookies are kept per "
+"top-level site. Remove the cookies of one site, or all of them.</span>"
+"</span><button id=\"cookies_clear\" class=\"btn danger\">Remove all"
+"</button></div><div id=\"cookie_sites\"></div>"
+"</div></section>\n"
 "</main></div>\n"
 "<div class=\"toast\" id=\"status\" role=\"status\"></div>\n"
 "<script>\n"
@@ -5353,8 +4769,25 @@ SETTINGS_SWITCH("cache_enabled",
 "$('save').onclick=saveGeneral;\n"
 "$('clear').onclick=function(){var b=$('clear');b.disabled=true;"
 "fetch('about:settings-clear',{method:'POST'}).then(function(){"
-"b.textContent='Cleared';toast('Browsing data cleared');});};\n"
-"load();\n"
+"b.textContent='Cleared';toast('Browsing data cleared');loadCookies();});};\n"
+"function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;"
+"if(text!=null)e.textContent=text;return e;}\n"
+"function removeCookies(site){fetch('about:settings-cookies-delete',{method:'POST',"
+"headers:{'Content-Type':'application/x-www-form-urlencoded'},"
+"body:enc({site:site})}).then(function(){"
+"toast(site?'Cookies removed for '+site:'All cookies removed');loadCookies();});}\n"
+"function loadCookies(){fetch('about:settings-cookies').then(function(r){"
+"return r.json();}).then(function(list){var box=$('cookie_sites');box.textContent='';"
+"$('cookies_clear').disabled=!list.length;"
+"if(!list.length){box.appendChild(el('div','desc empty','No cookies are stored.'));return;}"
+"list.forEach(function(s){var row=el('div','site-row');var txt=el('span','txt');"
+"txt.appendChild(el('span','lbl',s.site));"
+"txt.appendChild(el('span','desc',s.count+(s.count===1?' cookie':' cookies')));"
+"var b=el('button','btn small','Remove');b.type='button';"
+"b.onclick=function(){b.disabled=true;removeCookies(s.site);};"
+"row.appendChild(txt);row.appendChild(b);box.appendChild(row);});});}\n"
+"$('cookies_clear').onclick=function(){removeCookies('');};\n"
+"load();loadCookies();\n"
 "</script></body></html>";
 
 static gboolean
@@ -5470,6 +4903,20 @@ about_settings_save(const char *form)
     ns_config_save(NULL);
     ns_config_unlock();
     g_hash_table_destroy(q);
+}
+
+static void
+about_settings_cookies_delete(const char *form)
+{
+    GHashTable *q = form && *form
+        ? g_uri_parse_params(form, -1, "&", G_URI_PARAMS_WWW_FORM, NULL)
+        : NULL;
+    const char *site = q ? g_hash_table_lookup(q, "site") : NULL;
+    if (site && *site)
+        ns_cookie_store_clear_site(site);
+    else
+        ns_cookie_store_clear();
+    if (q) g_hash_table_destroy(q);
 }
 
 static void
@@ -5655,6 +5102,15 @@ synthesize_about_response(const char *url, const char *top_url,
             about_settings_clear();
         about_emit_json(resp, g_strdup(post ? "{\"ok\":true}"
                                             : "{\"ok\":false}"));
+    } else if (g_str_has_prefix(what, "settings-cookies-delete")) {
+        char *form = about_request_form(method, req_body, req_body_len);
+        gboolean ok = form != NULL;
+        if (ok) about_settings_cookies_delete(form);
+        g_free(form);
+        about_emit_json(resp, g_strdup(ok ? "{\"ok\":true}"
+                                          : "{\"ok\":false}"));
+    } else if (g_str_has_prefix(what, "settings-cookies")) {
+        about_emit_json(resp, ns_cookie_store_sites_json());
     } else {
         const char *body = "<!doctype html><title>Nordstjernen</title>";
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
@@ -6122,39 +5578,16 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
     ns_net_apply_curl_tls(curl);
 
-#ifdef NS_CURL_HAVE_COOKIE_SITE
-    if (req->cookie_jar_path) {
-        curl_easy_setopt(curl, CURLOPT_COOKIEFILE, req->cookie_jar_path);
-        if (req->cookie_js_path)
-            curl_easy_setopt(curl, CURLOPT_COOKIEFILE, req->cookie_js_path);
-        if (req->cookie_site && *req->cookie_site)
-            curl_easy_setopt(curl, CURLOPT_COOKIE_SITE, req->cookie_site);
-        curl_easy_setopt(curl, CURLOPT_COOKIE_CONTEXT,
-                         req->cookie_navigation ? (long)CURLCOOKIE_NAVIGATION
-                                                : 0L);
+    if (req->cookie_partition) {
+        g_autofree char *cookie = ns_cookie_store_header(req->cookie_partition,
+                                                         req->url,
+                                                         req->samesite_cross,
+                                                         TRUE);
+        if (cookie && *cookie)
+            curl_easy_setopt(curl, CURLOPT_COOKIE, cookie);
         hctx->cookie_curl = curl;
-        hctx->cookie_jar_path = req->cookie_jar_path;
+        hctx->cookie_partition = req->cookie_partition;
     }
-#else
-    if (req->cookie_jar_path && req->samesite_cross > 0) {
-        char *cookie = ns_net_cookies_for_request(req->url, req->cookie_jar_path,
-                                                  req->cookie_js_path,
-                                                  req->samesite_cross);
-        if (cookie && *cookie && req->headers) {
-            g_autofree char *line = g_strdup_printf("Cookie: %s", cookie);
-            curl_slist_append(req->headers, line);
-        }
-        g_free(cookie);
-        hctx->cookie_curl = curl;
-        hctx->cookie_jar_path = req->cookie_jar_path;
-    } else if (req->cookie_jar_path) {
-        curl_easy_setopt(curl, CURLOPT_COOKIEFILE, req->cookie_jar_path);
-        if (req->cookie_js_path)
-            curl_easy_setopt(curl, CURLOPT_COOKIEFILE, req->cookie_js_path);
-        hctx->cookie_curl = curl;
-        hctx->cookie_jar_path = req->cookie_jar_path;
-    }
-#endif
 #ifdef NS_CURL_HAVE_PRIORITY
     if (req->priority_urgency >= 0)
         curl_easy_setopt(curl, CURLOPT_PRIORITY_URGENCY,
@@ -6218,9 +5651,8 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
             errbuf[0] = '\0';
             curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
             curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-            curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");
-            curl_easy_setopt(curl, CURLOPT_COOKIELIST, "ALL");
-            hctx->cookie_jar_path = NULL;
+            curl_easy_setopt(curl, CURLOPT_COOKIE, NULL);
+            hctx->cookie_partition = NULL;
             rc = ns_net_multi_perform(curl, cancellable);
             if (rc == CURLE_OK)
                 out->tls_warning = warn;
@@ -6231,7 +5663,8 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
     }
 
     hctx->cookie_curl = NULL;
-    hctx->cookie_jar_path = NULL;
+    hctx->cookie_partition = NULL;
+    if (hctx->set_cookie_seen) ns_cookie_store_flush_soon();
 
     if (rc == CURLE_ABORTED_BY_CALLBACK && cancellable &&
         g_cancellable_is_cancelled(cancellable)) {
@@ -6678,20 +6111,16 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     if (cookies_allowed && same_site_ref && *same_site_ref &&
         !ns_url_is_same_site(url, same_site_ref))
         samesite_cross = is_navigation && is_simple_get(method) ? 1 : 2;
-    char *cookie_partition_path = cookies_allowed
-        ? ns_net_cookie_path_for_partition(partition_key) : NULL;
-    g_autofree char *cookie_site = (cookies_allowed && same_site_ref &&
-                                    *same_site_ref)
-        ? ns_net_curl_site_from(same_site_ref) : NULL;
+    const char *cookie_partition = cookies_allowed ? partition_key : NULL;
     int priority_urgency = -1;
     gboolean priority_incremental = FALSE;
     ns_net_priority_for(ns_net_fetch_destination(extra_headers),
                         is_navigation, &priority_urgency,
                         &priority_incremental);
     if (getenv("NS_NET_LOG"))
-        fprintf(stderr, "NS_NET cookie_site=%s nav=%d jar=%d u=%d i=%d %s\n",
-                cookie_site ? cookie_site : "(none)", is_navigation,
-                cookie_partition_path != NULL, priority_urgency,
+        fprintf(stderr, "NS_NET cookies=%s nav=%d samesite_cross=%d u=%d i=%d %s\n",
+                cookie_partition ? cookie_partition : "(none)", is_navigation,
+                samesite_cross, priority_urgency,
                 priority_incremental, url);
 
     gboolean streams_to_disk = g_hop_stream && g_hop_stream->discard_body;
@@ -6714,7 +6143,6 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                 ns_response *from_cache = response_from_cache_entry(cached);
                 ns_cache_entry_free(cached);
                 g_free(cache_partition);
-                g_free(cookie_partition_path);
                 g_free(top_origin);
                 g_free(top_site);
                 g_free(hsts_upgraded);
@@ -6735,7 +6163,6 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             g_free(origin_slot);
             g_free(referer);
             g_free(cache_partition);
-            g_free(cookie_partition_path);
             g_free(top_origin);
             g_free(top_site);
             g_free(hsts_upgraded);
@@ -6936,9 +6363,6 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     header_ctx.early_hints = is_navigation && request_http && is_simple_get(method);
 
     gboolean initial_https = g_str_has_prefix(url, "https://");
-    char *cookie_js_path = cookie_partition_path
-        ? ns_net_cookie_js_path_for_partition(partition_key) : NULL;
-
     ns_hop_req req = {
         .url = url,
         .method = method,
@@ -6954,11 +6378,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         .connect_timeout_s = is_navigation ? 15L : 6L,
         .proxy = ns_net_pick_configured_proxy(url),
         .no_proxy = ns_net_configured_no_proxy(),
-        .cookie_jar_path = cookie_partition_path,
-        .cookie_js_path = cookie_js_path,
+        .cookie_partition = cookie_partition,
         .samesite_cross = samesite_cross,
-        .cookie_site = cookie_site,
-        .cookie_navigation = is_navigation,
         .top_level_navigation = is_navigation,
         .priority_urgency = priority_urgency,
         .priority_incremental = priority_incremental,
@@ -6974,7 +6395,6 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     double fetch_start_real_ms = (double)g_get_real_time() / 1000.0;
     gboolean produced = ns_hop_transport(&req, &write_ctx, &header_ctx, &out,
                                          cancellable);
-    g_free(cookie_js_path);
 
     if (!produced) {
         if (out.cancelled)
@@ -7002,7 +6422,6 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         g_free(origin_slot);
         g_free(referer);
         g_free(cache_partition);
-        g_free(cookie_partition_path);
         g_free(top_origin);
         g_free(top_site);
         g_free(hsts_upgraded);
@@ -7113,7 +6532,6 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     }
     g_free(referer);
     g_free(cache_partition);
-    g_free(cookie_partition_path);
     g_free(top_origin);
     g_free(top_site);
 
