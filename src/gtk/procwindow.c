@@ -1951,6 +1951,13 @@ on_address_key_pressed(GtkEventControllerKey *controller, guint keyval,
     (void)controller;
     (void)keycode;
     ProcWindow *pw = ud;
+    if (keyval == GDK_KEY_Escape) {
+        NsProcView *v = current_view(pw);
+        set_address_text(pw, v ? ns_proc_view_display_url(v) : "");
+        if (v)
+            ns_proc_view_focus(v);
+        return TRUE;
+    }
     if (keyval != GDK_KEY_Return && keyval != GDK_KEY_KP_Enter)
         return FALSE;
     gboolean ctrl  = (state & GDK_CONTROL_MASK) != 0;
@@ -2311,26 +2318,6 @@ act_focus_address(GSimpleAction *a, GVariant *p, gpointer ud)
     ProcWindow *pw = ud;
     gtk_widget_grab_focus(pw->address);
     gtk_editable_select_region(GTK_EDITABLE(pw->address), 0, -1);
-}
-
-static void
-act_focus_page(GSimpleAction *a, GVariant *p, gpointer ud)
-{
-    (void)a;
-    (void)p;
-    ProcWindow *pw = ud;
-    NsProcView *v = current_view(pw);
-    GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(pw->window));
-    gboolean editing_address = focus && pw->address &&
-        (focus == pw->address || gtk_widget_is_ancestor(focus, pw->address));
-    if (editing_address)
-        set_address_text(pw, v ? ns_proc_view_display_url(v) : "");
-    else if (ns_proc_view_find_close(v))
-        return;
-    else if (v && ns_proc_view_is_loading(v))
-        ns_proc_view_stop(v);
-    if (v)
-        ns_proc_view_focus(v);
 }
 
 static void
@@ -2911,8 +2898,6 @@ install_shortcuts(ProcWindow *pw)
                    (const char *[]){ "<Ctrl>w", NULL });
     install_action(pw, "focus-address", G_CALLBACK(act_focus_address),
                    (const char *[]){ "<Ctrl>l", NULL });
-    install_action(pw, "focus-page", G_CALLBACK(act_focus_page),
-                   (const char *[]){ "Escape", NULL });
     install_action(pw, "zoom-in", G_CALLBACK(act_zoom_in),
                    (const char *[]){ "<Ctrl>plus", "<Ctrl>equal",
                                      "<Ctrl>KP_Add", NULL });

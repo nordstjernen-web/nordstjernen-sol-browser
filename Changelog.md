@@ -3,6 +3,12 @@ Changelog:
 
 1.0.43-dev:
 ======
+* Keyboard: Escape reaches the page. The window registered Escape as an
+  application shortcut, which GTK fires before the focused widget sees
+  the key, so a page never received it (the LibreQuake menu on
+  qwasm.m-h.org.uk could not be opened). The address bar now handles its
+  own Escape (restore the URL and focus the page), the find bar already
+  closes itself, and every other Escape goes to the page.
 * Network: TLS now sends key shares for both X25519MLKEM768 and X25519 in
   the first ClientHello, as Chrome and stock OpenSSL do. The group list
   offered only the post-quantum share, so a server without ML-KEM had to
