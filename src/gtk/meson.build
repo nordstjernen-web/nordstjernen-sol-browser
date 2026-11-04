@@ -2,6 +2,7 @@ nordstjernen_gtk_sources = files(
   'appmain.c',
   'mcp.c',
   'pagelayers.c',
+  'permissions.c',
   'procview.c',
   'procwindow.c',
   'remotectl.c',

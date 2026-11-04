@@ -6,6 +6,18 @@ Changelog:
 * JavaScript: a bytecode cache hit hands out a reference to the cached
   entry instead of duplicating it, so loading YouTube's application script
   from the cache no longer allocates and copies a transient 32 MB buffer.
+* Permissions: camera/microphone and WebGL decisions are now kept by the
+  browser shell in one permission ledger shared by every tab
+  (`permissions.ini` in the config directory) instead of in each
+  renderer's memory, so they apply to all tabs and survive renderer and
+  browser restarts. Clicking the lock icon in the address bar opens
+  **Site permissions**, where each can be set to Ask, Allow or Block;
+  changes take effect immediately in every open tab: blocking the camera
+  ends live camera tracks, and blocking or unblocking WebGL reloads the
+  site's pages. "Not now" on the camera prompt denies for that tab only.
+  The sandboxed renderer no longer edits the global settings file when a
+  site is granted the camera or WebGL. Renderers receive decisions over
+  one generic `/permission` request.
 * Restyle performance: a `:has()` rule whose subject has no class, id or
   type to key on (YouTube has one) made every relevant DOM mutation
   restyle the whole document. Since such a rule's argument uses only

@@ -26,6 +26,8 @@ cairo_surface_t *ns_webgl_canvas_surface(const ns_node *canvas);
 
 char *ns_webgl_take_pending_origin(void);
 void  ns_webgl_set_decision(const char *origin, int allow);
+void  ns_webgl_set_state(const char *origin, int state);
+void  ns_webgl_clear_decisions(void);
 
 cairo_surface_t *ns_js_drawimage_source_surface(JSContext *ctx,
                                                 JSValueConst src,

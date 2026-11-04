@@ -7650,6 +7650,7 @@
             (function () {
                 var md = navigator.mediaDevices;
                 var pending = [];
+                var live = [];
 
                 function makeError(name, msg) {
                     var e;
@@ -7699,6 +7700,8 @@
                         stop: function () {
                             if (track.readyState === 'ended') return;
                             track.readyState = 'ended';
+                            var at = live.indexOf(track);
+                            if (at >= 0) live.splice(at, 1);
                             if (kind === 'video' &&
                                 typeof globalThis.__nd_camera_release === 'function')
                                 globalThis.__nd_camera_release();
@@ -7708,6 +7711,7 @@
                             track.dispatchEvent({ type: 'ended' });
                         }
                     };
+                    live.push(track);
                     return track;
                 }
 
@@ -7801,6 +7805,10 @@
                         }));
                     });
                 });
+
+                globalThis.__nd_camera_revoke = function () {
+                    live.slice().forEach(function (t) { t.stop(); });
+                };
 
                 globalThis.__nd_camera_resolve_pending = function (allow) {
                     var q = pending; pending = [];

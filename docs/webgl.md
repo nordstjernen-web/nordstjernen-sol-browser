@@ -22,15 +22,18 @@ The data-transfer entry points are bounds-checked and zero-initialised (see
 
 The first time a page calls `canvas.getContext("webgl")` (or `"webgl2"` /
 `"experimental-webgl"`), Nordstjernen creates the context immediately when
-WebGL is globally enabled. The origin is remembered for the session and sent
-to the GTK shell over the renderer IPC channel (`X-WebGL`). The shell shows
-no indicator for it, and there is no permission dialog.
+WebGL is globally enabled and the site is not blocked. There is no
+permission dialog.
 
 Turn off **Enable WebGL** on `about:settings` to make subsequent
-`getContext("webgl")` and `getContext("webgl2")` calls return `null`. Hosts
-embedding `libnordstjernen` can also use `ns_browser_resolve_webgl()` to deny
-or allow an origin for the current renderer session. The stock GTK browser
-automatically allows an origin's first use while the global setting is on.
+`getContext("webgl")` and `getContext("webgl2")` calls return `null`
+everywhere. To block a single site, click the lock icon in the address bar
+and set **WebGL (3D graphics)** to **Block**. The choice is stored in the
+shell's permission ledger (`permissions.ini` in the user config directory),
+applies to every tab, survives restarts, and reloads open pages of that site
+so the change takes effect at once. Hosts embedding `libnordstjernen` can use
+`ns_browser_set_permission()` (or the older `ns_browser_resolve_webgl()`) to
+allow or deny an origin for the current renderer.
 
 ## Config
 

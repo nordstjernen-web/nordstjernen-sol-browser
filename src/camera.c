@@ -4,7 +4,6 @@
 
 #include <string.h>
 
-#include "config.h"
 #include "image.h"
 #include "js.h"
 #include "net.h"
@@ -45,19 +44,45 @@ ns_camera_take_pending_origin(void)
 void
 ns_camera_set_decision(const char *origin, int allow)
 {
-    if (!origin || !*origin) return;
+    ns_camera_set_state(origin, allow ? NS_CAMERA_ALLOW : NS_CAMERA_DENY);
+}
+
+int
+ns_camera_set_state(const char *origin, int state)
+{
+    if (!origin || !*origin) return 0;
     g_mutex_lock(&g_camera_lock);
-    ns_camera_record_decision(origin, allow ? TRUE : FALSE);
-    if (g_camera_pending && g_strcmp0(g_camera_pending, origin) == 0)
+    gpointer prev = NULL;
+    gboolean was_pending = FALSE;
+    if (g_camera_decisions &&
+        g_hash_table_lookup_extended(g_camera_decisions, origin, NULL, &prev))
+        was_pending = GPOINTER_TO_INT(prev) == 3;
+    if (state == NS_CAMERA_ALLOW || state == NS_CAMERA_DENY)
+        ns_camera_record_decision(origin, state == NS_CAMERA_ALLOW);
+    else if (g_camera_decisions && !was_pending)
+        g_hash_table_remove(g_camera_decisions, origin);
+    if (state != NS_CAMERA_ASK && g_camera_pending &&
+        g_strcmp0(g_camera_pending, origin) == 0)
         g_clear_pointer(&g_camera_pending, g_free);
     g_mutex_unlock(&g_camera_lock);
-    if (allow) {
-        ns_config *cfg = ns_config_mut();
-        if (cfg && !cfg->camera_enabled) {
-            cfg->camera_enabled = TRUE;
-            ns_config_save(NULL);
-        }
-    }
+    return was_pending && state != NS_CAMERA_ASK;
+}
+
+static gboolean
+camera_decision_settled(gpointer key, gpointer value, gpointer user_data)
+{
+    (void)key; (void)user_data;
+    return GPOINTER_TO_INT(value) != 3;
+}
+
+void
+ns_camera_clear_decisions(void)
+{
+    g_mutex_lock(&g_camera_lock);
+    if (g_camera_decisions)
+        g_hash_table_foreach_remove(g_camera_decisions,
+                                    camera_decision_settled, NULL);
+    g_mutex_unlock(&g_camera_lock);
 }
 
 int

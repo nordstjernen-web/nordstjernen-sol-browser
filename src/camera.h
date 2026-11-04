@@ -34,6 +34,10 @@ int      ns_camera_permission(ns_js *js);
 char    *ns_camera_take_pending_origin(void);
 void     ns_camera_set_decision(const char *origin, int allow);
 
+enum { NS_CAMERA_ASK = 0, NS_CAMERA_ALLOW = 1, NS_CAMERA_DENY = 2 };
+int      ns_camera_set_state(const char *origin, int state);
+void     ns_camera_clear_decisions(void);
+
 G_END_DECLS
 
 #endif
