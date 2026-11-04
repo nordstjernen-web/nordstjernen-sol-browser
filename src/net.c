@@ -1814,7 +1814,7 @@ ns_net_init(void)
     if (vi && vi->ssl_version &&
         sscanf(vi->ssl_version, "OpenSSL/%u.%u", &ossl_major, &ossl_minor) == 2 &&
         (ossl_major > 3 || (ossl_major == 3 && ossl_minor >= 5)))
-        g_ec_curves = "X25519MLKEM768:X25519:P-256:P-384";
+        g_ec_curves = "*X25519MLKEM768:*X25519:P-256:P-384";
 
     g_free(g_accept_encoding);
     g_accept_encoding = g_strdup(ns_content_decode_accept_encoding());
