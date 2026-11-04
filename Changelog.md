@@ -3,6 +3,15 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Cookies: `docs/cookies-security-report.md` is a source review of the
+  cookie store and its callers. It records one high finding (SameSite is
+  not enforced on a navigation that reaches a cross-site target through a
+  redirect, because the redirect loop drops the top URL without carrying
+  an initiator), three medium ones (any hostname starting with `127.` is
+  a secure context; WebSocket and EventSource cookies are keyed by the
+  frame origin rather than the top-level site; a sandboxed iframe can
+  list its origin's cookies through `cookieStore`), and the low and
+  informational items, each with the code path and a suggested fix.
 * Cookies: a nameless cookie (`Set-Cookie: =value`) is rejected when its
   value starts with `__Secure-` or `__Host-` or contains `=`, since the
   `Cookie` header carries a nameless cookie as its bare value and script on
