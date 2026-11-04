@@ -6514,27 +6514,44 @@ static int
 clamp_i(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 static void
-box_blur_argb(guchar *data, int stride, int w, int h, int radius)
+box_blur_argb_rows(const guchar *src, guchar *dst, int stride, int w, int h,
+                   int radius, guint64 inv)
 {
-    if (radius < 1 || w < 1 || h < 1) return;
     int win = radius * 2 + 1;
-    guchar *tmp = g_malloc0((gsize)stride * h);
+    guint32 *ext = g_new(guint32, (gsize)w + win);
     for (int y = 0; y < h; y++) {
-        guchar *s = data + y * stride;
-        guchar *d = tmp + y * stride;
-        for (int c = 0; c < 4; c++) {
-            int sum = 0;
-            for (int i = -radius; i <= radius; i++)
-                sum += s[clamp_i(i, 0, w - 1) * 4 + c];
-            for (int x = 0; x < w; x++) {
-                d[x * 4 + c] = (guchar)(sum / win);
-                sum += s[clamp_i(x + radius + 1, 0, w - 1) * 4 + c]
-                     - s[clamp_i(x - radius, 0, w - 1) * 4 + c];
+        const guchar *s = src + (gsize)y * stride;
+        guchar *d = dst + (gsize)y * stride;
+        for (int i = 0; i < w + win; i++)
+            memcpy(&ext[i], s + clamp_i(i - radius, 0, w - 1) * 4, 4);
+        guint32 sum[4] = { 0, 0, 0, 0 };
+        for (int i = 0; i < win; i++) {
+            const guchar *p = (const guchar *)&ext[i];
+            for (int c = 0; c < 4; c++) sum[c] += p[c];
+        }
+        for (int x = 0; x < w; x++) {
+            const guchar *add = (const guchar *)&ext[x + win];
+            const guchar *sub = (const guchar *)&ext[x];
+            for (int c = 0; c < 4; c++) {
+                d[x * 4 + c] = (guchar)((sum[c] * inv) >> 32);
+                sum[c] += add[c];
+                sum[c] -= sub[c];
             }
         }
     }
+    g_free(ext);
+}
+
+static void
+box_blur_argb(guchar *data, int stride, int w, int h, int radius)
+{
+    if (radius < 1 || w < 1 || h < 1) return;
+    guint32 win = (guint32)radius * 2 + 1;
+    guint64 inv = ((G_GUINT64_CONSTANT(1) << 32) + win - 1) / win;
+    guchar *tmp = g_malloc((gsize)stride * h);
+    box_blur_argb_rows(data, tmp, stride, w, h, radius, inv);
     int row_bytes = w * 4;
-    int *sums = g_new0(int, row_bytes);
+    guint32 *sums = g_new0(guint32, row_bytes);
     for (int i = -radius; i <= radius; i++) {
         const guchar *row = tmp + (gsize)clamp_i(i, 0, h - 1) * stride;
         for (int x = 0; x < row_bytes; x++) sums[x] += row[x];
@@ -6544,8 +6561,9 @@ box_blur_argb(guchar *data, int stride, int w, int h, int radius)
         const guchar *add = tmp + (gsize)clamp_i(y + radius + 1, 0, h - 1) * stride;
         const guchar *sub = tmp + (gsize)clamp_i(y - radius, 0, h - 1) * stride;
         for (int x = 0; x < row_bytes; x++) {
-            d[x] = (guchar)(sums[x] / win);
-            sums[x] += add[x] - sub[x];
+            d[x] = (guchar)((sums[x] * inv) >> 32);
+            sums[x] += add[x];
+            sums[x] -= sub[x];
         }
     }
     g_free(sums);
