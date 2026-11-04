@@ -20427,7 +20427,8 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         }
         ns_abs_static *st = g_abs_static
             ? g_hash_table_lookup(g_abs_static, abs_entry_static_key(&e)) : NULL;
-        const ns_box *flex_parent = e.pseudo ? NULL
+        const ns_box *flex_parent = e.pseudo
+            ? g_hash_table_lookup(box_map, e.dom)
             : abs_flex_parent_box(e.dom, box_map);
         gboolean static_rtl = FALSE;
         double static_right = 0;
