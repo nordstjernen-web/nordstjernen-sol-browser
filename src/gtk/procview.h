@@ -36,6 +36,9 @@ typedef void (*NsProcNotify)(NsProcView *view, NsProcEvent evt,
                              const char *text, gpointer user_data);
 
 char *ns_proc_renderer_path(void);
+char *ns_proc_url_origin(const char *url);
+char *ns_proc_url_host(const char *url);
+gboolean ns_proc_url_same_origin(const char *a, const char *b);
 void  ns_proc_single_tab_enable(void);
 gboolean ns_proc_single_tab(void);
 
@@ -71,6 +74,7 @@ void        ns_proc_view_restore(NsProcView *view,
 void ns_proc_view_back(NsProcView *view);
 void ns_proc_view_forward(NsProcView *view);
 void ns_proc_view_reload(NsProcView *view);
+void ns_proc_view_clear_cache(NsProcView *view);
 void ns_proc_view_stop(NsProcView *view);
 void ns_proc_view_toggle_console(NsProcView *view);
 void ns_proc_view_exit_fullscreen(NsProcView *view);

@@ -3,6 +3,16 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Architecture: the GTK shell no longer links the browser engine. It links
+  a small `libns-platform` library (settings, i18n, debug log, sandbox,
+  history, bookmarks, the profile databases, address-bar helpers), and the
+  linker now enforces the boundary: `nordstjernen.exe` shrinks from
+  23.9 MB to 0.6 MB on Windows. The shell computes page origins and hosts
+  itself, the page-security enum, print geometry and the address-bar
+  helpers moved into shared headers, and "hard reload" now clears the HTTP
+  cache through the renderer (it used to call into an engine cache the
+  shell never opened, so it cleared nothing). Builds against GTK older
+  than 4.22 still link the engine for the shell's SVG icon fallback.
 * Architecture: `--single-process` no longer runs the engine inside the
   browser shell. The mode was already limited to one tab; that tab now
   gets an ordinary sandboxed renderer process, so the renderer sandbox,

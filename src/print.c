@@ -9,23 +9,9 @@
 
 #include "paint.h"
 
-#define NS_PRINT_A4_WIDTH  (210.0 * 96.0 / 25.4)
-#define NS_PRINT_A4_HEIGHT (297.0 * 96.0 / 25.4)
-#define NS_PRINT_MARGIN    (0.5 * 96.0)
 #define NS_PRINT_MAX_SPANS (1u << 20)
 
 typedef struct { double top, bottom; } ns_print_span;
-
-void
-ns_print_setup_default(ns_print_setup *setup)
-{
-    setup->width = NS_PRINT_A4_WIDTH;
-    setup->height = NS_PRINT_A4_HEIGHT;
-    setup->margin_top = NS_PRINT_MARGIN;
-    setup->margin_right = NS_PRINT_MARGIN;
-    setup->margin_bottom = NS_PRINT_MARGIN;
-    setup->margin_left = NS_PRINT_MARGIN;
-}
 
 void
 ns_print_setup_apply_page_rule(ns_print_setup *setup,

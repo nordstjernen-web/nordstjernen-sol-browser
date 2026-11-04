@@ -3,7 +3,9 @@
 #define _GNU_SOURCE 1
 #include "rproc_http.h"
 #include "ipc_http.h"
-#include "print.h"
+#include <cairo.h>
+
+#include "print_setup.h"
 
 #include <glib/gstdio.h>
 
@@ -1558,6 +1560,14 @@ int
 ns_rproc_http_resolve_camera(ns_rproc_http *r, const char *origin, int allow)
 {
     return resolve_permission(r, "/camera", origin, allow);
+}
+
+int
+ns_rproc_http_clear_cache(ns_rproc_http *r)
+{
+    if (!r)
+        return -1;
+    return request_ok(r, "/clear-cache", g_strdup("{}"));
 }
 
 char *

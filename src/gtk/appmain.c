@@ -26,18 +26,11 @@
 #include <web-text-lib/ns-pango-cache.h>
 #endif
 
-#include "bytecode_cache.h"
-#include "cache.h"
 #include "config.h"
 #include "debuglog.h"
-#include "font.h"
-#include "media_os.h"
-#include "ext.h"
-#include "spellcheck.h"
 #include "history.h"
 #include "i18n.h"
 #include "mcp.h"
-#include "net.h"
 #include "proc_limits.h"
 #include "procview.h"
 #include "procwindow.h"
@@ -611,8 +604,7 @@ main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (g_str_has_prefix(argv[i], "--proxy=")) {
             const char *pxy = argv[i] + 8;
-            ns_net_set_proxy_override(pxy);
-            if (pxy && *pxy) {
+            if (*pxy) {
                 g_setenv("NS_HTTP_PROXY", pxy, TRUE);
                 g_setenv("NS_HTTPS_PROXY", pxy, TRUE);
             }

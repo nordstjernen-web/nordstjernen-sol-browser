@@ -18,17 +18,24 @@ if gtk4_dep.version().version_compare('<4.22')
   nordstjernen_gtk_sources += files('icons.c')
 endif
 
-nordstjernen_gtk_deps = nordstjernen_deps + [gtk4_dep]
+nordstjernen_gtk_deps = nordstjernen_platform_deps + [gtk4_dep, cairo, libcrypto]
+if have_fontconfig
+  nordstjernen_gtk_deps += [libfontconfig]
+endif
 if host_machine.system() != 'windows'
   nordstjernen_gtk_deps += [cc.find_library('rt', required: false)]
 endif
 
-nordstjernen_gtk_sdl_deps = []
-if sdl2_dep.found()
-  if host_machine.system() == 'windows'
-    nordstjernen_gtk_sdl_deps += [cc.find_library('SDL2')]
-  else
-    nordstjernen_gtk_sdl_deps += [sdl2_dep.partial_dependency(links: true)]
+nordstjernen_gtk_link = [libns_platform]
+if gtk4_dep.version().version_compare('<4.22')
+  nordstjernen_gtk_deps += nordstjernen_deps
+  nordstjernen_gtk_link = [libnordstjernen_static]
+  if sdl2_dep.found()
+    if host_machine.system() == 'windows'
+      nordstjernen_gtk_deps += [cc.find_library('SDL2')]
+    else
+      nordstjernen_gtk_deps += [sdl2_dep.partial_dependency(links: true)]
+    endif
   endif
 endif
 
@@ -54,8 +61,8 @@ executable(
     nordstjernen_gtk_sources + nordstjernen_gtk_platform_sources +
     nordstjernen_icon_resources +
     nordstjernen_win_resources + [polyfills_h, wpt_hook_h, remote_page_h],
-  link_with: libnordstjernen_static,
-  dependencies: nordstjernen_gtk_deps + nordstjernen_gtk_sdl_deps,
+  link_with: nordstjernen_gtk_link,
+  dependencies: nordstjernen_gtk_deps,
   include_directories: include_directories('..', '.'),
   win_subsystem: nordstjernen_win_subsystem,
   link_args: nordstjernen_exe_link_args + nordstjernen_gtk_platform_link_args,

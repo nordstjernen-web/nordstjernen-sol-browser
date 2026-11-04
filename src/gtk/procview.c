@@ -5,11 +5,12 @@
 #include "pagelayers.h"
 #include "permissions.h"
 
-#include "libnordstjernen.h"
 #include "proc_limits.h"
-#include "../print.h"
+#include "libnordstjernen.h"
+#include "netutil.h"
+#include "print_setup.h"
 #include "rproc_http.h"
-#include "net.h"
+#include "config.h"
 
 #include <cairo.h>
 #include <glib/gstdio.h>
@@ -65,7 +66,7 @@ typedef enum {
     REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLLBAR,
     REQ_PERMISSION, REQ_COLOR_SCHEME, REQ_FAVICON,
     REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_DOWNLOAD, REQ_POPUP,
-    REQ_SESSION_PULL, REQ_QUIT
+    REQ_SESSION_PULL, REQ_CLEAR_CACHE, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_CONTEXT } LinkAct;
 
@@ -696,28 +697,100 @@ ns_proc_renderer_path(void)
     return ns_proc_sibling_exe_path(NS_PROC_RENDERER_NAME);
 }
 
+static const char *
+pv_proxy_setting(const char *env, const char *configured)
+{
+    const char *v = g_getenv(env);
+    return v && *v ? v : configured;
+}
+
+static void
+pv_launcher_setenv(GSubprocessLauncher *launcher, const char *name,
+                   const char *value)
+{
+    if (value && *value)
+        g_subprocess_launcher_setenv(launcher, name, value, TRUE);
+}
+
 static void
 ns_proc_audio_apply_proxy_env(GSubprocessLauncher *launcher)
 {
-    const char *override = ns_net_proxy_override();
-    if (override && *override) {
-        g_subprocess_launcher_setenv(launcher, "all_proxy", override, TRUE);
-        g_subprocess_launcher_setenv(launcher, "http_proxy", override, TRUE);
-        g_subprocess_launcher_setenv(launcher, "https_proxy", override, TRUE);
-    } else {
-        const char *http_proxy = ns_net_http_proxy();
-        const char *https_proxy = ns_net_https_proxy();
-        if (http_proxy && *http_proxy)
-            g_subprocess_launcher_setenv(launcher, "http_proxy", http_proxy, TRUE);
-        if (https_proxy && *https_proxy)
-            g_subprocess_launcher_setenv(launcher, "https_proxy", https_proxy, TRUE);
+    const ns_config *cfg = ns_config_get();
+    pv_launcher_setenv(launcher, "http_proxy",
+                       pv_proxy_setting("NS_HTTP_PROXY",
+                                        cfg ? cfg->http_proxy : NULL));
+    pv_launcher_setenv(launcher, "https_proxy",
+                       pv_proxy_setting("NS_HTTPS_PROXY",
+                                        cfg ? cfg->https_proxy : NULL));
+    pv_launcher_setenv(launcher, "no_proxy",
+                       pv_proxy_setting("NS_NO_PROXY",
+                                        cfg ? cfg->no_proxy : NULL));
+}
+
+static int
+pv_default_port(const char *scheme)
+{
+    if (!g_ascii_strcasecmp(scheme, "http") ||
+        !g_ascii_strcasecmp(scheme, "ws")) return 80;
+    if (!g_ascii_strcasecmp(scheme, "https") ||
+        !g_ascii_strcasecmp(scheme, "wss")) return 443;
+    if (!g_ascii_strcasecmp(scheme, "ftp")) return 21;
+    return 0;
+}
+
+static GUri *
+pv_uri_parse(const char *url)
+{
+    return url ? g_uri_parse(url, G_URI_FLAGS_ENCODED, NULL) : NULL;
+}
+
+char *
+ns_proc_url_origin(const char *url)
+{
+    GUri *u = pv_uri_parse(url);
+    if (!u) return NULL;
+    const char *scheme = g_uri_get_scheme(u);
+    const char *host = g_uri_get_host(u);
+    char *out = NULL;
+    int def = scheme ? pv_default_port(scheme) : 0;
+    if (def && host && *host) {
+        char *ls = g_ascii_strdown(scheme, -1);
+        char *lh = g_ascii_strdown(host, -1);
+        int port = g_uri_get_port(u);
+        gboolean v6 = strchr(lh, ':') != NULL;
+        GString *s = g_string_new(NULL);
+        g_string_append_printf(s, "%s://%s%s%s", ls, v6 ? "[" : "", lh,
+                               v6 ? "]" : "");
+        if (port > 0 && port != def)
+            g_string_append_printf(s, ":%d", port);
+        out = g_string_free(s, FALSE);
+        g_free(ls);
+        g_free(lh);
     }
-    const char *no_proxy = ns_net_no_proxy();
-    if (no_proxy && *no_proxy)
-        g_subprocess_launcher_setenv(launcher, "no_proxy", no_proxy, TRUE);
-    const char *ca = ns_net_ca_bundle_path();
-    if (ca && *ca)
-        g_subprocess_launcher_setenv(launcher, "CURL_CA_BUNDLE", ca, TRUE);
+    g_uri_unref(u);
+    return out;
+}
+
+char *
+ns_proc_url_host(const char *url)
+{
+    GUri *u = pv_uri_parse(url);
+    if (!u) return NULL;
+    const char *host = g_uri_get_host(u);
+    char *out = host && *host ? g_ascii_strdown(host, -1) : NULL;
+    g_uri_unref(u);
+    return out;
+}
+
+gboolean
+ns_proc_url_same_origin(const char *a, const char *b)
+{
+    char *oa = ns_proc_url_origin(a);
+    char *ob = ns_proc_url_origin(b);
+    gboolean same = oa && ob && strcmp(oa, ob) == 0;
+    g_free(oa);
+    g_free(ob);
+    return same;
 }
 
 static void request_tick(NsProcView *v);
@@ -1475,6 +1548,9 @@ worker_main(gpointer data)
             res->dump_tab = req->dump_tab;
             res->href = v->proc ? ns_rproc_http_dump(v->proc, req->query) : NULL;
             post(res);
+        } else if (req->type == REQ_CLEAR_CACHE) {
+            if (v->proc)
+                ns_rproc_http_clear_cache(v->proc);
         } else if (req->type == REQ_SESSION_PULL) {
             Res *res = g_new0(Res, 1);
             res->view = pv_ref(v);
@@ -2678,7 +2754,7 @@ pv_same_document_url(const char *from, const char *to)
     if (!from || !to) return FALSE;
     gsize from_len = strcspn(from, "#"), to_len = strcspn(to, "#");
     if (from_len == to_len && strncmp(from, to, from_len) == 0) return TRUE;
-    return ns_url_same_origin(from, to);
+    return ns_proc_url_same_origin(from, to);
 }
 
 static void
@@ -2969,6 +3045,15 @@ restart_wedged_renderer(NsProcView *v)
 }
 
 void
+ns_proc_view_clear_cache(NsProcView *v)
+{
+    if (!v || v->closed) return;
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_CLEAR_CACHE;
+    push_req(v, req);
+}
+
+void
 ns_proc_view_reload(NsProcView *v)
 {
     v->render_restarts = 0;
@@ -3143,7 +3228,7 @@ static gboolean
 pv_current_origin_is(NsProcView *v, const char *origin)
 {
     if (!v->current_url || !origin) return FALSE;
-    char *mine = ns_url_origin_from(v->current_url);
+    char *mine = ns_proc_url_origin(v->current_url);
     gboolean same = mine && g_strcmp0(mine, origin) == 0;
     g_free(mine);
     return same;

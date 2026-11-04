@@ -13,15 +13,12 @@
 #include "threaddump.h"
 #include "watchdog.h"
 #include "bookmarks.h"
-#include "cache.h"
 #include "config.h"
 #include "history.h"
-#include "libnordstjernen.h"
-#include "net.h"
+#include "netutil.h"
 #include "rjson.h"
 #include "security.h"
 #include "version.h"
-#include "image.h"
 #ifdef __APPLE__
 #include "macos_dock.h"
 #endif
@@ -584,7 +581,7 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
 
     GString *tip = g_string_new(label);
     g_string_append_printf(tip, "\n%s", ns_i18n("Click for site permissions"));
-    char *host = ns_url_host_from(url);
+    char *host = ns_proc_url_host(url);
     if (host && *host)
         g_string_append_printf(tip, "\n%s", host);
     const char *ip = ns_proc_view_remote_ip(v);
@@ -1218,7 +1215,7 @@ pw_start_download(ProcWindow *pw, NsProcView *view, const char *url,
         download_begin(d);
         return;
     }
-    char *host = ns_url_host_from(url);
+    char *host = ns_proc_url_host(url);
     GtkAlertDialog *dialog = gtk_alert_dialog_new(
         "%s", ns_i18n("Save this program file?"));
     char *detail = g_strdup_printf(
@@ -1304,7 +1301,7 @@ static void
 pw_show_fullscreen_notice(ProcWindow *pw, NsProcView *v)
 {
     const char *url = v ? ns_proc_view_url(v) : NULL;
-    char *host = url ? ns_url_host_from(url) : NULL;
+    char *host = url ? ns_proc_url_host(url) : NULL;
     const char *site = host && *host ? host : ns_i18n("This page");
     char *site_markup = g_markup_escape_text(site, -1);
     char *hint = g_markup_escape_text(
@@ -2090,7 +2087,7 @@ show_site_permissions(ProcWindow *pw)
 {
     NsProcView *v = current_view(pw);
     const char *url = v ? ns_proc_view_url(v) : NULL;
-    char *origin = url ? ns_url_origin_from(url) : NULL;
+    char *origin = url ? ns_proc_url_origin(url) : NULL;
     if (!origin || !strstr(origin, "://")) {
         g_free(origin);
         return;
@@ -2206,7 +2203,7 @@ act_hard_reload(GSimpleAction *a, GVariant *p, gpointer ud)
     (void)p;
     NsProcView *v = current_view(ud);
     if (!v) return;
-    ns_cache_clear();
+    ns_proc_view_clear_cache(v);
     ns_proc_view_reload(v);
 }
 

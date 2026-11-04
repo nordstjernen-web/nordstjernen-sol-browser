@@ -1,7 +1,7 @@
 /* Nordstjernen — curl-free network helpers shared by the engine and the
  * thin browser shells: Accept-Language, search-URL building, proxy masking. */
 
-#include "net.h"
+#include "netutil.h"
 #include "config.h"
 
 #include <glib/gstdio.h>

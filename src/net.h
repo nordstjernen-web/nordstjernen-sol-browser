@@ -11,6 +11,7 @@
 
 #include "config.h"
 #include "csp.h"
+#include "netutil.h"
 #include "version.h"
 
 G_BEGIN_DECLS
@@ -76,13 +77,6 @@ gboolean    ns_net_is_mobile_mode(void);
 const char *ns_net_navigator_platform(void);
 const char *ns_net_ua_hint_platform(void);
 
-typedef enum {
-    NS_SEC_NONE = 0,
-    NS_SEC_SECURE,
-    NS_SEC_INVALID,
-    NS_SEC_PLAIN
-} ns_security;
-
 typedef struct ns_response {
     long  status;
     char *final_url;
@@ -123,9 +117,6 @@ void ns_net_shutdown(void);
 gboolean ns_net_idle(void);
 
 char *ns_net_exe_dir(void);
-const char *ns_net_default_accept_language(void);
-const char *ns_net_effective_accept_language(void);
-char      **ns_net_navigator_languages(void);
 
 typedef GBytes *(*ns_net_blob_resolver)(const char *url, char **out_type,
                                         gpointer user_data);
@@ -289,7 +280,6 @@ void  ns_net_set_allow_file_urls(gboolean allow);
 void  ns_net_set_log_fetches(gboolean on);
 void  ns_net_perf_snapshot(guint64 *fetches, guint64 *bytes,
                            double *sum_ms, double *span_ms);
-char *ns_net_proxy_mask(const char *proxy_url);
 void  ns_net_apply_curl_proxy(void *curl_handle, const char *url);
 void  ns_net_apply_curl_tls(void *curl_handle);
 const char *ns_net_proxy_override(void);
@@ -298,9 +288,6 @@ const char *ns_net_https_proxy(void);
 const char *ns_net_no_proxy(void);
 const char *ns_net_ca_bundle_path(void);
 
-gboolean ns_address_is_search(const char *s);
-char *ns_search_url_for(const char *query);
-char *ns_url_from_local_path(const char *path);
 
 char *ns_multipart_boundary(void);
 void  ns_multipart_quote_field(GString *out, const char *s);

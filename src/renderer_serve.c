@@ -3,6 +3,7 @@
 
 #define _GNU_SOURCE 1
 #include "renderer_serve.h"
+#include "cache.h"
 #include "download.h"
 #include "libnordstjernen.h"
 #include "renderer_tiles.h"
@@ -700,6 +701,12 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         s->frame_valid = 0;
         http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
         free(entries);
+        return 0;
+    }
+
+    if (strcmp(head->path, "/clear-cache") == 0) {
+        ns_cache_clear();
+        http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
         return 0;
     }
 
