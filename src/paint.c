@@ -10368,6 +10368,97 @@ backdrop_mirror(int i, int n)
     return i < n ? i : period - 1 - i;
 }
 
+#define NS_BACKDROP_CACHE_SLOTS 8
+#define NS_BACKDROP_CACHE_BYTES (8 * 1024 * 1024)
+
+typedef struct {
+    int              w, h;
+    double           scale;
+    char            *filter;
+    guchar          *raw;
+    gsize            raw_bytes;
+    cairo_surface_t *surf;
+    guint64          used;
+} backdrop_cache_entry;
+
+static backdrop_cache_entry g_backdrop_cache[NS_BACKDROP_CACHE_SLOTS];
+static guint64              g_backdrop_cache_clock;
+
+static gsize
+backdrop_cache_entry_bytes(const backdrop_cache_entry *e)
+{
+    return e->surf ? e->raw_bytes * 2 : 0;
+}
+
+static void
+backdrop_cache_entry_clear(backdrop_cache_entry *e)
+{
+    g_free(e->filter);
+    g_free(e->raw);
+    if (e->surf) cairo_surface_destroy(e->surf);
+    memset(e, 0, sizeof *e);
+}
+
+static gboolean
+backdrop_filter_cacheable(const char *filter)
+{
+    return filter && !strstr(filter, "url(");
+}
+
+static cairo_surface_t *
+backdrop_cache_lookup(const guchar *raw, gsize bytes, int w, int h,
+                      const char *filter, double scale)
+{
+    for (int i = 0; i < NS_BACKDROP_CACHE_SLOTS; i++) {
+        backdrop_cache_entry *e = &g_backdrop_cache[i];
+        if (!e->surf || e->w != w || e->h != h || e->scale != scale ||
+            e->raw_bytes != bytes || strcmp(e->filter, filter) != 0 ||
+            memcmp(e->raw, raw, bytes) != 0)
+            continue;
+        e->used = ++g_backdrop_cache_clock;
+        return cairo_surface_reference(e->surf);
+    }
+    return NULL;
+}
+
+static void
+backdrop_cache_store(guchar *raw, gsize bytes, int w, int h,
+                     const char *filter, double scale, cairo_surface_t *surf)
+{
+    gsize total = bytes * 2;
+    for (int i = 0; i < NS_BACKDROP_CACHE_SLOTS; i++)
+        total += backdrop_cache_entry_bytes(&g_backdrop_cache[i]);
+    backdrop_cache_entry *slot = NULL;
+    for (;;) {
+        backdrop_cache_entry *oldest = NULL;
+        for (int i = 0; i < NS_BACKDROP_CACHE_SLOTS; i++) {
+            backdrop_cache_entry *e = &g_backdrop_cache[i];
+            if (!e->surf) {
+                if (!slot) slot = e;
+                continue;
+            }
+            if (!oldest || e->used < oldest->used) oldest = e;
+        }
+        if (slot && total <= NS_BACKDROP_CACHE_BYTES) break;
+        if (!oldest) break;
+        total -= backdrop_cache_entry_bytes(oldest);
+        backdrop_cache_entry_clear(oldest);
+        slot = oldest;
+    }
+    if (!slot || total > NS_BACKDROP_CACHE_BYTES) {
+        g_free(raw);
+        return;
+    }
+    slot->w = w;
+    slot->h = h;
+    slot->scale = scale;
+    slot->filter = g_strdup(filter);
+    slot->raw = raw;
+    slot->raw_bytes = bytes;
+    slot->surf = cairo_surface_reference(surf);
+    slot->used = ++g_backdrop_cache_clock;
+}
+
 static void
 backdrop_capture(cairo_t *cr, const ns_box *b, const char *filter,
                  const cairo_matrix_t *tf, backdrop_image *out)
@@ -10420,9 +10511,24 @@ backdrop_capture(cairo_t *cr, const ns_box *b, const char *filter,
             memcpy(drow + x * 4, &px, sizeof px);
         }
     }
-    apply_image_filter(dst, dst_stride, w, h, filter, MAX(scale_x, scale_y),
-                       NULL);
-    cairo_surface_mark_dirty(surf);
+    double filter_scale = MAX(scale_x, scale_y);
+    gsize raw_bytes = (gsize)dst_stride * (gsize)h;
+    gboolean cacheable = backdrop_filter_cacheable(filter) &&
+                         raw_bytes * 2 <= NS_BACKDROP_CACHE_BYTES;
+    cairo_surface_t *cached = cacheable
+        ? backdrop_cache_lookup(dst, raw_bytes, w, h, filter, filter_scale)
+        : NULL;
+    if (cached) {
+        cairo_surface_destroy(surf);
+        surf = cached;
+    } else {
+        guchar *raw = cacheable ? g_memdup2(dst, raw_bytes) : NULL;
+        apply_image_filter(dst, dst_stride, w, h, filter, filter_scale, NULL);
+        cairo_surface_mark_dirty(surf);
+        if (raw)
+            backdrop_cache_store(raw, raw_bytes, w, h, filter, filter_scale,
+                                 surf);
+    }
     out->surf = surf;
     out->x = px0 - pad - off_x;
     out->y = py0 - pad - off_y;

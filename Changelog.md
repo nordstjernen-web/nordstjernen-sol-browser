@@ -3,6 +3,13 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Paint: a `backdrop-filter` whose backdrop has not changed since an
+  earlier paint reuses the filtered result instead of filtering again.
+  The last few backdrops are kept with the pixels they were made from
+  (8 MB in all); a filter that references SVG with `url()` is always
+  recomputed. Hovering x.com, whose sticky headers blur the page under
+  them, repainted the same blur on every frame: the renderer spends 6.5%
+  of its time on backdrops instead of 17.8%.
 * Style: moving the pointer onto another element restyles only the
   elements whose `:hover` state changed and the elements their `:hover`
   can reach: descendants that a `:hover` ancestor selector names (such
