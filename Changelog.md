@@ -3,6 +3,12 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Hit testing: the descendants of a positioned `z-index: auto` box now
+  compete in the enclosing stacking context, as they are painted, instead
+  of being resolved inside that box. A `z-index: 1` flex item (Google's
+  sign-in email field) sitting under a later `position: absolute` outline
+  overlay now receives the click, so the field takes focus and typing
+  works.
 * Security: an iframe sandboxed without `allow-same-origin` could list
   the cookies of its URL's origin through `cookieStore.get()`/`getAll()`
   (the internal `__nsCookieList()` hook had no sandbox check; only the

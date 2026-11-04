@@ -21740,15 +21740,21 @@ static const ns_box *
 hit_flush_deferred(GArray *list)
 {
     if (!list || list->len == 0) return NULL;
-    g_array_sort(list, hit_deferred_cmp);
     const ns_box *best = NULL;
     const ns_box *saved_flush = g_hit_flush_box;
+    GArray *saved_list = g_hit_deferred;
+    g_hit_deferred = list;
+    g_hit_defer_depth++;
     for (guint i = 0; i < list->len; i++) {
-        const hit_deferred *d = &g_array_index(list, hit_deferred, i);
-        g_hit_flush_box = d->box;
-        const ns_box *m = box_hit_test_tree(d->box, d->x, d->y);
+        hit_deferred *rest = &g_array_index(list, hit_deferred, i);
+        qsort(rest, list->len - i, sizeof(*rest), hit_deferred_cmp);
+        hit_deferred d = *rest;
+        g_hit_flush_box = d.box;
+        const ns_box *m = box_hit_test_tree(d.box, d.x, d.y);
         if (m) best = m;
     }
+    g_hit_defer_depth--;
+    g_hit_deferred = saved_list;
     g_hit_flush_box = saved_flush;
     return best;
 }
@@ -21812,7 +21818,8 @@ hit_self_test(const ns_box *root, double x, double y)
 static gboolean
 hit_owns_layer_scope(const ns_box *b, gboolean clipped)
 {
-    return b == g_hit_flush_box || clipped || ns_box_is_stacking_context(b);
+    return (b == g_hit_flush_box && g_hit_defer_depth == 0) || clipped ||
+           ns_box_is_stacking_context(b);
 }
 
 static const ns_box *
