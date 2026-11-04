@@ -3,6 +3,12 @@ Changelog:
 
 1.0.42-dev:
 ======
+* JavaScript: on Windows, `Date`'s local time uses the offset in force
+  at that date, from the in-tree time zone database. It used today's
+  daylight-saving state for every date, so in winter a summer date was
+  an hour off (`new Date(2026, 6, 1)` printed `GMT+0100` in Oslo) and
+  `toLocaleString()` disagreed with `Intl.DateTimeFormat` given the
+  same zone explicitly.
 * JavaScript: on Windows, the default time zone of `Intl` and
   `Temporal.Now` follows the user's Windows region when the Windows zone
   covers several countries, as CLDR's `windowsZones` maps it and Chrome

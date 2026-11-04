@@ -52747,8 +52747,16 @@ static const JSCFunctionListEntry js_math_obj[] = {
    between UTC time and local time 'd' in minutes */
 static int getTimezoneOffset(int64_t time) {
 #if defined(_WIN32)
+    static int system_zone = -2;
     DWORD r;
     TIME_ZONE_INFORMATION t;
+    if (system_zone == -2) {
+        system_zone = tp_tzdb_system();
+        if (system_zone == TP_TZ_UTC_ID && !tp_windows_system_zone())
+            system_zone = -1;
+    }
+    if (system_zone >= 0)
+        return (int)(-tp_tzdb_offset_ns(system_zone, (tp_i128)time * 1000000) / 60000000000LL);
     r = GetTimeZoneInformation(&t);
     if (r == TIME_ZONE_ID_INVALID)
         return 0;
