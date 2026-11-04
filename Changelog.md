@@ -3,6 +3,14 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Layout: grid tracks sized `minmax(<length>, <length>)` that do not all
+  fit share the free space equally from their minimums, each stopping
+  at its maximum, as the grid track sizing algorithm specifies. They
+  were shrunk in proportion to how far each could shrink, so a wide
+  track kept too much and a narrow one fell below its content. On
+  reddit.com, whose page grid is `minmax(0,756px) minmax(0,316px)`, the
+  feed took 630 px instead of 577 and pushed the 316 px right sidebar
+  past the edge of the window.
 * Style: a large `<style>` inside a shadow root is parsed once instead
   of twice. Its parsed sheet was cached under the host's scope id as it
   stood before the text was fetched, and fetching the text is what gives

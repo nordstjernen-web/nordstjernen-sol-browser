@@ -14255,6 +14255,36 @@ grid_flex_track_sizes(const ns_css_tracks *tr, double space,
 }
 
 static void
+grid_grow_tracks_equally(const double *room, int n, double amount,
+                         double *grow)
+{
+    gboolean frozen[NS_CSS_TRACKS_MAX] = {0};
+    for (int i = 0; i < n; i++) {
+        grow[i] = 0;
+        frozen[i] = room[i] <= 0;
+    }
+    while (amount > 0) {
+        int open = 0;
+        for (int i = 0; i < n; i++)
+            if (!frozen[i]) open++;
+        if (open == 0) break;
+        double share = amount / open;
+        gboolean froze = FALSE;
+        for (int i = 0; i < n; i++) {
+            if (frozen[i] || room[i] - grow[i] > share) continue;
+            amount -= room[i] - grow[i];
+            grow[i] = room[i];
+            frozen[i] = TRUE;
+            froze = TRUE;
+        }
+        if (froze) continue;
+        for (int i = 0; i < n; i++)
+            if (!frozen[i]) grow[i] += share;
+        break;
+    }
+}
+
+static void
 resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
                          double pct_basis,
                          const double *content_min, const double *content_max,
@@ -14373,6 +14403,11 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
         }
     }
 
+    double shrink_grow[NS_CSS_TRACKS_MAX] = {0};
+    if (shrink_used > 0)
+        grid_grow_tracks_equally(shrink_px, tr->n, total_shrink - shrink_used,
+                                 shrink_grow);
+
     double fr_sizes[NS_CSS_TRACKS_MAX] = {0};
     double fr_used = total_fr > 0
         ? grid_flex_track_sizes(tr, remaining, pct_basis, content_min,
@@ -14388,7 +14423,7 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
         case NS_CSS_TRACK_PERCENT:
             out_sizes[i] = fixed_px[i];
             if (shrink_used > 0 && shrink_px[i] > 0)
-                out_sizes[i] -= shrink_used * (shrink_px[i] / total_shrink);
+                out_sizes[i] += shrink_grow[i] - shrink_px[i];
             break;
         case NS_CSS_TRACK_FR:      out_sizes[i] = fr_sizes[i]; break;
         case NS_CSS_TRACK_AUTO:
