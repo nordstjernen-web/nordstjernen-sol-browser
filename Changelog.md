@@ -3,6 +3,16 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Video and styles: changing a text node no longer restyles the whole
+  page when a stylesheet carries a `:has()` rule whose subject has no
+  class, id or type, such as `:root:has([data-x])`. A text change cannot
+  alter which elements such an argument matches, but the incremental
+  restyle treated it as relevant to every `:has()` and recomputed all
+  styles. On x.com the video player's time label changes once a second,
+  and each change cost a 100 ms restyle that froze the playing video for
+  three or four frames. That restyle now recomputes five styles in 2 ms,
+  and playback keeps its frame rate. `:has()` arguments that use `:empty`
+  or another structural pseudo-class still restyle on text changes.
 * Video: `requestVideoFrameCallback` runs once per presented video
   frame, with that frame's own `mediaTime` and a real `presentedFrames`
   count, rather than on every animation frame with a time that moved in
