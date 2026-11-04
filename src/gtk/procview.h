@@ -46,6 +46,26 @@ void        ns_proc_view_set_private(NsProcView *view, gboolean private_mode);
 gboolean    ns_proc_view_is_private(NsProcView *view);
 
 void ns_proc_view_load(NsProcView *view, const char *url);
+
+typedef struct {
+    const char *url;
+    const char *title;
+    int         scroll_x;
+    int         scroll_y;
+} NsProcHistoryEntry;
+
+int         ns_proc_view_history_length(NsProcView *view);
+int         ns_proc_view_history_index(NsProcView *view);
+gboolean    ns_proc_view_history_entry(NsProcView *view, int index,
+                                       NsProcHistoryEntry *out);
+const char *ns_proc_view_session_storage(NsProcView *view);
+guint       ns_proc_view_state_serial(NsProcView *view);
+void        ns_proc_view_set_session_tab(NsProcView *view, gint64 id);
+gint64      ns_proc_view_session_tab(NsProcView *view);
+void        ns_proc_view_restore(NsProcView *view,
+                                 const NsProcHistoryEntry *entries,
+                                 int n_entries, int index,
+                                 const char *session_storage);
 void ns_proc_view_back(NsProcView *view);
 void ns_proc_view_forward(NsProcView *view);
 void ns_proc_view_reload(NsProcView *view);

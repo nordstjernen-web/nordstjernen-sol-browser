@@ -1558,6 +1558,67 @@ ns_session_storage_free(ns_session_storage *storage)
     if (storage) g_hash_table_unref((GHashTable *)storage);
 }
 
+unsigned long
+ns_session_storage_generation(void)
+{
+    return (unsigned long)ns_js_session_storage_generation();
+}
+
+char *
+ns_session_storage_serialize(ns_session_storage *storage)
+{
+    GString *out = g_string_new(NULL);
+    GHashTableIter outer;
+    gpointer origin, bucket;
+    if (storage) {
+        g_hash_table_iter_init(&outer, (GHashTable *)storage);
+        while (g_hash_table_iter_next(&outer, &origin, &bucket)) {
+            char *eo = g_strescape(origin, NULL);
+            GHashTableIter inner;
+            gpointer k, v;
+            g_hash_table_iter_init(&inner, bucket);
+            while (g_hash_table_iter_next(&inner, &k, &v)) {
+                char *ek = g_strescape(k, NULL);
+                char *ev = g_strescape(v, NULL);
+                g_string_append_printf(out, "%s\t%s\t%s\n", eo, ek, ev);
+                g_free(ek);
+                g_free(ev);
+            }
+            g_free(eo);
+        }
+    }
+    char *result = strdup(out->str);
+    g_string_free(out, TRUE);
+    return result;
+}
+
+int
+ns_session_storage_load(ns_session_storage *storage, const char *text)
+{
+    if (!storage) return -1;
+    GHashTable *area = (GHashTable *)storage;
+    g_hash_table_remove_all(area);
+    char **lines = g_strsplit(text ? text : "", "\n", -1);
+    for (int i = 0; lines[i]; i++) {
+        char **f = g_strsplit(lines[i], "\t", 3);
+        if (g_strv_length(f) == 3) {
+            char *origin = g_strcompress(f[0]);
+            GHashTable *bucket = g_hash_table_lookup(area, origin);
+            if (!bucket) {
+                bucket = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                               g_free, g_free);
+                g_hash_table_replace(area, g_strdup(origin), bucket);
+            }
+            g_hash_table_replace(bucket, g_strcompress(f[1]),
+                                 g_strcompress(f[2]));
+            g_free(origin);
+        }
+        g_strfreev(f);
+    }
+    g_strfreev(lines);
+    return 0;
+}
+
 void
 ns_browser_set_next_session_storage(ns_session_storage *storage)
 {

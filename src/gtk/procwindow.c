@@ -5,6 +5,7 @@
 #include "icons.h"
 #include "procview.h"
 #include "permissions.h"
+#include "sessionstore.h"
 #include "remotectl.h"
 #include "titlerow.h"
 #include "i18n.h"
@@ -72,8 +73,8 @@ typedef struct {
     guint           fullscreen_notice_timer;
     GtkWidget      *bookmarks_button;
     ns_bookmarks   *bookmarks;
-    char           *session_path;
     guint           session_timer;
+    GHashTable     *session_tabs;
     GtkWidget      *task_mgr_win;
     GtkWidget      *downloads_win;
     GtkWidget      *downloads_list;
@@ -95,6 +96,8 @@ procwindow_free(gpointer data)
     ProcWindow *pw = data;
     if (pw->session_timer)
         g_source_remove(pw->session_timer);
+    if (pw->session_tabs)
+        g_hash_table_unref(pw->session_tabs);
     if (pw->status_timer)
         g_source_remove(pw->status_timer);
     if (pw->fullscreen_notice_timer)
@@ -103,7 +106,6 @@ procwindow_free(gpointer data)
     for (int i = 0; settings && i < 2; i++)
         if (pw->theme_watch[i])
             g_signal_handler_disconnect(settings, pw->theme_watch[i]);
-    g_free(pw->session_path);
     g_free(pw->status_base);
     if (pw->bookmarks)
         ns_bookmarks_free(pw->bookmarks);
@@ -1579,13 +1581,49 @@ proc_window_add_tab_full(ProcWindow *pw, const char *url, gboolean foreground,
     proc_window_add_tab_opener(pw, url, foreground, private_mode, NULL, NULL);
 }
 
+static NsProcView *proc_window_add_tab_core(ProcWindow *pw, const char *url,
+                                            gboolean foreground,
+                                            gboolean private_mode,
+                                            const char *opener_token,
+                                            const char *opener_origin,
+                                            const ns_session_tab *restore);
+
 static NsProcView *
 proc_window_add_tab_opener(ProcWindow *pw, const char *url,
                            gboolean foreground, gboolean private_mode,
                            const char *opener_token, const char *opener_origin)
 {
+    return proc_window_add_tab_core(pw, url, foreground, private_mode,
+                                    opener_token, opener_origin, NULL);
+}
+
+static void
+restore_session_tab(NsProcView *v, const ns_session_tab *tab)
+{
+    int n = (int)tab->entries->len;
+    NsProcHistoryEntry *entries = g_new0(NsProcHistoryEntry, n);
+    for (int i = 0; i < n; i++) {
+        const ns_session_entry *e = g_ptr_array_index(tab->entries, i);
+        entries[i].url = e->url;
+        entries[i].title = e->title;
+        entries[i].scroll_x = e->scroll_x;
+        entries[i].scroll_y = e->scroll_y;
+    }
+    ns_proc_view_set_session_tab(v, tab->id);
+    ns_proc_view_restore(v, entries, n, tab->index, tab->storage);
+    g_free(entries);
+}
+
+static NsProcView *
+proc_window_add_tab_core(ProcWindow *pw, const char *url,
+                         gboolean foreground, gboolean private_mode,
+                         const char *opener_token, const char *opener_origin,
+                         const ns_session_tab *restore)
+{
     if (!private_mode && ns_rproc_single_process_enabled() &&
         gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook)) > 0) {
+        if (restore)
+            return NULL;
         NsProcView *cur = current_view(pw);
         if (cur) {
             char *r = normalize_url(url);
@@ -1668,6 +1706,10 @@ proc_window_add_tab_opener(ProcWindow *pw, const char *url,
         gtk_notebook_set_current_page(GTK_NOTEBOOK(pw->notebook), idx);
     update_active_tab(pw);
 
+    if (restore) {
+        restore_session_tab(v, restore);
+        return v;
+    }
     char *resolved = normalize_url(url);
     ns_proc_view_load(v, resolved);
     g_free(resolved);
@@ -3453,7 +3495,8 @@ on_bookmarks_clicked(GtkButton *button, gpointer user_data)
 
 typedef struct {
     char    *url;
-    char    *session_path;
+    gboolean explicit_url;
+    char    *instance_id;
     gboolean recover;
     gboolean private_mode;
 } ProcAppCtx;
@@ -3467,30 +3510,118 @@ session_url_recoverable(const char *u)
                  g_str_has_prefix(u, "file://"));
 }
 
+static ns_session_tab *
+session_tab_snapshot(NsProcView *v, int position, gboolean active)
+{
+    ns_session_tab *tab = g_new0(ns_session_tab, 1);
+    tab->id = ns_proc_view_session_tab(v);
+    tab->position = position;
+    tab->active = active;
+    tab->index = -1;
+    tab->entries = g_ptr_array_new_with_free_func(g_free);
+    int cur = ns_proc_view_history_index(v);
+    int n = ns_proc_view_history_length(v);
+    for (int i = 0; i < n; i++) {
+        NsProcHistoryEntry he;
+        if (!ns_proc_view_history_entry(v, i, &he) ||
+            !session_url_recoverable(he.url))
+            continue;
+        ns_session_entry *e = g_new0(ns_session_entry, 1);
+        e->url = (char *)he.url;
+        e->title = (char *)he.title;
+        e->scroll_x = he.scroll_x;
+        e->scroll_y = he.scroll_y;
+        if (i <= cur || tab->index < 0)
+            tab->index = (int)tab->entries->len;
+        g_ptr_array_add(tab->entries, e);
+    }
+    tab->storage = (char *)ns_proc_view_session_storage(v);
+    return tab;
+}
+
+static void
+session_tab_snapshot_free(ns_session_tab *tab)
+{
+    g_ptr_array_unref(tab->entries);
+    g_free(tab);
+}
+
 static gboolean
-write_session_cb(gpointer data)
+session_sync_cb(gpointer data)
 {
     ProcWindow *pw = data;
-    if (!pw->session_path)
-        return G_SOURCE_REMOVE;
-    GString *s = g_string_new(NULL);
-    int n = gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook));
+    if (!ns_session_available())
+        return G_SOURCE_CONTINUE;
+    GHashTable *seen = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                                             g_free, NULL);
+    GtkNotebook *nb = GTK_NOTEBOOK(pw->notebook);
+    int n = gtk_notebook_get_n_pages(nb);
+    int current = gtk_notebook_get_current_page(nb);
     for (int i = 0; i < n; i++) {
-        NsProcView *v = view_for_page(
-            gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), i));
-        if (v && ns_proc_view_is_private(v))
+        GtkWidget *page = gtk_notebook_get_nth_page(nb, i);
+        NsProcView *v = view_for_page(page);
+        if (!v || ns_proc_view_is_private(v))
             continue;
-        const char *u = v ? ns_proc_view_url(v) : NULL;
-        if (session_url_recoverable(u)) {
-            g_string_append(s, u);
-            g_string_append_c(s, '\n');
+        if (!ns_proc_view_session_tab(v))
+            ns_proc_view_set_session_tab(v, ns_session_tab_add());
+        ns_session_tab *tab = session_tab_snapshot(v, i, i == current);
+        if (tab->id) {
+            gint64 *key = g_new(gint64, 1);
+            *key = tab->id;
+            g_hash_table_add(seen, key);
+            const ns_session_entry *ce = tab->index >= 0
+                ? g_ptr_array_index(tab->entries, tab->index) : NULL;
+            char *fp = g_strdup_printf("%d|%d|%u|%d|%d|%u", i, i == current,
+                                       ns_proc_view_state_serial(v),
+                                       ce ? ce->scroll_x : 0,
+                                       ce ? ce->scroll_y : 0,
+                                       tab->entries->len);
+            if (g_strcmp0(fp, g_object_get_data(G_OBJECT(page),
+                                                "ns-session-fp")) != 0) {
+                ns_session_tab_save(tab);
+                g_object_set_data_full(G_OBJECT(page), "ns-session-fp", fp,
+                                       g_free);
+            } else {
+                g_free(fp);
+            }
         }
+        session_tab_snapshot_free(tab);
     }
-    g_file_set_contents_full(pw->session_path, s->str, (gssize)s->len,
-                             G_FILE_SET_CONTENTS_CONSISTENT |
-                             G_FILE_SET_CONTENTS_ONLY_EXISTING, 0600, NULL);
-    g_string_free(s, TRUE);
+    if (pw->session_tabs) {
+        GHashTableIter it;
+        gpointer key;
+        g_hash_table_iter_init(&it, pw->session_tabs);
+        while (g_hash_table_iter_next(&it, &key, NULL))
+            if (!g_hash_table_contains(seen, key))
+                ns_session_tab_remove(*(gint64 *)key);
+        g_hash_table_unref(pw->session_tabs);
+    }
+    pw->session_tabs = seen;
     return G_SOURCE_CONTINUE;
+}
+
+static gboolean
+restore_session(ProcWindow *pw, gboolean own_only)
+{
+    GPtrArray *tabs = ns_session_take_tabs(own_only);
+    gboolean opened = FALSE;
+    int active = -1;
+    for (guint i = 0; i < tabs->len; i++) {
+        const ns_session_tab *tab = g_ptr_array_index(tabs, i);
+        NsProcView *v = proc_window_add_tab_core(pw, NULL, !opened, FALSE,
+                                                 NULL, NULL, tab);
+        if (!v) {
+            ns_session_tab_remove(tab->id);
+            continue;
+        }
+        if (tab->active)
+            active = gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook)) - 1;
+        opened = TRUE;
+    }
+    if (active >= 0)
+        gtk_notebook_set_current_page(GTK_NOTEBOOK(pw->notebook), active);
+    g_ptr_array_unref(tabs);
+    return opened;
 }
 
 static void
@@ -3505,34 +3636,21 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
 #endif
     install_chrome_css();
     ProcWindow *pw = proc_window_new(app);
-    pw->session_path = g_strdup(ctx->session_path);
     gtk_window_present(GTK_WINDOW(pw->window));
     apply_color_scheme(pw);
 
     gboolean opened = FALSE;
-    if (ctx->recover && ctx->session_path) {
-        char *contents = NULL;
-        if (g_file_get_contents(ctx->session_path, &contents, NULL, NULL)) {
-            char **lines = g_strsplit(contents, "\n", -1);
-            for (int i = 0; lines && lines[i]; i++) {
-                if (session_url_recoverable(lines[i])) {
-                    proc_window_add_tab(pw, lines[i], !opened);
-                    opened = TRUE;
-                }
-            }
-            g_strfreev(lines);
-        }
-        g_free(contents);
-        if (opened)
+    if (!ctx->private_mode && ns_session_open(ctx->instance_id)) {
+        if (ctx->recover || !ctx->explicit_url)
+            opened = restore_session(pw, ctx->recover);
+        if (opened && ctx->recover)
             pw_set_status(pw, ns_i18n("Recovered the previous session after "
                                       "an unexpected exit"));
+        pw->session_timer = g_timeout_add_seconds(1, session_sync_cb, pw);
     }
     if (!opened)
         proc_window_add_tab_full(pw, ctx->url ? ctx->url : "about:start", TRUE,
                                  ctx->private_mode);
-
-    if (pw->session_path)
-        pw->session_timer = g_timeout_add_seconds(4, write_session_cb, pw);
     ns_remote_control_init();
 }
 
@@ -3589,8 +3707,9 @@ procapp_clear_http_caches(gboolean at_exit)
 }
 
 int
-ns_procapp_run(const char *startup_url, const char *session_path,
-               gboolean recover, gboolean private_mode)
+ns_procapp_run(const char *startup_url, gboolean explicit_url,
+               const char *instance_id, gboolean recover,
+               gboolean private_mode)
 {
     procapp_clear_http_caches(FALSE);
     if (!private_mode)
@@ -3598,7 +3717,8 @@ ns_procapp_run(const char *startup_url, const char *session_path,
     ns_perm_init(!private_mode);
     ProcAppCtx ctx = {
         .url = g_strdup(startup_url),
-        .session_path = g_strdup(session_path),
+        .explicit_url = explicit_url,
+        .instance_id = g_strdup(instance_id),
         .recover = recover,
         .private_mode = private_mode,
     };
@@ -3610,11 +3730,12 @@ ns_procapp_run(const char *startup_url, const char *session_path,
     ns_remote_control_shutdown();
     g_procapp = NULL;
     g_object_unref(app);
+    ns_session_close();
     ns_history_shutdown();
     ns_perm_shutdown();
     procapp_clear_http_caches(TRUE);
     g_free(ctx.url);
-    g_free(ctx.session_path);
+    g_free(ctx.instance_id);
     return status;
 }
 

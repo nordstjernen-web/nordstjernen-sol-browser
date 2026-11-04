@@ -9,6 +9,17 @@ Changelog:
   engine behind `-Dquickjs=quickjs` moves to master `712e8c0`, which carries
   the comparator fix the local sort patch added, so that patch and two
   adapter shims are gone. CI's NetBSD VM action moves to v1.5.3.
+* Sessions: tabs are now persistent data instead of window state. Every
+  tab's back/forward list (with each entry's title and scroll position)
+  and its `sessionStorage` is written to `session.db` in the config
+  directory as it changes, so a plain launch reopens the tabs left by the
+  last browser that exited (cleanly or not), and a crash restart restores
+  exactly the crashed window's tabs. Back and forward now return to the
+  position you had scrolled to, reload keeps the scroll position, and a
+  restarted renderer comes back with the page's scroll position and its
+  `sessionStorage`. Launching with a URL opens only that URL; private
+  windows store nothing. This replaces the URL-only recovery file the
+  watchdog used to keep.
 * JavaScript: a bytecode cache hit hands out a reference to the cached
   entry instead of duplicating it, so loading YouTube's application script
   from the cache no longer allocates and copies a transient 32 MB buffer.

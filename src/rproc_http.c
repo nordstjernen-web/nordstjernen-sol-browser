@@ -732,6 +732,7 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
     out->audio = head_field_dup(head->x_audio);
     out->window_action = head_field_dup(head->x_window_action);
     out->popup = head->x_popup != 0;
+    out->session_gen = head->x_session_gen;
     out->clipboard = head->x_clipboard > 0;
 }
 
@@ -1012,6 +1013,9 @@ ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out)
     long popup = 0;
     json_get_long(body, "popup", &popup);
     out->popup = popup != 0;
+    long session_gen = 0;
+    json_get_long(body, "session_gen", &session_gen);
+    out->session_gen = session_gen > 0 ? (unsigned long)session_gen : 0;
     out->title = json_get_str(body, "title");
     out->url = json_get_str(body, "url");
     long url_pushed = 0;
@@ -1554,6 +1558,27 @@ int
 ns_rproc_http_resolve_camera(ns_rproc_http *r, const char *origin, int allow)
 {
     return resolve_permission(r, "/camera", origin, allow);
+}
+
+char *
+ns_rproc_http_session_storage_get(ns_rproc_http *r)
+{
+    if (!r)
+        return NULL;
+    return request(r, "/session-storage", "{\"op\":\"get\"}");
+}
+
+int
+ns_rproc_http_session_storage_set(ns_rproc_http *r, const char *data)
+{
+    if (!r || !data)
+        return -1;
+    char *de = json_escape(data);
+    char *json = NULL;
+    if (!de || asprintf(&json, "{\"op\":\"set\",\"data\":\"%s\"}", de) < 0)
+        json = NULL;
+    free(de);
+    return request_ok(r, "/session-storage", json);
 }
 
 int

@@ -333,6 +333,8 @@ http_read_head(http_conn *c, http_head *out)
             out->x_clipboard = atol(val);
         else if (strcasecmp(line, "X-Tiles") == 0)
             out->x_tiles = atol(val);
+        else if (strcasecmp(line, "X-Session-Gen") == 0)
+            out->x_session_gen = strtoul(val, NULL, 10);
         else if (strcasecmp(line, "X-Wake") == 0)
             out->x_wake = atol(val);
         else if (strcasecmp(line, "X-Popup") == 0)
