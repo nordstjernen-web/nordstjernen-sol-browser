@@ -3,6 +3,14 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Style: a large `<style>` inside a shadow root is parsed once instead
+  of twice. Its parsed sheet was cached under the host's scope id as it
+  stood before the text was fetched, and fetching the text is what gives
+  the host its id, so the next style pass found no match and parsed the
+  same text again. reddit.com puts the same 251 KB stylesheet in each of
+  about 60 components and parsed it 126 times per load; it now parses it
+  69 times, and a load takes about a quarter less CPU (7.6-8.6 s to
+  5.8-6.2 s).
 * Layout: an absolutely positioned `::before` or `::after` with no
   insets takes its static position in a flex container from
   `justify-content` and `align-items`, as an absolutely positioned

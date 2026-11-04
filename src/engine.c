@@ -1349,6 +1349,7 @@ large_style_entry(ns_node *style, guint64 hash, gsize len, const char *base_url)
         return e;
     char *css = ns_css_style_element_text(style);
     if (!css) return NULL;
+    key.host_id = style_shadow_host_id(style);
     ns_css_stylesheet *sheet = ns_css_stylesheet_parse_author(css, -1);
     gboolean media_dep = css_has_viewport_media(css);
     g_free(css);
