@@ -3,6 +3,13 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Layout: an `auto` grid track holding an item with a definite `width`
+  is never narrower than that item, even when the tracks do not fit
+  the container. `auto` tracks that overflow were all scaled down to
+  fit, so three 732 px slides in a 732 px row each got 244 px and drew
+  over one another. reddit.com's image galleries lay their pictures out
+  this way and slide the row along; they showed all pictures at once,
+  overlapping, instead of one.
 * Shadow DOM: `::slotted()` matches the elements a slot receives after
   flattening, including those passed on through a slot of an enclosing
   component. A rule matched only the host's own children, so an

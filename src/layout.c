@@ -14288,6 +14288,7 @@ static void
 resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
                          double pct_basis,
                          const double *content_min, const double *content_max,
+                         const double *rigid_min,
                          double *out_sizes, gboolean stretch_auto)
 {
     double total_fixed = 0;
@@ -14353,13 +14354,26 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
         double room = free_for_auto - content_sum;
         if (room < 0) room = 0;
         if (auto_sum > room && auto_sum > 0) {
-            double scale = room / auto_sum;
+            double rigid_part[NS_CSS_TRACKS_MAX] = {0};
+            double rigid_sum = 0, shrinkable_sum = 0;
             for (int i = 0; i < tr->n; i++) {
                 if (tr->tracks[i].kind != NS_CSS_TRACK_AUTO) continue;
-                auto_base[i] *= scale;
-                if (auto_lim[i] < auto_base[i]) auto_lim[i] = auto_base[i];
+                rigid_part[i] = rigid_min ? MIN(auto_base[i], rigid_min[i]) : 0;
+                rigid_sum += rigid_part[i];
+                shrinkable_sum += auto_base[i] - rigid_part[i];
             }
-            base_sum = content_sum + room;
+            double shrink_room = MAX(room - rigid_sum, 0);
+            double scale = shrinkable_sum > shrink_room && shrinkable_sum > 0
+                ? shrink_room / shrinkable_sum : 1.0;
+            auto_sum = 0;
+            for (int i = 0; i < tr->n; i++) {
+                if (tr->tracks[i].kind != NS_CSS_TRACK_AUTO) continue;
+                auto_base[i] = rigid_part[i] +
+                               (auto_base[i] - rigid_part[i]) * scale;
+                if (auto_lim[i] < auto_base[i]) auto_lim[i] = auto_base[i];
+                auto_sum += auto_base[i];
+            }
+            base_sum = content_sum + auto_sum;
         }
         total_fixed += base_sum;
     }
@@ -15711,6 +15725,34 @@ grid_collect_col_items(GArray *out, ns_box *c, const ns_style *inherited,
     }
 }
 
+static double
+definite_length_px(const ns_css_value *v)
+{
+    if (!v || (v->kind != NS_CSS_V_LENGTH && v->kind != NS_CSS_V_CALC) ||
+        value_is_percent(v))
+        return -1;
+    return length_resolve(v, 0, -1);
+}
+
+static double
+grid_item_rigid_outer_width(const ns_box *c, double grid_extra)
+{
+    const ns_style *s = c->style;
+    if (!s) return 0;
+    double w = definite_length_px(s->values[NS_CSS_WIDTH]);
+    if (w < 0) return 0;
+    double max_w = definite_length_px(s->values[NS_CSS_MAX_WIDTH]);
+    double min_w = definite_length_px(s->values[NS_CSS_MIN_WIDTH]);
+    if (max_w >= 0 && w > max_w) w = max_w;
+    if (min_w >= 0 && w < min_w) w = min_w;
+    ns_edges m = {0}, pd = {0}, bd = {0};
+    edges_from_style(s, 0, &m, &pd, &bd);
+    double outer = w + m.left + m.right;
+    if (!keyword_is(s->values[NS_CSS_BOX_SIZING], "border-box"))
+        outer += pd.left + pd.right + bd.left + bd.right;
+    return outer + grid_extra;
+}
+
 static GArray *
 grid_col_items(GPtrArray *items, GArray *placed_cols, GArray *col_spans,
                const ns_style *child_inherited)
@@ -16170,6 +16212,7 @@ layout_grid(ns_box *box, double cw,
 
     double col_content[NS_CSS_TRACKS_MAX] = {0};
     double col_min[NS_CSS_TRACKS_MAX] = {0};
+    double col_rigid[NS_CSS_TRACKS_MAX] = {0};
     gboolean any_auto_content = FALSE;
     GArray *col_items = grid_col_items(items, placed_cols, col_spans,
                                        child_inherited);
@@ -16199,6 +16242,8 @@ layout_grid(ns_box *box, double cw,
             }
             mw += ci->extra;
             nw += ci->extra;
+            double rigid = grid_item_rigid_outer_width(c, ci->extra);
+            if (rigid > col_rigid[t]) col_rigid[t] = rigid;
             if (nw > avail) nw = avail;
             if (nw > col_content[t]) col_content[t] = nw;
             if (mw > col_min[t]) col_min[t] = mw;
@@ -16233,7 +16278,8 @@ layout_grid(ns_box *box, double cw,
     g_array_free(col_items, TRUE);
     resolve_track_sizes_full(cols, avail, cw,
                              any_auto_content ? col_min : NULL,
-                             any_auto_content ? col_content : NULL, col_sizes,
+                             any_auto_content ? col_content : NULL,
+                             col_rigid, col_sizes,
                              justify_kw_stretches_auto(
                                  keyword_or(box->style, NS_CSS_JUSTIFY_CONTENT,
                                             "normal")));
