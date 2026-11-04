@@ -136,6 +136,9 @@ without matching names. Keep `localhost` and `*.localhost` as they are
 
 ## 3. Medium: WebSocket and EventSource use the frame origin as the partition
 
+**Status: fixed.** `ns_net_curl_apply_cookies` takes the top-level URL;
+the WebSocket and EventSource bindings pass `ns_js_top_url`.
+
 **Where.** `src/net.c` `ns_net_curl_apply_cookies`; callers in
 `src/ws.c` and `src/eventsource.c`; the origin they pass is
 `ns_url_origin_from(js->current_url)` in `src/js.c`, i.e. the origin of

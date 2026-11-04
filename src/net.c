@@ -1520,7 +1520,7 @@ ns_net_cookies_json_for_js(const char *url, const char *top_url)
 
 void
 ns_net_curl_apply_cookies(void *curl_handle, const char *url,
-                          const char *origin)
+                          const char *origin, const char *top_url)
 {
     CURL *curl = curl_handle;
     g_autofree char *http_url = NULL;
@@ -1533,14 +1533,17 @@ ns_net_curl_apply_cookies(void *curl_handle, const char *url,
     if (!curl || !url || !origin || !*origin || policy == NS_COOKIE_NEVER ||
         !ns_url_is_http_or_https(origin))
         return;
-    if (policy == NS_COOKIE_FIRST_PARTY && !ns_url_is_same_site(url, origin))
+    const char *top = top_url && ns_url_is_http_or_https(top_url) ? top_url
+                                                                 : origin;
+    if (policy == NS_COOKIE_FIRST_PARTY && !ns_url_is_same_site(url, top))
         return;
-    g_autofree char *site = ns_url_site_from(origin);
-    g_autofree char *top_origin = ns_url_origin_from(origin);
+    g_autofree char *site = ns_url_site_from(top);
+    g_autofree char *top_origin = ns_url_origin_from(top);
     const char *partition_key = (site && *site) ? site
                               : (top_origin ? top_origin : "");
     if (!*partition_key) return;
-    int samesite_cross = ns_url_is_same_site(url, origin) ? 0 : 2;
+    int samesite_cross = ns_url_is_same_site(url, origin) &&
+                         ns_url_is_same_site(url, top) ? 0 : 2;
     g_autofree char *cookie = ns_cookie_store_header(partition_key, url,
                                                      samesite_cross, TRUE);
     if (cookie && *cookie)

@@ -32,6 +32,7 @@ gboolean ns_ws_available(void);
 
 ns_ws *ns_ws_new(const char        *url,
                  const char        *origin,
+                 const char        *top_url,
                  const char *const *protocols,
                  const ns_ws_callbacks *cbs,
                  gpointer           user_data);

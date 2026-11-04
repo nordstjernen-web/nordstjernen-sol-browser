@@ -25761,7 +25761,7 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
     }
     const char *const *protov = protos_terminated
         ? (const char *const *)protos_terminated->pdata : NULL;
-    s->ws = ns_ws_new(target, origin, protov, &cbs, s);
+    s->ws = ns_ws_new(target, origin, ns_js_top_url(js), protov, &cbs, s);
     g_free(origin);
     if (protos_terminated) g_ptr_array_free(protos_terminated, TRUE);
     g_free(target);
@@ -25968,7 +25968,8 @@ ns_window_eventsource_ctor(JSContext *ctx, JSValueConst this_val,
         .busy       = ns_js_es_busy,
     };
     g_auto(GStrv) csp_headers = ns_js_csp_headers_dup(js);
-    s->es = ns_es_new(target, origin && *origin ? origin : "null", NULL,
+    s->es = ns_es_new(target, origin && *origin ? origin : "null",
+                      ns_js_top_url(js), NULL,
                       (const char *const *)csp_headers, &cbs, s);
     g_free(origin);
     g_free(target);
