@@ -30,7 +30,7 @@ ns_perm_state ns_perm_get(const char *origin, ns_perm_kind kind);
 void          ns_perm_set(const char *origin, ns_perm_kind kind,
                           ns_perm_state state);
 
-char         *ns_perm_serialize(void);
+char         *ns_perm_serialize_origin(const char *origin);
 char         *ns_perm_entry_line(const char *origin, ns_perm_kind kind,
                                  ns_perm_state state);
 
