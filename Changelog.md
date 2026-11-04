@@ -3,6 +3,10 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Windows: the minimal LGPL FFmpeg built for the Windows packages
+  (`scripts/build-ffmpeg-lgpl.sh`) moves from 8.1.3 to 9.0.2
+  (libavcodec 63). VP9 video and Opus and Vorbis audio play through it
+  unchanged.
 * Architecture: `--single-process` no longer runs the engine inside the
   browser shell. The mode was already limited to one tab; that tab now
   gets an ordinary sandboxed renderer process, so the renderer sandbox,
