@@ -3,6 +3,14 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Paint: blurs (`filter: blur()`, `backdrop-filter`, blurred
+  `box-shadow` and `text-shadow`) run about twice as fast with the same
+  pixels. The box blur behind them walked each colour channel of a row
+  separately, clamped every sample index and divided once per byte; it
+  now sums the four channels together over a pre-clamped row and
+  divides by an exact multiply. Moving the pointer over x.com, whose
+  sticky headers blur what scrolls beneath them, spent 18% of the
+  renderer's time in the blur and now spends 10%.
 * Layout: an absolutely positioned column flex container sized by its
   `top` and `bottom` (or `inset: 0`) gives its items the whole height
   inside its padding and border under `box-sizing: border-box`. The
