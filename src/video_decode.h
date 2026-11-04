@@ -35,6 +35,8 @@ ns_texture *ns_video_player_frame_at(ns_video_player *player, double seconds,
 void   ns_video_player_prefetch(ns_video_player *player, double until,
                                 guint max_frames);
 guint  ns_video_player_current_serial(const ns_video_player *player);
+double ns_video_player_current_time(const ns_video_player *player);
+guint  ns_video_player_take_dropped(ns_video_player *player);
 guint  ns_video_player_upcoming(const ns_video_player *player, guint index,
                                 ns_texture **out_tex, double *out_pts);
 

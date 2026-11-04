@@ -735,6 +735,21 @@ ns_video_drop_mse_resources(ns_video_cache *cache, ns_video *v)
     v->pending_audio_file_len = 0;
 }
 
+static gboolean
+ns_video_take_presented(ns_video *v, double *out_pts)
+{
+    if (!v->player) return FALSE;
+    guint serial = ns_video_player_current_serial(v->player);
+    double pts = ns_video_player_current_time(v->player);
+    if (serial == 0 || pts < 0.0) return FALSE;
+    if (serial == v->presented_serial && v->player == v->presented_player)
+        return FALSE;
+    v->presented_serial = serial;
+    v->presented_player = v->player;
+    *out_pts = pts;
+    return TRUE;
+}
+
 gboolean
 ns_video_cache_seek_node(ns_video_cache *cache, const void *dom_node,
                          double seconds, gint64 now_us)
@@ -775,6 +790,9 @@ ns_video_cache_seek_node(ns_video_cache *cache, const void *dom_node,
     if (v->audio_opened)
         ns_video_emit_audio(cache, "seek %s %.3f", v->token, t);
     ns_video_emit_js(cache, v, "pos", t);
+    double pts = 0.0;
+    if (ns_video_take_presented(v, &pts))
+        ns_video_emit_js(cache, v, "frame", pts);
     return TRUE;
 }
 
@@ -2121,6 +2139,19 @@ ns_video_queue_emit(GArray *q, ns_video *v, const char *kind, double value)
 }
 
 static void
+ns_video_queue_presented(GArray *q, ns_video *v)
+{
+    double pts = 0.0;
+    if (ns_video_take_presented(v, &pts))
+        ns_video_queue_emit(q, v, "frame", pts);
+    guint dropped = ns_video_player_take_dropped(v->player);
+    if (dropped) {
+        v->dropped_frames += dropped;
+        ns_video_queue_emit(q, v, "dropped", (double)v->dropped_frames);
+    }
+}
+
+static void
 ns_video_track_frame_size(ns_video *v, GArray *emits)
 {
     if (!v->frame_texture) return;
@@ -2369,6 +2400,8 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         if (t - v->last_emit_time >= 0.20 || ended) {
             v->last_emit_time = t;
             ns_video_queue_emit(emits, v, "pos", v->cur_time);
+        } else {
+            ns_video_queue_emit(emits, v, "clock", v->cur_time);
         }
         if (ended) {
             if (ns_video_stream_growing(cache, v)) {
@@ -2388,6 +2421,9 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             ns_video_queue_emit(emits, v, "ended", v->duration);
         }
     }
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val))
+        ns_video_queue_presented(emits, val);
     for (guint ei = 0; ei < emits->len; ei++) {
         ns_video_emit_rec *rec =
             &g_array_index(emits, ns_video_emit_rec, ei);

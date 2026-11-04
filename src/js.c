@@ -917,6 +917,7 @@ typedef struct ns_raf_entry {
     gboolean waiting;
     ns_node *frame;
     ns_node *media;
+    int32_t  media_frames;
 } ns_raf_entry;
 
 static gboolean
@@ -35445,21 +35446,41 @@ ns_js_run_animation_frame(ns_js *js)
     return ns_js_run_animation_frame_internal(js);
 }
 
-static gboolean
-ns_rvfc_media_has_frame(JSContext *ctx, ns_node *media)
+static int32_t
+ns_media_int_prop(JSContext *ctx, JSValueConst el, const char *name)
 {
-    if (!media) return TRUE;
+    JSValue value = JS_GetPropertyStr(ctx, el, name);
+    int32_t out = 0;
+    if (JS_IsNumber(value)) JS_ToInt32(ctx, &out, value);
+    JS_FreeValue(ctx, value);
+    return out;
+}
+
+static int32_t
+ns_media_frame_count(JSContext *ctx, ns_node *media)
+{
+    if (!media) return 0;
     JSValue el = ns_make_element(ctx, media);
+    int32_t frames = JS_IsObject(el)
+        ? ns_media_int_prop(ctx, el, "_nd_frame_count") : 0;
+    JS_FreeValue(ctx, el);
+    return frames;
+}
+
+static gboolean
+ns_rvfc_media_has_frame(JSContext *ctx, const ns_raf_entry *e)
+{
+    if (!e->media) return TRUE;
+    JSValue el = ns_make_element(ctx, e->media);
     if (!JS_IsObject(el)) {
         JS_FreeValue(ctx, el);
         return TRUE;
     }
-    JSValue rs = JS_GetPropertyStr(ctx, el, "readyState");
-    int32_t ready = 0;
-    if (JS_IsNumber(rs)) JS_ToInt32(ctx, &ready, rs);
-    JS_FreeValue(ctx, rs);
+    int32_t ready = ns_media_int_prop(ctx, el, "readyState");
+    int32_t frames = ns_media_int_prop(ctx, el, "_nd_frame_count");
     JS_FreeValue(ctx, el);
-    return ready >= 2;
+    if (ready < 2) return FALSE;
+    return frames == 0 || frames != e->media_frames;
 }
 
 static gboolean
@@ -35496,7 +35517,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
             JS_FreeValue(callback_ctx, e->cb);
             continue;
         }
-        if (e->video_frame && !ns_rvfc_media_has_frame(callback_ctx, e->media)) {
+        if (e->video_frame && !ns_rvfc_media_has_frame(callback_ctx, e)) {
             e->waiting = TRUE;
             g_array_append_val(js->raf_pending, *e);
             continue;
@@ -35526,24 +35547,22 @@ ns_js_run_animation_frame_internal(ns_js *js)
             JSValue media = e->media
                 ? ns_make_element(callback_ctx, e->media) : JS_UNDEFINED;
             if (JS_IsObject(media)) {
-                JSValue value = JS_GetPropertyStr(callback_ctx, media, "_nd_pos");
+                presented_frames = ns_media_int_prop(callback_ctx, media,
+                                                     "_nd_frame_count");
+                gboolean decoded = presented_frames > 0;
+                JSValue value = JS_GetPropertyStr(callback_ctx, media,
+                    decoded ? "_nd_frame_time" : "_nd_pos");
                 if (JS_IsNumber(value))
                     JS_ToFloat64(callback_ctx, &media_time, value);
                 JS_FreeValue(callback_ctx, value);
-                value = JS_GetPropertyStr(callback_ctx, media, "videoWidth");
-                if (JS_IsNumber(value)) JS_ToInt32(callback_ctx, &width, value);
-                JS_FreeValue(callback_ctx, value);
-                value = JS_GetPropertyStr(callback_ctx, media, "videoHeight");
-                if (JS_IsNumber(value)) JS_ToInt32(callback_ctx, &height, value);
-                JS_FreeValue(callback_ctx, value);
-                value = JS_GetPropertyStr(callback_ctx, media,
-                                          "_nd_presented_frames");
-                if (JS_IsNumber(value))
-                    JS_ToInt32(callback_ctx, &presented_frames, value);
-                JS_FreeValue(callback_ctx, value);
-                presented_frames++;
-                JS_SetPropertyStr(callback_ctx, media, "_nd_presented_frames",
-                                  JS_NewInt32(callback_ctx, presented_frames));
+                width = ns_media_int_prop(callback_ctx, media, "videoWidth");
+                height = ns_media_int_prop(callback_ctx, media, "videoHeight");
+                if (!decoded) {
+                    presented_frames = ns_media_int_prop(callback_ctx, media,
+                        "_nd_presented_frames") + 1;
+                    JS_SetPropertyStr(callback_ctx, media, "_nd_presented_frames",
+                                      JS_NewInt32(callback_ctx, presented_frames));
+                }
             }
             JSValue meta = JS_NewObject(callback_ctx);
             JS_SetPropertyStr(callback_ctx, meta, "presentationTime",
@@ -51989,9 +52008,11 @@ ns_media_get_video_playback_quality(JSContext *ctx, JSValueConst this_val,
     JSValue q = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, q, "creationTime",
                       JS_NewFloat64(ctx, ns_perf_realm_now_ms(ctx)));
-    JS_SetPropertyStr(ctx, q, "totalVideoFrames",
-                      JS_NewInt32(ctx, (int)(pos * 30.0)));
-    JS_SetPropertyStr(ctx, q, "droppedVideoFrames", JS_NewInt32(ctx, 0));
+    int32_t presented = ns_media_int_prop(ctx, this_val, "_nd_frame_count");
+    int32_t dropped = ns_media_int_prop(ctx, this_val, "_nd_dropped_frames");
+    int32_t total = presented > 0 ? presented + dropped : (int32_t)(pos * 30.0);
+    JS_SetPropertyStr(ctx, q, "totalVideoFrames", JS_NewInt32(ctx, total));
+    JS_SetPropertyStr(ctx, q, "droppedVideoFrames", JS_NewInt32(ctx, dropped));
     JS_SetPropertyStr(ctx, q, "corruptedVideoFrames", JS_NewInt32(ctx, 0));
     return q;
 }
@@ -52067,6 +52088,7 @@ ns_media_request_video_frame_callback(JSContext *ctx, JSValueConst this_val,
         .frame = ns_js_context_frame(js, ctx),
         .media = ns_unwrap_element_mut(this_val)
     };
+    e.media_frames = ns_media_frame_count(ctx, e.media);
     g_array_append_val(js->raf_pending, e);
     ns_raf_schedule_tick(js);
     return JS_NewInt32(ctx, e.id);
@@ -72062,7 +72084,7 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
     } else if (strcmp(kind, "buf") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_buffered", JS_NewFloat64(ctx, value));
         ns_js_dispatch_event(js, n, "progress", NULL);
-    } else if (strcmp(kind, "pos") == 0) {
+    } else if (strcmp(kind, "pos") == 0 || strcmp(kind, "clock") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_pos", JS_NewFloat64(ctx, value));
         JSValue playing = JS_GetPropertyStr(ctx, el, "_nd_playing");
         if (JS_ToBool(ctx, playing) > 0) {
@@ -72076,7 +72098,17 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
                                   JS_NewFloat64(ctx, value));
         }
         JS_FreeValue(ctx, playing);
-        ns_js_dispatch_event(js, n, "timeupdate", NULL);
+        if (kind[0] == 'p')
+            ns_js_dispatch_event(js, n, "timeupdate", NULL);
+    } else if (strcmp(kind, "frame") == 0) {
+        int32_t frames = ns_media_int_prop(ctx, el, "_nd_frame_count");
+        JS_SetPropertyStr(ctx, el, "_nd_frame_count",
+                          JS_NewInt32(ctx, frames + 1));
+        JS_SetPropertyStr(ctx, el, "_nd_frame_time", JS_NewFloat64(ctx, value));
+        ns_rvfc_wake(js, n);
+    } else if (strcmp(kind, "dropped") == 0) {
+        JS_SetPropertyStr(ctx, el, "_nd_dropped_frames",
+                          JS_NewInt32(ctx, (int32_t)value));
     } else if (strcmp(kind, "play") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_playing", JS_TRUE);
         JS_SetPropertyStr(ctx, el, "_nd_ended", JS_FALSE);

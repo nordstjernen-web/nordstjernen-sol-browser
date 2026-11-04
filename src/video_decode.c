@@ -75,6 +75,7 @@ struct ns_video_player {
     guint       pending_serial;
     GArray     *ahead;
     guint       next_serial;
+    guint       dropped;
 };
 
 typedef struct ns_vframe {
@@ -1087,9 +1088,11 @@ ns_video_player_frame_at(ns_video_player *player, double seconds,
 #endif
 
     gboolean changed = FALSE;
+    gboolean in_playback = player->cur_time >= 0.0;
     for (;;) {
         if (player->pending_time >= 0.0) {
             if (player->pending_time <= seconds || player->cur_time < 0.0) {
+                if (changed && in_playback) player->dropped++;
                 ns_texture_unref(player->cur_tex);
                 player->cur_tex = player->pending_tex;
                 player->cur_time = player->pending_time;
@@ -1148,6 +1151,21 @@ guint
 ns_video_player_current_serial(const ns_video_player *player)
 {
     return player ? player->cur_serial : 0;
+}
+
+double
+ns_video_player_current_time(const ns_video_player *player)
+{
+    return player ? player->cur_time : -1.0;
+}
+
+guint
+ns_video_player_take_dropped(ns_video_player *player)
+{
+    if (!player) return 0;
+    guint dropped = player->dropped;
+    player->dropped = 0;
+    return dropped;
 }
 
 guint
