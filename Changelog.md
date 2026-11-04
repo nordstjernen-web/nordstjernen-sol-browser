@@ -9,6 +9,12 @@ Changelog:
   chunks and corrects some pixel-format conversions. The local change
   accepting 16-bit JPEG quantization tables, which upstream still rejects,
   is carried over.
+* Architecture: the headless modes (`--headless`, `--dump`, `--eval`,
+  `--inspect`, `--wpt`, `--act`) now run inside `nordstjernen-renderer`.
+  The browser shell hands the unchanged command line to the renderer
+  executable and returns its exit code, so the GTK shell no longer runs
+  the engine for them. This is the first step towards a shell that does
+  not link the engine at all.
 * QuickJS: the fork reports quickjs-ng 0.18.0 and takes three upstream
   memory-safety fixes (`Array.prototype.find` value ownership, RegExp
   bytecode lifetime on recompile, BJSON RegExp references). The original

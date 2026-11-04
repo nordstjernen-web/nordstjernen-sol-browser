@@ -150,10 +150,9 @@ if quickjs_original
 endif
 
 # GTK-free helpers used by the desktop executable but not the engine UI:
-# the headless render driver and the crash watchdog. Kept in src/ as common
+# the crash watchdog. Kept in src/ as common
 # code; the GTK frontend itself lives in src/gtk/.
 nordstjernen_app_sources = files(
-  'headless.c',
   'watchdog.c',
 )
 
@@ -409,7 +408,8 @@ if not is_mobile
   executable(
     'nordstjernen-renderer',
     files('renderer_http.c', 'renderer_serve.c', 'renderer_tiles.c',
-          'ipc_http.c', 'threaddump.c'),
+          'ipc_http.c', 'threaddump.c', 'headless.c', 'headless_main.c',
+          'rproc_http.c', 'rproc_inproc.c') + [wpt_hook_h],
     link_with: libnordstjernen_static,
     include_directories: include_directories('.'),
     dependencies: nordstjernen_deps + ns_sdl_deps + rproc_deps,
