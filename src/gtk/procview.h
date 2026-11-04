@@ -36,6 +36,8 @@ typedef void (*NsProcNotify)(NsProcView *view, NsProcEvent evt,
                              const char *text, gpointer user_data);
 
 char *ns_proc_renderer_path(void);
+void  ns_proc_single_tab_enable(void);
+gboolean ns_proc_single_tab(void);
 
 NsProcView *ns_proc_view_new(void);
 GtkWidget  *ns_proc_view_widget(NsProcView *view);

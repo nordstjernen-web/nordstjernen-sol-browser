@@ -260,8 +260,8 @@ The preload map and the coalescer are process-global. In this edition the
 engine runs inside the per-tab renderer process (`nordstjernen-renderer`
 links the engine library), so each tab gets its own map and coalescer and
 no state is shared between tabs even before the key's site partition is
-considered. Under `--single-process` they are shared by every tab in the
-one process, and the site partition in the key is then what keeps
+considered. In the headless driver, which can host several renderer
+sessions in one process, the site partition in the key is what keeps
 documents from different sites apart. See
 [tab-isolation.md](tab-isolation.md) and
 [single-process-mode.md](single-process-mode.md).

@@ -70,9 +70,7 @@ The hang timeout is **60 s** of no heartbeat (`NS_WATCHDOG_HANG_MIN_SECS`).
 Because page JavaScript runs in the renderer processes — not in the
 shell's main loop — the shell loop is never legitimately blocked by a long
 synchronous script; the watchdog is the backstop for *native* deadlocks in
-the shell (a wedged blit or a stuck IPC call). Under `--single-process`
-the shell does run page JS, so there the configured JS eval budget
-(`js_eval_budget_ms`) is added on top of the 60 s. (Runaway
+the shell (a wedged blit or a stuck IPC call), in every mode. (Runaway
 scripts are interrupted separately, in-engine, at the JS budget; see
 `src/js.c`.)
 

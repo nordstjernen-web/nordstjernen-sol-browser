@@ -38,7 +38,7 @@ reporting in [SECURITY.md](../SECURITY.md), and licensing in
 - [preloading.md](preloading.md) — the speculative preload scan, the request key that identifies a fetch, and the four layers that keep a subresource from being fetched twice.
 - [cookies.md](cookies.md) — the browser-owned SQLite cookie store: one database per profile, in-memory set as the source of truth, write-behind flushes, libcurl kept out of cookies.
 - [tab-isolation.md](tab-isolation.md) — process-per-tab renderers and the sandbox boundary.
-- [single-process-mode.md](single-process-mode.md) — the `--single-process` fallback.
+- [single-process-mode.md](single-process-mode.md) — the one-tab `--single-process` mode.
 - [threading.md](threading.md) — the threading model.
 - [watchdog.md](watchdog.md) — the watchdog supervisor.
 

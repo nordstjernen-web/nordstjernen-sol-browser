@@ -245,8 +245,7 @@ Two parts (GTK; see `docs/watchdog.md`). A **supervisor process**
 with `g_child_watch_add`, and restarts it on crash/hang with capped burst
 control plus session recovery. Inside the shell, a **hang-monitor thread**
 (`ns_watchdog_hang_thread`) compares an atomic heartbeat (`g_beat`, bumped
-by a 2 s shell-main-loop timeout) against a 60 s deadline (plus the JS eval
-budget under `--single-process`, where the shell does run page JS); if the
+by a 2 s shell-main-loop timeout) against a 60 s deadline; if the
 loop stops beating it `_Exit`s with code 70 so the supervisor restarts. In
 the default multiprocess mode the shell runs no page JS, so its loop is
 never legitimately blocked long.
