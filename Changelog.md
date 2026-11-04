@@ -3,6 +3,12 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Network: `<link rel=preconnect>` and `dns-prefetch` connect through
+  the shared transfer handle instead of a handle of their own, so they
+  reuse its parsed certificate store. Each hint made OpenSSL read and
+  parse the whole CA bundle again (about 25 ms of CPU for 120
+  certificates) while the page was loading; x.com declares seven, and a
+  load of it now takes about 7% less CPU.
 * Headless: `--act` steps `type` and `key` go to the element page script
   last focused, as keystrokes in a window do. They went to the field
   the last `click` step hit, so typing into a field that a page opens
