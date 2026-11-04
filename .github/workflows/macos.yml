@@ -116,7 +116,6 @@ jobs:
 
       - name: Build
         id: build
-        if: hashFiles('meson.build') != ''
         shell: bash
         run: |
           set -o pipefail
