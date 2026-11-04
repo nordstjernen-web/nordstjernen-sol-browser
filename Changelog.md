@@ -3,6 +3,13 @@ Changelog:
 
 1.0.43-dev:
 ======
+* Network: TLS now sends key shares for both X25519MLKEM768 and X25519 in
+  the first ClientHello, as Chrome and stock OpenSSL do. The group list
+  offered only the post-quantum share, so a server without ML-KEM had to
+  answer with a HelloRetryRequest, and some servers mishandle that retry
+  (qwasm.m-h.org.uk answered "illegal parameter", shown as "Secure
+  connection failed"). Servers that support ML-KEM still negotiate
+  X25519MLKEM768.
 
 1.0.42:
 ======
