@@ -18,7 +18,8 @@ if gtk4_dep.version().version_compare('<4.22')
   nordstjernen_gtk_sources += files('icons.c')
 endif
 
-nordstjernen_gtk_deps = nordstjernen_platform_deps + [gtk4_dep, cairo, libcrypto]
+nordstjernen_gtk_deps = nordstjernen_platform_deps + [gtk4_dep, cairo, libcrypto,
+                                                    libm]
 if have_fontconfig
   nordstjernen_gtk_deps += [libfontconfig]
 endif
