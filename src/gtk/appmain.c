@@ -536,6 +536,12 @@ main(int argc, char **argv)
             return rc;
         }
     }
+#ifdef G_OS_WIN32
+    ns_win32_anchor_gtk_data();
+#endif
+#ifdef __APPLE__
+    ns_macos_anchor_gtk_data();
+#endif
     gboolean proc_mode = ns_proc_mode_wanted(argc, argv);
     if (!proc_mode && !ns_print_config_wanted(argc, argv)) {
         int rc = ns_run_headless_host(argc, argv);
@@ -599,10 +605,6 @@ main(int argc, char **argv)
     g_log_set_writer_func(ns_log_writer, NULL, NULL);
 #ifdef G_OS_WIN32
     ns_win32_set_app_id();
-    ns_win32_anchor_gtk_data();
-#endif
-#ifdef __APPLE__
-    ns_macos_anchor_gtk_data();
 #endif
 
     const char *gsk_renderer_override = NULL;
