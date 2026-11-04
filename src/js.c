@@ -36489,7 +36489,12 @@ ns_js_build_mouse_event(ns_js *js, const ns_node *target, const char *type,
     ns_event_put(ctx, event, "timeStamp",
                       JS_NewFloat64(ctx, ns_perf_realm_now_ms(ctx)));
     int move_x = 0, move_y = 0;
-    if (strcmp(type, "mousemove") == 0 || strcmp(type, "pointermove") == 0) {
+    if (js->locked_movement &&
+        (strcmp(type, "mousemove") == 0 || strcmp(type, "pointermove") == 0)) {
+        move_x = js->locked_move_x;
+        move_y = js->locked_move_y;
+    } else if (strcmp(type, "mousemove") == 0 ||
+               strcmp(type, "pointermove") == 0) {
         int slot = type[0] == 'p' ? 1 : 0;
         if (js->has_last_mouse[slot]) {
             move_x = (int)(client_x - js->last_mouse_x[slot]);
@@ -43053,6 +43058,8 @@ ns_element_get_baseURI(JSContext *ctx, JSValueConst this_val)
     return JS_NewString(ctx, base && *base ? base : "about:blank");
 }
 
+static gboolean ns_js_doc_contains(const ns_js *js, const ns_node *node);
+
 static JSValue
 ns_element_requestPointerLock(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
@@ -43060,12 +43067,17 @@ ns_element_requestPointerLock(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     ns_js *js = js_from_ctx(ctx);
     const ns_node *el = ns_unwrap_element(this_val);
-    if (js && el && js->pointer_lock_element != el) {
-        js->pointer_lock_element = el;
+    if (!js || !el || js->pointer_lock_element == el) return JS_UNDEFINED;
+    if ((!js->pointer_lock_element && !ns_js_has_transient_activation(js)) ||
+        !ns_js_doc_contains(js, el)) {
         if (js->current_doc)
-            ns_js_dispatch_event(js, js->current_doc,
-                                 "pointerlockchange", NULL);
+            ns_js_dispatch_event(js, js->current_doc, "pointerlockerror",
+                                 NULL);
+        return JS_UNDEFINED;
     }
+    js->pointer_lock_element = el;
+    if (js->current_doc)
+        ns_js_dispatch_event(js, js->current_doc, "pointerlockchange", NULL);
     return JS_UNDEFINED;
 }
 
@@ -47198,6 +47210,24 @@ ns_js_pointer_event_target(ns_js *js, const ns_node *hit)
         js->pointer_capture_element = NULL;
     }
     return hit;
+}
+
+gboolean
+ns_js_pointer_locked(ns_js *js)
+{
+    if (!js || !js->pointer_lock_element) return FALSE;
+    if (ns_js_doc_contains(js, js->pointer_lock_element)) return TRUE;
+    js->pointer_lock_element = NULL;
+    return FALSE;
+}
+
+void
+ns_js_set_locked_movement(ns_js *js, gboolean locked, int dx, int dy)
+{
+    if (!js) return;
+    js->locked_movement = locked;
+    js->locked_move_x = locked ? dx : 0;
+    js->locked_move_y = locked ? dy : 0;
 }
 
 void

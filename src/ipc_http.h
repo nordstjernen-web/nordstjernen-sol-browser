@@ -29,6 +29,7 @@ typedef struct {
     long  x_page_w, x_page_h, x_scroll_y, x_scroll_x, x_clipboard, x_tiles;
     long  x_wake;
     long  x_popup;
+    long  x_pointer_lock;
     unsigned long x_session_gen;
     char  x_nav[2048];
     char  x_webgl[2048];

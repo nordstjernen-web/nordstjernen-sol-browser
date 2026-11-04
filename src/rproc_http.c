@@ -734,6 +734,7 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
     out->audio = head_field_dup(head->x_audio);
     out->window_action = head_field_dup(head->x_window_action);
     out->popup = head->x_popup != 0;
+    out->pointer_lock = head->x_pointer_lock != 0;
     out->session_gen = head->x_session_gen;
     out->clipboard = head->x_clipboard > 0;
 }
@@ -1014,9 +1015,11 @@ ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out)
     out->config = json_get_str(body, "config");
     out->audio = json_get_str(body, "audio");
     out->window_action = json_get_str(body, "window_action");
-    long popup = 0;
+    long popup = 0, pointer_lock = 0;
     json_get_long(body, "popup", &popup);
+    json_get_long(body, "pointer_lock", &pointer_lock);
     out->popup = popup != 0;
+    out->pointer_lock = pointer_lock != 0;
     long session_gen = 0;
     json_get_long(body, "session_gen", &session_gen);
     out->session_gen = session_gen > 0 ? (unsigned long)session_gen : 0;
@@ -1269,6 +1272,27 @@ ns_rproc_http_set_focused_editable_selection(ns_rproc_http *r, size_t caret,
     json_get_long(body, "ok", &ok);
     free(body);
     return ok != 0 ? 1 : 0;
+}
+
+int
+ns_rproc_http_hover_locked(ns_rproc_http *r, int x, int y, int mods,
+                           int buttons, int dx, int dy)
+{
+    if (!r)
+        return -1;
+    char json[160];
+    snprintf(json, sizeof json,
+             "{\"x\":%d,\"y\":%d,\"mods\":%d,\"buttons\":%d,"
+             "\"locked\":1,\"dx\":%d,\"dy\":%d}",
+             x, y, mods, buttons, dx, dy);
+    char *body = request(r, "/hover", json);
+    if (!body)
+        return -1;
+    long changed = 0, animating = 0;
+    json_get_long(body, "changed", &changed);
+    json_get_long(body, "animating", &animating);
+    free(body);
+    return changed ? 1 : animating ? 2 : 0;
 }
 
 int

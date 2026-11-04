@@ -288,6 +288,9 @@ gboolean ns_js_dispatch_mouse_event_detail(ns_js *js, const ns_node *target,
                                            const ns_node *related,
                                            gboolean *default_prevented);
 const ns_node *ns_js_pointer_event_target(ns_js *js, const ns_node *hit);
+gboolean       ns_js_pointer_locked(ns_js *js);
+void           ns_js_set_locked_movement(ns_js *js, gboolean locked, int dx,
+                                         int dy);
 void           ns_js_release_pointer_capture(ns_js *js);
 
 ns_js_drag_session *ns_js_drag_session_new(ns_js *js);

@@ -3364,6 +3364,24 @@ ns_browser_hover(ns_browser *browser, int x, int y)
 }
 
 int
+ns_browser_hover_locked(ns_browser *browser, int x, int y, int mods,
+                        int buttons, int dx, int dy)
+{
+    if (!browser || !browser->js)
+        return ns_browser_hover_full(browser, x, y, mods, buttons);
+    ns_js_set_locked_movement(browser->js, TRUE, dx, dy);
+    int changed = ns_browser_hover_full(browser, x, y, mods, buttons);
+    ns_js_set_locked_movement(browser->js, FALSE, 0, 0);
+    return changed;
+}
+
+int
+ns_browser_pointer_locked(ns_browser *browser)
+{
+    return browser && browser->js && ns_js_pointer_locked(browser->js);
+}
+
+int
 ns_browser_hover_full(ns_browser *browser, int x, int y, int mods,
                       int buttons)
 {

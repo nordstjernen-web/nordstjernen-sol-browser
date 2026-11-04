@@ -3,6 +3,7 @@
 #include "procview.h"
 #include "i18n.h"
 #include "pagelayers.h"
+#include "pointerlock.h"
 #include "permissions.h"
 
 #include "proc_limits.h"
@@ -97,6 +98,7 @@ typedef struct {
     int     clicks;
     int     kind;
     int     keycode;
+    int     move_x, move_y;
     int     fallback_scroll;
     double  fallback_x;
     double  fallback_y;
@@ -151,6 +153,7 @@ typedef struct {
     char            *audio;
     char            *window_action;
     gboolean         popup;
+    gboolean         pointer_lock;
     unsigned long    session_gen;
     char            *clipboard;
     GdkTexture      *texture;
@@ -254,6 +257,10 @@ struct NsProcView {
     gboolean    hover_inflight;
     gboolean    hover_pending;
     int         hover_pending_x, hover_pending_y;
+
+    NsPointerLock *plock;
+    gboolean    plock_suppress;
+    int         plock_dx, plock_dy;
 
     gboolean    has_selection;
     gboolean    multi_click;
@@ -1302,6 +1309,7 @@ worker_main(gpointer data)
                     free(fr.window_action);
                 }
                 res->popup = fr.popup ? TRUE : FALSE;
+                res->pointer_lock = fr.pointer_lock ? TRUE : FALSE;
                 res->session_gen = fr.session_gen;
                 if (fr.clipboard && v->proc)
                     res->clipboard = ns_rproc_http_clipboard(v->proc);
@@ -1334,6 +1342,7 @@ worker_main(gpointer data)
                 res->url = tick.url ? g_strdup(tick.url) : NULL;
                 res->url_pushed = tick.url_pushed ? TRUE : FALSE;
                 res->popup = tick.popup ? TRUE : FALSE;
+                res->pointer_lock = tick.pointer_lock ? TRUE : FALSE;
                 res->session_gen = tick.session_gen;
                 ns_rproc_http_tick_clear(&tick);
             }
@@ -1414,9 +1423,13 @@ worker_main(gpointer data)
             res->type = RES_HOVER;
             res->seq = req->seq;
             if (v->proc) {
-                int rc = ns_rproc_http_hover_buttons(v->proc, req->x, req->y,
-                                                     req->mods, req->buttons,
-                                                     &res->href, &res->cursor);
+                int rc = req->kind == 1
+                    ? ns_rproc_http_hover_locked(v->proc, req->x, req->y,
+                                                 req->mods, req->buttons,
+                                                 req->move_x, req->move_y)
+                    : ns_rproc_http_hover_buttons(v->proc, req->x, req->y,
+                                                  req->mods, req->buttons,
+                                                  &res->href, &res->cursor);
                 res->ok = rc == 1;
                 res->animating = rc == 2;
             }
@@ -1511,6 +1524,7 @@ worker_main(gpointer data)
             res->view = pv_ref(v);
             res->type = RES_EVAL;
             res->seq = req->seq;
+            res->kind = req->kind;
             res->dump_tab = req->dump_tab;
             res->inspect = req->inspect;
             res->remote_cb = req->remote_cb;
@@ -2328,7 +2342,32 @@ start_hover(NsProcView *v, int x, int y)
     req->y = y;
     req->mods = v->pointer_mods;
     req->buttons = v->pointer_buttons;
+    if (ns_pointer_lock_active(v->plock)) {
+        req->kind = 1;
+        req->move_x = v->plock_dx;
+        req->move_y = v->plock_dy;
+        v->plock_dx = v->plock_dy = 0;
+    }
     push_req(v, req);
+}
+
+static void
+pv_lock_anchor_page(NsProcView *v, int *px, int *py)
+{
+    double ax = 0, ay = 0, s = cur_scale(v);
+    ns_pointer_lock_anchor(v->plock, &ax, &ay);
+    *px = v->scroll_x + (int)(ax / s);
+    *py = v->scroll_y + (int)(ay / s);
+}
+
+static void
+pv_locked_hover(NsProcView *v, int dx, int dy)
+{
+    int px = 0, py = 0;
+    pv_lock_anchor_page(v, &px, &py);
+    v->plock_dx += dx;
+    v->plock_dy += dy;
+    request_hover(v, px, py);
 }
 
 typedef struct {
@@ -3359,6 +3398,44 @@ pv_apply_window_action(NsProcView *v, const char *action)
 }
 
 static void
+pv_release_pointer_lock(NsProcView *v)
+{
+    if (!ns_pointer_lock_active(v->plock)) return;
+    ns_pointer_lock_release(v->plock);
+    v->plock_suppress = TRUE;
+    v->plock_dx = v->plock_dy = 0;
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_EVAL;
+    req->kind = 1;
+    req->query = g_strdup("document.exitPointerLock()");
+    push_req(v, req);
+}
+
+static void
+pv_sync_pointer_lock(NsProcView *v, gboolean locked)
+{
+    if (!locked) {
+        v->plock_suppress = FALSE;
+        ns_pointer_lock_release(v->plock);
+        return;
+    }
+    if (v->plock_suppress || ns_pointer_lock_active(v->plock) || !v->area)
+        return;
+    GtkRoot *root = gtk_widget_get_root(v->area);
+    if (GTK_IS_WINDOW(root) && gtk_window_is_active(GTK_WINDOW(root)) &&
+        gtk_widget_has_focus(v->area)) {
+        ns_pointer_lock_engage(v->plock, v->pointer_x, v->pointer_y);
+        return;
+    }
+    v->plock_suppress = TRUE;
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_EVAL;
+    req->kind = 1;
+    req->query = g_strdup("document.exitPointerLock()");
+    push_req(v, req);
+}
+
+static void
 pv_note_session_gen(NsProcView *v, unsigned long gen)
 {
     if (!gen || gen == v->session_gen_seen || v->session_pull_inflight ||
@@ -3529,6 +3606,8 @@ on_result(gpointer data)
             pv_audio_pump(v, res->audio);
         if (current && res->ok && res->window_action && *res->window_action)
             pv_apply_window_action(v, res->window_action);
+        if (current && res->ok)
+            pv_sync_pointer_lock(v, res->pointer_lock);
         if (res->ok && res->popup)
             pv_popup_poll(v);
         if (current && res->ok && !navigated)
@@ -3610,6 +3689,8 @@ on_result(gpointer data)
             pv_audio_pump(v, res->audio);
         if (res->ok && res->window_action && *res->window_action)
             pv_apply_window_action(v, res->window_action);
+        if (res->ok)
+            pv_sync_pointer_lock(v, res->pointer_lock);
         if (res->ok && res->popup)
             pv_popup_poll(v);
         if (res->ok && res->clipboard && v->area) {
@@ -3719,13 +3800,14 @@ on_result(gpointer data)
         if (res->seq != v->hover_seq)
             goto done;
         v->hover_inflight = FALSE;
+        gboolean locked = ns_pointer_lock_active(v->plock);
         if (res->href && *res->href) {
             post_emit(v, NS_PROC_EVT_STATUS, res->href);
-            if (!v->busy_cursor)
+            if (!v->busy_cursor && !locked)
                 pv_set_named_cursor(v->area, res->cursor ? res->cursor : "pointer");
         } else {
             post_emit(v, NS_PROC_EVT_STATUS, "");
-            if (!v->busy_cursor)
+            if (!v->busy_cursor && !locked)
                 pv_set_named_cursor(v->area, res->cursor);
         }
         if (res->ok)
@@ -3823,6 +3905,8 @@ on_result(gpointer data)
     } else if (res->type == RES_CONSOLE) {
         if (res->href && *res->href)
             console_append(v, res->href);
+    } else if (res->type == RES_EVAL && res->kind == 1) {
+        v->plock_suppress = FALSE;
     } else if (res->type == RES_EVAL) {
         if (res->inspect) {
             if (v->elements_buffer)
@@ -4537,6 +4621,8 @@ pv_release_button(NsProcView *v, int button, double x, double y, int clicks)
     v->buttons_pressed &= ~bit;
     if (!v->opened)
         return;
+    if (ns_pointer_lock_active(v->plock))
+        ns_pointer_lock_anchor(v->plock, &x, &y);
     double s = cur_scale(v);
     start_release(v, v->scroll_x + (int)(x / s), v->scroll_y + (int)(y / s),
                   button, clicks);
@@ -4560,6 +4646,12 @@ on_secondary_pressed(GtkGestureClick *gesture, int n_press, double x, double y,
     if (!v->opened)
         return;
     gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    if (ns_pointer_lock_active(v->plock)) {
+        int lx = 0, ly = 0;
+        pv_lock_anchor_page(v, &lx, &ly);
+        pv_press_button(v, gesture, n_press, lx, ly);
+        return;
+    }
     v->ctx_x = x;
     v->ctx_y = y;
     double s = cur_scale(v);
@@ -4642,16 +4734,6 @@ static void
 on_search_prev(GtkWidget *w, gpointer data)
 { (void)w; request_find(data, 2); }
 
-gboolean
-ns_proc_view_find_close(NsProcView *view)
-{
-    if (!view || !view->search_revealer ||
-        !gtk_revealer_get_reveal_child(GTK_REVEALER(view->search_revealer)))
-        return FALSE;
-    search_close(view);
-    return TRUE;
-}
-
 static void
 on_search_stop(GtkSearchEntry *e, gpointer data)
 { (void)e; search_close(data); }
@@ -4674,6 +4756,11 @@ on_pressed(GtkGestureClick *gesture, int n_press, double x, double y,
     double s = cur_scale(v);
     int px = v->scroll_x + (int)(x / s);
     int py = v->scroll_y + (int)(y / s);
+    if (ns_pointer_lock_active(v->plock)) {
+        pv_lock_anchor_page(v, &px, &py);
+        pv_press_button(v, gesture, n_press, px, py);
+        return;
+    }
     if (pv_gesture_dom_button(gesture) != 0) {
         pv_press_button(v, gesture, n_press, px, py);
         return;
@@ -4712,6 +4799,12 @@ on_motion(GtkEventControllerMotion *ctrl, double x, double y, gpointer data)
                              buttons != v->pointer_buttons;
     v->pointer_mods = mods;
     v->pointer_buttons = buttons;
+    int lock_dx = 0, lock_dy = 0;
+    if (ns_pointer_lock_motion(v->plock, x, y, &lock_dx, &lock_dy)) {
+        if (v->opened && (lock_dx || lock_dy || state_changed))
+            pv_locked_hover(v, lock_dx, lock_dy);
+        return;
+    }
     if (!state_changed &&
         fabs(x - v->pointer_x) < 0.01 && fabs(y - v->pointer_y) < 0.01)
         return;
@@ -4741,6 +4834,10 @@ on_drag_begin(GtkGestureDrag *g, double sx, double sy, gpointer data)
 {
     (void)g;
     NsProcView *v = data;
+    if (ns_pointer_lock_active(v->plock)) {
+        gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_DENIED);
+        return;
+    }
     v->drag_start_x = sx;
     v->drag_start_y = sy;
     v->drag_anchored = FALSE;
@@ -4815,6 +4912,8 @@ on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
     NsProcView *v = data;
     if (!v->opened)
         return FALSE;
+    if (keyval == GDK_KEY_Escape)
+        pv_release_pointer_lock(v);
     if (keyval == GDK_KEY_F12) {
         console_set_open(v, !v->console_open);
         return TRUE;
@@ -4911,6 +5010,8 @@ on_area_destroy(GtkWidget *widget, gpointer data)
     NsProcView *v = data;
     NS_PROC_VIEW_AREA(widget)->view = NULL;
     v->closed = TRUE;
+    ns_pointer_lock_free(v->plock);
+    v->plock = NULL;
     if (v->perm_listener) {
         ns_perm_remove_listener(v->perm_listener);
         v->perm_listener = 0;
@@ -5414,6 +5515,7 @@ ns_proc_view_new(void)
 
     v->overlay = gtk_overlay_new();
     gtk_overlay_set_child(GTK_OVERLAY(v->overlay), grid);
+    v->plock = ns_pointer_lock_new(v->area, v->overlay);
     gtk_widget_set_vexpand(v->overlay, TRUE);
     build_perm_bar(v);
     v->root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -5459,6 +5561,13 @@ ns_proc_view_new(void)
     GtkEventController *motion = gtk_event_controller_motion_new();
     g_signal_connect(motion, "motion", G_CALLBACK(on_motion), v);
     gtk_widget_add_controller(v->area, motion);
+
+    GtkEventController *focus = gtk_event_controller_focus_new();
+    g_signal_connect_swapped(focus, "leave",
+                             G_CALLBACK(pv_release_pointer_lock), v);
+    gtk_widget_add_controller(v->area, focus);
+    g_signal_connect_swapped(v->area, "unmap",
+                             G_CALLBACK(pv_release_pointer_lock), v);
 
     GtkEventController *scroll = gtk_event_controller_scroll_new(
         GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES |
