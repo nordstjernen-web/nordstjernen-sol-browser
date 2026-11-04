@@ -3,6 +3,7 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Android: the Android Gradle Plugin moves from 9.4.1 to 9.5.0.
 * Images: the vendored Wuffs moves from 0.4.0-alpha.10 to alpha.12, which
   fixes an out-of-bounds read in its number parsing, parses PNG cICP
   chunks and corrects some pixel-format conversions. The local change
