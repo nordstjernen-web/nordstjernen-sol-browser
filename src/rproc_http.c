@@ -842,10 +842,12 @@ tiles_request_json(char *json, size_t cap, int jn,
     jn += snprintf(json + jn, cap - (size_t)jn,
                    ",\"tiles\":1,\"tile_h\":%d,\"want_y0\":%d,"
                    "\"want_y1\":%d,\"gen\":%d,\"vp_held\":%d,"
-                   "\"fill\":%d,\"have\":\"%s\",\"hold\":\"%s\"}",
+                   "\"fill\":%d,\"have\":\"%s\",\"hold\":\"%s\","
+                   "\"vheld\":\"%s\"}",
                    t->tile_h, t->want_y0, t->want_y1, t->gen, t->vp_held,
                    t->fill,
-                   t->have ? t->have : "", t->hold ? t->hold : "");
+                   t->have ? t->have : "", t->hold ? t->hold : "",
+                   t->vheld ? t->vheld : "");
     return (size_t)jn < cap ? jn : -1;
 }
 
@@ -914,7 +916,7 @@ ns_rproc_http_render_tiles(ns_rproc_http *r, int width, int height,
     height = MIN(height, r->max_h);
     if (!(scale > 0))
         scale = 1.0;
-    char json[4096];
+    char json[8192];
     int jn = render_request_json(r, json, sizeof json, width, height,
                                  scroll_x, scroll_y, scale, caret_active,
                                  wheel);

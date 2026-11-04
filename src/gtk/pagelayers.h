@@ -23,6 +23,7 @@ gboolean ns_page_layers_active(const NsPageLayers *pl);
 gboolean ns_page_layers_advance_videos(NsPageLayers *pl, gint64 now_us);
 int ns_page_layers_gen(const NsPageLayers *pl);
 int ns_page_layers_vp_held(const NsPageLayers *pl);
+char *ns_page_layers_video_held(const NsPageLayers *pl);
 char *ns_page_layers_have(const NsPageLayers *pl, double y0, double y1,
                           gboolean any_gen);
 gboolean ns_page_layers_missing(const NsPageLayers *pl, double y0, double y1,

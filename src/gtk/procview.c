@@ -118,6 +118,7 @@ typedef struct {
     ns_rproc_http_tiles_req tiles;
     char   *have;
     char   *hold;
+    char   *vheld;
     NsProcViewTextFn remote_cb;
     gpointer remote_ud;
     long    download_id;
@@ -594,6 +595,7 @@ pv_free(NsProcView *v)
             g_free(r->paths);
             g_free(r->have);
             g_free(r->hold);
+            g_free(r->vheld);
             g_free(r);
         }
         g_async_queue_unref(v->queue);
@@ -1130,6 +1132,7 @@ req_free(Req *req)
     g_free(req->paths);
     g_free(req->have);
     g_free(req->hold);
+    g_free(req->vheld);
     g_free(req);
 }
 
@@ -1232,6 +1235,7 @@ worker_main(gpointer data)
             ns_rproc_http_frame fr;
             req->tiles.have = req->have;
             req->tiles.hold = req->hold;
+            req->tiles.vheld = req->vheld;
             gboolean rendered = v->proc &&
                 (req->tiles.tile_h > 0
                      ? ns_rproc_http_render_tiles(v->proc, req->w, req->h,
@@ -1755,6 +1759,7 @@ pv_tiles_request(NsProcView *v, Req *req)
     v->tiles_fill = FALSE;
     req->have = ns_page_layers_have(v->layers, y0, y1, FALSE);
     req->hold = ns_page_layers_have(v->layers, y0, y1, TRUE);
+    req->vheld = ns_page_layers_video_held(v->layers);
 }
 
 static gboolean

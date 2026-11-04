@@ -3,6 +3,13 @@ Changelog:
 
 1.0.42:
 ======
+* Video: a playing `<video>` no longer sends its queued frames to the
+  window again after every relayout. The renderer re-sent up to 40 decoded
+  frames (3.5 MB each at 720p) on each new tile generation, 2-8 times the
+  frames it decoded, and the window turned each copy into a new texture; on
+  YouTube that was 200-330 MB/s of copying on both main threads. The
+  window now lists the frame serials it holds in its tile request, and the
+  renderer sends pixels only for frames missing from that list.
 * Permissions: the shell now honours a camera request only when the
   origin the renderer reports is the tab's own origin, and refuses others
   for that tab without prompting or storing anything, so a misbehaving

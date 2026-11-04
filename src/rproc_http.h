@@ -128,6 +128,7 @@ typedef struct ns_rproc_http_tiles_req {
     int         fill;
     const char *have;
     const char *hold;
+    const char *vheld;
 } ns_rproc_http_tiles_req;
 
 int  ns_rproc_http_render_tiles(ns_rproc_http *r, int width, int height,
