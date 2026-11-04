@@ -3,6 +3,11 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Build: CMake is no longer installed or required for the desktop
+  builds. Nothing has used it since the llama.cpp integration was removed;
+  it is dropped from the Linux, macOS, Windows and Java CI jobs, the nightly
+  distro and Java-native containers, the Fedora SRPM's `BuildRequires` and
+  the macOS and Linux build docs. Android still uses it for the JNI bridge.
 * Build: the options file is renamed from `meson_options.txt` to
   `meson.options`, the name current Meson uses. The declared Meson floor
   rises from 1.0 to 1.3, which the project already needed for its `c_std`
