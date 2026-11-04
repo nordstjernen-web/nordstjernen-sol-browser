@@ -13,10 +13,8 @@ print dialog with the current page paginated behind it. Paper size,
 orientation, printer and copies are the dialog's business; what
 Nordstjernen decides is where each sheet begins and ends.
 
-Printing works in every process mode. Under `--single-process` (or
-`NS_SINGLE_PROCESS=1`) the sheets stay cairo **recording surfaces** and
-reach the printer as vectors. In the default process-per-tab mode a
-recording surface crosses no process boundary, so the renderer rasterises
+Printing works in every process mode. A cairo recording surface crosses
+no process boundary, so the renderer rasterises
 each sheet at `NS_PRINT_RASTER_SCALE` device pixels per CSS pixel, writes
 it beside the page-export files in the runtime directory, and the shell
 loads the sheets back and prints them. The pagination is identical either

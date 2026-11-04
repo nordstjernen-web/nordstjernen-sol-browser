@@ -291,8 +291,8 @@ them large:
    `nordstjernen-renderer` per tab (and the `nordstjernen-audio` helper)
    exactly that way (`src/rproc_http.c`) for
    OS-level tab isolation. Those helpers would have to be re-built as **XPC services**
-   (`Contents/XPCServices/*.xpc`), or the app would ship
-   `--single-process` and forfeit the per-tab security boundary. This is
+   (`Contents/XPCServices/*.xpc`); there is no in-process fallback, since
+   even `--single-process` runs its tab in a renderer process. This is
    real engineering, not configuration.
 2. **Hardened Runtime + JIT.** WAMR (WebAssembly) maps executable memory,
    so `com.apple.security.cs.allow-jit` is required (already in

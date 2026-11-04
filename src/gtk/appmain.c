@@ -42,7 +42,6 @@
 #include "procview.h"
 #include "procwindow.h"
 #include "remotectl.h"
-#include "rproc_inproc.h"
 #include "security.h"
 #include "threaddump.h"
 #include "version.h"
@@ -577,20 +576,18 @@ main(int argc, char **argv)
     gboolean single_process = proc_mode &&
                               ns_single_process_wanted(argc, argv);
     if (single_process)
-        ns_rproc_single_process_enable();
+        ns_proc_single_tab_enable();
 
     if (proc_mode) {
         ns_security_add_writable_dir("/dev/shm");
-        if (!single_process) {
-            char *rpath = ns_proc_renderer_path();
-            if (rpath) {
-                char *rdir = g_path_get_dirname(rpath);
-                if (rdir) {
-                    ns_security_add_exec_dir(rdir);
-                    g_free(rdir);
-                }
-                g_free(rpath);
+        char *rpath = ns_proc_renderer_path();
+        if (rpath) {
+            char *rdir = g_path_get_dirname(rpath);
+            if (rdir) {
+                ns_security_add_exec_dir(rdir);
+                g_free(rdir);
             }
+            g_free(rpath);
         }
         ns_security_allow_gpu_devices();
         ns_security_sandbox_init(g_self_exe);
@@ -651,9 +648,7 @@ main(int argc, char **argv)
     if (proc_mode) {
         if (ns_watchdog_is_child(argc, argv)) {
             ns_watchdog_child_guard_parent_death();
-            const ns_config *wcfg = ns_config_get();
-            ns_watchdog_child_arm_hang_monitor(
-                single_process && wcfg ? wcfg->js_eval_budget_ms : 0);
+            ns_watchdog_child_arm_hang_monitor(0);
         }
         const char *session = ns_watchdog_child_session_arg(argc, argv);
         gboolean recover = ns_watchdog_child_is_recovery();

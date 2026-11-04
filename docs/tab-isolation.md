@@ -18,9 +18,8 @@ this document is the implemented default. The sections from *Per-tab
 worker status* through *Recommended order* were written for the original
 single-process GTK engine and are kept as history; *First implementation
 step* onward describes the process boundary as built. An
-opt-in `--single-process` flag serves every tab from an in-process
-engine over the same IPC protocol, trading the renderer sandbox and
-crash containment for footprint and debuggability; see
+opt-in `--single-process` flag limits the browser to one tab with one
+ordinary renderer process; see
 [`single-process-mode.md`](single-process-mode.md).
 
 Engine state is per renderer process:
@@ -56,8 +55,8 @@ where it is currently shared:
 | Config | `config.c` `g_cfg` | browser process |
 
 Cookies are partitioned by registrable site, and same-origin, CORS, CSP,
-mixed-content, and SRI checks exist. Within one renderer process (and
-across all tabs under `--single-process`) these are policy boundaries,
+mixed-content, and SRI checks exist. Within one renderer process these
+are policy boundaries,
 not memory-safety boundaries.
 
 ## Per-tab worker status (historical)

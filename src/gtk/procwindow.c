@@ -10,7 +10,6 @@
 #include "titlerow.h"
 #include "i18n.h"
 #include "rproc_http.h"
-#include "rproc_inproc.h"
 #include "threaddump.h"
 #include "watchdog.h"
 #include "bookmarks.h"
@@ -620,7 +619,6 @@ apply_color_scheme(ProcWindow *pw)
     if (have && g_str_equal(have, want))
         return;
     g_setenv("NS_COLOR_SCHEME", want, TRUE);
-    ns_browser_set_color_scheme(dark);
     int pages = gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook));
     for (int i = 0; i < pages; i++) {
         NsProcView *v = view_for_page(
@@ -1620,7 +1618,7 @@ proc_window_add_tab_core(ProcWindow *pw, const char *url,
                          const char *opener_token, const char *opener_origin,
                          const ns_session_tab *restore)
 {
-    if (!private_mode && ns_rproc_single_process_enabled() &&
+    if (!private_mode && ns_proc_single_tab() &&
         gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook)) > 0) {
         if (restore)
             return NULL;
@@ -2617,13 +2615,8 @@ task_mgr_refresh(NsTaskMgr *tm)
         int pid = ns_proc_view_renderer_pid(v);
         char state[32] = "starting";
         long rss = -1;
-        if (pid > 0) {
+        if (pid > 0)
             ns_rproc_http_proc_info(pid, state, sizeof state, &rss);
-        } else if (ns_rproc_single_process_enabled()) {
-            pid = ns_rproc_self_pid();
-            ns_rproc_http_proc_info(pid, state, sizeof state, &rss);
-            g_strlcpy(state, "in-process", sizeof state);
-        }
 
         const char *title = ns_proc_view_title(v);
         const char *url = ns_proc_view_url(v);
@@ -2953,7 +2946,7 @@ install_shortcuts(ProcWindow *pw)
     install_action(pw, "quit", G_CALLBACK(act_quit),
                    (const char *[]){ "<Ctrl>q", NULL });
 
-    if (ns_rproc_single_process_enabled()) {
+    if (ns_proc_single_tab()) {
         GAction *nt = g_action_map_lookup_action(G_ACTION_MAP(pw->window),
                                                  "new-tab");
         if (nt) g_simple_action_set_enabled(G_SIMPLE_ACTION(nt), FALSE);
@@ -3069,7 +3062,7 @@ proc_window_new(GtkApplication *app)
                      G_CALLBACK(on_newtab_clicked), pw);
     gtk_widget_set_valign(pw->newtab_btn, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(pw->tabstrip), pw->newtab_btn);
-    if (ns_rproc_single_process_enabled())
+    if (ns_proc_single_tab())
         gtk_widget_set_visible(pw->newtab_btn, FALSE);
     gtk_header_bar_set_title_widget(GTK_HEADER_BAR(pw->header),
                                     ns_title_row_new(pw->tabstrip));

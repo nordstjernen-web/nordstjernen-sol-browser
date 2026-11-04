@@ -9,7 +9,6 @@
 #include "proc_limits.h"
 #include "../print.h"
 #include "rproc_http.h"
-#include "rproc_inproc.h"
 #include "net.h"
 
 #include <cairo.h>
@@ -672,6 +671,20 @@ ns_proc_sibling_exe_path(const char *base)
     if (!cand) return name;
     g_free(name);
     return cand;
+}
+
+static gboolean g_single_tab;
+
+void
+ns_proc_single_tab_enable(void)
+{
+    g_single_tab = TRUE;
+}
+
+gboolean
+ns_proc_single_tab(void)
+{
+    return g_single_tab;
 }
 
 char *
@@ -4302,7 +4315,7 @@ ctx_page_menu(NsProcView *v)
     if (v->ctx_link) {
         GMenu *s = g_menu_new();
         g_menu_append(s, ns_i18n("Open Link"), "ctx.open-link");
-        if (!ns_rproc_single_process_enabled())
+        if (!ns_proc_single_tab())
             g_menu_append(s, ns_i18n("Open Link in New Tab"), "ctx.open-newtab");
         g_menu_append(s, ns_i18n("Copy Link Address"), "ctx.copy-link");
         g_menu_append_section(menu, NULL, G_MENU_MODEL(s));

@@ -104,10 +104,9 @@ finer process-per-site boundary is noted as future work in
 in short-lived helper processes spawned by the shell — see
 [§12](#12-media-audio-and-video).
 
-**Single-process mode.** `--single-process` (or `NS_SINGLE_PROCESS=1`)
-serves every tab from one in-process engine over the same IPC protocol
-(`src/rproc_inproc.c`), trading the renderer sandbox and crash
-containment for footprint and debuggability. **Headless** modes
+**Single-tab mode.** `--single-process` (or `NS_SINGLE_PROCESS=1`)
+limits the browser to one tab, served by one ordinary sandboxed renderer
+process; the shell does not run the engine in any mode. **Headless** modes
 (`--headless`/`--dump`/`--eval`/`--inspect`/`--wpt`/`--act`) are a
 separate path again: the shell hands the command line to
 `nordstjernen-renderer --headless-host …` and waits for it, and the
@@ -180,10 +179,9 @@ The same tree feeds paper. `ns_browser_print_pages`
 the document out at the sheet size `@page` asks for, cuts it into sheets
 at the breaks `break-before`/`break-after`/`break-inside` allow, renders
 one cairo recording surface per sheet and restores the on-screen layout.
-In single-process mode the shell takes those surfaces directly; across
-the process boundary the renderer's `/print` handler rasterises each
+Across the process boundary the renderer's `/print` handler rasterises each
 sheet to a PNG in the runtime directory and the shell loads them back
-(`ns_rproc_http_print`). Either way `src/gtk/procview.c` hands the sheets
+(`ns_rproc_http_print`), and `src/gtk/procview.c` hands the sheets
 to `GtkPrintOperation` and the platform's own print dialog. See
 [printing.md](printing.md).
 
