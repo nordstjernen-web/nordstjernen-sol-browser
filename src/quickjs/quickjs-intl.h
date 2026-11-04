@@ -337,7 +337,6 @@ int intl_calendar_compute(int cal, int64_t date, IntlCalendarDate *out);
 int64_t intl_fixed_from_gregorian(int64_t y, int m, int d);
 void intl_gregorian_from_fixed(int64_t date, int64_t *py, int *pm, int *pd);
 const char *intl_metazone_for(const char *zone, int64_t epoch_minutes);
-const char *intl_windows_zone_to_iana(const char *windows_name);
 const char *intl_time_zone_cldr_id(const char *name);
 const char *intl_iana_to_windows_zone(const char *iana);
 int intl_region_default_calendar(const char *region);

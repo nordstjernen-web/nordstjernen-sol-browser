@@ -467,6 +467,9 @@ int tp_tzdb_possible(int id, const TPDateTime *dt, tp_i128 out[2]);
 bool tp_tzdb_next_transition(int id, tp_i128 ns, tp_i128 *out);
 bool tp_tzdb_previous_transition(int id, tp_i128 ns, tp_i128 *out);
 int tp_tzdb_system(void);
+#if defined(_WIN32)
+const char *tp_windows_system_zone(void);
+#endif
 
 void tp_put_iso_year(TPBuf *b, int64_t year);
 void tp_put_iso_date(TPBuf *b, TPISODate d);
