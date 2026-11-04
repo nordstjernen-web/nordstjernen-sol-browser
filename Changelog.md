@@ -3,6 +3,15 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Style: moving the pointer onto another element restyles only the
+  elements whose `:hover` state changed and the elements their `:hover`
+  can reach: descendants that a `:hover` ancestor selector names (such
+  as Tailwind's `group-hover:`), and the following siblings when a
+  `:hover` compound precedes `+` or `~`. Every change of the hovered
+  element used to recompute the style of the whole page. A `:hover`
+  inside `:has()` or `@scope` still restyles everything. Scrolling and
+  hovering an x.com profile spends 14% of the renderer's time computing
+  styles instead of 23%.
 * Layout: grid tracks sized `minmax(<length>, <length>)` that do not all
   fit share the free space equally from their minimums, each stopping
   at its maximum, as the grid track sizing algorithm specifies. They

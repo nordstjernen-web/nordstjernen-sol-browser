@@ -33834,6 +33834,9 @@ static GHashTable    *g_struct_flood_attrs;
 static GHashTable    *g_empty_sib_keys;
 static GHashTable    *g_empty_sib_attrs;
 static gboolean       g_empty_sib_loose;
+static gboolean       g_hover_sib;
+static gboolean       g_hover_loose;
+static gboolean       g_incr_prev_hover_lost;
 static GHashTable    *g_inv_sets;
 static GHashTable    *g_incr_inv_pending;
 static GPtrArray     *g_inv_active;
@@ -33904,9 +33907,20 @@ incr_inv_note_key(char kind, const char *name, const ns_css_simple *subject)
     else inv->whole = TRUE;
 }
 
+static gboolean
+incr_simple_has_pseudo(const ns_css_simple *c, ns_css_pseudo kind)
+{
+    for (guint i = 0; c->pseudos && i < c->pseudos->len; i++)
+        if (g_array_index(c->pseudos, ns_css_pseudo_pred, i).kind == kind)
+            return TRUE;
+    return FALSE;
+}
+
 static void
 incr_inv_note_compound(const ns_css_simple *c, const ns_css_simple *subject)
 {
+    if (incr_simple_has_pseudo(c, NS_CSS_PC_HOVER))
+        incr_inv_note_key(':', "hover", subject);
     if (c->id && *c->id) incr_inv_note_key('#', c->id, subject);
     for (guint i = 0; c->classes && i < c->classes->len; i++) {
         const char *cls = g_ptr_array_index(c->classes, i);
@@ -34172,6 +34186,10 @@ ns_css_forget_node(const ns_node *node)
     if (g_css_focus_node == node) g_css_focus_node = NULL;
     if (g_css_focus_visible_node == node) g_css_focus_visible_node = NULL;
     if (g_css_hover_node == node) g_css_hover_node = NULL;
+    if (g_incr_prev_hover == node) {
+        g_incr_prev_hover = NULL;
+        g_incr_prev_hover_lost = TRUE;
+    }
     if (g_css_active_node == node) g_css_active_node = NULL;
     if (g_css_fullscreen_node == node) g_css_fullscreen_node = NULL;
     if (!g_css_compute_thread) return;
@@ -34667,6 +34685,94 @@ incr_simple_uses_empty(const ns_css_simple *c, int depth)
     return FALSE;
 }
 
+static gboolean incr_selector_mentions_hover(const ns_css_selector *sel,
+                                             int depth);
+
+static gboolean
+incr_group_mentions_hover(const GPtrArray *group, int depth)
+{
+    for (guint i = 0; group && i < group->len; i++)
+        if (incr_selector_mentions_hover(g_ptr_array_index(group, i), depth))
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+incr_simple_mentions_hover(const ns_css_simple *c, int depth)
+{
+    if (!c) return FALSE;
+    if (depth > 6 || incr_simple_has_pseudo(c, NS_CSS_PC_HOVER)) return TRUE;
+    GPtrArray *groups[3] = { c->matches_any, c->matches_none, c->has_groups };
+    for (guint g = 0; g < G_N_ELEMENTS(groups); g++)
+        for (guint gi = 0; groups[g] && gi < groups[g]->len; gi++)
+            if (incr_group_mentions_hover(g_ptr_array_index(groups[g], gi),
+                                          depth + 1))
+                return TRUE;
+    for (guint i = 0; c->pseudos && i < c->pseudos->len; i++)
+        if (incr_group_mentions_hover(
+                g_array_index(c->pseudos, ns_css_pseudo_pred, i).of_group,
+                depth + 1))
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+incr_selector_mentions_hover(const ns_css_selector *sel, int depth)
+{
+    for (guint i = 0; sel && sel->compounds && i < sel->compounds->len; i++)
+        if (incr_simple_mentions_hover(g_ptr_array_index(sel->compounds, i),
+                                       depth))
+            return TRUE;
+    return FALSE;
+}
+
+static void incr_hover_scan_selector(const ns_css_selector *sel, int depth);
+
+static void
+incr_hover_scan_group(const GPtrArray *group, int depth)
+{
+    for (guint i = 0; group && i < group->len; i++)
+        incr_hover_scan_selector(g_ptr_array_index(group, i), depth);
+}
+
+static void
+incr_hover_scan_simple(const ns_css_simple *c, int depth)
+{
+    if (depth > 6) {
+        g_hover_loose = TRUE;
+        return;
+    }
+    for (guint gi = 0; c->has_groups && gi < c->has_groups->len; gi++)
+        if (incr_group_mentions_hover(g_ptr_array_index(c->has_groups, gi),
+                                      depth + 1))
+            g_hover_loose = TRUE;
+    GPtrArray *groups[2] = { c->matches_any, c->matches_none };
+    for (guint g = 0; g < G_N_ELEMENTS(groups); g++)
+        for (guint gi = 0; groups[g] && gi < groups[g]->len; gi++)
+            incr_hover_scan_group(g_ptr_array_index(groups[g], gi), depth + 1);
+    for (guint i = 0; c->pseudos && i < c->pseudos->len; i++)
+        incr_hover_scan_group(
+            g_array_index(c->pseudos, ns_css_pseudo_pred, i).of_group,
+            depth + 1);
+}
+
+static void
+incr_hover_scan_selector(const ns_css_selector *sel, int depth)
+{
+    guint n = sel && sel->compounds ? sel->compounds->len : 0;
+    for (guint ci = 0; ci < n; ci++) {
+        const ns_css_simple *c = g_ptr_array_index(sel->compounds, ci);
+        if (!c) continue;
+        ns_css_comb right = NS_CSS_COMB_NONE;
+        if (sel->combinators && ci + 1 < sel->combinators->len)
+            right = g_array_index(sel->combinators, ns_css_comb, ci + 1);
+        if ((right == NS_CSS_COMB_ADJACENT || right == NS_CSS_COMB_SIBLING) &&
+            incr_simple_mentions_hover(c, depth))
+            g_hover_sib = TRUE;
+        incr_hover_scan_simple(c, depth);
+    }
+}
+
 static void
 incr_note_empty_sib(const ns_css_simple *c)
 {
@@ -34699,6 +34805,7 @@ incr_collect_struct_keys(const ns_css_stylesheet *sh)
             if (!sel || !sel->compounds) continue;
             incr_collect_attr_keys_selector(sel, 0);
             incr_note_struct_descendants(sel);
+            incr_hover_scan_selector(sel, 0);
             guint nc = sel->compounds->len;
             for (guint ci = 0; ci < nc; ci++) {
                 const ns_css_simple *c = g_ptr_array_index(sel->compounds, ci);
@@ -34878,6 +34985,9 @@ incr_collect_name_keys(const ns_css_stylesheet *sh)
         incr_collect_name_keys_group(r->selectors, 0);
         for (guint si = 0; r->scopes && si < r->scopes->len; si++) {
             const ns_css_scope *scope = g_ptr_array_index(r->scopes, si);
+            if (incr_group_mentions_hover(scope->roots, 1) ||
+                incr_group_mentions_hover(scope->limits, 1))
+                g_hover_loose = TRUE;
             incr_collect_name_keys_group(scope->roots, 1);
             incr_collect_name_keys_group(scope->limits, 1);
             const GPtrArray *scope_groups[2] = { scope->roots, scope->limits };
@@ -35031,6 +35141,8 @@ incr_ensure_struct_keys(const ns_css_stylesheet *ua,
     g_clear_pointer(&g_empty_sib_keys, g_hash_table_destroy);
     g_clear_pointer(&g_empty_sib_attrs, g_hash_table_destroy);
     g_empty_sib_loose = FALSE;
+    g_hover_sib = FALSE;
+    g_hover_loose = FALSE;
     if (g_incr_inv_pending) g_hash_table_remove_all(g_incr_inv_pending);
     if (g_inv_sets) g_hash_table_remove_all(g_inv_sets);
     else g_inv_sets = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
@@ -35702,9 +35814,8 @@ incr_add_self_dirty(ns_node *target)
 }
 
 static void
-incr_mark_self_dirty(ns_node *target, GPtrArray *queue)
+incr_add_inv_pending(ns_node *target, GPtrArray *queue)
 {
-    incr_add_self_dirty(target);
     if (queue && queue->len > 0) {
         if (!g_incr_inv_pending)
             g_incr_inv_pending = g_hash_table_new_full(
@@ -35718,7 +35829,89 @@ incr_mark_self_dirty(ns_node *target, GPtrArray *queue)
         for (guint i = 0; i < queue->len; i++)
             g_ptr_array_add(pending, g_ptr_array_index(queue, i));
     }
+}
+
+static void
+incr_mark_self_dirty(ns_node *target, GPtrArray *queue)
+{
+    incr_add_self_dirty(target);
+    incr_add_inv_pending(target, queue);
     incr_mark_has_subjects(target);
+}
+
+static void
+incr_add_subtree_dirty(ns_node *target)
+{
+    if (!g_incr_dirty)
+        g_incr_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_hash_table_add(g_incr_dirty, target);
+}
+
+static void
+incr_mark_hover_flip(ns_node *n, incr_inv_set *hover_inv)
+{
+    if (g_hover_sib) {
+        incr_add_subtree_dirty(n);
+        int marked = 0;
+        for (ns_node *s = n->next_sibling; s; s = s->next_sibling) {
+            if (s->kind != NS_NODE_ELEMENT) continue;
+            if (++marked > 256) {
+                incr_add_subtree_dirty(n->parent ? n->parent : n);
+                break;
+            }
+            incr_add_subtree_dirty(s);
+        }
+        return;
+    }
+    if (g_desc_keys_loose || (hover_inv && hover_inv->whole)) {
+        incr_add_subtree_dirty(n);
+        return;
+    }
+    incr_add_self_dirty(n);
+    if (hover_inv) {
+        GPtrArray *queue = g_ptr_array_new();
+        g_ptr_array_add(queue, hover_inv);
+        incr_add_inv_pending(n, queue);
+        g_ptr_array_free(queue, TRUE);
+    }
+}
+
+static GHashTable *
+incr_hover_chain(const ns_node *hover)
+{
+    GHashTable *chain = g_hash_table_new(g_direct_hash, g_direct_equal);
+    for (const ns_node *h = hover; h; h = h->parent)
+        g_hash_table_add(chain, (gpointer)h);
+    return chain;
+}
+
+static void
+incr_mark_hover_side(const ns_node *hover, GHashTable *other_chain,
+                     incr_inv_set *hover_inv)
+{
+    for (const ns_node *h = hover; h; h = h->parent)
+        if (h->kind == NS_NODE_ELEMENT &&
+            !g_hash_table_contains(other_chain, h))
+            incr_mark_hover_flip((ns_node *)h, hover_inv);
+}
+
+static gboolean
+incr_hover_change_supported(void)
+{
+    return g_struct_ready && !g_hover_loose && !g_incr_prev_hover_lost;
+}
+
+static void
+incr_mark_hover_change(const ns_node *before, const ns_node *after)
+{
+    incr_inv_set *hover_inv = g_inv_sets
+        ? g_hash_table_lookup(g_inv_sets, ":hover") : NULL;
+    GHashTable *before_chain = incr_hover_chain(before);
+    GHashTable *after_chain = incr_hover_chain(after);
+    incr_mark_hover_side(before, after_chain, hover_inv);
+    incr_mark_hover_side(after, before_chain, hover_inv);
+    g_hash_table_destroy(before_chain);
+    g_hash_table_destroy(after_chain);
 }
 
 static gboolean
@@ -38433,11 +38626,13 @@ ns_css_compute(ns_node *doc,
     guint env_changed =
         (g_incr_prev_cq_sig != cq_sig ? STYLE_READS_CONTAINER : 0) |
         (g_incr_prev_font_gen != font_gen ? STYLE_READS_FONT_METRICS : 0);
+    gboolean hover_moved = g_css_hover_node != g_incr_prev_hover ||
+                           g_incr_prev_hover_lost;
     g_incr_pass_active = incr_want
         && g_incr_prev_styles != NULL
         && g_incr_prev_doc == doc
         && g_css_focus_node == g_incr_prev_focus
-        && g_css_hover_node == g_incr_prev_hover
+        && (!hover_moved || incr_hover_change_supported())
         && g_css_active_node == g_incr_prev_active
         && g_css_fullscreen_node == g_incr_prev_fullscreen;
     guint sheet_marked = 0;
@@ -38445,6 +38640,8 @@ ns_css_compute(ns_node *doc,
         g_incr_pass_active = struct_kept && !has_reset &&
             incr_apply_sheet_change(doc, cached_ua, author_sheets, n_sheets,
                                     &sheet_marked);
+    if (g_incr_pass_active && hover_moved)
+        incr_mark_hover_change(g_incr_prev_hover, g_css_hover_node);
     if (g_incr_pass_active)
         incr_mark_env_dependents(env_changed);
     else if (g_incr_env_nodes)
@@ -38497,6 +38694,7 @@ ns_css_compute(ns_node *doc,
         g_incr_prev_font_gen = font_gen;
         g_incr_prev_focus = g_css_focus_node;
         g_incr_prev_hover = g_css_hover_node;
+        g_incr_prev_hover_lost = FALSE;
         g_incr_prev_active = g_css_active_node;
         g_incr_prev_fullscreen = g_css_fullscreen_node;
         if (g_getenv("NS_PROFILE"))
