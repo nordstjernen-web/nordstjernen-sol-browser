@@ -3,6 +3,15 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Shadow DOM: `::slotted()` matches the elements a slot receives after
+  flattening, including those passed on through a slot of an enclosing
+  component. A rule matched only the host's own children, so an
+  element slotted into a component whose shadow tree slots it on into a
+  second one missed the second component's `::slotted()` rules.
+  reddit.com's image galleries hand their list of pictures through two
+  carousels this way, and the inner one's `::slotted(:not([slot]))`
+  lays it out as a row; the pictures stacked instead, offset, with
+  their neighbours showing.
 * Style: collecting the page's stylesheets before a layout no longer
   re-hashes the text of every `<style>` element. A text node now keeps
   the hash of its text until the text changes or the node is freed.
