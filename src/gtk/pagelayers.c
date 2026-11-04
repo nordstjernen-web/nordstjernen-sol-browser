@@ -562,6 +562,22 @@ ns_page_layers_vp_held(const NsPageLayers *pl)
 }
 
 char *
+ns_page_layers_video_held(const NsPageLayers *pl)
+{
+    GString *out = g_string_new(NULL);
+    for (guint i = 0; pl && pl->active && i < pl->videos->len; i++) {
+        const PlVideo *v = g_ptr_array_index(pl->videos, i);
+        for (guint j = 0; j < v->frames->len; j++) {
+            const PlFrame *f = &g_array_index(v->frames, PlFrame, j);
+            if (f->tex)
+                g_string_append_printf(out, "%s%u", out->len ? "," : "",
+                                       f->serial);
+        }
+    }
+    return g_string_free(out, FALSE);
+}
+
+char *
 ns_page_layers_have(const NsPageLayers *pl, double y0, double y1,
                     gboolean any_gen)
 {

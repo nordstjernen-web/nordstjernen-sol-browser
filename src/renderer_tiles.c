@@ -36,6 +36,8 @@ typedef struct tiles_req {
     int  n_have;
     long hold[NS_TILE_LIST_MAX];
     int  n_hold;
+    long vheld[NS_TILE_LIST_MAX];
+    int  n_vheld;
 } tiles_req;
 
 typedef struct tiles_out {
@@ -109,6 +111,7 @@ tiles_req_parse(const char *body, tiles_req *r)
     json_get_long(body, "vp_held", &r->vp_held);
     r->n_have = tiles_parse_list(body, "have", r->have);
     r->n_hold = tiles_parse_list(body, "hold", r->hold);
+    r->n_vheld = tiles_parse_list(body, "vheld", r->vheld);
     return r->tile_h >= 64 && r->tile_h <= 2048;
 }
 
@@ -399,8 +402,9 @@ tiles_write_doc(ns_tiles *t, ns_browser *b, const ns_tiles_view *v,
 }
 
 typedef struct tiles_video_out {
-    tiles_out *o;
-    gboolean   fresh;
+    tiles_out       *o;
+    gboolean         fresh;
+    const tiles_req *r;
 } tiles_video_out;
 
 static gboolean
@@ -414,7 +418,9 @@ tiles_write_video_frame(tiles_video_out *vo, const ns_video_frame_ref *f,
     size_t row = (size_t)fw * 4u;
     size_t need = row * (size_t)fh;
     long long at = -1;
-    if (vo->fresh || f->serial > sent) {
+    gboolean held = tiles_list_has(vo->r->vheld, vo->r->n_vheld,
+                                   (long)f->serial);
+    if (!held && (vo->fresh || f->serial > sent)) {
         if (o->off > o->cap || need > o->cap - o->off) return FALSE;
         ns_texture_download(f->tex, o->fb + o->off, row);
         at = (long long)o->off;
@@ -441,9 +447,10 @@ tiles_write_video(const ns_video_layer *layer, gpointer data)
 }
 
 static void
-tiles_write_videos(ns_browser *b, gboolean fresh, tiles_out *o)
+tiles_write_videos(ns_browser *b, const tiles_req *r, gboolean fresh,
+                   tiles_out *o)
 {
-    tiles_video_out vo = { o, fresh };
+    tiles_video_out vo = { o, fresh, r };
     g_string_append(o->desc, "videos\n");
     ns_browser_foreach_video_layer(b, tiles_write_video, &vo);
 }
@@ -481,7 +488,7 @@ ns_tiles_render(ns_tiles *t, ns_browser *b, const char *body,
     }
     tiles_write_doc(t, b, view, &r, fresh, &o);
     if (t->state < 0) return -1;
-    tiles_write_videos(b, fresh, &o);
+    tiles_write_videos(b, &r, fresh, &o);
     if (g_getenv("NS_PROFILE"))
         g_printerr("[profile] tiles %6.1fms gen=%d fresh=%d bytes=%zu\n",
                    (double)(g_get_monotonic_time() - t0) / 1000.0, t->gen,
