@@ -3,6 +3,15 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Cookies: a nameless cookie (`Set-Cookie: =value`) is rejected when its
+  value starts with `__Secure-` or `__Host-` or contains `=`, since the
+  `Cookie` header carries a nameless cookie as its bare value and script on
+  a sibling host could otherwise forge a prefixed cookie (RFC 6265bis
+  5.6). The internal `__nsCookieList()` hook behind `cookieStore` now
+  answers only for URLs same-origin with the document, as the Cookie Store
+  API requires, and is removed from the global object once the polyfill
+  has captured it, so a page could no longer list another origin's
+  cookies in its site or partition.
 * Cookies: the per-site Netscape cookie jar files, their `.js.txt`
   siblings and the SameSite sidecars are replaced by one SQLite database
   per profile, `cookies/cookies.db`, owned by browser code

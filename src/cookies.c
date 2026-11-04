@@ -823,17 +823,32 @@ line_clear(ns_cookie_line *line)
 }
 
 static gboolean
-name_has_prefix(const ns_cookie_line *line, const char *prefix)
+bytes_have_prefix(const char *s, gsize len, const char *prefix)
 {
     gsize plen = strlen(prefix);
-    return line->name_len >= plen &&
-           g_ascii_strncasecmp(line->name, prefix, plen) == 0;
+    return len >= plen && g_ascii_strncasecmp(s, prefix, plen) == 0;
+}
+
+static gboolean
+name_has_prefix(const ns_cookie_line *line, const char *prefix)
+{
+    return bytes_have_prefix(line->name, line->name_len, prefix);
+}
+
+static gboolean
+nameless_value_forges_cookie(const ns_cookie_line *line)
+{
+    if (line->name_len) return FALSE;
+    return memchr(line->value, '=', line->value_len) != NULL ||
+           bytes_have_prefix(line->value, line->value_len, "__Secure-") ||
+           bytes_have_prefix(line->value, line->value_len, "__Host-");
 }
 
 static gboolean
 line_passes_policy(const ns_cookie_line *line, const ns_request_url *req,
                    gboolean from_http)
 {
+    if (nameless_value_forges_cookie(line)) return FALSE;
     if (!from_http && line->httponly) return FALSE;
     if (line->secure && !req->secure) return FALSE;
     if (line->samesite == NS_COOKIE_SAMESITE_NONE && !line->secure) return FALSE;

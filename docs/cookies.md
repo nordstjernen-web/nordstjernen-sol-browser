@@ -101,7 +101,9 @@ a site pays one query.
   default path of the request URL;
 - `Secure` is accepted only from a secure context (`https`, or a loopback
   host); `SameSite=None` requires `Secure`; the `__Secure-` and `__Host-`
-  prefixes are enforced for HTTP and script alike;
+  prefixes are enforced for HTTP and script alike, and a nameless cookie
+  whose value starts with either prefix or contains `=` is rejected, since
+  the `Cookie` header would carry it as a forged named cookie;
 - script may not set an `HttpOnly` cookie nor replace or delete an
   existing one;
 - a cookie set over an insecure connection may not overwrite a secure
@@ -164,7 +166,9 @@ rules live in the store, so there is no second copy in JavaScript.
 
 `cookieStore` (`data/js/polyfills.js`) reads the cookies script may see,
 with their real attributes, through `__nsCookieList()`
-(`ns_cookie_store_visible_json()`), and writes through `document.cookie`
+(`ns_cookie_store_visible_json()`), which answers only for a URL
+same-origin with the document and is deleted from the global object once
+the polyfill has captured it; it writes through `document.cookie`
 with the Cookie Store API defaults: path `/`, `SameSite=Strict`, `Secure`
 in a secure context. `set()` and `delete()` fire a `CookieChangeEvent`
 named `change` on `cookieStore` with the cookies they changed or deleted;
