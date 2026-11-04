@@ -5,8 +5,8 @@
 
 #include "bytecode_cache.h"
 
-#define NS_BYTECODE_CACHE_MEM_CAP_BYTES   (16u * 1024u * 1024u)
-#define NS_BYTECODE_CACHE_VALUE_CAP_BYTES (4u  * 1024u * 1024u)
+#define NS_BYTECODE_CACHE_MEM_CAP_BYTES   (64u * 1024u * 1024u)
+#define NS_BYTECODE_CACHE_VALUE_CAP_BYTES (20u * 1024u * 1024u)
 
 typedef struct ns_bytecode_cache_entry {
     guint8 *bytes;

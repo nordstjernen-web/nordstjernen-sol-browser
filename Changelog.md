@@ -3,6 +3,17 @@ Changelog:
 
 1.0.42-dev:
 ======
+* Restyle performance: a `:has()` rule whose subject has no class, id or
+  type to key on (YouTube has one) made every relevant DOM mutation
+  restyle the whole document. Since such a rule's argument uses only
+  descendant and child combinators, only the mutated node and its
+  ancestors can change their match, so just those are restyled now. On a
+  YouTube watch page this removes about a hundred full restyles of ~6,000
+  elements (20-75 ms each) per navigation.
+* JavaScript: the in-memory bytecode cache holds scripts whose bytecode is
+  up to 20 MB (was 4 MB) within a 64 MB budget (was 16 MB), so YouTube's
+  9.7 MB application script is compiled once per renderer instead of on
+  every load.
 * Media: when the operating system's AAC decoder is available (Media
   Foundation on Windows, AudioToolbox, MediaCodec, GStreamer),
   `MediaSource.isTypeSupported()` no longer claims Opus or Vorbis, so
