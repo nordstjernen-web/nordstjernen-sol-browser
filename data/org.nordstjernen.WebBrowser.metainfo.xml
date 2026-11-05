@@ -60,6 +60,17 @@
   </branding>
 
   <releases>
+    <release version="1.0.44" date="2026-11-05">
+      <description>
+        <p>Passkeys, security and site compatibility release.</p>
+        <ul>
+          <li>Passkeys and security keys work on Windows, and GitHub shows its Google, Apple and passkey sign-in options.</li>
+          <li>Fullscreen, pointer lock, pop-ups and downloads are per-site capabilities in the site settings.</li>
+          <li>WebGL shaders are validated with glslang, and many sandbox, cookie, CSP and network hardening fixes.</li>
+          <li>Live video on X plays from its timeline, and Facebook, X and Reddit render more like Chrome.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.43" date="2026-11-05">
       <description>
         <p>Input, network and Windows packaging release.</p>
