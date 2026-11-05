@@ -198,21 +198,45 @@ endif
 
 # Every WebGL shader is validated by the Khronos glslang front end before it
 # reaches the GPU driver (src/glsl_validate.c), so WebGL is built only when
-# glslang is present. Its pkg-config file is broken on Debian (it names
-# libraries that no longer exist), so the libraries are looked up directly.
+# glslang is present. Its pkg-config file names libraries that no longer
+# exist (MachineIndependent, GenericCodeGen), so it is consulted only for the
+# library and include directories -- which Homebrew keeps off the default
+# search paths -- and the two real libraries are looked up directly.
 have_glslang = false
 glslang_deps = []
 if not is_mobile
   glslang_feature = get_option('glslang')
   if glslang_feature.allowed()
-    glslang_lib = cc.find_library('glslang', required: false)
+    glslang_pc = dependency('glslang', method: 'pkg-config', required: false)
+    glslang_lib_dirs = []
+    glslang_cflags = []
+    if glslang_pc.found()
+      glslang_libdir = glslang_pc.get_variable(pkgconfig: 'libdir', default_value: '')
+      glslang_incdir = glslang_pc.get_variable(pkgconfig: 'includedir', default_value: '')
+      if glslang_libdir != ''
+        glslang_lib_dirs = [glslang_libdir]
+      endif
+      if glslang_incdir != ''
+        glslang_cflags = ['-I' + glslang_incdir]
+      endif
+    elif host_machine.system() == 'darwin'
+      foreach brew_prefix : ['/opt/homebrew', '/usr/local']
+        glslang_lib_dirs += brew_prefix / 'lib'
+        glslang_cflags += '-I' + brew_prefix / 'include'
+      endforeach
+    endif
+    glslang_lib = cc.find_library('glslang', dirs: glslang_lib_dirs,
+                                  required: false)
     glslang_limits = cc.find_library('glslang-default-resource-limits',
-                                     required: false)
+                                     dirs: glslang_lib_dirs, required: false)
     have_glslang = glslang_lib.found() and glslang_limits.found() and \
-                   cc.has_header('glslang/Include/glslang_c_interface.h') and \
-                   cc.has_header('glslang/Public/resource_limits_c.h')
+                   cc.has_header('glslang/Include/glslang_c_interface.h',
+                                 args: glslang_cflags) and \
+                   cc.has_header('glslang/Public/resource_limits_c.h',
+                                 args: glslang_cflags)
     if have_glslang
-      glslang_deps = [glslang_lib, glslang_limits, dependency('threads')]
+      glslang_deps = [declare_dependency(compile_args: glslang_cflags),
+                      glslang_lib, glslang_limits, dependency('threads')]
       cxx_runtime_name = host_machine.system() == 'darwin' ? 'c++' : 'stdc++'
       cxx_runtime = cc.find_library(cxx_runtime_name, required: false)
       if cxx_runtime.found()

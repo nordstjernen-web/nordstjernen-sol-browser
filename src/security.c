@@ -1003,9 +1003,9 @@ ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
     }
     const scmp_datum_t self_pid = (scmp_datum_t)getpid();
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(kill), 1,
-                           SCMP_A0(SCMP_CMP_EQ, self_pid));
+                           SCMP_A0(SCMP_CMP_EQ, self_pid, 0));
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 1,
-                           SCMP_A0(SCMP_CMP_EQ, self_pid));
+                           SCMP_A0(SCMP_CMP_EQ, self_pid, 0));
 #else
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
     int clone3_nr = seccomp_syscall_resolve_name("clone3");

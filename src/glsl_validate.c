@@ -20,6 +20,9 @@ typedef struct {
     GString    *log;
 } ns_glsl_scan;
 
+static void ns_glsl_error(ns_glsl_scan *s, int line, const char *fmt, ...)
+    G_GNUC_PRINTF(3, 4);
+
 static void
 ns_glsl_error(ns_glsl_scan *s, int line, const char *fmt, ...)
 {
