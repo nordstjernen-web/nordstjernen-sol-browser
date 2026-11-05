@@ -3,6 +3,12 @@ Changelog:
 
 1.0.44-dev:
 ======
+* DOM: read-only attributes such as `nodeType`, `tagName`, `form`,
+  `naturalWidth` or `validity` no longer carry a setter that silently
+  swallows assignments. As in other browsers, assigning to them is ignored
+  in sloppy-mode scripts and throws a `TypeError` in strict mode, and
+  `Object.getOwnPropertyDescriptor(...).set` is `undefined`. About 120
+  idlharness subtests.
 * DOM: interface members now have the property attributes Web IDL
   requires. Attributes, operations and constants on every interface
   prototype and interface object are enumerable, constants are read-only,
