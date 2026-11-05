@@ -98,7 +98,7 @@ Install [Homebrew](https://brew.sh) if you do not already have it, then:
 
 ```sh
 brew install meson ninja pkg-config gtk4 libepoxy curl \
-    uchardet libpsl sqlite webp sdl2
+    uchardet libpsl sqlite webp sdl2 glslang
 brew install ccache          # optional, speeds up rebuilds
 brew install dylibbundler    # needed only to package the .app / .dmg
 ```

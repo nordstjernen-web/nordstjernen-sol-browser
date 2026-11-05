@@ -3,6 +3,7 @@ Nordstjernen web browser
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue?style=flat-square)](COPYING)
 [![Latest release](https://img.shields.io/github/v/release/nordstjernen-web/nordstjernen-sol-browser?style=flat-square)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases/latest)
+[![npm package](https://img.shields.io/npm/v/nordstjernen-browser?style=flat-square&logo=npm)](https://www.npmjs.com/package/nordstjernen-browser)
 [![Best viewed in Nordstjernen Browser](docs/best-viewed-in-nordstjernen-badge.svg)](https://nordstjernen.org)
 
 Nordstjernen Sol is a web browser written from scratch in C, focused on
@@ -239,6 +240,7 @@ network.
 | GTK 4 | **≥ 4.22.1 on Windows** (MSYS2 stock), ≥ 4.14 elsewhere (≥ 4.22 preferred) | UI toolkit, GSK renderer |
 | GLib / GModule, Pango, cairo, HarfBuzz, FriBidi, fontconfig | (ship with GTK; web-text-lib needs GLib ≥ 2.80, cairo ≥ 1.18, HarfBuzz ≥ 8.3, FriBidi ≥ 1.0.6, fontconfig ≥ 2.15) | core types, dynamic module loading, text shaping, 2D drawing |
 | libepoxy | — (with EGL on Linux) | OpenGL/ES function dispatch for WebGL |
+| glslang | — (desktop; `-Dglslang=disabled` drops WebGL) | validates every WebGL shader before it reaches the GPU driver |
 | libcurl | ≥ 8.5 (≥ 8.11 for WebSocket) | HTTP/2 networking, HSTS, native WebSocket (cookies are handled by the browser, see `docs/cookies.md`) |
 | OpenSSL (libcrypto) | — | WebCrypto (`crypto.subtle`) |
 | uchardet | — | charset detection |

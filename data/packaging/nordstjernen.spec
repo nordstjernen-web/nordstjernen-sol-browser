@@ -26,6 +26,7 @@ BuildRequires:  pkgconfig(libseccomp)
 BuildRequires:  pkgconfig(sqlite3)
 BuildRequires:  pkgconfig(libwebp)
 BuildRequires:  pkgconfig(sdl2)
+BuildRequires:  glslang-devel
 BuildRequires:  pkgconfig(libavcodec) >= 60
 BuildRequires:  pkgconfig(libavformat) >= 60
 BuildRequires:  pkgconfig(libavutil) >= 58

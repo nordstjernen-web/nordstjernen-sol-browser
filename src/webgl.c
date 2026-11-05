@@ -16,6 +16,7 @@
 
 #include "config.h"
 #include "glctx.h"
+#include "glsl_validate.h"
 #include "js.h"
 #include "net.h"
 
@@ -72,6 +73,8 @@ typedef struct ns_webgl {
     GHashTable    *buffer_sizes;
     GHashTable    *elem_data;
     GHashTable    *uncleared_rbs;
+    GHashTable    *shader_src;
+    GHashTable    *shader_log;
     int            next_sync;
 } ns_webgl;
 
@@ -474,6 +477,8 @@ ns_webgl_free(ns_webgl *g)
     if (g->attrib_masks) g_hash_table_destroy(g->attrib_masks);
     if (g->elem_data) g_hash_table_destroy(g->elem_data);
     if (g->uncleared_rbs) g_hash_table_destroy(g->uncleared_rbs);
+    if (g->shader_src) g_hash_table_destroy(g->shader_src);
+    if (g->shader_log) g_hash_table_destroy(g->shader_log);
     if (g->pbo_timer) {
         g_source_destroy(g->pbo_timer);
         g_source_unref(g->pbo_timer);
@@ -2166,11 +2171,50 @@ wgl_createShader(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     return wgl_wrap(g, ctx, s, "shader");
 }
 
+static GHashTable *
+wgl_shader_table(GHashTable **table)
+{
+    if (!*table)
+        *table = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
+                                       g_free);
+    return *table;
+}
+
+static const char *
+wgl_shader_lookup(GHashTable *table, GLuint name)
+{
+    return table ? g_hash_table_lookup(table, GUINT_TO_POINTER(name)) : NULL;
+}
+
+static void
+wgl_shader_remember(ns_webgl *g, GLuint name, const char *src, size_t len,
+                    char *rejection)
+{
+    g_hash_table_insert(wgl_shader_table(&g->shader_src), GUINT_TO_POINTER(name),
+                        g_strndup(src, len));
+    if (rejection)
+        g_hash_table_insert(wgl_shader_table(&g->shader_log),
+                            GUINT_TO_POINTER(name), rejection);
+    else if (g->shader_log)
+        g_hash_table_remove(g->shader_log, GUINT_TO_POINTER(name));
+}
+
+static gboolean
+wgl_shader_is_fragment(GLuint name)
+{
+    GLint type = 0;
+    glGetShaderiv(name, GL_SHADER_TYPE, &type);
+    return type == GL_FRAGMENT_SHADER;
+}
+
 static JSValue
 wgl_deleteShader(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    glDeleteShader((GLuint)wgl_name(ctx, argv[0]));
+    GLuint name = (GLuint)wgl_name(ctx, argv[0]);
+    if (g->shader_src) g_hash_table_remove(g->shader_src, GUINT_TO_POINTER(name));
+    if (g->shader_log) g_hash_table_remove(g->shader_log, GUINT_TO_POINTER(name));
+    glDeleteShader(name);
     return JS_UNDEFINED;
 }
 
@@ -2232,16 +2276,23 @@ wgl_shaderSource(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     const char *src = JS_ToCStringLen(ctx, &slen, argv[1]);
     if (src) {
         if (slen <= NS_WEBGL_MAX_SHADER) {
+            GLuint name = (GLuint)wgl_name(ctx, argv[0]);
             char *rewritten = wgl_rewrite_draw_id(src);
             const GLchar *p = rewritten ? rewritten : src;
             GLint plen = rewritten ? (GLint)strlen(rewritten) : (GLint)slen;
+            char *rejection = ns_glsl_validate(p, (size_t)plen, g->version,
+                                               wgl_shader_is_fragment(name));
+            wgl_shader_remember(g, name, src, slen, rejection);
             char *prefixed = NULL;
-            if (epoxy_is_desktop_gl() && !strstr(p, "#version")) {
+            if (rejection) {
+                p = "#error rejected by the WebGL shader validator\n";
+                plen = (GLint)strlen(p);
+            } else if (epoxy_is_desktop_gl() && !strstr(p, "#version")) {
                 prefixed = g_strconcat("#version 100\n", p, NULL);
                 p = prefixed;
                 plen = (GLint)strlen(prefixed);
             }
-            glShaderSource((GLuint)wgl_name(ctx, argv[0]), 1, &p, &plen);
+            glShaderSource(name, 1, &p, &plen);
             g_free(prefixed);
             g_free(rewritten);
         }
@@ -2291,16 +2342,22 @@ static JSValue
 wgl_getShaderInfoLog(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    return wgl_gl_log(ctx, (GLuint)wgl_name(ctx, argv[0]),
-                      glGetShaderiv, GL_INFO_LOG_LENGTH, glGetShaderInfoLog);
+    GLuint name = (GLuint)wgl_name(ctx, argv[0]);
+    const char *rejection = wgl_shader_lookup(g->shader_log, name);
+    if (rejection) return JS_NewString(ctx, rejection);
+    return wgl_gl_log(ctx, name, glGetShaderiv, GL_INFO_LOG_LENGTH,
+                      glGetShaderInfoLog);
 }
 
 static JSValue
 wgl_getShaderSource(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    return wgl_gl_log(ctx, (GLuint)wgl_name(ctx, argv[0]),
-                      glGetShaderiv, GL_SHADER_SOURCE_LENGTH, glGetShaderSource);
+    GLuint name = (GLuint)wgl_name(ctx, argv[0]);
+    const char *original = wgl_shader_lookup(g->shader_src, name);
+    if (original) return JS_NewString(ctx, original);
+    return wgl_gl_log(ctx, name, glGetShaderiv, GL_SHADER_SOURCE_LENGTH,
+                      glGetShaderSource);
 }
 
 static JSValue

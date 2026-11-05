@@ -65,7 +65,41 @@ ns_gl_context_create(void)
         return NULL;
     }
 
-    HGLRC rc = wglCreateContext(dc);
+    HGLRC legacy = wglCreateContext(dc);
+    if (!legacy || !wglMakeCurrent(dc, legacy)) {
+        if (legacy) wglDeleteContext(legacy);
+        ReleaseDC(window, dc);
+        DestroyWindow(window);
+        return NULL;
+    }
+
+#ifndef WGL_CONTEXT_FLAGS_ARB
+#define WGL_CONTEXT_FLAGS_ARB 0x2094
+#endif
+#ifndef WGL_CONTEXT_ROBUST_ACCESS_BIT_ARB
+#define WGL_CONTEXT_ROBUST_ACCESS_BIT_ARB 0x00000004
+#endif
+#ifndef WGL_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB
+#define WGL_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB 0x8256
+#endif
+#ifndef WGL_LOSE_CONTEXT_ON_RESET_ARB
+#define WGL_LOSE_CONTEXT_ON_RESET_ARB 0x8252
+#endif
+    HGLRC rc = NULL;
+    if (epoxy_has_wgl_extension(dc, "WGL_ARB_create_context_robustness")) {
+        const int attrs[] = {
+            WGL_CONTEXT_FLAGS_ARB, WGL_CONTEXT_ROBUST_ACCESS_BIT_ARB,
+            WGL_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB,
+                WGL_LOSE_CONTEXT_ON_RESET_ARB,
+            0,
+        };
+        rc = wglCreateContextAttribsARB(dc, NULL, attrs);
+    } else {
+        g_message("WebGL: the OpenGL driver lacks WGL_ARB_create_context_robustness, "
+                  "so no WebGL context is created");
+    }
+    wglMakeCurrent(NULL, NULL);
+    wglDeleteContext(legacy);
     if (!rc || !wglMakeCurrent(dc, rc)) {
         if (rc) wglDeleteContext(rc);
         ReleaseDC(window, dc);
@@ -273,27 +307,28 @@ ns_gl_context_create(void)
 #define EGL_LOSE_CONTEXT_ON_RESET_EXT 0x31BF
 #endif
     const char *egl_exts = eglQueryString(d, EGL_EXTENSIONS);
-    gboolean robust = egl_exts &&
-        strstr(egl_exts, "EGL_EXT_create_context_robustness") != NULL;
+    if (!egl_exts || !strstr(egl_exts, "EGL_EXT_create_context_robustness")) {
+        g_message("WebGL: the EGL driver lacks EGL_EXT_create_context_robustness, "
+                  "so no WebGL context is created");
+        return NULL;
+    }
 
     EGLContext context = EGL_NO_CONTEXT;
     for (EGLint major = 3; major >= 2 && context == EGL_NO_CONTEXT; major--) {
-        if (robust) {
-            EGLint ra[] = {
-                EGL_CONTEXT_MAJOR_VERSION, major,
-                EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT, EGL_TRUE,
-                EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT,
-                    EGL_LOSE_CONTEXT_ON_RESET_EXT,
-                EGL_NONE,
-            };
-            context = eglCreateContext(d, config, EGL_NO_CONTEXT, ra);
-        }
-        if (context == EGL_NO_CONTEXT) {
-            EGLint na[] = { EGL_CONTEXT_MAJOR_VERSION, major, EGL_NONE };
-            context = eglCreateContext(d, config, EGL_NO_CONTEXT, na);
-        }
+        EGLint ra[] = {
+            EGL_CONTEXT_MAJOR_VERSION, major,
+            EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT, EGL_TRUE,
+            EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT,
+                EGL_LOSE_CONTEXT_ON_RESET_EXT,
+            EGL_NONE,
+        };
+        context = eglCreateContext(d, config, EGL_NO_CONTEXT, ra);
     }
-    if (context == EGL_NO_CONTEXT) return NULL;
+    if (context == EGL_NO_CONTEXT) {
+        g_message("WebGL: the EGL driver refused a robust-access context, "
+                  "so no WebGL context is created");
+        return NULL;
+    }
 
     EGLSurface surface = EGL_NO_SURFACE;
     if (!eglMakeCurrent(d, EGL_NO_SURFACE, EGL_NO_SURFACE, context)) {

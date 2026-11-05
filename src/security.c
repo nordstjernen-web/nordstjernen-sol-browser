@@ -61,9 +61,18 @@ static gboolean ns_runtime_dir_writable = TRUE;
 #endif
 #ifdef __linux__
 static gboolean ns_config_dir_writable = TRUE;
+static gboolean ns_landlock_scope_abstract_sockets;
 #endif
 
 static ns_security_status ns_status = { .landlock_abi = -1 };
+
+void
+ns_security_landlock_scope_abstract_sockets(void)
+{
+#ifdef __linux__
+    ns_landlock_scope_abstract_sockets = TRUE;
+#endif
+}
 
 void
 ns_security_config_dir_read_only(void)
@@ -281,10 +290,21 @@ ns_security_thread_count(void)
 #ifndef LANDLOCK_CREATE_RULESET_VERSION
 #define LANDLOCK_CREATE_RULESET_VERSION (1U << 0)
 #endif
+#ifndef LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET
+#define LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET (1ULL << 0)
+#endif
+#ifndef LANDLOCK_SCOPE_SIGNAL
+#define LANDLOCK_SCOPE_SIGNAL (1ULL << 1)
+#endif
+
+struct ns_landlock_ruleset_attr {
+    guint64 handled_access_fs;
+    guint64 handled_access_net;
+    guint64 scoped;
+};
 
 static int
-landlock_create_ruleset_(const struct landlock_ruleset_attr *attr,
-                         size_t size, guint32 flags)
+landlock_create_ruleset_(const void *attr, size_t size, guint32 flags)
 {
     return (int)syscall(SYS_landlock_create_ruleset, attr, size, flags);
 }
@@ -455,7 +475,12 @@ ns_security_sandbox_init(const char *self_exe)
     guint64 fs_rw   = fs_read | fs_write;
     guint64 fs_all  = fs_read | fs_write | fs_exec;
 
-    struct landlock_ruleset_attr attr = { .handled_access_fs = fs_all };
+    struct ns_landlock_ruleset_attr attr = { .handled_access_fs = fs_all };
+    if (abi >= 6) {
+        attr.scoped = LANDLOCK_SCOPE_SIGNAL;
+        if (ns_landlock_scope_abstract_sockets)
+            attr.scoped |= LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET;
+    }
     int rfd = landlock_create_ruleset_(&attr, sizeof(attr), 0);
     if (rfd < 0) {
         int err = errno;
@@ -763,7 +788,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "inotify_init1",
     "inotify_rm_watch",
     "ioctl",
-    "kill",
     "lgetxattr",
     "link",
     "linkat",
@@ -799,7 +823,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "openat2",
     "pause",
     "pidfd_open",
-    "pidfd_send_signal",
     "pipe",
     "pipe2",
     "pkey_alloc",
@@ -897,7 +920,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "syncfs",
     "sysinfo",
     "tee",
-    "tgkill",
     "time",
     "timer_create",
     "timer_delete",
@@ -912,7 +934,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "timerfd_settime",
     "timerfd_settime64",
     "times",
-    "tkill",
     "truncate",
     "truncate64",
     "umask",
@@ -980,12 +1001,19 @@ ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
         (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
                                SCMP_A0(SCMP_CMP_EQ, (scmp_datum_t)domains[i], 0));
     }
+    const scmp_datum_t self_pid = (scmp_datum_t)getpid();
+    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(kill), 1,
+                           SCMP_A0(SCMP_CMP_EQ, self_pid));
+    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 1,
+                           SCMP_A0(SCMP_CMP_EQ, self_pid));
 #else
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
     int clone3_nr = seccomp_syscall_resolve_name("clone3");
     if (clone3_nr != __NR_SCMP_ERROR)
         (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, clone3_nr, 0);
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 0);
+    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(kill), 0);
+    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 0);
 #endif
 }
 

@@ -3,6 +3,52 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Security: a sandboxed renderer can no longer signal other processes.
+  The seccomp filter allows `kill` and `tgkill` only against the
+  renderer's own PID and drops `tkill` and `pidfd_send_signal`; on Landlock
+  ABI 6 kernels the ruleset also scopes signals to the sandbox domain, and
+  renderers' rulesets scope abstract UNIX sockets too. A compromised tab
+  could previously `kill(-1, SIGKILL)` every process of the user.
+* Security: WebGL shaders are validated before they reach the GPU driver.
+  `shaderSource()` checks the WebGL source rules (character set, identifier
+  length, reserved `webgl_` names, nesting, allowed directives, `#version`
+  and `#extension`) and then parses and links the shader with the Khronos
+  glslang front end as GLSL ES 1.00 or 3.00, with the ES 1.00 Appendix A
+  limits; a rejected shader is replaced by a `#error` line, fails to
+  compile and reports the validator's message in `getShaderInfoLog()`.
+  glslang is now a required desktop build dependency (`glslang-dev`,
+  `glslang-devel` or `glslang`; `-Dglslang=disabled` drops WebGL). The GL
+  context is created with robust buffer access
+  (`EGL_EXT_create_context_robustness`, `WGL_ARB_create_context_robustness`)
+  or not at all. `getShaderSource()` now returns the page's own source.
+* Security: WebGPU enables only the Vulkan, Metal and D3D12 backends of
+  wgpu-native, whose shader translation injects bounds checks; the GL
+  backend, which does not, is no longer used, so the software fallback is
+  lavapipe rather than llvmpipe. The WGSL source passed to
+  `createShaderModule()` is capped at 4 MiB. `NS_WEBGPU_VALIDATION=1` turns
+  on wgpu's backend validation layers for development.
+* Security: the shell↔renderer IPC parser reads every numeric `X-*` header
+  through a range-checked parser clamped to ±2³⁰ instead of `atol`, the
+  JSON number helper reports an out-of-range value as absent, and the
+  shell validates a tiled render reply's width, height and stride against
+  the viewport and the shared framebuffer exactly as it already did for
+  linear frames.
+* Security: a page can run at most 64 workers at once (dedicated, shared
+  and service workers together). Each worker is an OS thread with its own
+  JavaScript runtime, and a loop creating workers could previously spawn
+  threads until the kernel refused and peg every core. Beyond the limit a
+  `Worker` or `SharedWorker` fires `error` and `register()` rejects with
+  `QuotaExceededError`, each with a console line naming the limit;
+  terminating a worker frees a slot.
+* Security: the response-side CORS check and the canvas origin-clean check
+  no longer treat every `blob:` URL as readable; a blob URL is readable
+  only by documents of the origin that created it, the same rule the fetch
+  layer already applied.
+* Security: `EventSource` follows redirects in the engine instead of inside
+  libcurl. Each hop is checked like the engine's own redirect loop — at most
+  10 redirects, no https→http downgrade, `connect-src` and the safe-browsing
+  list re-checked per hop, and the partition's cookies re-evaluated for the
+  new URL — where libcurl used to follow up to 20 hops on its own.
 * Fullscreen is a site capability. The site settings popover gains a
   Fullscreen row; a blocked site's `requestFullscreen()` rejects with a
   `TypeError` and `fullscreenerror`, and with Ask the promise waits until

@@ -105,7 +105,7 @@ a missing one fails `meson setup` with `Dependency "…" not found`.
 
 Everything else builds from the declared `BuildRequires`:
 
-    gcc meson ninja pkgconfig hicolor-icon-theme
+    gcc meson ninja pkgconfig hicolor-icon-theme glslang-devel
     pkgconfig(gtk4) pkgconfig(epoxy) pkgconfig(libcurl) pkgconfig(libcrypto)
     pkgconfig(uchardet) pkgconfig(libpsl) pkgconfig(sqlite3)
     pkgconfig(libwebp) pkgconfig(libavif) pkgconfig(libjxl) pkgconfig(sdl2)

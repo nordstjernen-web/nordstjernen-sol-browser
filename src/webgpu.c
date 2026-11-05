@@ -80,6 +80,8 @@ typedef struct {
 } ns_wg_encoder;
 typedef struct { WGPURenderPassEncoder pass; } ns_wg_pass;
 typedef struct { WGPUCommandBuffer cmd; } ns_wg_cmdbuf;
+#define NS_WEBGPU_MAX_SHADER (4u * 1024u * 1024u)
+
 typedef struct { WGPUShaderModule mod; } ns_wg_shader;
 typedef struct { WGPURenderPipeline pipe; } ns_wg_pipeline;
 typedef struct { WGPUBindGroupLayout layout; } ns_wg_bgl;
@@ -188,8 +190,20 @@ ns_webgpu_allowed(void)
 static WGPUInstance
 ns_webgpu_instance(void)
 {
-    if (!g_wg_instance)
-        g_wg_instance = wgpuCreateInstance(NULL);
+    if (g_wg_instance) return g_wg_instance;
+    WGPUInstanceExtras extras;
+    memset(&extras, 0, sizeof extras);
+    extras.chain.sType = (WGPUSType)WGPUSType_InstanceExtras;
+    extras.backends = WGPUInstanceBackend_Vulkan | WGPUInstanceBackend_Metal |
+                      WGPUInstanceBackend_DX12;
+    const char *validation = g_getenv("NS_WEBGPU_VALIDATION");
+    extras.flags = validation && validation[0] == '1'
+        ? WGPUInstanceFlag_Validation | WGPUInstanceFlag_Debug
+        : WGPUInstanceFlag_Empty;
+    WGPUInstanceDescriptor desc;
+    memset(&desc, 0, sizeof desc);
+    desc.nextInChain = &extras.chain;
+    g_wg_instance = wgpuCreateInstance(&desc);
     return g_wg_instance;
 }
 
@@ -2711,9 +2725,16 @@ wg_device_createShaderModule(JSContext *ctx, JSValueConst this_val,
     if (!d || argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "createShaderModule: descriptor required");
     JSValue jcode = JS_GetPropertyStr(ctx, argv[0], "code");
-    const char *code = JS_IsString(jcode) ? JS_ToCString(ctx, jcode) : NULL;
+    size_t code_len = 0;
+    const char *code = JS_IsString(jcode) ? JS_ToCStringLen(ctx, &code_len, jcode)
+                                          : NULL;
     JS_FreeValue(ctx, jcode);
     if (!code) return JS_ThrowTypeError(ctx, "createShaderModule: code required");
+    if (code_len > NS_WEBGPU_MAX_SHADER) {
+        JS_FreeCString(ctx, code);
+        return JS_ThrowTypeError(ctx, "createShaderModule: WGSL source larger "
+                                      "than 4 MiB");
+    }
     char *wgsl = g_strdup(code);
     JS_FreeCString(ctx, code);
     wg_wgsl_drop_subgroups_enable(wgsl);

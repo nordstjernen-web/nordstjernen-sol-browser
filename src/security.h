@@ -12,6 +12,7 @@ G_BEGIN_DECLS
 
 gboolean ns_security_env_flag(const char *name);
 void ns_security_runtime_dir_read_only(void);
+void ns_security_landlock_scope_abstract_sockets(void);
 void ns_security_config_dir_read_only(void);
 gboolean ns_security_refuse_root(void);
 gboolean ns_security_require_landlock(void);

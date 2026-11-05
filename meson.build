@@ -196,6 +196,36 @@ if not is_mobile
   endif
 endif
 
+# Every WebGL shader is validated by the Khronos glslang front end before it
+# reaches the GPU driver (src/glsl_validate.c), so WebGL is built only when
+# glslang is present. Its pkg-config file is broken on Debian (it names
+# libraries that no longer exist), so the libraries are looked up directly.
+have_glslang = false
+glslang_deps = []
+if not is_mobile
+  glslang_feature = get_option('glslang')
+  if glslang_feature.allowed()
+    glslang_lib = cc.find_library('glslang', required: false)
+    glslang_limits = cc.find_library('glslang-default-resource-limits',
+                                     required: false)
+    have_glslang = glslang_lib.found() and glslang_limits.found() and \
+                   cc.has_header('glslang/Include/glslang_c_interface.h') and \
+                   cc.has_header('glslang/Public/resource_limits_c.h')
+    if have_glslang
+      glslang_deps = [glslang_lib, glslang_limits, dependency('threads')]
+      cxx_runtime_name = host_machine.system() == 'darwin' ? 'c++' : 'stdc++'
+      cxx_runtime = cc.find_library(cxx_runtime_name, required: false)
+      if cxx_runtime.found()
+        glslang_deps += cxx_runtime
+      endif
+    else
+      error('WebGL needs the glslang shader validator: install glslang-dev (Debian/Ubuntu), glslang-devel (Fedora/openSUSE) or glslang (Arch, Alpine, FreeBSD, MSYS2, Homebrew), or pass -Dglslang=disabled to build without WebGL')
+    endif
+  else
+    warning('-Dglslang=disabled: WebGL is not built, because shaders would reach the GPU driver unvalidated')
+  endif
+endif
+
 have_gtk = false
 if not is_mobile and gtk_feature.allowed()
   gtk4 = dependency('gtk4', version: gtk4_min, required: gtk_feature)
@@ -229,7 +259,7 @@ libpsl = dependency('libpsl')
 
 sqlite3 = dependency('sqlite3')
 
-if not is_mobile
+if not is_mobile and have_glslang
   add_project_arguments('-DNS_ENABLE_WEBGL=1', language: 'c')
   # The offscreen GL context (src/glctx.c) has three backends: WGL on Windows,
   # CGL on macOS (which has no EGL — its epoxy dispatches to the OpenGL
@@ -671,6 +701,7 @@ install_data(
 
 summary({'WebAssembly (WAMR)': have_wasm,
          'WebAssembly SIMD (SIMDe)': have_wasm_simd}, section: 'Features')
+summary({'WebGL (glslang shader validator)': have_glslang}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
 summary({'H.264/AAC OS decoders': media_os_backend}, section: 'Features')
 summary({'JPEG XL images (libjxl)': have_jxl}, section: 'Features')

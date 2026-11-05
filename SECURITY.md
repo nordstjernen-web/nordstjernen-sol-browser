@@ -74,6 +74,19 @@ GPU API on, the filter must allow executable mappings, because the GPU
 drivers behind them (Mesa's llvmpipe among them) compile shaders to
 machine code; a separate GPU process would lift that.
 
+### GPU shader validation (`src/glsl_validate.c`, `src/webgpu.c`)
+
+Page shaders never reach a GPU driver unchecked. Every WebGL shader is
+checked against the WebGL source rules and then parsed and linked by the
+Khronos glslang front end before `glShaderSource` sees it; a rejected
+shader is replaced by a one-line `#error`. The WebGL context is created
+with robust buffer access (`EGL_EXT_create_context_robustness` /
+`WGL_ARB_create_context_robustness`) or not at all, so out-of-range
+accesses inside shaders return defined values. WebGPU shaders are
+validated by naga inside wgpu-native, which also injects bounds checks on
+the Vulkan, Metal and D3D12 backends; the GL backend, which injects none,
+is not enabled. See `docs/webgl.md` and `docs/webgpu.md`.
+
 ### Privilege drop (`src/security_root.c`)
 
 - Linux/macOS: refuses to start as root — prints a diagnostic and exits
@@ -154,7 +167,16 @@ compromised renderer cannot truncate the shell's mapping from under it.
   `CLONE_NEW*` namespace flags and `clone3` returns `ENOSYS` (so libc
   falls back to `clone`), and `socket` only creates `AF_INET`,
   `AF_INET6` and `AF_NETLINK` sockets in the renderer (the audio
-  helper also keeps `AF_UNIX` for the sound server). Landlock does
+  helper also keeps `AF_UNIX` for the sound server). `kill` and
+  `tgkill` are allowed only with the process's own PID as the target
+  (what `abort()`, `pthread_kill` and the thread-dump signal need);
+  `tkill` and `pidfd_send_signal` are not on the list, so a compromised
+  renderer cannot signal the shell, other renderers or any other
+  process of the user. On kernels with Landlock ABI 6 or newer the
+  ruleset additionally scopes signals (every sandboxed process) and
+  abstract UNIX sockets (renderers) to the sandbox domain, so the same
+  holds on architectures where seccomp argument filtering is not
+  compiled in. Landlock does
   not govern `connect()` to a UNIX socket, so without that rule a
   compromised renderer could reach the session D-Bus and have it start
   programs outside the sandbox. On setups whose EGL lacks the surfaceless

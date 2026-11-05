@@ -69,6 +69,8 @@ module.exports = {
   ],
 
   optional: [
+    { module: 'glslang', feature: 'WebGL (every shader is validated by glslang; the build fails without it unless configured with -Dglslang=disabled)',
+      apt: 'glslang-dev', pacman: 'glslang', brew: 'glslang', msys: 'glslang' },
     { module: 'sdl2', feature: 'audio playback', apt: 'libsdl2-dev', pacman: 'sdl2', brew: 'sdl2', msys: 'SDL2' },
     { module: 'gstreamer-1.0', minimum: '1.20', unix: true, feature: 'H.264 video and AAC audio',
       apt: 'libgstreamer1.0-dev', pacman: 'gstreamer' },
