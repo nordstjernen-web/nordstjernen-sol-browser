@@ -13,6 +13,12 @@ Changelog:
   reference to its device. Both kept the raw device handle without one, so
   after a page dropped its last reference to the `GPUDevice` and the device
   was collected, `mapAsync()` or `finish()` used a released handle.
+* Sandbox (security): the window process's cache cleanup no longer follows
+  symbolic links. A renderer, which may write to the cache directory, could
+  replace `~/.cache/nordstjernen/frames` (or a subdirectory) with a link
+  to another directory, and the next cleanup deleted the files there. On
+  Linux, macOS and the BSDs the cleanup now opens every directory with
+  `O_NOFOLLOW` relative to its parent and removes entries with `unlinkat`.
 
 1.0.43:
 ======
