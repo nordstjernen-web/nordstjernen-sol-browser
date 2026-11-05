@@ -19,6 +19,13 @@ Changelog:
   to another directory, and the next cleanup deleted the files there. On
   Linux, macOS and the BSDs the cleanup now opens every directory with
   `O_NOFOLLOW` relative to its parent and removes entries with `unlinkat`.
+* Images (security): a page's `<base href>` no longer decides the request
+  context of its images. The base URL resolved each `src` and was also
+  passed as the top-level URL, so `<base href="https://bank.example/">`
+  made a page's image requests look first-party to bank.example (its
+  cookie partition, SameSite, `Sec-Fetch-Site`, Referer and CSP), and
+  `<base href="file:///">` made local files loadable as images. The
+  document's own URL is now the request context; `<base>` only resolves.
 
 1.0.43:
 ======

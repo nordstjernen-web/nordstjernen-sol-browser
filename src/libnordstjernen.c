@@ -523,6 +523,7 @@ browser_ensure_images(ns_browser *browser)
     ns_engine_img_session *s =
         ns_engine_fetch_images_start(browser->layout,
                                      img_base ? img_base : browser->base_url,
+                                     browser->base_url,
                                      browser->images, browser->img_requested,
                                      browser->cur_scroll_y, vp_h, &deferred,
                                      browser_image_arrived, browser);
