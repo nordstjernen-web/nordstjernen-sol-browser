@@ -4,6 +4,7 @@ Nordstjernen web browser
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue?style=flat-square)](COPYING)
 [![Latest release](https://img.shields.io/github/v/release/nordstjernen-web/nordstjernen-sol-browser?style=flat-square)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases/latest)
 [![npm package](https://img.shields.io/npm/v/nordstjernen-browser?style=flat-square&logo=npm)](https://www.npmjs.com/package/nordstjernen-browser)
+[![PyPI package](https://img.shields.io/pypi/v/nordstjernen-browser?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/nordstjernen-browser/)
 [![Best viewed in Nordstjernen Browser](docs/best-viewed-in-nordstjernen-badge.svg)](https://nordstjernen.org)
 
 Nordstjernen Sol is a web browser written from scratch in C, focused on
