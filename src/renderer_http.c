@@ -2,14 +2,6 @@
 
 #define _GNU_SOURCE 1
 
-#ifdef NS_HAVE_SDL
-#define SDL_MAIN_HANDLED
-#include <SDL.h>
-#ifdef main
-#undef main
-#endif
-#endif
-
 #include "ipc_http.h"
 #include "libnordstjernen.h"
 #include "config.h"
@@ -128,9 +120,6 @@ renderer_selftest(const char *url)
 int
 main(int argc, char **argv)
 {
-#ifdef NS_HAVE_SDL
-    SDL_SetMainReady();
-#endif
     if (argc == 3 && strcmp(argv[1], "--selftest") == 0)
         return renderer_selftest(argv[2]);
     if (argc >= 2 && strcmp(argv[1], NS_PROC_HEADLESS_FLAG) == 0) {

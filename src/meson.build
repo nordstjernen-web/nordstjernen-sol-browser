@@ -331,8 +331,12 @@ endif
 ns_lib_c_args = []
 ns_sdl_deps = []
 if sdl2_dep.found()
-  ns_sdl_deps += [sdl2_dep]
-  ns_lib_c_args += ['-DNS_HAVE_SDL']
+  ns_sdl_deps += [sdl2_dep.partial_dependency(compile_args: true,
+                                              includes: true)]
+  ns_lib_c_args += ['-DNS_HAVE_SDL',
+                    '-DNS_SDL_LIBDIR="@0@"'.format(
+                      sdl2_dep.get_variable(pkgconfig: 'libdir',
+                                            default_value: ''))]
 endif
 
 if have_webgpu

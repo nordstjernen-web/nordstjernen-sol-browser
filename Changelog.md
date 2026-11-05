@@ -291,6 +291,13 @@ Changelog:
   computed, as `em` does against its font size; it was dropped, so
   `transform: translateY(-2lh)` did not move the box at all. openai.com's
   prompt placeholder sat 36 px below where Chrome draws it.
+* Performance: the renderer loads SDL only when a page first captures the
+  microphone. It linked SDL at start-up for that one feature, and Homebrew
+  and newer Linux distributions ship SDL2 as sdl2-compat, whose start-up
+  code loads all of SDL3: every tab paid for 73 extra mapped images, about
+  44 M instructions and 4 MB of memory. The audio helper still links SDL
+  as before. When WebGL and WebGPU are both off on Linux, SDL is loaded
+  before the sandbox forbids executable mappings.
 
 1.0.43:
 ======
