@@ -241,10 +241,16 @@ function optionalReport(libraries, manager) {
   return lines.join('\n');
 }
 
+function disabledOptions(libraries) {
+  const absent = [...libraries.missing, ...libraries.outdated];
+  const options = [...new Set(absent.map((entry) => entry.mesonOption).filter(Boolean))];
+  return options.map((option) => `-D${option}=disabled`);
+}
+
 function preflight(product, env, { onWarning, onError }) {
   if (process.platform === 'win32' && !locateMsys2()) {
     onError(missingMsys2Report(product));
-    return;
+    return [];
   }
   const manager = packageManager();
   const tools = checkTools(product.tools, env);
@@ -254,15 +260,17 @@ function preflight(product, env, { onWarning, onError }) {
   }
   if (tools.missing.some((tool) => tool.label === 'pkg-config')) {
     onError(uncheckedReport(product, tools, manager));
-    return;
+    return [];
   }
   const libraries = checkLibraries(product.required, env);
   if (tools.missing.length || tools.outdated.length || libraries.missing.length || libraries.outdated.length) {
     onError(report(product, tools, libraries, manager));
-    return;
+    return [];
   }
-  const optional = optionalReport(checkLibraries(product.optional, env), manager);
+  const optionalLibraries = checkLibraries(product.optional, env);
+  const optional = optionalReport(optionalLibraries, manager);
   if (optional) onWarning(optional);
+  return disabledOptions(optionalLibraries);
 }
 
 module.exports = { preflight };

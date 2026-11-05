@@ -247,8 +247,14 @@ def _optional_report(libraries, manager):
     return "\n".join(lines)
 
 
+def _disabled_options(libraries):
+    absent = libraries[0] + libraries[1]
+    options = dict.fromkeys(e["meson_option"] for e in absent if e.get("meson_option"))
+    return [f"-D{option}=disabled" for option in options]
+
+
 def preflight(env, warn):
-    """Raise PreflightError naming what is missing; call warn() for optional features left out."""
+    """Raise PreflightError naming what is missing; warn() about optional features left out and return the meson options that leave them out."""
     if sys.platform == "win32" and not locate_msys2():
         raise PreflightError(_missing_msys2_report())
     manager = _package_manager()
@@ -263,6 +269,8 @@ def preflight(env, warn):
     libraries = _check_libraries(product.REQUIRED, env)
     if missing_tools or outdated_tools or libraries[0] or libraries[1]:
         raise PreflightError(_report((missing_tools, outdated_tools), libraries, manager))
-    optional = _optional_report(_check_libraries(product.OPTIONAL, env), manager)
+    optional_libraries = _check_libraries(product.OPTIONAL, env)
+    optional = _optional_report(optional_libraries, manager)
     if optional:
         warn(optional)
+    return _disabled_options(optional_libraries)
