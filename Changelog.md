@@ -3,6 +3,11 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Security: `EventSource` follows redirects in the engine instead of inside
+  libcurl. Each hop is checked like the engine's own redirect loop — at most
+  10 redirects, no https→http downgrade, `connect-src` and the safe-browsing
+  list re-checked per hop, and the partition's cookies re-evaluated for the
+  new URL — where libcurl used to follow up to 20 hops on its own.
 * Fullscreen is a site capability. The site settings popover gains a
   Fullscreen row; a blocked site's `requestFullscreen()` rejects with a
   `TypeError` and `fullscreenerror`, and with Ask the promise waits until

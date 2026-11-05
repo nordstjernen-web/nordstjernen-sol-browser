@@ -6,6 +6,7 @@
 #include "eventsource.h"
 #include "csp.h"
 #include "net.h"
+#include "safebrowsing.h"
 
 #include <curl/curl.h>
 #include <string.h>
@@ -158,7 +159,8 @@ typedef struct {
     gboolean    fatal;
     gboolean    is_event_stream;
     char       *allow_origin;
-    CURL       *curl;
+    char       *location;
+    const char *url;
 } ns_es_parse;
 
 static void
@@ -255,10 +257,8 @@ ns_es_feed(ns_es_parse *p, const char *buf, gsize len)
 static gboolean
 ns_es_cors_allows(const ns_es_parse *p)
 {
-    char *final_url = NULL;
-    curl_easy_getinfo(p->curl, CURLINFO_EFFECTIVE_URL, &final_url);
     const char *origin = p->es->origin;
-    if (final_url && origin && ns_url_same_origin(origin, final_url))
+    if (origin && ns_url_same_origin(origin, p->url))
         return TRUE;
     return p->allow_origin &&
            (strcmp(p->allow_origin, "*") == 0 ||
@@ -269,10 +269,14 @@ static gboolean
 ns_es_csp_allows(const ns_es_parse *p)
 {
     if (!p->es->csp) return TRUE;
-    char *final_url = NULL;
-    curl_easy_getinfo(p->curl, CURLINFO_EFFECTIVE_URL, &final_url);
-    return final_url &&
-           ns_csp_allows(p->es->csp, NS_CSP_CONNECT, final_url, p->es->origin);
+    return ns_csp_allows(p->es->csp, NS_CSP_CONNECT, p->url, p->es->origin);
+}
+
+static gboolean
+ns_es_status_redirects(long status)
+{
+    return status == 301 || status == 302 || status == 303 ||
+           status == 307 || status == 308;
 }
 
 static size_t
@@ -299,18 +303,11 @@ ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
         p->status = code;
         p->is_event_stream = FALSE;
         g_clear_pointer(&p->allow_origin, g_free);
-    } else if (total >= 9 && p->status >= 300 && p->status < 400 &&
-               p->es->csp &&
+        g_clear_pointer(&p->location, g_free);
+    } else if (total >= 9 && ns_es_status_redirects(p->status) &&
                !g_ascii_strncasecmp(buffer, "Location:", 9)) {
-        char *cur = NULL;
-        curl_easy_getinfo(p->curl, CURLINFO_EFFECTIVE_URL, &cur);
-        g_autofree char *loc = g_strstrip(g_strndup(buffer + 9, total - 9));
-        g_autofree char *target = cur ? ns_url_resolve(cur, loc) : NULL;
-        if (!target ||
-            !ns_csp_allows(p->es->csp, NS_CSP_CONNECT, target, p->es->origin)) {
-            p->fatal = TRUE;
-            return 0;
-        }
+        g_free(p->location);
+        p->location = g_strstrip(g_strndup(buffer + 9, total - 9));
     } else if (total >= 28 &&
                !g_ascii_strncasecmp(buffer, "Access-Control-Allow-Origin:", 28)) {
         g_free(p->allow_origin);
@@ -320,6 +317,8 @@ ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
         if (g_strstr_len(buffer, total, "text/event-stream"))
             p->is_event_stream = TRUE;
     } else if (total <= 2) {
+        if (ns_es_status_redirects(p->status) && p->location)
+            return 0;
         if (!p->opened) {
             if (p->status == 200 && p->is_event_stream &&
                 (!ns_es_cors_allows(p) || !ns_es_csp_allows(p))) {
@@ -357,8 +356,10 @@ ns_es_progress(void *clientp, curl_off_t dt, curl_off_t dn, curl_off_t ut,
 }
 
 static gboolean
-ns_es_connect_once(ns_es *es, gboolean *opened_out)
+ns_es_connect_once(ns_es *es, const char *url, gboolean *opened_out,
+                   char **location_out)
 {
+    *location_out = NULL;
     CURL *curl = curl_easy_init();
     if (!curl) return FALSE;
 
@@ -367,23 +368,19 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
     p.line = g_byte_array_new();
     p.data = g_string_new(NULL);
     p.status = 0;
-    p.curl = curl;
+    p.url = url;
 
-    curl_easy_setopt(curl, CURLOPT_URL, es->url);
+    curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, NS_USER_AGENT);
-    ns_net_curl_apply_cookies(curl, es->url, es->origin, es->top_url);
+    ns_net_curl_apply_cookies(curl, url, es->origin, es->top_url);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     ns_net_apply_curl_tls(curl);
-    ns_net_apply_curl_proxy(curl, es->url);
+    ns_net_apply_curl_proxy(curl, url);
     ns_net_address_guard address_guard;
-    ns_net_address_guard_init(&address_guard, es->origin, es->url);
+    ns_net_address_guard_init(&address_guard, es->origin, url);
     ns_net_apply_curl_address_guard(curl, &address_guard);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 20L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR,
-                     g_str_has_prefix(es->url, "https://") ? "https"
-                                                            : "http,https");
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
@@ -418,11 +415,65 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
     curl_easy_cleanup(curl);
     *opened_out = p.opened;
     gboolean fatal = p.fatal || address_guard.blocked;
+    if (!fatal && !p.opened && ns_es_status_redirects(p.status))
+        *location_out = g_steal_pointer(&p.location);
     g_byte_array_free(p.line, TRUE);
     g_string_free(p.data, TRUE);
     g_free(p.event_type);
     g_free(p.allow_origin);
+    g_free(p.location);
     return !fatal;
+}
+
+static char *
+ns_es_redirect_target(const ns_es *es, const char *from, const char *location,
+                      int hops)
+{
+    if (hops >= NS_MAX_REDIRECTS) return NULL;
+    char *next = ns_url_resolve(from, location);
+    if (!next) return NULL;
+    gboolean downgrade = g_str_has_prefix(es->url, "https://") &&
+                         !g_str_has_prefix(next, "https://");
+    gboolean ok = ns_url_is_http_or_https(next) && !downgrade;
+    if (ok && es->csp)
+        ok = ns_csp_allows(es->csp, NS_CSP_CONNECT, next, es->origin);
+    if (ok) {
+        g_autofree char *host = ns_url_host_from(next);
+        ok = !host || !ns_safebrowsing_blocked(host);
+    }
+    if (!ok) {
+        g_free(next);
+        return NULL;
+    }
+    return next;
+}
+
+static gboolean
+ns_es_connect_following_redirects(ns_es *es, gboolean *opened_out)
+{
+    char *url = g_strdup(es->url);
+    int hops = 0;
+    gboolean retriable;
+    for (;;) {
+        char *location = NULL;
+        retriable = ns_es_connect_once(es, url, opened_out, &location);
+        if (!location || g_atomic_int_get(&es->exit_requested)) {
+            g_free(location);
+            break;
+        }
+        char *next = retriable ? ns_es_redirect_target(es, url, location, hops)
+                               : NULL;
+        g_free(location);
+        if (!next) {
+            retriable = FALSE;
+            break;
+        }
+        g_free(url);
+        url = next;
+        hops++;
+    }
+    g_free(url);
+    return retriable;
 }
 
 static gpointer
@@ -431,7 +482,7 @@ ns_es_worker(gpointer data)
     ns_es *es = data;
     while (!g_atomic_int_get(&es->exit_requested)) {
         gboolean opened = FALSE;
-        gboolean retriable = ns_es_connect_once(es, &opened);
+        gboolean retriable = ns_es_connect_following_redirects(es, &opened);
         if (g_atomic_int_get(&es->exit_requested)) break;
         if (!retriable) {
             ns_es_emit_error(es, TRUE);
