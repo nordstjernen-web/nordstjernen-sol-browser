@@ -446,6 +446,9 @@ ns_ws_worker_curl(gpointer data)
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     ns_net_apply_curl_tls(curl);
     ns_net_apply_curl_proxy(curl, ws->url);
+    ns_net_address_guard address_guard;
+    ns_net_address_guard_init(&address_guard, ws->origin, ws->url);
+    ns_net_apply_curl_address_guard(curl, &address_guard);
     ns_net_curl_apply_cookies(curl, ws->url, ws->origin, ws->top_url);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
@@ -477,7 +480,9 @@ ns_ws_worker_curl(gpointer data)
     CURLcode rc = curl_easy_perform(curl);
 
     if (rc != CURLE_OK || g_atomic_int_get(&ws->exit_requested)) {
-        const char *msg = rc != CURLE_OK
+        const char *msg = address_guard.blocked
+            ? ns_net_address_guard_message()
+            : rc != CURLE_OK
             ? (errbuf[0] ? errbuf : curl_easy_strerror(rc))
             : "aborted";
         if (rc != CURLE_OK) ns_ws_dispatch_error(ws, msg);

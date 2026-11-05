@@ -3,6 +3,15 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Network (security): a page served from the public internet can no longer
+  make requests to private-network or loopback addresses, and a page on a
+  private network can no longer reach loopback, following the Private
+  Network Access draft. The check runs on the address each connection is
+  actually made to, so a host that changes its DNS answer after the page
+  loaded (DNS rebinding) is caught too. Top-level navigations, pages opened
+  from local files and requests that go through a proxy are exempt;
+  subresources, `fetch()`, `XMLHttpRequest`, WebSocket and EventSource
+  connections are covered.
 * Local files (security): a page opened from a `file:` URL may now load
   scripts, stylesheets, images, media, frames and workers only from its own
   directory and the directories below it. Any readable file on the

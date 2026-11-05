@@ -282,6 +282,25 @@ void  ns_net_perf_snapshot(guint64 *fetches, guint64 *bytes,
                            double *sum_ms, double *span_ms);
 void  ns_net_apply_curl_proxy(void *curl_handle, const char *url);
 void  ns_net_apply_curl_tls(void *curl_handle);
+
+typedef enum {
+    NS_ADDRESS_SPACE_UNKNOWN = -1,
+    NS_ADDRESS_SPACE_PUBLIC = 0,
+    NS_ADDRESS_SPACE_PRIVATE = 1,
+    NS_ADDRESS_SPACE_LOCAL = 2,
+} ns_address_space;
+
+typedef struct ns_net_address_guard {
+    ns_address_space document_space;
+    gboolean         blocked;
+} ns_net_address_guard;
+
+void  ns_net_address_guard_init(ns_net_address_guard *guard,
+                                const char *document_url,
+                                const char *request_url);
+void  ns_net_apply_curl_address_guard(void *curl_handle,
+                                      ns_net_address_guard *guard);
+const char *ns_net_address_guard_message(void);
 const char *ns_net_proxy_override(void);
 const char *ns_net_http_proxy(void);
 const char *ns_net_https_proxy(void);
