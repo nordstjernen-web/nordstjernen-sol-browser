@@ -331,7 +331,8 @@ The whole mitigation suite can be disabled for debugging with
 ### Network
 
 libcurl drives every fetch with TLS verification enabled
-(`CURLOPT_SSL_VERIFYPEER=1`, `CURLOPT_SSL_VERIFYHOST=2`), `http,https`
+(`CURLOPT_SSL_VERIFYPEER=1`, `CURLOPT_SSL_VERIFYHOST=2`), TLS 1.2 as the
+minimum protocol version, `http,https`
 as the only allowed protocols, redirects clamped to HTTPS once the
 initial scheme is HTTPS, max ten redirects, an explicit response-size
 cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
