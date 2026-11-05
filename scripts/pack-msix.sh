@@ -141,6 +141,7 @@ else
 fi
 
 rm -f "$MSIX"
+"$ROOT/scripts/check-no-profile-data.sh" "$STAGE"
 if [ -n "${MAKEAPPX:-}" ] && [ -f "$MAKEAPPX" ] || MAKEAPPX=$(resolve_kit_tool makeappx.exe); then
     MSYS2_ARG_CONV_EXCL='*' "$MAKEAPPX" pack /o /d "$(winpath "$STAGE")" /p "$(winpath "$MSIX")"
 elif command -v makemsix >/dev/null 2>&1; then

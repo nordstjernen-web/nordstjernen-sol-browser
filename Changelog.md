@@ -3,6 +3,13 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Release: packages cannot carry browser profile data. Every pack script
+  runs `scripts/check-no-profile-data.sh` on its staging tree before
+  archiving, and the release workflow runs it again on the finished
+  `.zip`, `.deb` and `.rpm` files: a cookie store, history, session or
+  site-storage database, the remote-control token file or any SQLite file
+  fails the build. The 1.0.41–1.0.43 packages were checked and contain
+  none.
 * macOS: the browser installs with Homebrew, `brew install --cask
   nordstjernen-web/tap/nordstjernen`. Publishing a release points the cask
   in the nordstjernen-web/homebrew-tap repository at that release's

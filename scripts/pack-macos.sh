@@ -399,6 +399,7 @@ else
 fi
 
 rm -f "$DMG"
+"$ROOT/scripts/check-no-profile-data.sh" "$STAGE"
 if ! hdiutil create -volname "Nordstjernen ${VERSION}" \
     -srcfolder "$STAGE" \
     -ov -format UDZO -imagekey zlib-level=1 \

@@ -250,6 +250,7 @@ for ca in \
     fi
 done
 
+"$ROOT/scripts/check-no-profile-data.sh" "$OUT"
 bundled=$(find "$APP" -maxdepth 1 -name '*.dll' | wc -l)
 size=$(du -sh "$OUT" | awk '{print $1}')
 printf 'pack-windows: bundled %s DLLs, total size %s, output: %s\n' "$bundled" "$size" "$OUT"

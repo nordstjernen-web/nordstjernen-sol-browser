@@ -43,6 +43,7 @@ resolve_makensis() {
     return 1
 }
 
+"$ROOT/scripts/check-no-profile-data.sh" "$BUNDLE"
 MAKENSIS=$(resolve_makensis) || {
     echo "pack-windows-installer: makensis not found." >&2
     echo "Install with: pacman -S mingw-w64-ucrt-x86_64-nsis" >&2

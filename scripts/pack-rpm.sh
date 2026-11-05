@@ -181,6 +181,7 @@ fi
 - Prebuilt binary repackaged as an RPM.
 SPEC_EOF
 
+"$ROOT/scripts/check-no-profile-data.sh" "$STAGE"
 rpmbuild --define "_topdir $RPMTOP" -bb "$SPEC"
 
 RPMFILE=$(find "$RPMTOP/RPMS" -name "nordstjernen-${RPMVERSION}-*.rpm" -print -quit)

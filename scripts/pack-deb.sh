@@ -263,6 +263,7 @@ chmod 755 "$PKGROOT/DEBIAN/postinst" "$PKGROOT/DEBIAN/postrm" \
 
 DEB="$ROOT/dist/nordstjernen_${VERSION}_${DISTRO_TAG:+${DISTRO_TAG}_}${DEBARCH}.deb"
 rm -f "$DEB"
+"$ROOT/scripts/check-no-profile-data.sh" "$PKGROOT"
 dpkg-deb --root-owner-group --build "$PKGROOT" "$DEB" >/dev/null
 
 echo

@@ -137,6 +137,7 @@ DEPLOY_GTK_VERSION=4 \
     --icon-file "$PNG_ICON" \
     --plugin gtk
 
+"$ROOT/scripts/check-no-profile-data.sh" "$APPDIR"
 FINAL="$ROOT/dist/${NAME}-${VERSION}-${ARCH}.AppImage"
 ARCH="${ARCH}" "$APPIMAGETOOL" --appimage-extract-and-run \
     --runtime-file "$RUNTIME" \

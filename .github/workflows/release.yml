@@ -180,6 +180,11 @@ jobs:
           cd dist
           shopt -s nullglob
           packages=(*.deb *.rpm *.zip *.dmg)
+          listable=(*.deb *.zip)
+          if command -v rpm >/dev/null 2>&1; then listable+=(*.rpm); fi
+          if [ ${#listable[@]} -gt 0 ]; then
+            "$GITHUB_WORKSPACE/scripts/check-no-profile-data.sh" "${listable[@]}"
+          fi
           sha256sum -- "${packages[@]}" > SHA256SUMS
           cat SHA256SUMS
           if state=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
