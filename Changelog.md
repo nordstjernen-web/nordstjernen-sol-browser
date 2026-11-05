@@ -3,6 +3,11 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Downloads are a site capability. The site settings popover gains a
+  Downloads row (Ask / Allow / Block) next to Camera and WebGL; a blocked
+  site's download offers are dropped, and with Ask the offer is held while
+  the prompt bar asks, then started or dropped. Allow stays the default, so
+  nothing changes for sites the user has not restricted.
 * Documentation: the software architecture diagram is redrawn as a layered
   figure (supervisor, shell, the shell/renderer boundary with the profile
   and media helpers beside it, the renderer's subsystems, then every

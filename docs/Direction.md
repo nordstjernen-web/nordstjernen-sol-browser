@@ -79,7 +79,8 @@ the request channel is generic (`X-Capability`, `/capability`,
 `/permission`; see [engine-protocol.md](engine-protocol.md),
 "Capabilities"), the ledger falls back to each kind's default, and the
 shell's prompt bar and site settings are driven by the vocabulary. Today it
-holds camera (ask) and WebGL (allow, revocable). The target extends the
+holds camera (ask), WebGL (allow, revocable) and downloads (allow, gated in
+the shell where the file is written). The target extends the
 vocabulary without changing the shape:
 
 - **One vocabulary.** A capability enumeration shared by shell and renderer:

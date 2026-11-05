@@ -282,6 +282,7 @@ struct NsProcView {
     ns_perm_kind perm_kind;
     gboolean    perm_pending;
     char       *perm_origin;
+    char       *download_held;
     guint       perm_listener;
     char       *capability_deferred[NS_CAP_COUNT];
 
@@ -632,6 +633,7 @@ pv_free(NsProcView *v)
     g_free(v->perm_origin);
     for (int k = 0; k < NS_CAP_COUNT; k++)
         g_free(v->capability_deferred[k]);
+    g_free(v->download_held);
     if (v->hourglass_cursor)
         g_object_unref(v->hourglass_cursor);
     g_mutex_clear(&v->proc_lock);
@@ -2834,6 +2836,7 @@ pv_follow_same_document_state(NsProcView *v, const char *url, gboolean pushed,
 }
 
 static void pv_perm_resolve(NsProcView *v, gboolean allow);
+static void pv_perm_bar_show(NsProcView *v, ns_perm_kind kind, const char *origin);
 
 static gboolean
 req_outlived_by_load(const Req *req)
@@ -3300,6 +3303,16 @@ pv_push_page_permissions(NsProcView *v)
 }
 
 static void
+pv_release_held_download(NsProcView *v, gboolean allow)
+{
+    char *offer = v->download_held;
+    if (!offer) return;
+    v->download_held = NULL;
+    if (allow) post_emit(v, NS_PROC_EVT_DOWNLOAD, offer);
+    g_free(offer);
+}
+
+static void
 pv_on_permission_changed(const char *origin, ns_perm_kind kind,
                          ns_perm_state state, ns_perm_state previous,
                          gpointer user_data)
@@ -3314,6 +3327,8 @@ pv_on_permission_changed(const char *origin, ns_perm_kind kind,
         if (v->perm_revealer)
             gtk_revealer_set_reveal_child(GTK_REVEALER(v->perm_revealer),
                                           FALSE);
+        if (kind == NS_CAP_DOWNLOADS)
+            pv_release_held_download(v, state == NS_PERM_ALLOW);
     }
     gboolean blocked_changed =
         (state == NS_PERM_DENY) != (previous == NS_PERM_DENY);
@@ -3337,7 +3352,18 @@ pv_perm_resolve(NsProcView *v, gboolean allow)
         ns_perm_set(origin, kind, NS_PERM_ALLOW);
     else
         pv_send_permission(v, origin, kind, NS_PERM_DENY);
+    if (kind == NS_CAP_DOWNLOADS)
+        pv_release_held_download(v, allow);
     g_free(origin);
+}
+
+void
+ns_proc_view_hold_download(NsProcView *v, const char *offer, const char *origin)
+{
+    if (!v || v->closed || !offer || !origin) return;
+    g_free(v->download_held);
+    v->download_held = g_strdup(offer);
+    pv_perm_bar_show(v, NS_CAP_DOWNLOADS, origin);
 }
 
 static void

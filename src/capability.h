@@ -10,6 +10,7 @@ G_BEGIN_DECLS
 typedef enum {
     NS_CAP_CAMERA,
     NS_CAP_WEBGL,
+    NS_CAP_DOWNLOADS,
     NS_CAP_COUNT
 } ns_capability;
 

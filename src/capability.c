@@ -19,6 +19,13 @@ static const ns_capability_info capabilities[NS_CAP_COUNT] = {
         .default_state = NS_CAP_ALLOW,
         .reload_on_change = TRUE,
     },
+    [NS_CAP_DOWNLOADS] = {
+        .name = "downloads",
+        .label = "Downloads",
+        .prompt = "This site wants to download a file",
+        .default_state = NS_CAP_ALLOW,
+        .reload_on_change = FALSE,
+    },
 };
 
 const ns_capability_info *
