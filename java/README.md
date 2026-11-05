@@ -163,7 +163,7 @@ renderer control protocol —
 | | |
 | --- | --- |
 | Navigation | `navigate` (with back/forward-cache traversal and user-activation), `setViewport`, `url`, `title`, `pageWidth`/`pageHeight`, `pendingNav` |
-| Painting | `render` (with caret blinking), `tick`, `favicon`, `export` |
+| Painting | `render` (with caret blinking), `tick`, `favicon`, `export`, `screenshotPng` (whole page or a region, as PNG bytes) |
 | Pointer | `press`, `release`, `hover`, `linkAt`, `contextMenu`, `mediaAt`, `dropFiles` |
 | Scrolling | `scrollAt` for overflow scrollers, `scrollbarPress`/`Drag`/`Release` for the scrollbars a page paints itself |
 | Text | `key`, `select`, `find`, `focusedEditable`, `focusedEditableState`, `setFocusedEditableSelection` |
