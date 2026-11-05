@@ -38,6 +38,12 @@ Changelog:
   now needs `'unsafe-inline'` (with no nonce, hash or `'strict-dynamic'`),
   runs in the realm of the link's own frame, and the scheme is matched the
   way the URL parser does (any case, after leading spaces).
+* Sandbox (security): forms in a sandboxed iframe can no longer navigate the
+  tab without permission. Clicking a submit button skipped the
+  `allow-forms` check that `form.submit()` made, and neither path checked
+  `allow-top-navigation` (or `-by-user-activation`) and `allow-popups`, so
+  a frame sandboxed with `allow-forms` could still replace the page with a
+  `target=_top` or `target=_blank` form.
 
 1.0.43:
 ======
