@@ -3,6 +3,12 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Printing: `--dump=print:FILE` lays the page out at the sheet's content
+  width again. The headless driver started with a viewport of 1000 pixels,
+  which the print path took for an explicit `--viewport`, so a page was
+  laid out 1000 wide and clipped to the 698 pixels of an A4 sheet: the right
+  third of every line was missing unless `--viewport=698` was passed.
+  `--help` now lists `print:FILE`.
 * Printing: a forced page break is honoured in a document shorter than one
   page. `break-before: page` and `page-break-before: always` were only
   looked at while more than a sheet of content remained, so a two-part

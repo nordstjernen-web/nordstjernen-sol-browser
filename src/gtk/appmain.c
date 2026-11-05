@@ -445,9 +445,12 @@ ns_print_version_or_help(int argc, char **argv)
                   "  --mcp                  run the MCP server over stdio\n"
                   "  --print-config         print the effective configuration and exit\n"
                   "  --headless             load URL without a window\n"
-                  "  --dump=text|dom|layout|png:FILE|pdf:FILE\n"
+                  "  --dump=text|dom|layout|png:FILE|pdf:FILE|print:FILE\n"
                   "                         what a headless run writes (default text)\n"
-                  "  --viewport=W[xH]       headless viewport size\n"
+                  "                         pdf: one page as tall as the document\n"
+                  "                         print: paged PDF, A4 unless @page says otherwise\n"
+                  "  --viewport=W[xH]       headless viewport size (default 1000 wide;\n"
+                  "                         print: the sheet's content width)\n"
                   "  --version              print the version and exit\n"
                   "  --help                 print this help and exit\n",
                   stdout);
