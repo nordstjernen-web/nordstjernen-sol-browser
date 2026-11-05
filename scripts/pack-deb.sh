@@ -6,13 +6,13 @@
 # a hand-maintained list. The image-codec libraries whose SONAMEs differ
 # per distro release (libavif and its AV1 codecs) are bundled in
 # the package instead. The FFmpeg libav* dependencies keep their
-# SONAME-derived package names (libavcodec60 on Ubuntu 24.04, libavcodec61
-# on Debian 13, …) but have their version floor relaxed to the FFmpeg
+# SONAME-derived package names (libavcodec61 on Debian 13, …) but have
+# their version floor relaxed to the FFmpeg
 # major.minor release (see relax_ffmpeg_floor), so a .deb built on a
 # patched build host still installs on a system running an earlier patch
 # release of the same ABI. Those package names tie the .deb to the distro
 # release it was built on, so the file name carries that release
-# (nordstjernen_<version>_ubuntu24.04_amd64.deb); DEB_DISTRO_TAG overrides
+# (nordstjernen_<version>_ubuntu26.04_amd64.deb); DEB_DISTRO_TAG overrides
 # the tag read from /etc/os-release, and an empty tag drops it.
 set -euo pipefail
 

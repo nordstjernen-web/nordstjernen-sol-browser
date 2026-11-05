@@ -21,7 +21,7 @@ modern HTML, CSS and JavaScript standards.
 | Windows 10 (1809 or later), x64 | [Microsoft Store](https://apps.microsoft.com/detail/9nw8t7w5z4pl) |
 | Android 14 or later (arm64, x86_64) | [Google Play](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser) |
 | macOS (Apple Silicon) | notarised `.dmg` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
-| Debian 13, Ubuntu 24.04 and 26.04, Fedora 45 | `.deb` and `.rpm` packages and a portable Linux `.zip` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
+| Debian 13, Ubuntu 26.04, Fedora 45 | `.deb` and `.rpm` packages and a portable Linux `.zip` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
 | npm (Linux, macOS, BSD, Windows) | [`nordstjernen-browser`](https://www.npmjs.com/package/nordstjernen-browser), see below |
 | Java/JVM | [`org.nordstjernen:nordstjernen-java`](https://github.com/nordstjernen-web/nordstjernen-sol-browser/packages) on GitHub Packages (Maven) |
 | Alpine (musl), Arch, FreeBSD, NetBSD, iOS (experimental) | build from source — see [docs/](docs/README.md) and [docs/iOS.md](docs/iOS.md) |
