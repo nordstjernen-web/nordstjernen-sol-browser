@@ -867,11 +867,8 @@ pv_stream_url_allowed(const char *url, const char *subdir)
 }
 
 static gboolean
-pv_audio_url_allowed(NsProcView *v, const char *url)
+pv_audio_url_allowed(const char *url)
 {
-    if (!g_str_has_prefix(url, "file://")) return FALSE;
-    if (v->current_url && g_str_has_prefix(v->current_url, "file:"))
-        return TRUE;
     return pv_stream_url_allowed(url, "msaudio");
 }
 
@@ -906,11 +903,11 @@ pv_helper_line_ok(const char *cmd)
 }
 
 static gboolean
-pv_audio_command_allowed(NsProcView *v, const char *cmd)
+pv_audio_command_allowed(const char *cmd)
 {
     if (!pv_helper_line_ok(cmd)) return FALSE;
     const char *url = pv_helper_open_url(cmd);
-    return !url || pv_audio_url_allowed(v, url);
+    return !url || pv_audio_url_allowed(url);
 }
 
 static gboolean
@@ -964,7 +961,7 @@ pv_audio_pump(NsProcView *v, const char *commands)
     char **lines = g_strsplit(commands, "\x1f", -1);
     for (int i = 0; lines[i]; i++) {
         if (!*lines[i]) continue;
-        if (!pv_audio_command_allowed(v, lines[i])) {
+        if (!pv_audio_command_allowed(lines[i])) {
             if (g_getenv("NS_DBG_AUDIO"))
                 g_printerr("[audio-pump] refused: %s\n", lines[i]);
             continue;

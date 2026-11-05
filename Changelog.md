@@ -3,6 +3,11 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Audio (security): the window process no longer lets a renderer showing a
+  `file:` page hand the audio helper an arbitrary `file://` path. Every
+  audio source is staged into the media cache directory first, so the
+  exemption only widened what a compromised renderer could make the
+  unsandboxed helper open.
 * Mixed content (security): an `http:` image, video, audio, font or
   stylesheet referenced from an `https:` page is now requested over
   `https:` instead of being loaded in the clear, as Chrome and Firefox do;
