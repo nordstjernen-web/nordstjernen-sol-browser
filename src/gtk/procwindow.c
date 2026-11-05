@@ -27,6 +27,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef _WIN32
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 #define NS_PROC_APP_ID "org.nordstjernen.WebBrowser"
 #define NS_FULLSCREEN_NOTICE_SECONDS 5
 
@@ -3629,12 +3636,70 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
     ns_remote_control_init();
 }
 
+#ifndef _WIN32
+static int
+procapp_open_dir_nofollow(int parent, const char *name)
+{
+    return openat(parent, name,
+                  O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+}
+
+static void
+procapp_clear_dir_fd(int dfd, gboolean by_age, gint64 cutoff, guint depth,
+                     guint *budget)
+{
+    DIR *dir = fdopendir(dfd);
+    if (!dir) {
+        close(dfd);
+        return;
+    }
+    struct dirent *ent;
+    while (*budget > 0 && (ent = readdir(dir))) {
+        const char *e = ent->d_name;
+        if (strcmp(e, ".") == 0 || strcmp(e, "..") == 0)
+            continue;
+        (*budget)--;
+        struct stat st;
+        if (fstatat(dirfd(dir), e, &st, AT_SYMLINK_NOFOLLOW) != 0)
+            continue;
+        if (S_ISDIR(st.st_mode)) {
+            if (depth >= 64)
+                continue;
+            int child = procapp_open_dir_nofollow(dirfd(dir), e);
+            if (child < 0)
+                continue;
+            procapp_clear_dir_fd(child, by_age, cutoff, depth + 1, budget);
+            unlinkat(dirfd(dir), e, AT_REMOVEDIR);
+        } else if (!by_age || st.st_mtime < cutoff) {
+            unlinkat(dirfd(dir), e, 0);
+        }
+    }
+    closedir(dir);
+}
+#endif
+
 static void
 procapp_clear_cache_dir(const char *name, gint64 min_age_s)
 {
+    gint64 cutoff = g_get_real_time() / G_USEC_PER_SEC - min_age_s;
+#ifndef _WIN32
+    int root = open(g_get_user_cache_dir(),
+                    O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (root < 0)
+        return;
+    int app = procapp_open_dir_nofollow(root, "nordstjernen");
+    close(root);
+    if (app < 0)
+        return;
+    int dfd = procapp_open_dir_nofollow(app, name);
+    close(app);
+    if (dfd < 0)
+        return;
+    guint budget = 100000;
+    procapp_clear_dir_fd(dfd, min_age_s > 0, cutoff, 0, &budget);
+#else
     char *dir = g_build_filename(g_get_user_cache_dir(), "nordstjernen",
                                  name, NULL);
-    gint64 cutoff = g_get_real_time() / G_USEC_PER_SEC - min_age_s;
     GQueue *stack = g_queue_new();
     GPtrArray *dirs = g_ptr_array_new_with_free_func(g_free);
     g_queue_push_head(stack, g_strdup(dir));
@@ -3666,6 +3731,7 @@ procapp_clear_cache_dir(const char *name, gint64 min_age_s)
     g_queue_free_full(stack, g_free);
     g_ptr_array_free(dirs, TRUE);
     g_free(dir);
+#endif
 }
 
 static void
