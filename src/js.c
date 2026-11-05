@@ -1689,6 +1689,24 @@ ns_js_realm_url_or_current(ns_js *js, JSContext *realm)
     return url ? url : js->current_url;
 }
 
+static char *
+ns_js_csp_upgrade_insecure(const ns_csp *csp, const char *url)
+{
+    if (!url || !csp || !ns_csp_upgrades_insecure_requests(csp)) return NULL;
+    if (g_ascii_strncasecmp(url, "http://", 7) == 0)
+        return g_strconcat("https://", url + 7, NULL);
+    if (g_ascii_strncasecmp(url, "ws://", 5) == 0)
+        return g_strconcat("wss://", url + 5, NULL);
+    return NULL;
+}
+
+static char *
+ns_js_realm_upgrade_insecure(ns_js *js, JSContext *realm, const char *url)
+{
+    return js ? ns_js_csp_upgrade_insecure(ns_js_realm_csp(js, realm), url)
+              : NULL;
+}
+
 #define NS_JS_CONSOLE_SCRIPT "devtools-console"
 
 static gboolean
@@ -10671,6 +10689,12 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         return promise;
     }
     char *abs_url = top ? ns_url_resolve(top, url) : NULL;
+    char *secure_url = ns_js_realm_upgrade_insecure(st->js, ctx,
+                                                    abs_url ? abs_url : url);
+    if (secure_url) {
+        g_free(abs_url);
+        abs_url = secure_url;
+    }
     const char *send_url = abs_url ? abs_url : url;
     const char *use_method = method ? method : "GET";
 
@@ -22604,6 +22628,11 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     char *resolved = (_js && _js->current_url)
         ? ns_url_resolve(_js->current_url, url) : NULL;
     st->url = resolved ? resolved : g_strdup(url);
+    char *secure_url = ns_js_realm_upgrade_insecure(_js, ctx, st->url);
+    if (secure_url) {
+        g_free(st->url);
+        st->url = secure_url;
+    }
     st->origin_url = g_strdup(_js ? _js->current_url : NULL);
     st->start_ms = ns_perf_now_ms(_js);
     if (method) st->method = g_strdup(method);
@@ -25738,6 +25767,11 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
         g_free(target);
         target = remapped;
     }
+    char *secure_target = ns_js_realm_upgrade_insecure(js, ctx, target);
+    if (secure_target) {
+        g_free(target);
+        target = secure_target;
+    }
 
     if (g_ascii_strncasecmp(target, "ws://",  5) != 0 &&
         g_ascii_strncasecmp(target, "wss://", 6) != 0) {
@@ -26009,6 +26043,11 @@ ns_window_eventsource_ctor(JSContext *ctx, JSValueConst this_val,
     char *target = g_strdup(resolved ? resolved : url_raw);
     JS_FreeCString(ctx, url_raw);
     g_free(resolved);
+    char *secure_target = ns_js_realm_upgrade_insecure(js, ctx, target);
+    if (secure_target) {
+        g_free(target);
+        target = secure_target;
+    }
 
     if (g_ascii_strncasecmp(target, "http://", 7) != 0 &&
         g_ascii_strncasecmp(target, "https://", 8) != 0) {
@@ -30396,6 +30435,11 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     if (!abs_url)
         return ns_throw_dom_exception(ctx, "SyntaxError", 12,
             "Failed to construct 'Worker': the script URL is invalid.");
+    char *secure_url = ns_js_realm_upgrade_insecure(js, ctx, abs_url);
+    if (secure_url) {
+        g_free(abs_url);
+        abs_url = secure_url;
+    }
     if (g_str_has_prefix(abs_url, "data:")) {
         gsize raw_len = 0;
         g_autofree char *raw_script = ns_js_decode_data_url(abs_url, &raw_len);
@@ -30586,6 +30630,11 @@ ns_shared_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc,
     if (!abs_url)
         return ns_throw_dom_exception(ctx, "SyntaxError", 12,
             "Failed to construct 'SharedWorker': the script URL is invalid.");
+    char *secure_url = ns_js_realm_upgrade_insecure(js, ctx, abs_url);
+    if (secure_url) {
+        g_free(abs_url);
+        abs_url = secure_url;
+    }
     if (!ns_shared_worker_same_origin(js, ctx, abs_url))
         return ns_throw_dom_exception(ctx, "SecurityError", 18,
             "Failed to construct 'SharedWorker': the script URL is not "
@@ -51610,7 +51659,8 @@ ns_media_helper_url_blocked(ns_js *js, const char *url)
     const char *page = js->current_url;
     gboolean mixed = page &&
         g_ascii_strncasecmp(page, "https://", 8) == 0 &&
-        g_ascii_strncasecmp(url, "http://", 7) == 0;
+        g_ascii_strncasecmp(url, "http://", 7) == 0 &&
+        !ns_csp_upgrades_insecure_requests(js->csp);
     gboolean csp = js->csp &&
         !ns_csp_allows(js->csp, NS_CSP_MEDIA, url, page);
     return mixed || csp;
@@ -68543,6 +68593,12 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         }
         char *abs_url = ns_js_resolve_against_base(js, n, origin, src);
         if (!abs_url) return;
+        char *secure_url = ns_js_csp_upgrade_insecure(ns_js_node_csp(js, n),
+                                                      abs_url);
+        if (secure_url) {
+            g_free(abs_url);
+            abs_url = secure_url;
+        }
         if (g_str_has_prefix(origin, "https://") &&
             g_str_has_prefix(abs_url, "http://")) {
             if (js->log_cb) {
@@ -69300,6 +69356,12 @@ ns_js_load_link_element(ns_js *js, ns_node *n, const char *origin)
     if (!js || !n || (n->flags & NS_NODE_LINK_LOAD_FIRED)) return;
     n->flags |= NS_NODE_LINK_LOAD_FIRED;
     g_autofree char *abs_url = ns_link_target_url(js, n, origin);
+    char *secure_url = ns_js_csp_upgrade_insecure(ns_js_node_csp(js, n),
+                                                  abs_url);
+    if (secure_url) {
+        g_free(abs_url);
+        abs_url = secure_url;
+    }
     if (!abs_url || !ns_link_fetch_allowed(js, n, abs_url, origin)) {
         ns_link_fetch_settle(ns_link_fetch_new(js, n), 0);
         return;

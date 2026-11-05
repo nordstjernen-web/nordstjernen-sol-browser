@@ -335,8 +335,12 @@ libcurl drives every fetch with TLS verification enabled
 as the only allowed protocols, redirects clamped to HTTPS once the
 initial scheme is HTTPS, max ten redirects, an explicit response-size
 cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
-`CURLOPT_HSTS`; Alt-Svc is honoured. Mixed-content sub-resources
-(http inside an https document) are blocked. The
+`CURLOPT_HSTS`; Alt-Svc is honoured. Active mixed content (an `http:`
+script, frame, worker, `fetch()`, XHR or socket inside an `https:`
+document) is blocked, and passive mixed content (images, media, fonts and
+stylesheets) is upgraded to `https:` rather than fetched in the clear; a
+document's `upgrade-insecure-requests` directive upgrades every request it
+makes, including same-host navigations. The
 `tls_allow_insecure_override` setting, off by default, lets the user
 proceed past a certificate error only for the top-level navigation
 itself, never for an HSTS host; that retried navigation sends and stores
@@ -367,7 +371,7 @@ left to the proxy.
   from the downloads folder cannot read the rest of the disk.
 - CSP (`default-src`, `script-src`, `style-src`, `img-src`,
   `media-src`, `connect-src`, `font-src`, `frame-src`,
-  `frame-ancestors`) is parsed and enforced for both inline and
+  `frame-ancestors`, `upgrade-insecure-requests`) is parsed and enforced for both inline and
   external resources, including nonce and hash matches. Without
   `'unsafe-eval'` in the effective script directive, `eval()`, the
   `Function` constructors and string timers are refused, and WebAssembly

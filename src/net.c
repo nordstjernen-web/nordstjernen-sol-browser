@@ -6239,6 +6239,36 @@ ns_net_csp_allows(const char *doc_url, ns_csp_kind kind, const char *url,
     return ok;
 }
 
+static gboolean
+ns_net_csp_upgrades_insecure(const char *doc_url)
+{
+    if (!doc_url) return FALSE;
+    g_autofree char *origin = ns_url_origin_from(doc_url);
+    if (!origin || !*origin) return FALSE;
+    gboolean upgrade = FALSE;
+    g_mutex_lock(&g_csp_lock);
+    ns_net_csp_entry *e = g_csp_by_origin
+        ? g_hash_table_lookup(g_csp_by_origin, origin) : NULL;
+    if (e) upgrade = ns_csp_upgrades_insecure_requests(e->csp);
+    g_mutex_unlock(&g_csp_lock);
+    return upgrade;
+}
+
+static gboolean
+ns_net_should_upgrade_insecure(const char *url, const char *top_url,
+                               gboolean is_navigation)
+{
+    if (!top_url || !*top_url || g_ascii_strncasecmp(url, "http://", 7) != 0)
+        return FALSE;
+    if (!is_navigation)
+        return g_ascii_strncasecmp(top_url, "https://", 8) == 0 ||
+               ns_net_csp_upgrades_insecure(top_url);
+    if (!ns_net_csp_upgrades_insecure(top_url)) return FALSE;
+    g_autofree char *doc_host = ns_url_host_from(top_url);
+    g_autofree char *req_host = ns_url_host_from(url);
+    return doc_host && req_host && g_ascii_strcasecmp(doc_host, req_host) == 0;
+}
+
 static ns_csp_kind
 ns_net_hop_csp_kind(GPtrArray *extra_headers)
 {
@@ -6309,6 +6339,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     }
 
     char *https_url = ns_net_hsts_upgrade(url);
+    if (!https_url && ns_net_should_upgrade_insecure(url, top_url, is_navigation))
+        https_url = g_strconcat("https://", url + 7, NULL);
     if (https_url) {
         g_free(hsts_upgraded);
         hsts_upgraded = https_url;

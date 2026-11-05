@@ -486,9 +486,9 @@ boundary** (`src/security.c`).
 - **Same-Origin Policy / CORS.** Enforced through `ns_url_same_origin`;
   `fetch`/XHR responses are gated by a CORS check
   (`cors_allows`, `src/js.c:9366`).
-- **CSP** (`src/csp.c`) parses and enforces 14 directives including
-  `frame-ancestors`, with source-list matching, nonces, and
-  sha-256/384/512 inline hashes.
+- **CSP** (`src/csp.c`) parses and enforces 14 source directives
+  including `frame-ancestors`, with source-list matching, nonces, and
+  sha-256/384/512 inline hashes, plus `upgrade-insecure-requests`.
 - **No JIT** means no runtime code generation for JS or wasm, removing
   the W^X attack surface entirely; runaway scripts are bounded by the
   60-second interrupt monitor rather than a kill.
