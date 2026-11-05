@@ -3,6 +3,11 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Settings (security): changing the `gsk_renderer` key from the Settings
+  page now asks for confirmation like the other security-relevant keys.
+  It was on the list of keys a renderer may change silently, so a
+  compromised renderer could pick which GPU code path the window process
+  runs on its next start.
 * TLS (security): connections now require TLS 1.2 or newer. libcurl's
   default floor is TLS 1.0, which Chrome, Firefox and Safari dropped in
   2020; no current site needs it and the older versions are vulnerable to
