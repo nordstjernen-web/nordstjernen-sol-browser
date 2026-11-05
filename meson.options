@@ -20,6 +20,12 @@ option('glslang', type: 'feature', value: 'auto',
        description: 'Validate every WebGL shader with the Khronos glslang front end before it reaches the GPU driver (glslang-dev / glslang-devel / glslang). Auto: required on desktop, where WebGL is built only with it; -Dglslang=disabled drops WebGL entirely rather than building it without the validator.')
 option('audio', type: 'feature', value: 'auto',
        description: 'Build the nordstjernen-audio playback helper (SDL2 output + minimp3/pl_mpeg decode). Auto-detects SDL2; disable for engine-only or JNI builds without SDL2.')
+option('libav', type: 'feature', value: 'auto',
+       description: 'Inline WebM (VP9/VP8 video, Opus/Vorbis audio) and MP4 demuxing over FFmpeg\'s libav* libraries. Auto: required on Linux and Windows, used on macOS when present. Disable for a headless or embedding runtime that renders pages and plays no video; such a build carries no FFmpeg dependency.')
+option('poppler', type: 'feature', value: 'auto',
+       description: 'Show PDF documents through poppler-glib. Auto: used when present. Disable to leave PDF viewing out of the build.')
+option('enchant', type: 'feature', value: 'auto',
+       description: 'Spell-check editable text through Enchant. Auto: used when present. Disable to leave spell-checking out of the build.')
 option('webgpu', type: 'feature', value: 'auto',
        description: 'Build the WebGPU API (navigator.gpu) over the external wgpu-native library. Auto: required on glibc Linux, macOS and Windows (x86_64/aarch64), where the pinned release is fetched by a meson wrap when neither pkg-config wgpu_native nor -Dwgpu_native_root provides it; optional elsewhere. -Dwebgpu=enabled hard-requires it everywhere, -Dwebgpu=disabled never builds it. When built, WebGPU is on at runtime by default; Settings can turn it off, and --enable-webgpu (or NS_WEBGPU_ALLOW=1) overrides that.')
 option('wgpu_native_root', type: 'string', value: '',

@@ -353,7 +353,8 @@ if host_machine.system() == 'windows'
   nordstjernen_link_args += cc.get_supported_link_arguments(
     ['-Wl,--stack,8388608'],
   )
-  nordstjernen_link_args += ['-lbcrypt', '-ladvapi32', '-lshell32', '-luser32']
+  nordstjernen_link_args += ['-lbcrypt', '-ladvapi32', '-lshell32', '-luser32',
+                             '-lws2_32']
 endif
 
 # NetBSD pkgsrc libunistring (pulled in transitively through the libcurl /

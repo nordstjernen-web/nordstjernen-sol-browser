@@ -3,6 +3,14 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Build: `-Dlibav=disabled`, `-Dpoppler=disabled` and `-Denchant=disabled`
+  leave FFmpeg, PDF viewing and spell-checking out, for a renderer that
+  only has to lay out and paint pages (a server, an embedding runtime).
+  FFmpeg stays required on Linux and Windows by default. Together with the
+  existing `gtk`, `audio`, `gstreamer`, `avif`, `jxl`, `webgpu` and
+  `glslang` switches the Windows renderer shrinks from 23.6 MB with 122
+  DLLs to 12.7 MB with 43. The engine now links `ws2_32` itself on Windows
+  instead of relying on FFmpeg to pull it in.
 * Java: the jars carry `License.md`, `COPYING` and
   `THIRD-PARTY-LICENSES.md` under `META-INF/` (the Gradle, Maven and nightly
   builds all left them out), the Maven sources jar no longer contains the
