@@ -291,6 +291,12 @@ Changelog:
   computed, as `em` does against its font size; it was dropped, so
   `transform: translateY(-2lh)` did not move the box at all. openai.com's
   prompt placeholder sat 36 px below where Chrome draws it.
+* Layout: an inline-block, inline-flex or inline-grid box counts with its
+  max-content width when the max-content width of the line around it is
+  measured. It was laid out at the containing block's width first and kept
+  that width, so a `width: max-content` box whose containing block was
+  narrow wrapped text that Chrome keeps on one line. GitHub's navigation
+  menus came out 90 px narrower, with their links wrapped.
 
 1.0.43:
 ======

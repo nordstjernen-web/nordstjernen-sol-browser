@@ -10552,6 +10552,25 @@ typedef struct ns_atomic_geometry {
     ns_edges margin, padding, border;
 } ns_atomic_geometry;
 
+static void
+widen_atomic_to_max_content(ns_box *ab, const ns_style *parent_style,
+                            double basis, GArray **saved)
+{
+    double outer = ab->content_width + ab->margin.left + ab->margin.right +
+                   ab->padding.left + ab->padding.right +
+                   ab->border.left + ab->border.right;
+    if (outer < basis - 0.5) return;
+    double w = measure_natural_width(ab, parent_style);
+    if (!(w > ab->content_width)) return;
+    if (!*saved) *saved = g_array_new(FALSE, FALSE, sizeof(ns_atomic_geometry));
+    ns_atomic_geometry g = {
+        .box = ab, .width = ab->content_width, .height = ab->content_height,
+        .margin = ab->margin, .padding = ab->padding, .border = ab->border,
+    };
+    g_array_append_val(*saved, g);
+    ab->content_width = w;
+}
+
 static GArray *
 measure_inline_atomics_begin(ns_box *box, const ns_style *parent_style,
                              gboolean max_content)
@@ -10564,8 +10583,9 @@ measure_inline_atomics_begin(ns_box *box, const ns_style *parent_style,
         gboolean cyclic = replaced_width_is_cyclic(ab) ||
             (!max_content && (replaced_width_is_percent(ab) ||
                               replaced_max_width_is_percent(ab)));
-        gboolean to_min_content = !max_content && !cyclic &&
+        gboolean shrinks = !cyclic &&
             (ab->kind == NS_BOX_BLOCK || ab->kind == NS_BOX_TABLE);
+        gboolean to_min_content = !max_content && shrinks;
         if (cyclic || to_min_content) {
             if (!saved)
                 saved = g_array_new(FALSE, FALSE, sizeof(ns_atomic_geometry));
@@ -10575,8 +10595,11 @@ measure_inline_atomics_begin(ns_box *box, const ns_style *parent_style,
             };
             g_array_append_val(saved, g);
         }
+        double basis = inline_atomic_measure_basis(ab);
         if (inline_atomic_needs_layout(ab))
-            layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
+            layout_box(ab, basis, parent_style);
+        if (max_content && shrinks)
+            widen_atomic_to_max_content(ab, parent_style, basis, &saved);
         if (to_min_content) {
             double w = min_width_of(ab, parent_style);
             if (w >= 0 && w < ab->content_width) ab->content_width = w;
