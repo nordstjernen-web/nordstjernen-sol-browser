@@ -4286,23 +4286,63 @@ maybe_guess_ftp_content_type(ns_response *resp)
     g_free(ctype);
 }
 
-static gboolean
-ns_file_access_allowed(const char *top_url)
+static char *
+file_url_canonical_path(const char *url)
 {
-    if (!g_allow_file_urls) return FALSE;
-    if (!top_url || !*top_url) return TRUE;
-    return g_str_has_prefix(top_url, "file:");
+    g_autofree char *bare = g_strdup(url);
+    char *cut = strpbrk(bare, "?#");
+    if (cut) *cut = '\0';
+    g_autofree char *uri_path = g_filename_from_uri(bare, NULL, NULL);
+    return uri_path ? g_canonicalize_filename(uri_path, NULL) : NULL;
+}
+
+static char *
+file_url_directory(const char *url)
+{
+    g_autofree char *canon = file_url_canonical_path(url);
+    if (!canon) return NULL;
+    g_autofree char *bare = g_strdup(url);
+    char *cut = strpbrk(bare, "?#");
+    if (cut) *cut = '\0';
+    gboolean is_dir = g_str_has_suffix(bare, "/") ||
+                      g_file_test(canon, G_FILE_TEST_IS_DIR);
+    g_autofree char *dir = is_dir ? g_strdup(canon) : g_path_get_dirname(canon);
+    if (g_str_has_suffix(dir, G_DIR_SEPARATOR_S)) return g_steal_pointer(&dir);
+    return g_strconcat(dir, G_DIR_SEPARATOR_S, NULL);
 }
 
 static gboolean
-synthesize_file_response(const char *url, const char *top_url, ns_response *resp)
+ns_file_access_allowed(const char *url, const char *top_url,
+                       gboolean is_navigation, const char **reason)
+{
+    if (!g_allow_file_urls) {
+        *reason = "local file access is disabled";
+        return FALSE;
+    }
+    if (!top_url || !*top_url) return TRUE;
+    if (!g_str_has_prefix(top_url, "file:")) {
+        *reason = "local file access is not allowed from a remote page";
+        return FALSE;
+    }
+    if (is_navigation) return TRUE;
+    g_autofree char *dir = file_url_directory(top_url);
+    g_autofree char *canon = file_url_canonical_path(url);
+    if (dir && canon && g_str_has_prefix(canon, dir)) return TRUE;
+    *reason = "a local page may only load files from its own directory "
+              "and the directories below it";
+    return FALSE;
+}
+
+static gboolean
+synthesize_file_response(const char *url, const char *top_url,
+                         gboolean is_navigation, ns_response *resp)
 {
     if (!url || !g_str_has_prefix(url, "file:")) return FALSE;
-    if (!ns_file_access_allowed(top_url)) {
+    const char *reason = NULL;
+    if (!ns_file_access_allowed(url, top_url, is_navigation, &reason)) {
         resp->final_url = g_strdup(url);
         resp->status = 0;
-        resp->error = g_strdup("local file access is not allowed from a "
-                               "remote page");
+        resp->error = g_strdup(reason);
         return TRUE;
     }
     char *uri_path = g_filename_from_uri(url, NULL, NULL);
@@ -6057,7 +6097,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         return resp;
     if (synthesize_data_response(url, resp))
         return resp;
-    if (synthesize_file_response(url, top_url, resp))
+    if (synthesize_file_response(url, top_url, is_navigation, resp))
         return resp;
 
     char *hsts_upgraded = NULL;
