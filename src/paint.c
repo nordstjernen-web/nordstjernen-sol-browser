@@ -7230,6 +7230,18 @@ apply_clip_path(cairo_t *cr, const ns_box *b)
     return TRUE;
 }
 
+static double
+box_content_x(const ns_box *b)
+{
+    return b->x + b->margin.left + b->border.left + b->padding.left;
+}
+
+static double
+box_content_y(const ns_box *b)
+{
+    return b->y + b->margin.top + b->border.top + b->padding.top;
+}
+
 static gboolean
 apply_box_content_clip(cairo_t *cr, const ns_box *b)
 {
@@ -7240,8 +7252,13 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
         return FALSE;
     corner_radii radii = box_border_radii(b);
     if (!corner_radii_zero(radii)) {
-        rounded_rect_path(cr, b->x, b->y,
-                          b->content_width, b->content_height, radii);
+        corner_radii content_radii = corner_radii_inset(radii,
+            b->border.top + b->padding.top,
+            b->border.right + b->padding.right,
+            b->border.bottom + b->padding.bottom,
+            b->border.left + b->padding.left);
+        rounded_rect_path(cr, box_content_x(b), box_content_y(b),
+                          b->content_width, b->content_height, content_radii);
         cairo_clip(cr);
         clipped = TRUE;
     }
@@ -7852,18 +7869,6 @@ paint_image(cairo_t *cr, const ns_box *b)
         paint_image_fallback(cr, b, img);
     }
     cairo_restore(cr);
-}
-
-static double
-box_content_x(const ns_box *b)
-{
-    return b->x + b->margin.left + b->border.left + b->padding.left;
-}
-
-static double
-box_content_y(const ns_box *b)
-{
-    return b->y + b->margin.top + b->border.top + b->padding.top;
 }
 
 static void
