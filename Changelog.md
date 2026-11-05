@@ -3,6 +3,20 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Web Authentication: passkeys and security keys work.
+  `navigator.credentials.create()` / `get()`, `PublicKeyCredential` (with
+  `isUserVerifyingPlatformAuthenticatorAvailable()`,
+  `getClientCapabilities()`, `toJSON()` and the `parse*OptionsFromJSON()`
+  helpers) and the attestation / assertion response objects are
+  implemented, including `getPublicKey()`. The request travels from the
+  sandboxed renderer to the shell, which checks the origin against the tab,
+  validates the RP ID against the Public Suffix List and builds
+  `clientDataJSON` itself before handing the ceremony to the platform. On
+  Windows that is `webauthn.dll`: Windows Hello, USB/NFC/BLE security keys
+  and phones. Linux, BSD and macOS expose the API and reject requests until
+  their backends land. GitHub's sign-in page now offers "Continue with
+  Google", "Continue with Apple" and "Sign in with a passkey", which it hid
+  from browsers without the API. See `docs/webauthn.md`.
 * Release: packages cannot carry browser profile data. Every pack script
   runs `scripts/check-no-profile-data.sh` on its staging tree before
   archiving, and the release workflow runs it again on the finished

@@ -52,6 +52,7 @@ typedef struct {
     char                *window_action;
     int                  clipboard;
     int                  popup;
+    int                  webauthn;
     int                  pointer_lock;
     unsigned long        session_gen;
     char                *tiles;
@@ -76,6 +77,7 @@ typedef struct {
     char *url;
     int   url_pushed;
     int   popup;
+    int   webauthn;
     int   pointer_lock;
     unsigned long session_gen;
 } ns_rproc_http_tick;
@@ -190,6 +192,9 @@ void  ns_rproc_http_set_opener(ns_rproc_http *r, const char *token,
                                const char *origin);
 char *ns_rproc_http_popup_poll(ns_rproc_http *r);
 int   ns_rproc_http_popup_deliver(ns_rproc_http *r, const char *json);
+void  ns_rproc_http_set_webauthn_support(ns_rproc_http *r, int flags);
+char *ns_rproc_http_webauthn_poll(ns_rproc_http *r);
+int   ns_rproc_http_webauthn_deliver(ns_rproc_http *r, const char *json);
 char *ns_rproc_http_download_poll(ns_rproc_http *r, long id);
 int   ns_rproc_http_download_cancel(ns_rproc_http *r, long id);
 int   ns_rproc_http_find(ns_rproc_http *r, const char *query,

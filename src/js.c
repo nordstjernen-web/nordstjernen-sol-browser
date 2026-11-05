@@ -278,7 +278,6 @@ static void ns_fullscreen_request_clear(ns_js *js);
 static void ns_fullscreen_request_resume(ns_js *js, gboolean allow);
 static void ns_js_capability_request(ns_capability capability, const char *origin);
 static int ns_js_capability_state(ns_js *js, JSContext *realm, ns_capability capability, char **origin_out);
-static void ns_js_microtask_checkpoint(ns_js *js);
 static gboolean ns_js_doc_contains(const ns_js *js, const ns_node *node);
 static JSValue ns_popup_open(JSContext *ctx, ns_js *js, const char *url,
                              int argc, JSValueConst *argv);
@@ -1816,7 +1815,7 @@ ns_js_realm_scope_leave(ns_js *js, ns_realm_scope *scope)
     js->ctx = scope->ctx;
 }
 
-static void
+void
 ns_js_microtask_checkpoint(ns_js *js)
 {
     if (js && js->ctx && js->callback_depth == 0 && !JS_IsRunningScript(js->ctx))
@@ -62062,6 +62061,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "__nsWptActivate",       ns_wpt_activate,                  0);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
     ns_bind_fn(ctx, global, "__ndMseAppend",         ns_window_mse_append,             3);
+    ns_js_webauthn_install(ctx, global);
     ns_bind_fn(ctx, global, "__ndMseEos",            ns_window_mse_eos,                1);
     ns_bind_fn(ctx, global, "__ndMediaBySrc",        ns_window_media_by_src,           1);
     ns_bind_fn(ctx, global, "__nsCookieList",        ns_window_cookie_list,            1);
@@ -65956,6 +65956,7 @@ static void
 ns_js_reset_runtime_state(ns_js *js)
 {
     if (!js) return;
+    ns_js_webauthn_reset(js);
     ns_popover_state_clear(js);
     js->focused_node = NULL;
     ns_js_forget_pending_change(js);
@@ -66669,6 +66670,7 @@ ns_js_free(ns_js *js)
     ns_js *resume_active = ns_active_js();
     if (resume_active == js) resume_active = NULL;
     ns_set_active_js(js);
+    ns_js_webauthn_reset(js);
     ns_js_module_prefetch_release(js);
     for (; js->mic_holds > 0; js->mic_holds--) ns_mic_release();
     for (; js->camera_holds > 0; js->camera_holds--) ns_camera_release();

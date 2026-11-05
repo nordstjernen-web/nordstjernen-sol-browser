@@ -575,6 +575,8 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
              tiles ? "X-Tiles: 1\r\n" : "");
     if (ns_browser_popup_pending() && hn > 0 && (size_t)hn < sizeof hdrs)
         hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn, "X-Popup: 1\r\n");
+    if (ns_browser_webauthn_pending() && hn > 0 && (size_t)hn < sizeof hdrs)
+        hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn, "X-WebAuthn: 1\r\n");
     if (ns_browser_pointer_locked(s->cur) && hn > 0 && (size_t)hn < sizeof hdrs)
         hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                        "X-Pointer-Lock: 1\r\n");
@@ -824,6 +826,9 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         long popups = 0;
         json_get_long(body, "popups", &popups);
         ns_browser_set_popups_supported((int)popups);
+        long webauthn = 0;
+        json_get_long(body, "webauthn", &webauthn);
+        ns_browser_set_webauthn_support((int)webauthn);
         char *opener_token = json_get_str(body, "opener_token");
         char *opener_origin = json_get_str(body, "opener_origin");
         ns_browser_set_opener(opener_token, opener_origin);
@@ -966,7 +971,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             "\"download\":\"%s\",\"config\":\"%s\",\"audio\":\"%s\","
             "\"window_action\":\"%s\",\"title\":\"%s\",\"url\":\"%s\","
             "\"url_pushed\":%d,\"popup\":%d,\"pointer_lock\":%d,"
-            "\"session_gen\":%lu}",
+            "\"webauthn\":%d,\"session_gen\":%lu}",
             changed != 0, session_animating(s) ? 1 : 0, session_wake_ms(s),
             page_w, page_h, nav_e ? nav_e : "", webgl_e ? webgl_e : "",
             camera_e ? camera_e : "", capability_e ? capability_e : "",
@@ -976,6 +981,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             title_e ? title_e : "", url_e ? url_e : "", url_pushed,
             ns_browser_popup_pending(),
             ns_browser_pointer_locked(s->cur) ? 1 : 0,
+            ns_browser_webauthn_pending(),
             ns_session_storage_generation());
         if (n >= 0)
             http_write_response(ctrl_w, 200, "application/json", NULL, json,
@@ -1321,6 +1327,26 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
     if (strcmp(head->path, "/popup-deliver") == 0) {
         if (s->cur && body) {
             ns_browser_popup_deliver(s->cur, body);
+            s->frame_valid = 0;
+        }
+        const char *json = "{\"ok\":1}";
+        http_write_response(ctrl_w, 200, "application/json", NULL, json,
+                            strlen(json));
+        return 0;
+    }
+
+    if (strcmp(head->path, "/webauthn-poll") == 0) {
+        char *json = ns_browser_webauthn_take();
+        const char *out = json ? json : "[]";
+        http_write_response(ctrl_w, 200, "application/json", NULL, out,
+                            strlen(out));
+        free(json);
+        return 0;
+    }
+
+    if (strcmp(head->path, "/webauthn-deliver") == 0) {
+        if (s->cur && body) {
+            ns_browser_webauthn_deliver(s->cur, body);
             s->frame_valid = 0;
         }
         const char *json = "{\"ok\":1}";

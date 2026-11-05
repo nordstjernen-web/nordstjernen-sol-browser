@@ -14978,4 +14978,489 @@
             writable: true, configurable: true
         });
     })();
+    (function installWebAuthn() {
+        var nativeRequest = global.__ndWebAuthnRequest;
+        var nativeCancel = global.__ndWebAuthnCancel;
+        var nativePlatform = global.__ndWebAuthnPlatform;
+        ['__ndWebAuthnRequest', '__ndWebAuthnCancel', '__ndWebAuthnPlatform'].forEach(function (name) {
+            try { delete global[name]; } catch (e) {}
+        });
+        if (ndWorkerScope || typeof nativeRequest !== 'function' || !global.isSecureContext ||
+            typeof global.Navigator !== 'function')
+            return;
+
+        var stringify = JSON.stringify;
+        var startTimer = global.setTimeout;
+        var stopTimer = global.clearTimeout;
+        var NativePromise = Promise;
+        var defaultTimeout = 300000;
+        var b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+        function bytesOf(v, what) {
+            if (v instanceof ArrayBuffer) return new Uint8Array(v.slice(0));
+            if (ArrayBuffer.isView(v))
+                return new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength));
+            throw new TypeError("Failed to read the '" + what + "' property: " +
+                                "The provided value is not of type '(ArrayBuffer or ArrayBufferView)'.");
+        }
+
+        function encode(bytes) {
+            var out = '', i;
+            for (i = 0; i + 2 < bytes.length; i += 3) {
+                var n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+                out += b64[n >> 18] + b64[(n >> 12) & 63] + b64[(n >> 6) & 63] + b64[n & 63];
+            }
+            if (bytes.length - i === 1) {
+                out += b64[bytes[i] >> 2] + b64[(bytes[i] & 3) << 4];
+            } else if (bytes.length - i === 2) {
+                var m = (bytes[i] << 8) | bytes[i + 1];
+                out += b64[m >> 10] + b64[(m >> 4) & 63] + b64[(m & 15) << 2];
+            }
+            return out;
+        }
+
+        function decode(text) {
+            if (typeof text !== 'string' || /[^A-Za-z0-9_-]/.test(text) || text.length % 4 === 1)
+                throw ndDomError('EncodingError', 'The string is not valid base64url.');
+            var out = new Uint8Array(Math.floor(text.length * 3 / 4)), o = 0, acc = 0, bits = 0;
+            for (var i = 0; i < text.length; i++) {
+                acc = (acc << 6) | b64.indexOf(text[i]);
+                bits += 6;
+                if (bits >= 8) {
+                    bits -= 8;
+                    out[o++] = (acc >> bits) & 255;
+                }
+            }
+            return out.buffer.slice(0, o);
+        }
+
+        function str(v) { return String(v); }
+
+        function dict(v, what) {
+            if (v === undefined || v === null) return {};
+            if (typeof v !== 'object' && typeof v !== 'function')
+                throw new TypeError("Failed to read the '" + what + "' property: The provided value is not of type 'Object'.");
+            return v;
+        }
+
+        function required(obj, key, what) {
+            if (obj[key] === undefined)
+                throw new TypeError("Failed to read the '" + what + "' property: Required member is undefined.");
+            return obj[key];
+        }
+
+        function sequence(v, what) {
+            if (v === undefined) return [];
+            if (v === null || typeof v !== 'object' || typeof v[Symbol.iterator] !== 'function')
+                throw new TypeError("Failed to read the '" + what + "' property: The provided value cannot be converted to a sequence.");
+            return Array.prototype.slice.call(Array.from(v));
+        }
+
+        function timeoutOf(v) {
+            if (v === undefined) return defaultTimeout;
+            var n = Number(v) >>> 0;
+            if (!n) return defaultTimeout;
+            return Math.min(Math.max(n, 15000), 600000);
+        }
+
+        function descriptors(list, what) {
+            return sequence(list, what).map(function (d) {
+                d = dict(d, what);
+                var out = { type: str(required(d, 'type', 'type')),
+                            id: encode(bytesOf(required(d, 'id', 'id'), 'id')) };
+                if (d.transports !== undefined) out.transports = sequence(d.transports, 'transports').map(str);
+                return out;
+            }).filter(function (d) { return d.type === 'public-key'; });
+        }
+
+        function extensionsOf(ext) {
+            ext = dict(ext, 'extensions');
+            var out = {};
+            if (ext.credProps !== undefined) out.credProps = !!ext.credProps;
+            return out;
+        }
+
+        function creationOptions(pk) {
+            pk = dict(pk, 'publicKey');
+            var rp = dict(required(pk, 'rp', 'rp'), 'rp');
+            var user = dict(required(pk, 'user', 'user'), 'user');
+            var userId = bytesOf(required(user, 'id', 'id'), 'id');
+            if (userId.length < 1 || userId.length > 64)
+                throw new TypeError("Failed to execute 'create' on 'CredentialsContainer': " +
+                                    "The `user.id` attribute must be between 1 and 64 bytes long.");
+            var challenge = bytesOf(required(pk, 'challenge', 'challenge'), 'challenge');
+            var params = sequence(required(pk, 'pubKeyCredParams', 'pubKeyCredParams'), 'pubKeyCredParams')
+                .map(function (p) {
+                    p = dict(p, 'pubKeyCredParams');
+                    return { type: str(required(p, 'type', 'type')), alg: Number(required(p, 'alg', 'alg')) | 0 };
+                });
+            var supported = params.filter(function (p) { return p.type === 'public-key'; });
+            if (params.length === 0) supported = [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }];
+            else if (supported.length === 0)
+                throw ndDomError('NotSupportedError', 'None of the requested credential types is supported.');
+            var sel = dict(pk.authenticatorSelection, 'authenticatorSelection');
+            var residentKey = sel.residentKey !== undefined ? str(sel.residentKey)
+                : (sel.requireResidentKey ? 'required' : 'discouraged');
+            if (['required', 'preferred', 'discouraged'].indexOf(residentKey) < 0) residentKey = 'discouraged';
+            var out = {
+                rp: { name: str(required(rp, 'name', 'name')) },
+                user: { id: encode(userId), name: str(required(user, 'name', 'name')),
+                        displayName: str(required(user, 'displayName', 'displayName')) },
+                challenge: encode(challenge),
+                pubKeyCredParams: supported,
+                timeout: timeoutOf(pk.timeout),
+                excludeCredentials: descriptors(pk.excludeCredentials, 'excludeCredentials'),
+                authenticatorSelection: {
+                    residentKey: residentKey,
+                    userVerification: sel.userVerification !== undefined ? str(sel.userVerification) : 'preferred'
+                },
+                attestation: pk.attestation !== undefined ? str(pk.attestation) : 'none',
+                extensions: extensionsOf(pk.extensions)
+            };
+            if (rp.id !== undefined) out.rp.id = str(rp.id).toLowerCase();
+            if (sel.authenticatorAttachment !== undefined)
+                out.authenticatorSelection.authenticatorAttachment = str(sel.authenticatorAttachment);
+            return out;
+        }
+
+        function requestOptions(pk) {
+            pk = dict(pk, 'publicKey');
+            var out = {
+                challenge: encode(bytesOf(required(pk, 'challenge', 'challenge'), 'challenge')),
+                timeout: timeoutOf(pk.timeout),
+                allowCredentials: descriptors(pk.allowCredentials, 'allowCredentials'),
+                userVerification: pk.userVerification !== undefined ? str(pk.userVerification) : 'preferred',
+                extensions: extensionsOf(pk.extensions)
+            };
+            if (pk.rpId !== undefined) out.rpId = str(pk.rpId).toLowerCase();
+            return out;
+        }
+
+        function cbor(bytes, pos) {
+            var head = bytes[pos++], major = head >> 5, info = head & 31, n = info;
+            if (info === 24) n = bytes[pos++];
+            else if (info === 25) { n = (bytes[pos] << 8) | bytes[pos + 1]; pos += 2; }
+            else if (info === 26) { n = ((bytes[pos] << 24) >>> 0) + (bytes[pos + 1] << 16) + (bytes[pos + 2] << 8) + bytes[pos + 3]; pos += 4; }
+            else if (info === 27) {
+                n = (((bytes[pos] << 24) >>> 0) + (bytes[pos + 1] << 16) + (bytes[pos + 2] << 8) + bytes[pos + 3]) * 4294967296 +
+                    ((bytes[pos + 4] << 24) >>> 0) + (bytes[pos + 5] << 16) + (bytes[pos + 6] << 8) + bytes[pos + 7];
+                pos += 8;
+            } else if (info > 27) throw new Error('cbor');
+            if (pos > bytes.length) throw new Error('cbor');
+            switch (major) {
+            case 0: return { value: n, end: pos };
+            case 1: return { value: -1 - n, end: pos };
+            case 2:
+                if (pos + n > bytes.length) throw new Error('cbor');
+                return { value: bytes.subarray(pos, pos + n), end: pos + n };
+            case 3:
+                if (pos + n > bytes.length) throw new Error('cbor');
+                return { value: new TextDecoder().decode(bytes.subarray(pos, pos + n)), end: pos + n };
+            case 4: {
+                var arr = [];
+                for (var i = 0; i < n; i++) { var item = cbor(bytes, pos); arr.push(item.value); pos = item.end; }
+                return { value: arr, end: pos };
+            }
+            case 5: {
+                var map = new Map();
+                for (var j = 0; j < n; j++) {
+                    var k = cbor(bytes, pos), v = cbor(bytes, k.end);
+                    map.set(k.value, v.value);
+                    pos = v.end;
+                }
+                return { value: map, end: pos };
+            }
+            case 7: return { value: n === 20 ? false : n === 21 ? true : null, end: pos };
+            default: throw new Error('cbor');
+            }
+        }
+
+        function authDataOf(attestationObject) {
+            try {
+                var obj = cbor(new Uint8Array(attestationObject), 0).value;
+                var auth = obj instanceof Map ? obj.get('authData') : null;
+                return auth instanceof Uint8Array ? auth : null;
+            } catch (e) { return null; }
+        }
+
+        function coseKeyOf(authData) {
+            try {
+                if (!authData || authData.length < 55 || !(authData[32] & 0x40)) return null;
+                var len = (authData[53] << 8) | authData[54];
+                return cbor(authData, 55 + len).value;
+            } catch (e) { return null; }
+        }
+
+        function hex(s) {
+            var out = new Uint8Array(s.length / 2);
+            for (var i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16);
+            return out;
+        }
+
+        function join(parts) {
+            var len = 0, o = 0;
+            parts.forEach(function (p) { len += p.length; });
+            var out = new Uint8Array(len);
+            parts.forEach(function (p) { out.set(p, o); o += p.length; });
+            return out;
+        }
+
+        function der(tag, body) {
+            var n = body.length, head;
+            if (n < 128) head = [tag, n];
+            else if (n < 256) head = [tag, 0x81, n];
+            else head = [tag, 0x82, n >> 8, n & 255];
+            return join([new Uint8Array(head), body]);
+        }
+
+        function derInteger(bytes) {
+            var i = 0;
+            while (i < bytes.length - 1 && bytes[i] === 0) i++;
+            bytes = bytes.subarray(i);
+            return der(0x02, bytes[0] & 0x80 ? join([new Uint8Array([0]), bytes]) : bytes);
+        }
+
+        function spkiOf(key) {
+            if (!(key instanceof Map)) return null;
+            var kty = key.get(1), crv = key.get(-1), x = key.get(-2), y = key.get(-3);
+            if (kty === 2 && x instanceof Uint8Array && y instanceof Uint8Array) {
+                var prefix = { 1: '3059301306072a8648ce3d020106082a8648ce3d030107034200',
+                               2: '3076301006072a8648ce3d020106052b81040022036200',
+                               3: '30819b301006072a8648ce3d020106052b8104002303818600' }[crv];
+                return prefix ? join([hex(prefix), new Uint8Array([4]), x, y]) : null;
+            }
+            if (kty === 1 && crv === 6 && x instanceof Uint8Array)
+                return join([hex('302a300506032b6570032100'), x]);
+            if (kty === 3 && key.get(-1) instanceof Uint8Array && key.get(-2) instanceof Uint8Array) {
+                var rsa = der(0x30, join([derInteger(key.get(-1)), derInteger(key.get(-2))]));
+                var bits = der(0x03, join([new Uint8Array([0]), rsa]));
+                return der(0x30, join([hex('300d06092a864886f70d0101010500'), bits]));
+            }
+            return null;
+        }
+
+        var states = new WeakMap();
+        var stateOf = idlBrand(states);
+
+        function Credential() { throw idlIllegalConstructor('Credential'); }
+        Object.defineProperty(Credential.prototype, 'id', { get: function () { return stateOf(this).id; }, configurable: true });
+        Object.defineProperty(Credential.prototype, 'type', { get: function () { return stateOf(this).type; }, configurable: true });
+
+        function PublicKeyCredential() { throw idlIllegalConstructor('PublicKeyCredential'); }
+        PublicKeyCredential.prototype = Object.create(Credential.prototype);
+        Object.defineProperty(PublicKeyCredential.prototype, 'constructor',
+                              { value: PublicKeyCredential, writable: true, configurable: true });
+        ['rawId', 'response', 'authenticatorAttachment'].forEach(function (key) {
+            Object.defineProperty(PublicKeyCredential.prototype, key, {
+                get: function () { return stateOf(this)[key]; }, configurable: true
+            });
+        });
+        defineMethod(PublicKeyCredential.prototype, 'getClientExtensionResults', function () {
+            var ext = stateOf(this).extensions, out = {};
+            if (ext.credProps) out.credProps = Object.assign({}, ext.credProps);
+            return out;
+        });
+        defineMethod(PublicKeyCredential.prototype, 'toJSON', function () {
+            var s = stateOf(this), r = stateOf(s.response), response = { clientDataJSON: encode(new Uint8Array(r.clientDataJSON)) };
+            if (r.attestationObject) {
+                var auth = authDataOf(r.attestationObject), spki = spkiOf(coseKeyOf(auth)), key = coseKeyOf(auth);
+                response.authenticatorData = auth ? encode(auth) : '';
+                response.transports = r.transports.slice();
+                if (spki) response.publicKey = encode(spki);
+                response.publicKeyAlgorithm = key instanceof Map ? key.get(3) : -7;
+                response.attestationObject = encode(new Uint8Array(r.attestationObject));
+            } else {
+                response.authenticatorData = encode(new Uint8Array(r.authenticatorData));
+                response.signature = encode(new Uint8Array(r.signature));
+                if (r.userHandle) response.userHandle = encode(new Uint8Array(r.userHandle));
+            }
+            var out = { id: s.id, rawId: s.id, response: response,
+                        clientExtensionResults: this.getClientExtensionResults(), type: 'public-key' };
+            if (s.authenticatorAttachment) out.authenticatorAttachment = s.authenticatorAttachment;
+            return out;
+        });
+        defineMethod(PublicKeyCredential, 'isUserVerifyingPlatformAuthenticatorAvailable', function () {
+            return NativePromise.resolve(!!(nativePlatform && nativePlatform()));
+        });
+        defineMethod(PublicKeyCredential, 'isConditionalMediationAvailable', function () {
+            return NativePromise.resolve(false);
+        });
+        defineMethod(PublicKeyCredential, 'getClientCapabilities', function () {
+            var platform = !!(nativePlatform && nativePlatform());
+            return NativePromise.resolve({
+                conditionalCreate: false, conditionalGet: false, hybridTransport: platform,
+                passkeyPlatformAuthenticator: platform, userVerifyingPlatformAuthenticator: platform,
+                relatedOrigins: false, signalAllAcceptedCredentials: false,
+                signalCurrentUserDetails: false, signalUnknownCredential: false,
+                'extension:credProps': true
+            });
+        });
+        defineMethod(PublicKeyCredential, 'parseCreationOptionsFromJSON', function (json) {
+            idlNeed(arguments, 1, 'PublicKeyCredential', 'parseCreationOptionsFromJSON');
+            json = dict(json, 'options');
+            var user = dict(required(json, 'user', 'user'), 'user');
+            var out = Object.assign({}, json, {
+                user: Object.assign({}, user, { id: decode(required(user, 'id', 'id')) }),
+                challenge: decode(required(json, 'challenge', 'challenge'))
+            });
+            if (json.excludeCredentials !== undefined)
+                out.excludeCredentials = sequence(json.excludeCredentials, 'excludeCredentials').map(function (d) {
+                    return Object.assign({}, d, { id: decode(dict(d, 'excludeCredentials').id) });
+                });
+            return out;
+        });
+        defineMethod(PublicKeyCredential, 'parseRequestOptionsFromJSON', function (json) {
+            idlNeed(arguments, 1, 'PublicKeyCredential', 'parseRequestOptionsFromJSON');
+            json = dict(json, 'options');
+            var out = Object.assign({}, json, { challenge: decode(required(json, 'challenge', 'challenge')) });
+            if (json.allowCredentials !== undefined)
+                out.allowCredentials = sequence(json.allowCredentials, 'allowCredentials').map(function (d) {
+                    return Object.assign({}, d, { id: decode(dict(d, 'allowCredentials').id) });
+                });
+            return out;
+        });
+
+        function AuthenticatorResponse() { throw idlIllegalConstructor('AuthenticatorResponse'); }
+        Object.defineProperty(AuthenticatorResponse.prototype, 'clientDataJSON', {
+            get: function () { return stateOf(this).clientDataJSON; }, configurable: true
+        });
+
+        function AuthenticatorAttestationResponse() { throw idlIllegalConstructor('AuthenticatorAttestationResponse'); }
+        AuthenticatorAttestationResponse.prototype = Object.create(AuthenticatorResponse.prototype);
+        Object.defineProperty(AuthenticatorAttestationResponse.prototype, 'constructor',
+                              { value: AuthenticatorAttestationResponse, writable: true, configurable: true });
+        Object.defineProperty(AuthenticatorAttestationResponse.prototype, 'attestationObject', {
+            get: function () { return stateOf(this).attestationObject; }, configurable: true
+        });
+        defineMethod(AuthenticatorAttestationResponse.prototype, 'getTransports', function () {
+            return stateOf(this).transports.slice();
+        });
+        defineMethod(AuthenticatorAttestationResponse.prototype, 'getAuthenticatorData', function () {
+            var auth = authDataOf(stateOf(this).attestationObject);
+            return auth ? auth.slice().buffer : new ArrayBuffer(0);
+        });
+        defineMethod(AuthenticatorAttestationResponse.prototype, 'getPublicKey', function () {
+            var spki = spkiOf(coseKeyOf(authDataOf(stateOf(this).attestationObject)));
+            return spki ? spki.buffer : null;
+        });
+        defineMethod(AuthenticatorAttestationResponse.prototype, 'getPublicKeyAlgorithm', function () {
+            var key = coseKeyOf(authDataOf(stateOf(this).attestationObject));
+            return key instanceof Map && typeof key.get(3) === 'number' ? key.get(3) : -7;
+        });
+
+        function AuthenticatorAssertionResponse() { throw idlIllegalConstructor('AuthenticatorAssertionResponse'); }
+        AuthenticatorAssertionResponse.prototype = Object.create(AuthenticatorResponse.prototype);
+        Object.defineProperty(AuthenticatorAssertionResponse.prototype, 'constructor',
+                              { value: AuthenticatorAssertionResponse, writable: true, configurable: true });
+        ['authenticatorData', 'signature', 'userHandle'].forEach(function (key) {
+            Object.defineProperty(AuthenticatorAssertionResponse.prototype, key, {
+                get: function () { return stateOf(this)[key]; }, configurable: true
+            });
+        });
+
+        function makeCredential(data, create) {
+            var r = data.response || {};
+            var response = Object.create(create ? AuthenticatorAttestationResponse.prototype
+                                                : AuthenticatorAssertionResponse.prototype);
+            var rs = { clientDataJSON: decode(r.clientDataJSON) };
+            if (create) {
+                rs.attestationObject = decode(r.attestationObject);
+                rs.transports = (Array.isArray(r.transports) ? r.transports : []).map(str).sort();
+            } else {
+                rs.authenticatorData = decode(r.authenticatorData);
+                rs.signature = decode(r.signature);
+                rs.userHandle = typeof r.userHandle === 'string' ? decode(r.userHandle) : null;
+            }
+            states.set(response, rs);
+            var credential = Object.create(PublicKeyCredential.prototype);
+            states.set(credential, {
+                id: str(data.id), type: 'public-key', rawId: decode(data.id), response: response,
+                authenticatorAttachment: typeof data.authenticatorAttachment === 'string'
+                    ? data.authenticatorAttachment : null,
+                extensions: data.clientExtensionResults || {}
+            });
+            return credential;
+        }
+
+        function run(type, options, signal) {
+            return new NativePromise(function (resolve, reject) {
+                var ticket = nativeRequest(type, stringify(options));
+                var done = false, timer = null, onAbort = null;
+                function finish(fn, value) {
+                    if (done) return;
+                    done = true;
+                    if (timer !== null) stopTimer(timer);
+                    if (onAbort) signal.removeEventListener('abort', onAbort);
+                    fn(value);
+                }
+                timer = startTimer(function () {
+                    nativeCancel(ticket.id);
+                    finish(reject, ndDomError('NotAllowedError',
+                        'The operation either timed out or was not allowed.'));
+                }, options.timeout);
+                if (signal) {
+                    onAbort = function () { nativeCancel(ticket.id); finish(reject, signal.reason); };
+                    signal.addEventListener('abort', onAbort);
+                }
+                ticket.promise.then(function (data) {
+                    try { finish(resolve, makeCredential(data, type === 'create')); }
+                    catch (e) { finish(reject, ndDomError('NotAllowedError', 'The authenticator returned malformed data.')); }
+                }, function (e) { finish(reject, e); });
+            });
+        }
+
+        function start(self, options, member, normalize, type) {
+            return new NativePromise(function (resolve, reject) {
+                containerOf(self);
+                options = dict(options, 'options');
+                var signal = options.signal;
+                if (signal !== undefined && !(typeof global.AbortSignal === 'function' && signal instanceof global.AbortSignal))
+                    throw new TypeError("Failed to execute '" + member + "' on 'CredentialsContainer': " +
+                                        "member signal is not of type AbortSignal.");
+                if (signal && signal.aborted) return reject(signal.reason);
+                if (type === 'get' && options.mediation === 'conditional')
+                    throw new TypeError("Failed to execute 'get' on 'CredentialsContainer': " +
+                                        'Conditional mediation is not supported.');
+                if (options.publicKey === undefined)
+                    throw ndDomError('NotSupportedError',
+                                     'Only public-key credentials are supported.');
+                resolve(run(type, normalize(options.publicKey), signal));
+            });
+        }
+
+        var containers = new WeakMap();
+        var containerOf = idlBrand(containers);
+        function CredentialsContainer() { throw idlIllegalConstructor('CredentialsContainer'); }
+        defineMethod(CredentialsContainer.prototype, 'create', function (options) {
+            return start(this, options, 'create', creationOptions, 'create');
+        });
+        defineMethod(CredentialsContainer.prototype, 'get', function (options) {
+            return start(this, options, 'get', requestOptions, 'get');
+        });
+        defineMethod(CredentialsContainer.prototype, 'store', function () {
+            var self = this;
+            return new NativePromise(function () {
+                containerOf(self);
+                throw ndDomError('NotSupportedError', 'Storing credentials is not supported.');
+            });
+        });
+        defineMethod(CredentialsContainer.prototype, 'preventSilentAccess', function () {
+            var self = this;
+            return new NativePromise(function (resolve) { containerOf(self); resolve(undefined); });
+        });
+
+        idlExpose(Credential, 'Credential');
+        idlExpose(PublicKeyCredential, 'PublicKeyCredential', Credential);
+        idlExpose(AuthenticatorResponse, 'AuthenticatorResponse');
+        idlExpose(AuthenticatorAttestationResponse, 'AuthenticatorAttestationResponse', AuthenticatorResponse);
+        idlExpose(AuthenticatorAssertionResponse, 'AuthenticatorAssertionResponse', AuthenticatorResponse);
+        idlExpose(CredentialsContainer, 'CredentialsContainer');
+
+        var container = Object.create(CredentialsContainer.prototype);
+        containers.set(container, {});
+        Object.defineProperty(global.Navigator.prototype, 'credentials', {
+            get: function credentials() { return container; },
+            enumerable: true, configurable: true
+        });
+    })();
 })(typeof globalThis !== 'undefined' ? globalThis : this);
