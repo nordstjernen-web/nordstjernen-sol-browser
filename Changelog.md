@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-Unreleased:
+1.0.45-dev:
 ======
 * pip: `pip install nordstjernen-browser` installs the browser. The package
   carries a small launcher; the first `nordstjernen` run (or
