@@ -44,6 +44,14 @@ Changelog:
   `allow-top-navigation` (or `-by-user-activation`) and `allow-popups`, so
   a frame sandboxed with `allow-forms` could still replace the page with a
   `target=_top` or `target=_blank` form.
+* Microphone and camera (security): live microphone samples and camera
+  frames now reach only documents of the origin that was granted access.
+  An analyser node returned microphone data whenever a page-writable
+  property said it was fed by a microphone, so a cross-origin iframe in a
+  tab where the top page had been granted the microphone could read it;
+  any document could also close the devices, and nothing released them
+  when the page went away. Releases now need the granting origin, and the
+  devices are closed when the page's script context is torn down.
 
 1.0.43:
 ======

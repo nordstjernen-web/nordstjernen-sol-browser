@@ -11677,6 +11677,26 @@ ns_returns_resolved_empty_array(JSContext *ctx, JSValueConst this_val,
     return ns_promise_resolve_take(ctx, JS_NewArray(ctx));
 }
 
+static char *
+ns_media_grant_key(ns_js *js, JSContext *ctx)
+{
+    const char *url = ns_js_realm_url_or_current(js, ctx);
+    char *origin = ns_url_origin_from(url);
+    if (!origin || !*origin || strcmp(origin, "null") == 0) {
+        g_free(origin);
+        origin = g_strdup(url ? url : "");
+    }
+    return origin;
+}
+
+static gboolean
+ns_media_origin_granted(ns_js *js, JSContext *ctx)
+{
+    if (!js || !js->media_grant_origins) return FALSE;
+    g_autofree char *key = ns_media_grant_key(js, ctx);
+    return g_hash_table_contains(js->media_grant_origins, key);
+}
+
 static JSValue
 ns_cam_request(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -11686,8 +11706,13 @@ ns_cam_request(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     gboolean want_audio = argc > 1 && JS_ToBool(ctx, argv[1]);
     int d = ns_camera_permission(js);
     if (d == 1) {
-        if (want_video) ns_camera_acquire();
-        if (want_audio) ns_mic_acquire();
+        if (!js) return JS_NewString(ctx, "denied");
+        if (want_video && ns_camera_acquire()) js->camera_holds++;
+        if (want_audio && ns_mic_acquire()) js->mic_holds++;
+        if (!js->media_grant_origins)
+            js->media_grant_origins = g_hash_table_new_full(
+                g_str_hash, g_str_equal, g_free, NULL);
+        g_hash_table_add(js->media_grant_origins, ns_media_grant_key(js, ctx));
         return JS_NewString(ctx, "granted");
     }
     if (d == 0)
@@ -11698,7 +11723,11 @@ ns_cam_request(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 static JSValue
 ns_cam_release(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || js->camera_holds <= 0 || !ns_media_origin_granted(js, ctx))
+        return JS_UNDEFINED;
+    js->camera_holds--;
     ns_camera_release();
     return JS_UNDEFINED;
 }
@@ -11706,7 +11735,11 @@ ns_cam_release(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 static JSValue
 ns_mic_release_js(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || js->mic_holds <= 0 || !ns_media_origin_granted(js, ctx))
+        return JS_UNDEFINED;
+    js->mic_holds--;
     ns_mic_release();
     return JS_UNDEFINED;
 }
@@ -11740,7 +11773,9 @@ ns_audio_node_is_mic(JSContext *ctx, JSValueConst node)
         mic = JS_ToBool(ctx, t);
         JS_FreeValue(ctx, t);
     }
-    return mic;
+    if (!mic) return FALSE;
+    ns_js *js = js_from_ctx(ctx);
+    return js && js->mic_holds > 0 && ns_media_origin_granted(js, ctx);
 }
 
 static JSValue
@@ -52148,6 +52183,9 @@ ns_media_set_srcObject(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         is_cam = JS_ToBool(ctx, m);
         JS_FreeValue(ctx, m);
     }
+    if (is_cam && !(js && js->camera_holds > 0 &&
+                    ns_media_origin_granted(js, ctx)))
+        is_cam = FALSE;
     if (el) {
         ns_element_set_attr(el, NS_MEDIA_STREAM_ATTR, is_cam ? "camera" : "");
         if (js) js->mutated = TRUE;
@@ -66137,6 +66175,12 @@ ns_js_free(ns_js *js)
     if (resume_active == js) resume_active = NULL;
     ns_set_active_js(js);
     ns_js_module_prefetch_release(js);
+    for (; js->mic_holds > 0; js->mic_holds--) ns_mic_release();
+    for (; js->camera_holds > 0; js->camera_holds--) ns_camera_release();
+    if (js->media_grant_origins) {
+        g_hash_table_destroy(js->media_grant_origins);
+        js->media_grant_origins = NULL;
+    }
     if (js->doc_ready_states) {
         g_hash_table_destroy(js->doc_ready_states);
         js->doc_ready_states = NULL;
