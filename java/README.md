@@ -194,17 +194,43 @@ and [API docs](https://www.nordstjernen.org/nightly/java/apidocs/). Run it with
 
 ## Use from Maven or Gradle
 
+Releases are published to **GitHub Packages**, not yet to Maven Central. The
+version is the release tag (for example `1.0.44`); the artifact for a release
+holds the JNI libraries for Linux x86_64 only, and no renderer.
+
 ```xml
+<repositories>
+  <repository>
+    <id>nordstjernen</id>
+    <url>https://maven.pkg.github.com/nordstjernen-web/nordstjernen-sol-browser</url>
+  </repository>
+</repositories>
+
 <dependency>
   <groupId>org.nordstjernen</groupId>
   <artifactId>nordstjernen-java</artifactId>
-  <version>1.0.29</version>
+  <version>1.0.44</version>
 </dependency>
 ```
 
 ```groovy
-implementation 'org.nordstjernen:nordstjernen-java:1.0.29'
+repositories {
+    maven {
+        url = uri('https://maven.pkg.github.com/nordstjernen-web/nordstjernen-sol-browser')
+        credentials {
+            username = System.getenv('GITHUB_ACTOR')
+            password = System.getenv('GITHUB_TOKEN')
+        }
+    }
+}
+dependencies {
+    implementation 'org.nordstjernen:nordstjernen-java:1.0.44'
+}
 ```
+
+GitHub Packages asks for a token even to read a public package: a personal
+access token with `read:packages`, as the `nordstjernen` server in
+`~/.m2/settings.xml` for Maven or as above for Gradle.
 
 ## Build
 
@@ -219,29 +245,32 @@ cd java && gradle build      # -> build/libs/nordstjernen-java-<version>.jar
 cd java && mvn package       # -> target/nordstjernen-java-<version>.jar
 ```
 
+`build-native.sh` runs on Linux, on macOS and, in an MSYS2 shell, on Windows.
+
 Both builds emit the runnable jar plus `-sources` and `-javadoc`, with the
-same manifest (`Main-Class`, `Automatic-Module-Name`, `Enable-Native-Access`).
-`java/pom.xml` is the single source of truth for the version; `build.gradle`
-reads it back so the two never drift.
+same manifest (`Main-Class`, `Automatic-Module-Name`, `Enable-Native-Access`)
+and the licence texts (`License.md`, `COPYING`, `THIRD-PARTY-LICENSES.md`)
+under `META-INF/`. `java/pom.xml` is the single source of truth for the
+version; `build.gradle` reads it back so the two never drift.
 
 ### Publishing
 
 ```sh
 mvn install                          # → ~/.m2/repository
 gradle publishToMavenLocal           # the same coordinates, from Gradle
-mvn -Prelease deploy                 # signed, to the Maven Central portal
 ```
 
-The `release` profile adds `maven-gpg-plugin` and
-`central-publishing-maven-plugin`; put the signing key and the `central`
-server credentials in `~/.m2/settings.xml`. The POM already carries the
-name, description, URL, licence, developer and SCM metadata a public
-repository requires.
+`.github/workflows/java-publish.yml` publishes each release to GitHub
+Packages with Gradle. The POM also has a `release` profile
+(`mvn -Prelease deploy`) that signs the artifacts with `maven-gpg-plugin` and
+uploads them to the Maven Central portal with
+`central-publishing-maven-plugin`; no workflow runs it yet, and it needs the
+signing key and the `central` server credentials in `~/.m2/settings.xml`.
 
 `scripts/build-native.sh` compiles `libnordstjernen` (via meson) and
 `libnordstjernenjni` (the JNI bridge, linked with `RPATH=$ORIGIN` so it finds
 the engine beside it), staging both into `src/main/resources/native/`. The
-Gradle jar bundles them; `NativeLoader` extracts and loads them at runtime.
+Gradle jar bundles them; `NativeLoader` unpacks and loads them at runtime.
 
 The nightly **fat jar** (`scripts/nightly.sh`, `stage_java`) goes one step
 further: it compiles every source under `src/main/java` (library **and** the
@@ -253,7 +282,9 @@ embedding library and the `java -jar`-launchable browser.
 
 `NativeLoader` resolves, in order:
 1. the directory in the `nordstjernen.native.dir` system property;
-2. libraries bundled in the jar under `/native/<os>-<arch>/`;
+2. libraries bundled in the jar under `/native/<os>-<arch>/`, unpacked once
+   into a per-user cache directory named after their contents
+   (`nordstjernen.cache.dir` moves it);
 3. the platform loader (`java.library.path` / `LD_LIBRARY_PATH`).
 
 > The jar bundles `libnordstjernen` and the JNI bridge, but **not** the engine's
