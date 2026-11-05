@@ -127,6 +127,7 @@ package() {
 }
 APKBUILD_EOF
 
+"$ROOT/scripts/check-no-profile-data.sh" "$STAGE"
 ( cd "$BUILDTOP" && abuild -F -d rootpkg )
 
 APKFILE=$(find "$REPODEST" -name "nordstjernen-${APKVER}-r*.apk" | head -n1 || true)

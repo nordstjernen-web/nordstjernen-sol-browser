@@ -67,6 +67,7 @@ ${RUNTIME}
     ./nordstjernen https://example.com
 EOF
 
+"$ROOT/scripts/check-no-profile-data.sh" "$STAGE"
 ( cd "$ROOT/dist" && rm -f "${SLUG}.zip" && zip -r "${SLUG}.zip" "$SLUG" >/dev/null )
 log "wrote $ZIP"
 printf '%s\n' "$ZIP"

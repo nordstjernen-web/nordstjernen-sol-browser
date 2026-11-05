@@ -253,6 +253,7 @@ EOF
 log "staged: $(cd "$STAGE" && find . -type f | sort | tr '\n' ' ')"
 log "zip -> $ZIP"
 rm -f "$ZIP"
+"$ROOT/scripts/check-no-profile-data.sh" "$STAGE"
 ( cd "$ROOT/dist" && zip -r "$(basename "$ZIP")" "$(basename "$STAGE")" >/dev/null )
 [ -s "$ZIP" ] || { log "ERROR: $ZIP missing or empty after zip"; exit 1; }
 
