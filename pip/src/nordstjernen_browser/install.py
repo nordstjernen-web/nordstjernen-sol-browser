@@ -205,7 +205,7 @@ def _progress(label):
 def _build_from_source(staging, work):
     env = build_environment(product.WINDOWS_ENV)
     try:
-        preflight(env, log)
+        disabled_options = preflight(env, log)
     except PreflightError as error:
         raise InstallError(str(error)) from error
 
@@ -231,7 +231,7 @@ def _build_from_source(staging, work):
             run_logged("tar", tar_args, env, build_log)
             log("configuring")
             run_logged("meson", ["setup", build_path(build), build_path(source), *product.MESON_OPTIONS,
-                                 f"--prefix={build_path(staging)}"], env, build_log)
+                                 *disabled_options, f"--prefix={build_path(staging)}"], env, build_log)
             run_logged("meson", ["compile", "-C", build_path(build)], env, build_log,
                        _progress("compiling"))
             log("installing")

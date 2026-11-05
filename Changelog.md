@@ -3,6 +3,12 @@ Changelog:
 
 1.0.45-dev:
 ======
+* pip/npm installers: a missing glslang or GStreamer no longer stops the
+  build. The installer warned that it was building without WebGL, then
+  ran `meson setup` without `-Dglslang=disabled`, which fails because
+  glslang is required unless disabled (GStreamer likewise on Linux). It
+  now passes `-Dglslang=disabled` / `-Dgstreamer=disabled` for the
+  features it reports as left out.
 * Media: closing a tab stops its sound at once. The audio helper of a tab
   playing video or audio was shut down only when the last reference to
   the tab went away, so a YouTube video kept playing after its tab was

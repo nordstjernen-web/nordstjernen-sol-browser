@@ -185,7 +185,7 @@ function progressReporter(label) {
 
 async function buildFromSource(staging, work) {
   const env = buildEnvironment(product);
-  preflight(product, env, {
+  const disabledOptions = preflight(product, env, {
     onWarning: (message) => log(message),
     onError: (message) => {
       throw new InstallError(message);
@@ -209,7 +209,7 @@ async function buildFromSource(staging, work) {
     await runLogged('tar', process.platform === 'win32' ? ['--force-local', ...tarArgs] : tarArgs, env, logFd);
     log('configuring');
     await runLogged('meson', ['setup', buildPath(build), buildPath(source), ...product.mesonOptions,
-      `--prefix=${buildPath(staging)}`], env, logFd);
+      ...disabledOptions, `--prefix=${buildPath(staging)}`], env, logFd);
     await runLogged('meson', ['compile', '-C', buildPath(build)], env, logFd, progressReporter('compiling'));
     log('installing');
     await runLogged('meson', ['install', '-C', buildPath(build), '--quiet'], env, logFd);

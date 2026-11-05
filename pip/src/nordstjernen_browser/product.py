@@ -83,15 +83,14 @@ REQUIRED = [
 
 OPTIONAL = [
     _lib("glslang", "glslang-dev", "glslang", "glslang", "glslang",
-         feature="WebGL (every shader is validated by glslang; the build fails without it "
-                 "unless configured with -Dglslang=disabled)"),
+         feature="WebGL", meson_option="glslang"),
     _lib("sdl2", "libsdl2-dev", "sdl2", "sdl2", "SDL2", feature="audio playback"),
     _lib("gstreamer-1.0", "libgstreamer1.0-dev", "gstreamer", minimum="1.20", unix=True,
-         feature="H.264 video and AAC audio"),
+         feature="H.264 video and AAC audio", meson_option="gstreamer"),
     _lib("gstreamer-app-1.0", "libgstreamer-plugins-base1.0-dev", "gst-plugins-base-libs",
-         minimum="1.20", unix=True, feature="H.264 video and AAC audio"),
+         minimum="1.20", unix=True, feature="H.264 video and AAC audio", meson_option="gstreamer"),
     _lib("gstreamer-video-1.0", "libgstreamer-plugins-base1.0-dev", "gst-plugins-base-libs",
-         minimum="1.20", unix=True, feature="H.264 video and AAC audio"),
+         minimum="1.20", unix=True, feature="H.264 video and AAC audio", meson_option="gstreamer"),
     _lib("poppler-glib", "libpoppler-glib-dev", "poppler-glib", "poppler", "poppler",
          feature="viewing PDF files"),
     _lib("libbrotlidec", "libbrotli-dev", "brotli", "brotli", "brotli", feature="WOFF2 web fonts"),
