@@ -9058,31 +9058,6 @@ ns_element_get_outerHTML(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
-ns_xml_serializeToString(JSContext *ctx, JSValueConst this_val,
-                        int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    if (argc < 1) return JS_NewString(ctx, "");
-    const ns_node *n = ns_unwrap_element(argv[0]);
-    if (!n) return JS_NewString(ctx, "");
-    char *html = (n->flags & NS_NODE_XML_DOC)
-                     ? ns_node_xml_outer_html(n) : ns_node_outer_html(n);
-    JSValue v = JS_NewString(ctx, html ? html : "");
-    g_free(html);
-    return v;
-}
-
-static JSValue
-ns_xml_serializer_ctor(JSContext *ctx, JSValueConst this_val,
-                       int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    JSValue obj = JS_NewObject(ctx);
-    ns_bind_fn(ctx, obj, "serializeToString", ns_xml_serializeToString, 1);
-    return obj;
-}
-
-static JSValue
 ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
     ns_node *self = ns_unwrap_element_mut(this_val);
@@ -65980,7 +65955,6 @@ ns_js_setup_document_interfaces(ns_js *js, JSContext *ctx, JSValueConst global)
     ns_link_class_ctor(ctx, global, "CSSStyleDeclaration", ns_style_class_id);
     ns_link_class_ctor(ctx, global, "DOMStringMap", ns_dataset_class_id);
     ns_link_class_ctor(ctx, global, "DOMTokenList", ns_token_list_class_id);
-    ns_bind_ctor(ctx, global, "XMLSerializer", ns_xml_serializer_ctor, 0);
 
     ns_bind_fn(ctx, global, "__ns_zlib_create", ns_zlib_create, 2);
     ns_bind_fn(ctx, global, "__ns_zlib_push",   ns_zlib_push,   2);
