@@ -271,6 +271,14 @@ Changelog:
   derive. ECDH and X25519 now require the `public` parameter to be a public
   key of the same algorithm and curve, and `generateKey` makes AES keys of
   128, 192 or 256 bits only.
+* Layout: an empty `display: table` box stops margin collapsing, as in
+  Chrome. The clearfix `::before { content: ''; display: table }` is not
+  self-collapsing, so a child's top margin stays inside its parent instead
+  of collapsing through the parent's top edge; the same holds for an empty
+  block that contains such a box. An empty block whose margins collapse
+  through sits at its parent's top edge when a later sibling's margin
+  collapses through the parent, instead of that margin above it. ESPN's
+  main pane sat 10 px too low and BBC's front page 16 px too high.
 
 1.0.43:
 ======
