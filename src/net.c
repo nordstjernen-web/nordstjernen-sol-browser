@@ -121,6 +121,7 @@ typedef struct ns_hop_req {
     int                samesite_cross;
     gboolean           top_level_navigation;
     const char        *document_url;
+    gboolean           hsts_store;
     int                priority_urgency;
     gboolean           priority_incremental;
     gboolean           follow_redirects;
@@ -5873,7 +5874,9 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
 
     const char *hsts_curl = ns_net_hsts_curl_path();
     if (hsts_curl) {
-        curl_easy_setopt(curl, CURLOPT_HSTS_CTRL, (long)CURLHSTS_ENABLE);
+        long hsts_ctrl = CURLHSTS_ENABLE;
+        if (!req->hsts_store) hsts_ctrl |= CURLHSTS_READONLYFILE;
+        curl_easy_setopt(curl, CURLOPT_HSTS_CTRL, hsts_ctrl);
         curl_easy_setopt(curl, CURLOPT_HSTS, hsts_curl);
     }
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, req->http_version_pref);
@@ -6699,6 +6702,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         .samesite_cross = samesite_cross,
         .top_level_navigation = is_navigation,
         .document_url = is_navigation ? NULL : top_url,
+        .hsts_store = is_navigation || !top_url || !*top_url ||
+                      ns_url_is_same_site(top_url, url),
         .priority_urgency = priority_urgency,
         .priority_incremental = priority_incremental,
         .follow_redirects = follow_redirects,
