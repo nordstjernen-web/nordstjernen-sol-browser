@@ -76,17 +76,38 @@ static void
 add_text_line_spans(GArray *spans, const ns_box *b, double top, double bottom,
                     double page_h)
 {
-    double line_h = b->style ? ns_paint_css_line_height_px(b->style) : 0;
-    double height = bottom - top;
-    if (!(line_h > 1) || height <= line_h * 1.5) {
+    NsPangoLayout *layout =
+        b->vertical_wm ? NULL : ns_paint_build_inline_layout(NULL, b);
+    int lines = layout ? ns_pango_layout_get_line_count(layout) : 0;
+    if (lines < 2) {
+        g_clear_object(&layout);
         add_span(spans, top, bottom, page_h);
         return;
     }
-    guint room = spans->len < NS_PRINT_MAX_SPANS
-        ? NS_PRINT_MAX_SPANS - spans->len : 0;
-    for (double y = top; y < bottom - 0.5 && y + line_h > y && room > 0;
-         y += line_h, room--)
-        add_span(spans, y, MIN(y + line_h, bottom), page_h);
+    const GArray *heights = b->atomic_line_heights;
+    if (heights && heights->len == (guint)lines) {
+        double line_top = b->y;
+        for (guint i = 0; i < heights->len && spans->len < NS_PRINT_MAX_SPANS;
+             i++) {
+            double line_h = g_array_index(heights, double, i);
+            add_span(spans, line_top, line_top + line_h, page_h);
+            line_top += line_h;
+        }
+        g_object_unref(layout);
+        return;
+    }
+    double y_origin = b->y + ns_paint_inline_y_offset_for_layout(b, layout);
+    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+    do {
+        NsPangoRectangle line;
+        ns_pango_layout_iter_get_line_extents(it, NULL, &line);
+        add_span(spans, y_origin + (double)line.y / NS_PANGO_SCALE,
+                 y_origin + (double)(line.y + line.height) / NS_PANGO_SCALE,
+                 page_h);
+    } while (spans->len < NS_PRINT_MAX_SPANS &&
+             ns_pango_layout_iter_next_line(it));
+    ns_pango_layout_iter_free(it);
+    g_object_unref(layout);
 }
 
 static void

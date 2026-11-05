@@ -3,6 +3,12 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Printing: a page break no longer cuts a line of text in half. The
+  paginator guessed where the lines of a paragraph were by stepping its CSS
+  `line-height` down from the top of the text, which drifts as soon as one
+  line is taller than the rest: a larger word, an inline image, a
+  superscript. It now takes the line boxes the painter uses, so the cut
+  falls between two lines.
 * Printing: `--dump=print:FILE` lays the page out at the sheet's content
   width again. The headless driver started with a viewport of 1000 pixels,
   which the print path took for an explicit `--viewport`, so a page was
