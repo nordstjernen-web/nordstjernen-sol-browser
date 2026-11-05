@@ -1490,8 +1490,16 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         break;
     case NS_PROC_EVT_DOWNLOAD:
         if (text && *text) {
-            char **parts = g_strsplit(text, "\t", 2);
             const char *page_url = ns_proc_view_url(v);
+            g_autofree char *origin = ns_proc_url_origin(page_url);
+            ns_perm_state allowed = origin && *origin
+                ? ns_perm_get(origin, NS_CAP_DOWNLOADS) : NS_PERM_ALLOW;
+            if (allowed == NS_PERM_DENY) break;
+            if (allowed == NS_PERM_ASK) {
+                ns_proc_view_hold_download(v, text, origin);
+                break;
+            }
+            char **parts = g_strsplit(text, "\t", 2);
             gboolean local_target =
                 g_ascii_strncasecmp(parts[0], "file:", 5) == 0;
             gboolean local_page =

@@ -97,6 +97,7 @@ name or a default:
 |------|---------|-----------|
 | `camera` | ask | live tracks are stopped when the state becomes deny |
 | `webgl` | allow | the page is reloaded when the blocked state flips |
+| `downloads` | allow | gated in the shell: an offer (`X-Download`) is held while the prompt is open and dropped on deny |
 
 The flow is the same for every kind:
 

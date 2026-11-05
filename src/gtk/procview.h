@@ -119,6 +119,8 @@ void ns_proc_view_set_opener(NsProcView *v, const char *token,
 void ns_proc_view_popup_deliver(NsProcView *v, const char *json);
 void     ns_proc_view_download_start(NsProcView *view, const char *url,
                                      NsProcViewTextFn cb, gpointer user_data);
+void     ns_proc_view_hold_download(NsProcView *view, const char *offer,
+                                    const char *origin);
 void     ns_proc_view_download_poll(NsProcView *view, long id,
                                     NsProcViewTextFn cb, gpointer user_data);
 void     ns_proc_view_remote_console(NsProcView *view, NsProcViewTextFn cb,

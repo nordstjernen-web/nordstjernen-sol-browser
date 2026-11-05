@@ -5219,6 +5219,7 @@ ns_browser_set_permission(ns_browser *browser, const char *kind,
         ns_webgl_set_state(origin, st);
         return 0;
     }
+    if (cap != NS_CAP_CAMERA) return 0;
     gboolean answered = ns_camera_set_state(origin, st);
     if (answered)
         browser_eval_quiet(browser,

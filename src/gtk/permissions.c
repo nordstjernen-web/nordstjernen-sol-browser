@@ -17,6 +17,13 @@ static char       *g_perm_path;
 static GArray     *g_perm_listeners;
 static guint       g_perm_next_listener = 1;
 
+static ns_perm_state
+perm_default(ns_perm_kind kind)
+{
+    const ns_capability_info *info = ns_capability_info_get(kind);
+    return info ? info->default_state : NS_PERM_ASK;
+}
+
 static char *
 perm_key(const char *origin, ns_perm_kind kind)
 {
@@ -52,7 +59,7 @@ perm_load_locked(void)
             char *v = g_key_file_get_string(g_perm_file, groups[i],
                                             ns_capability_name((ns_perm_kind)k), NULL);
             ns_perm_state st = ns_cap_state_from_name(v);
-            if (st != NS_PERM_ASK)
+            if (v && st != perm_default((ns_perm_kind)k))
                 g_hash_table_insert(g_perm_entries,
                                     perm_key(groups[i], (ns_perm_kind)k),
                                     GINT_TO_POINTER(st));
@@ -99,13 +106,6 @@ ns_perm_shutdown(void)
     g_mutex_unlock(&g_perm_lock);
 }
 
-static ns_perm_state
-perm_default(ns_perm_kind kind)
-{
-    const ns_capability_info *info = ns_capability_info_get(kind);
-    return info ? info->default_state : NS_PERM_ASK;
-}
-
 ns_perm_state
 ns_perm_get(const char *origin, ns_perm_kind kind)
 {
@@ -137,14 +137,15 @@ ns_perm_set(const char *origin, ns_perm_kind kind, ns_perm_state state)
     ns_perm_state prev = g_hash_table_lookup_extended(g_perm_entries, key,
                                                       NULL, &stored)
         ? (ns_perm_state)GPOINTER_TO_INT(stored) : perm_default(kind);
-    if (state == NS_PERM_ASK)
+    gboolean is_default = state == perm_default(kind);
+    if (is_default)
         g_hash_table_remove(g_perm_entries, key);
     else
         g_hash_table_insert(g_perm_entries, g_strdup(key),
                             GINT_TO_POINTER(state));
     g_free(key);
     if (g_perm_file && perm_origin_storable(origin)) {
-        if (state == NS_PERM_ASK)
+        if (is_default)
             g_key_file_remove_key(g_perm_file, origin,
                                   ns_capability_name(kind), NULL);
         else
