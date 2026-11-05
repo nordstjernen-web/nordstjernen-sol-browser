@@ -77,6 +77,15 @@
         <directory>src/main/resources-filtered</directory>
         <filtering>true</filtering>
       </resource>
+      <resource>
+        <directory>${project.basedir}/..</directory>
+        <includes>
+          <include>License.md</include>
+          <include>COPYING</include>
+          <include>THIRD-PARTY-LICENSES.md</include>
+        </includes>
+        <targetPath>META-INF</targetPath>
+      </resource>
     </resources>
 
     <plugins>
@@ -109,6 +118,11 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-source-plugin</artifactId>
         <version>3.3.1</version>
+        <configuration>
+          <excludes>
+            <exclude>native/**</exclude>
+          </excludes>
+        </configuration>
         <executions>
           <execution>
             <id>attach-sources</id>

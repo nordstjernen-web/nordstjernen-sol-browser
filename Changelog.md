@@ -3,6 +3,12 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Java: the jars carry `License.md`, `COPYING` and
+  `THIRD-PARTY-LICENSES.md` under `META-INF/` (the Gradle, Maven and nightly
+  builds all left them out), the Maven sources jar no longer contains the
+  native libraries, and `java/README.md` says where releases are actually
+  published: GitHub Packages, at the release version, not Maven Central at
+  1.0.29.
 * Downloads: saving a `blob:` or `data:` link no longer writes an empty
   file. The renderer streams a download into its staging file chunk by
   chunk, but a response that is not fetched over the network arrives whole,

@@ -526,6 +526,9 @@ stage_java() {
     if [ -d "$jtree/java/src/main/resources/org" ]; then
         cp -r "$jtree/java/src/main/resources/org" "$work/stage/"
     fi
+    mkdir -p "$work/stage/META-INF"
+    cp "$jtree/License.md" "$jtree/COPYING" "$jtree/THIRD-PARTY-LICENSES.md" \
+        "$work/stage/META-INF/"
     printf 'Automatic-Module-Name: org.nordstjernen\nEnable-Native-Access: ALL-UNNAMED\nMain-Class: org.nordstjernen.app.Browser\nImplementation-Title: Nordstjernen\nImplementation-Version: %s\n' \
         "$MESON_VERSION" > "$work/mf.txt"
 

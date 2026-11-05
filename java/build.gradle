@@ -56,6 +56,10 @@ tasks.withType(Javadoc).configureEach {
 // src/main/resources/native/<os>-<arch>/ and are bundled into the jar.
 
 tasks.named('jar') {
+    from('..') {
+        include 'License.md', 'COPYING', 'THIRD-PARTY-LICENSES.md'
+        into 'META-INF'
+    }
     manifest {
         attributes(
             'Automatic-Module-Name': 'org.nordstjernen',
