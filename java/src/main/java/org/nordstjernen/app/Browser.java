@@ -7,6 +7,7 @@ package org.nordstjernen.app;
 
 import org.nordstjernen.AudioHelper;
 import org.nordstjernen.RemoteBrowser;
+import org.nordstjernen.RendererTimeoutException;
 
 import javax.swing.*;
 import java.awt.*;
@@ -734,6 +735,9 @@ public final class Browser {
                                    boolean userActivated) {
         try {
             return engine.navigate(url, vw, vh, SETTLE_MS, fromHistory, userActivated);
+        } catch (RendererTimeoutException ex) {
+            restartQuietly();
+            return false;
         } catch (RuntimeException ex) {
             if (restarts >= MAX_RESTARTS) return false;
             restarts++;
@@ -744,6 +748,18 @@ public final class Browser {
                 return false;
             }
         }
+    }
+
+    private void restartQuietly() {
+        try {
+            engine.restart();
+        } catch (RuntimeException ex) {
+            setStatusLater("Renderer could not be restarted: " + ex.getMessage());
+        }
+    }
+
+    private void setStatusLater(String text) {
+        SwingUtilities.invokeLater(() -> setStatus(text));
     }
 
     /**

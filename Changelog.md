@@ -3,6 +3,18 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Java: the renderer-process client can no longer hang or be fed a planted
+  binary. Every request has a deadline (two minutes by default,
+  `nordstjernen.timeout.ms` or `RemoteBrowser.setTimeout`); a renderer that
+  does not answer is stopped and the call fails with
+  `RendererTimeoutException`, and a crashed one fails the next call at once
+  with its exit code and, for the two common causes (no Landlock, a missing
+  DLL), what to do about it. The client now sends the `/hello` handshake and
+  refuses a renderer of another protocol version, bounds the header lines
+  and the `Content-Length` it accepts, reports a non-200 reply instead of
+  ignoring it, and closes within a few seconds whatever state the renderer
+  is in. The renderer is looked up beside the jar, in the checkout's
+  `builddir/src/` and on `PATH`, never in the working directory.
 * pip/npm installers: a missing glslang or GStreamer no longer stops the
   build. The installer warned that it was building without WebGL, then
   ran `meson setup` without `-Dglslang=disabled`, which fails because

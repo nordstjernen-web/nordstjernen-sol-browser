@@ -245,6 +245,30 @@ public final class RemoteBrowser implements AutoCloseable {
     }
 
     /**
+     * How long a request may take before the renderer is stopped and the call
+     * fails with {@link RendererTimeoutException}. Two minutes unless the
+     * {@code nordstjernen.timeout.ms} system property says otherwise; a page
+     * load is one request, so this also bounds {@link #navigate}.
+     */
+    public void setTimeout(java.time.Duration timeout) {
+        renderer.setTimeoutMs(timeout.toMillis());
+    }
+
+    public java.time.Duration timeout() {
+        return java.time.Duration.ofMillis(renderer.timeoutMs());
+    }
+
+    /** The version of the engine in the renderer process, as it reported at start-up. */
+    public String engineVersion() {
+        return renderer.engineVersion();
+    }
+
+    /** Whether the renderer process is running; false after a crash or a timeout, until {@link #restart()}. */
+    public boolean isAlive() {
+        return renderer.isAlive();
+    }
+
+    /**
      * The page's {@code window.devicePixelRatio}: the zoom times the screen's
      * scale factor. It rides along with every later navigation, viewport and
      * render request, so a page picks {@code srcset} candidates and media
@@ -725,8 +749,10 @@ public final class RemoteBrowser implements AutoCloseable {
      * new process starts with no page loaded.
      */
     public void restart() {
-        try { renderer.close(); } catch (RuntimeException ignored) { }
+        long timeoutMs = renderer.timeoutMs();
+        renderer.close();
         this.renderer = new RendererProcess(MAX_W, MAX_H, privateMode);
+        this.renderer.setTimeoutMs(timeoutMs);
         this.title = "";
         this.url = "";
         this.pendingNav = "";
