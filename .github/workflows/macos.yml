@@ -239,14 +239,26 @@ jobs:
       # the failures that have actually shipped: a duplicate-LC_RPATH bundle
       # that dyld refuses to launch, a missing relocated dylib, and TLS/curl
       # regressions that break every HTTPS fetch. If the bundle exists, it
-      # must work.
+      # must work. Only a failed DNS lookup is retried: the runner's resolver
+      # occasionally drops a query (the 1.0.43 release run failed on
+      # "Could not resolve host: example.com"), and that says nothing about
+      # the bundle. Any other failure ends the step at once.
       - name: Smoke test the bundled .app (launch + HTTPS fetch)
         if: hashFiles('dist/Nordstjernen.app/Contents/MacOS/Nordstjernen') != ''
         run: |
           set -o pipefail
           BIN="dist/Nordstjernen.app/Contents/MacOS/Nordstjernen"
-          "$BIN" --headless --dump=text https://example.com | tee bundle-smoke.txt
-          grep -qiE "Example Domain|documentation examples" bundle-smoke.txt
+          for attempt in 1 2 3; do
+            status=0
+            "$BIN" --headless --dump=text https://example.com | tee bundle-smoke.txt || status=$?
+            if [ "$status" -eq 0 ] && grep -qiE "Example Domain|documentation examples" bundle-smoke.txt; then
+              exit 0
+            fi
+            grep -q "Could not resolve host" bundle-smoke.txt || exit 1
+            echo "::warning::DNS lookup of example.com failed (attempt $attempt); retrying"
+            sleep $((attempt * 15))
+          done
+          exit 1
 
       # --headless renders in-process, so nothing above runs shm_open, the
       # fork/execv of nordstjernen-renderer, or the renderer's own dylibs and
@@ -259,13 +271,22 @@ jobs:
           sudo mv /opt/homebrew /opt/homebrew.hidden
           trap 'sudo mv /opt/homebrew.hidden /opt/homebrew' EXIT
           smoke() {
-            NS_HEADLESS_RENDERER="$APP/nordstjernen-renderer" \
-              "$APP/Nordstjernen" --headless --dump=text "$1" 2>smoke.err | tee smoke.txt
-            cat smoke.err
-            grep -qiE "$2" smoke.txt
-            if grep -qiE "Library not loaded|Fontconfig error|cannot execute|renderer framebuffer" smoke.err; then
-              exit 1
-            fi
+            for attempt in 1 2 3; do
+              status=0
+              NS_HEADLESS_RENDERER="$APP/nordstjernen-renderer" \
+                "$APP/Nordstjernen" --headless --dump=text "$1" 2>smoke.err | tee smoke.txt || status=$?
+              cat smoke.err
+              if grep -qiE "Library not loaded|Fontconfig error|cannot execute|renderer framebuffer" smoke.err; then
+                exit 1
+              fi
+              if [ "$status" -eq 0 ] && grep -qiE "$2" smoke.txt; then
+                return 0
+              fi
+              grep -q "Could not resolve host" smoke.txt || exit 1
+              echo "::warning::DNS lookup for $1 failed (attempt $attempt); retrying"
+              sleep $((attempt * 15))
+            done
+            exit 1
           }
           smoke about:start Nordstjernen
           smoke https://example.com "Example Domain|documentation examples"
