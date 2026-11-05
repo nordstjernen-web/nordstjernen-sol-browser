@@ -41,21 +41,45 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # A stalled mirror connection used to hang apt until the 30-minute job
-      # limit; time out and retry a stalled download instead.
+      # The runner's Azure Ubuntu mirror sometimes serves at a few KB/s and
+      # the install outran its time limit. Downloaded packages are cached
+      # between runs, the download is bounded on its own, and a stalled
+      # download is retried against archive.ubuntu.com.
+      - name: Restore apt package cache
+        uses: actions/cache@v6
+        with:
+          path: ~/apt-archives
+          key: apt-linux-${{ matrix.ubuntu }}-${{ hashFiles('.github/workflows/linux.yml') }}
+          restore-keys: |
+            apt-linux-${{ matrix.ubuntu }}-
+
       - name: Install build dependencies
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: |
           printf '%s\n' 'Acquire::Retries "5";' 'Acquire::http::Timeout "30";' \
-            'Acquire::https::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/80-ci-retries
-          sudo apt-get update
-          sudo apt-get install -y \
-            ccache clang gcc pkg-config meson ninja-build \
-            libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev \
-            libuchardet-dev libpsl-dev libsqlite3-dev \
-            libwebp-dev libavif-dev libjxl-dev libsdl2-dev libseccomp-dev glslang-dev ca-certificates \
-            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+            'Acquire::https::Timeout "30";' \
+            "Dir::Cache::Archives \"$HOME/apt-archives\";" |
+            sudo tee /etc/apt/apt.conf.d/80-ci-retries
+          mkdir -p ~/apt-archives/partial
+          packages="ccache clang gcc pkg-config meson ninja-build
+            libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev
+            libuchardet-dev libpsl-dev libsqlite3-dev
+            libwebp-dev libavif-dev libjxl-dev libsdl2-dev libseccomp-dev glslang-dev ca-certificates
+            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev"
+          download() {
+            sudo apt-get update &&
+              timeout 420 sudo apt-get install -y --download-only $packages
+          }
+          if ! download; then
+            echo "::warning::apt mirror stalled; retrying against archive.ubuntu.com"
+            sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' \
+              /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true
+            download
+          fi
+          sudo apt-get install -y $packages
+          sudo rm -rf ~/apt-archives/partial ~/apt-archives/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
 
       - name: Restore ccache
         uses: actions/cache@v6
