@@ -208,6 +208,9 @@ struct ns_js {
     gboolean       has_last_mouse[2];
     gint64         user_activation_us;
     gboolean       user_ever_activated;
+    GHashTable    *media_grant_origins;
+    int            mic_holds;
+    int            camera_holds;
     GHashTable   *canvas_states;
     ns_image_cache *image_cache;
     struct ns_anim *anim;
