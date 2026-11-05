@@ -109,6 +109,10 @@ download_finished(GObject *source, GAsyncResult *result, gpointer user_data)
     ns_download *d = user_data;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
+    if (d->state == NS_DOWNLOAD_RUNNING && d->bytes == 0 && resp &&
+        !resp->error && resp->body && resp->body->len > 0)
+        download_chunk(d, resp->status, resp->raw_headers, resp->body->data,
+                       resp->body->len);
     if (d->state == NS_DOWNLOAD_RUNNING) {
         gboolean flushed = d->file && fflush(d->file) == 0;
         if (d->file) {

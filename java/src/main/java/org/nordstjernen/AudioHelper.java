@@ -12,8 +12,6 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.List;
-import java.util.Locale;
 
 /**
  * Plays a page's sound the way the GTK shell does. The renderer reports media
@@ -168,8 +166,8 @@ public final class AudioHelper implements AutoCloseable {
         }
         try {
             Path stream = Path.of(URI.create(url)).toAbsolutePath().normalize();
-            for (Path cache : cacheDirs()) {
-                if (stream.startsWith(cache.resolve("nordstjernen").resolve("msaudio"))) {
+            for (Path staging : EngineDirs.cacheSubdirs("msaudio")) {
+                if (stream.startsWith(staging)) {
                     return true;
                 }
             }
@@ -177,21 +175,5 @@ public final class AudioHelper implements AutoCloseable {
         } catch (RuntimeException e) {
             return false;
         }
-    }
-
-    /** The per-user cache directories GLib may stage the renderer's media streams under. */
-    private static List<Path> cacheDirs() {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        String home = System.getProperty("user.home", "");
-        if (os.contains("win")) {
-            String local = System.getenv("LOCALAPPDATA");
-            return List.of(Path.of(local != null && !local.isEmpty() ? local : home));
-        }
-        String xdg = System.getenv("XDG_CACHE_HOME");
-        Path cache = xdg != null && !xdg.isEmpty() ? Path.of(xdg) : Path.of(home, ".cache");
-        if (os.contains("mac") || os.contains("darwin")) {
-            return List.of(cache, Path.of(home, "Library", "Caches"));
-        }
-        return List.of(cache);
     }
 }

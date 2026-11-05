@@ -111,6 +111,31 @@ final class Json {
         }
     }
 
+    /** The integer value of {@code key} as a long, or {@code fallback} when absent. */
+    static long longInteger(String json, String key, long fallback) {
+        int i = valueStart(json, key);
+        if (i < 0) {
+            return fallback;
+        }
+        i = skipSpace(json, i);
+        int start = i;
+        if (i < json.length() && (json.charAt(i) == '-' || json.charAt(i) == '+')) {
+            i++;
+        }
+        int digits = i;
+        while (i < json.length() && Character.isDigit(json.charAt(i))) {
+            i++;
+        }
+        if (i == digits) {
+            return fallback;
+        }
+        try {
+            return Long.parseLong(json.substring(start, i));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
     /** True when {@code key} holds a non-zero integer. */
     static boolean flag(String json, String key) {
         return integer(json, key, 0) != 0;
