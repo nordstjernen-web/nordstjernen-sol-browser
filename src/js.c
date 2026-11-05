@@ -30734,11 +30734,17 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return ns_sw_reject(ctx, "TypeError", "register requires a script URL");
     const char *raw = JS_ToCString(ctx, argv[0]);
     if (!raw) return JS_EXCEPTION;
-    char *abs_url = js->current_url ? ns_url_resolve(js->current_url, raw)
-                                : ns_url_resolve(NULL, raw);
+    const char *doc_url = ns_js_realm_url_or_current(js, ctx);
+    char *abs_url = ns_url_resolve(doc_url, raw);
     JS_FreeCString(ctx, raw);
     if (!abs_url)
         return ns_sw_reject(ctx, "TypeError", "invalid script URL");
+    if (ns_url_is_http_or_https(abs_url) &&
+        !ns_url_same_origin(doc_url, abs_url)) {
+        g_free(abs_url);
+        return ns_sw_reject(ctx, "SecurityError",
+                            "script URL origin does not match the document");
+    }
 
     char *scope = NULL;
     if (argc >= 2 && JS_IsObject(argv[1])) {
@@ -30746,7 +30752,7 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         if (JS_IsString(sv)) {
             const char *s = JS_ToCString(ctx, sv);
             if (s) {
-                scope = ns_url_resolve(js->current_url ? js->current_url : abs_url, s);
+                scope = ns_url_resolve(doc_url ? doc_url : abs_url, s);
                 JS_FreeCString(ctx, s);
             }
         }
@@ -30759,7 +30765,7 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return ns_sw_reject(ctx, "SecurityError",
                             "scope origin does not match the script URL");
     }
-    if (!ns_sw_url_trustworthy(js->current_url) ||
+    if (!ns_sw_url_trustworthy(doc_url) ||
         !ns_sw_url_trustworthy(abs_url)) {
         g_free(abs_url);
         g_free(scope);
@@ -30775,7 +30781,7 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     }
 
     ns_worker_host policy = {0};
-    policy.base_url = js->current_url;
+    policy.base_url = (char *)doc_url;
     char *policy_error = NULL;
     if (!ns_worker_script_url_allowed(&policy, abs_url, FALSE, &policy_error)) {
         JSValue ret = ns_sw_reject(ctx, "SecurityError",

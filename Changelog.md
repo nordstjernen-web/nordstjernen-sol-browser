@@ -3,6 +3,12 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Service workers (security): `navigator.serviceWorker.register()` now
+  resolves the script URL and scope against the calling document's own
+  URL and rejects a script whose origin differs from that document, as the
+  specification requires. It resolved and policy-checked against the
+  renderer's current URL instead, which an embedded frame could not rely
+  on being its own.
 * Android: the app is now labelled Nordstjernen Browser on the home screen
   and in its title bar, matching its Google Play listing, instead of Sol
   Explorer.
