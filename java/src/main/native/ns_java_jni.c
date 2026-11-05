@@ -6,13 +6,122 @@
 #include <jni.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "libnordstjernen.h"
+
+#define NS_JNI_REPLACEMENT 0xFFFDu
 
 static ns_browser *
 as_browser(jlong handle)
 {
     return (ns_browser *)(intptr_t)handle;
+}
+
+static char *
+utf8_from_jstring(JNIEnv *env, jstring s)
+{
+    if (!s) return NULL;
+    jsize n = (*env)->GetStringLength(env, s);
+    const jchar *u = (*env)->GetStringChars(env, s, NULL);
+    if (!u) return NULL;
+    char *out = malloc((size_t)n * 3 + 1);
+    size_t o = 0;
+    for (jsize i = 0; out && i < n; i++) {
+        uint32_t c = u[i];
+        if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n &&
+            u[i + 1] >= 0xDC00 && u[i + 1] <= 0xDFFF) {
+            c = 0x10000 + ((c - 0xD800) << 10) + (uint32_t)(u[i + 1] - 0xDC00);
+            i++;
+        } else if (c >= 0xD800 && c <= 0xDFFF) {
+            c = NS_JNI_REPLACEMENT;
+        }
+        if (c < 0x80) {
+            out[o++] = (char)c;
+        } else if (c < 0x800) {
+            out[o++] = (char)(0xC0 | (c >> 6));
+            out[o++] = (char)(0x80 | (c & 0x3F));
+        } else if (c < 0x10000) {
+            out[o++] = (char)(0xE0 | (c >> 12));
+            out[o++] = (char)(0x80 | ((c >> 6) & 0x3F));
+            out[o++] = (char)(0x80 | (c & 0x3F));
+        } else {
+            out[o++] = (char)(0xF0 | (c >> 18));
+            out[o++] = (char)(0x80 | ((c >> 12) & 0x3F));
+            out[o++] = (char)(0x80 | ((c >> 6) & 0x3F));
+            out[o++] = (char)(0x80 | (c & 0x3F));
+        }
+    }
+    if (out) out[o] = '\0';
+    (*env)->ReleaseStringChars(env, s, u);
+    return out;
+}
+
+static uint32_t
+utf8_decode(const unsigned char *s, size_t left, size_t *used)
+{
+    unsigned char lead = s[0];
+    uint32_t c;
+    size_t more;
+    *used = 1;
+    if (lead < 0x80) return lead;
+    if (lead >= 0xC2 && lead <= 0xDF) {
+        c = lead & 0x1Fu;
+        more = 1;
+    } else if (lead >= 0xE0 && lead <= 0xEF) {
+        c = lead & 0x0Fu;
+        more = 2;
+    } else if (lead >= 0xF0 && lead <= 0xF4) {
+        c = lead & 0x07u;
+        more = 3;
+    } else {
+        return NS_JNI_REPLACEMENT;
+    }
+    if (more >= left) return NS_JNI_REPLACEMENT;
+    for (size_t k = 1; k <= more; k++) {
+        if ((s[k] & 0xC0) != 0x80) return NS_JNI_REPLACEMENT;
+        c = (c << 6) | (s[k] & 0x3Fu);
+    }
+    if ((more == 2 && (c < 0x800 || (c >= 0xD800 && c <= 0xDFFF))) ||
+        (more == 3 && (c < 0x10000 || c > 0x10FFFF)))
+        return NS_JNI_REPLACEMENT;
+    *used = more + 1;
+    return c;
+}
+
+static jstring
+jstring_from_utf8(JNIEnv *env, const char *text)
+{
+    const unsigned char *s = (const unsigned char *)text;
+    size_t len = strlen(text);
+    if (len > (size_t)INT32_MAX) return NULL;
+    jchar *u = malloc((len + 1) * sizeof(jchar));
+    if (!u) return NULL;
+    size_t o = 0;
+    for (size_t i = 0; i < len;) {
+        size_t used;
+        uint32_t c = utf8_decode(s + i, len - i, &used);
+        i += used;
+        if (c >= 0x10000) {
+            c -= 0x10000;
+            u[o++] = (jchar)(0xD800 + (c >> 10));
+            u[o++] = (jchar)(0xDC00 + (c & 0x3FF));
+        } else {
+            u[o++] = (jchar)c;
+        }
+    }
+    jstring out = (*env)->NewString(env, u, (jsize)o);
+    free(u);
+    return out;
+}
+
+static jstring
+take_string(JNIEnv *env, char *owned)
+{
+    if (!owned) return NULL;
+    jstring out = jstring_from_utf8(env, owned);
+    free(owned);
+    return out;
 }
 
 JNIEXPORT jint JNICALL
@@ -35,10 +144,9 @@ Java_org_nordstjernen_Nordstjernen_nativeOpen(JNIEnv *env, jclass clazz,
                                               jint settle_ms)
 {
     (void)clazz;
-    if (!url) return 0;
-    const char *u = (*env)->GetStringUTFChars(env, url, NULL);
+    char *u = utf8_from_jstring(env, url);
     ns_browser *b = u ? ns_browser_open(u, viewport_width, settle_ms) : NULL;
-    if (u) (*env)->ReleaseStringUTFChars(env, url, u);
+    free(u);
     return (jlong)(intptr_t)b;
 }
 
@@ -61,11 +169,7 @@ Java_org_nordstjernen_Nordstjernen_nativeRenderText(JNIEnv *env, jclass clazz,
                                                     jlong handle)
 {
     (void)clazz;
-    char *text = ns_browser_render_text(as_browser(handle));
-    if (!text) return NULL;
-    jstring s = (*env)->NewStringUTF(env, text);
-    free(text);
-    return s;
+    return take_string(env, ns_browser_render_text(as_browser(handle)));
 }
 
 JNIEXPORT jstring JNICALL
@@ -73,11 +177,7 @@ Java_org_nordstjernen_Nordstjernen_nativeTitle(JNIEnv *env, jclass clazz,
                                                jlong handle)
 {
     (void)clazz;
-    char *title = ns_browser_title(as_browser(handle));
-    if (!title) return NULL;
-    jstring s = (*env)->NewStringUTF(env, title);
-    free(title);
-    return s;
+    return take_string(env, ns_browser_title(as_browser(handle)));
 }
 
 JNIEXPORT jstring JNICALL
@@ -85,11 +185,7 @@ Java_org_nordstjernen_Nordstjernen_nativeLinkAt(JNIEnv *env, jclass clazz,
                                                 jlong handle, jint x, jint y)
 {
     (void)clazz;
-    char *url = ns_browser_link_at(as_browser(handle), x, y);
-    if (!url) return NULL;
-    jstring s = (*env)->NewStringUTF(env, url);
-    free(url);
-    return s;
+    return take_string(env, ns_browser_link_at(as_browser(handle), x, y));
 }
 
 JNIEXPORT jstring JNICALL
@@ -97,11 +193,7 @@ Java_org_nordstjernen_Nordstjernen_nativeUrl(JNIEnv *env, jclass clazz,
                                              jlong handle)
 {
     (void)clazz;
-    char *url = ns_browser_url(as_browser(handle));
-    if (!url) return NULL;
-    jstring s = (*env)->NewStringUTF(env, url);
-    free(url);
-    return s;
+    return take_string(env, ns_browser_url(as_browser(handle)));
 }
 
 JNIEXPORT jstring JNICALL
@@ -109,11 +201,7 @@ Java_org_nordstjernen_Nordstjernen_nativeLinks(JNIEnv *env, jclass clazz,
                                                jlong handle)
 {
     (void)clazz;
-    char *links = ns_browser_links(as_browser(handle));
-    if (!links) return NULL;
-    jstring s = (*env)->NewStringUTF(env, links);
-    free(links);
-    return s;
+    return take_string(env, ns_browser_links(as_browser(handle)));
 }
 
 JNIEXPORT jbyteArray JNICALL
@@ -146,10 +234,9 @@ Java_org_nordstjernen_Nordstjernen_nativeRenderImage(JNIEnv *env, jclass clazz,
                                                      jlong handle, jstring path)
 {
     (void)clazz;
-    if (!path) return -1;
-    const char *p = (*env)->GetStringUTFChars(env, path, NULL);
+    char *p = utf8_from_jstring(env, path);
     int rc = p ? ns_browser_render_image(as_browser(handle), p) : -1;
-    if (p) (*env)->ReleaseStringUTFChars(env, path, p);
+    free(p);
     return rc;
 }
 
