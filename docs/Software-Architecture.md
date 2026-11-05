@@ -4,18 +4,24 @@ How Nordstjernen is built, from the process model down to each engine
 subsystem, and how those choices compare with Firefox (Gecko), Chrome
 (Blink), and Ladybird (LibWeb).
 
-Snapshot: **1.0.31-dev**, 2026-10-09. This is a living map of the codebase;
+Snapshot: **1.0.44-dev**, 2026-11-05. This is a living map of the codebase;
 the source is the source of truth. File references are given as
-`path:line` and were accurate at the snapshot revision.
+`path:line` and were accurate at the snapshot revision. The direction the
+structure is being moved in, and who it is for, is in
+[Direction.md](Direction.md); the shell/renderer contract is in
+[engine-protocol.md](engine-protocol.md).
 
 [![Software architecture diagram](software-architecture-diagram.png)](software-architecture-diagram.png)
 
-The poster above maps the process tree, the source modules inside each
-process, their external dependencies, and the information flows between
-them (IPC control channel, shared-memory framebuffer, media command and
-frame paths, page-load pipeline). Regenerate it with graphviz + pillow
-via `scripts/arch-diagram/build_poster.py` followed by
-`scripts/arch-diagram/compose.py`.
+The diagram is layered top to bottom: the supervisor, the engine-free
+browser shell, the boundary between the shell and the renderer (the engine
+protocol, the shared-memory framebuffer and process supervision, with the
+persistent profile and the media helpers at its sides), the renderer's
+subsystems from the protocol server down to the sandbox, and finally the
+in-tree and system libraries, one box each. Numbered badges trace a page
+load through the engine. Regenerate it with
+`scripts/arch-diagram/build_diagram.py` (Pillow only; it reads line counts
+and the version from the tree).
 
 ---
 
@@ -148,9 +154,9 @@ pixels travel through shared memory (see [Rendering.md](Rendering.md)).
 - **Renderer→shell side-channels** ride the `/render` reply as extra
   headers drained from the engine's pending queues: `X-Nav` (a
   script-initiated navigation), `X-Audio` (media-helper commands),
-  `X-WebGL` (WebGL activity), `X-Camera` (a permission prompt),
-  `X-Download` (a download offer), and `X-Window-Action` (a
-  script-requested window action).
+  `X-WebGL` (WebGL activity), `X-Capability` (a capability request the
+  page is suspended on; see §10), `X-Download` (a download offer), and
+  `X-Window-Action` (a script-requested window action).
 
 The protocol is readable in a trace and trivial to extend, which is the
 whole point: a browser's process boundary is normally the least
@@ -498,6 +504,16 @@ boundary** (`src/security.c`).
   60-second interrupt monitor rather than a kill.
 - **Safe-browsing** (`src/safebrowsing.c`) is a **local** SHA-256 host
   blocklist with an interstitial — no network callout, no telemetry.
+- **Capabilities.** What a page may do beyond rendering its own content
+  is a capability defined once in `src/capability.h` (name, label,
+  prompt, default state, revoke action) and compiled into both the shell
+  and the engine. A gate in the engine (`ns_camera_permission` for
+  `getUserMedia`) suspends the operation without a decision and reports it
+  as an `X-Capability` event; the shell's ledger (`src/gtk/permissions.c`,
+  `permissions.ini`) or its prompt bar answers through `/permission`, and a
+  later revocation is pushed to every tab the same way. The renderer never
+  decides a capability for itself. See
+  [engine-protocol.md](engine-protocol.md), "Capabilities".
 
 See [tab-isolation.md](tab-isolation.md), [watchdog.md](watchdog.md).
 
