@@ -13135,6 +13135,12 @@ ns_subtle_deriveBits(JSContext *ctx, JSValueConst this_val,
         ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
         return promise;
     }
+    const char *uerr = ns_wc_op_check(k, a.name, NS_USAGE_DERIVE_BITS);
+    if (uerr) {
+        ns_wc_alg_free(&a);
+        ns_js_promise_reject(ctx, resolvers, uerr);
+        return promise;
+    }
     int length = 0;
     if (argc >= 3 && JS_IsNumber(argv[2])) {
         int32_t x = 0;
@@ -13170,6 +13176,13 @@ ns_subtle_deriveKey(JSContext *ctx, JSValueConst this_val,
         ns_wc_alg_free(&a);
         ns_wc_alg_free(&dk);
         ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
+        return promise;
+    }
+    const char *uerr = ns_wc_op_check(k, a.name, NS_USAGE_DERIVE_KEY);
+    if (uerr) {
+        ns_wc_alg_free(&a);
+        ns_wc_alg_free(&dk);
+        ns_js_promise_reject(ctx, resolvers, uerr);
         return promise;
     }
     gboolean ext = JS_ToBool(ctx, argv[3]) > 0;

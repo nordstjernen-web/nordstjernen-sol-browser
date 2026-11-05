@@ -63,6 +63,13 @@ Changelog:
   took 20 s; it now uses 70 MB and 1.6 s). The gradient is rasterised at
   most 2048 pixels on a side and scaled; areas beyond 4 million pixels are
   not painted.
+* WebCrypto (security): `deriveBits` and `deriveKey` check the key's usages
+  and algorithm like every other `crypto.subtle` operation. A
+  non-extractable ECDH key limited to `deriveKey` handed its raw shared
+  secret to `deriveBits`, and a PBKDF2 key imported with no usages could
+  derive. ECDH and X25519 now require the `public` parameter to be a public
+  key of the same algorithm and curve, and `generateKey` makes AES keys of
+  128, 192 or 256 bits only.
 
 1.0.43:
 ======
