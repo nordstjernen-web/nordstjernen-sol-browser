@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.44-dev:
+1.0.44:
 ======
 * Web Authentication: passkeys and security keys work.
   `navigator.credentials.create()` / `get()`, `PublicKeyCredential` (with
