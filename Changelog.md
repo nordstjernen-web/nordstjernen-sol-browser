@@ -3,6 +3,10 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Media: closing a tab stops its sound at once. The audio helper of a tab
+  playing video or audio was shut down only when the last reference to
+  the tab went away, so a YouTube video kept playing after its tab was
+  closed.
 * pip: `pip install nordstjernen-browser` installs the browser. The package
   carries a small launcher; the first `nordstjernen` run (or
   `nordstjernen-install`) builds the release from its checksum-verified

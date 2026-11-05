@@ -5118,6 +5118,7 @@ on_area_destroy(GtkWidget *widget, gpointer data)
     NsProcView *v = data;
     NS_PROC_VIEW_AREA(widget)->view = NULL;
     v->closed = TRUE;
+    pv_audio_shutdown(v);
     ns_pointer_lock_free(v->plock);
     v->plock = NULL;
     ns_webauthn_free(v->webauthn);
