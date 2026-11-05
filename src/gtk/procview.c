@@ -282,7 +282,9 @@ struct NsProcView {
     ns_perm_kind perm_kind;
     gboolean    perm_pending;
     char       *perm_origin;
-    char       *download_held;
+    char       *held_text;
+    NsProcEvent held_event;
+    ns_perm_kind held_kind;
     guint       perm_listener;
     char       *capability_deferred[NS_CAP_COUNT];
 
@@ -633,7 +635,7 @@ pv_free(NsProcView *v)
     g_free(v->perm_origin);
     for (int k = 0; k < NS_CAP_COUNT; k++)
         g_free(v->capability_deferred[k]);
-    g_free(v->download_held);
+    g_free(v->held_text);
     if (v->hourglass_cursor)
         g_object_unref(v->hourglass_cursor);
     g_mutex_clear(&v->proc_lock);
@@ -3303,13 +3305,13 @@ pv_push_page_permissions(NsProcView *v)
 }
 
 static void
-pv_release_held_download(NsProcView *v, gboolean allow)
+pv_release_held(NsProcView *v, ns_perm_kind kind, gboolean allow)
 {
-    char *offer = v->download_held;
-    if (!offer) return;
-    v->download_held = NULL;
-    if (allow) post_emit(v, NS_PROC_EVT_DOWNLOAD, offer);
-    g_free(offer);
+    char *held = v->held_text;
+    if (!held || v->held_kind != kind) return;
+    v->held_text = NULL;
+    if (allow) post_emit(v, v->held_event, held);
+    g_free(held);
 }
 
 static void
@@ -3327,8 +3329,7 @@ pv_on_permission_changed(const char *origin, ns_perm_kind kind,
         if (v->perm_revealer)
             gtk_revealer_set_reveal_child(GTK_REVEALER(v->perm_revealer),
                                           FALSE);
-        if (kind == NS_CAP_DOWNLOADS)
-            pv_release_held_download(v, state == NS_PERM_ALLOW);
+        pv_release_held(v, kind, state == NS_PERM_ALLOW);
     }
     gboolean blocked_changed =
         (state == NS_PERM_DENY) != (previous == NS_PERM_DENY);
@@ -3352,18 +3353,20 @@ pv_perm_resolve(NsProcView *v, gboolean allow)
         ns_perm_set(origin, kind, NS_PERM_ALLOW);
     else
         pv_send_permission(v, origin, kind, NS_PERM_DENY);
-    if (kind == NS_CAP_DOWNLOADS)
-        pv_release_held_download(v, allow);
+    pv_release_held(v, kind, allow);
     g_free(origin);
 }
 
 void
-ns_proc_view_hold_download(NsProcView *v, const char *offer, const char *origin)
+ns_proc_view_hold_event(NsProcView *v, ns_capability kind, NsProcEvent event,
+                        const char *text, const char *origin)
 {
-    if (!v || v->closed || !offer || !origin) return;
-    g_free(v->download_held);
-    v->download_held = g_strdup(offer);
-    pv_perm_bar_show(v, NS_CAP_DOWNLOADS, origin);
+    if (!v || v->closed || !text || !origin) return;
+    g_free(v->held_text);
+    v->held_text = g_strdup(text);
+    v->held_event = event;
+    v->held_kind = kind;
+    pv_perm_bar_show(v, kind, origin);
 }
 
 static void

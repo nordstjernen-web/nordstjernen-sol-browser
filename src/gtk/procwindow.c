@@ -1496,7 +1496,8 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
                 ? ns_perm_get(origin, NS_CAP_DOWNLOADS) : NS_PERM_ALLOW;
             if (allowed == NS_PERM_DENY) break;
             if (allowed == NS_PERM_ASK) {
-                ns_proc_view_hold_download(v, text, origin);
+                ns_proc_view_hold_event(v, NS_CAP_DOWNLOADS,
+                                        NS_PROC_EVT_DOWNLOAD, text, origin);
                 break;
             }
             char **parts = g_strsplit(text, "\t", 2);
@@ -1816,6 +1817,19 @@ pw_popup_open(ProcWindow *pw, NsProcView *v, const RjValue *op)
     const char *url = rj_get_str(op, "url");
     const char *token = rj_get_str(op, "token");
     if (!url || !*url) return;
+    g_autofree char *page_origin = ns_proc_url_origin(ns_proc_view_url(v));
+    ns_perm_state allowed = page_origin && *page_origin
+        ? ns_perm_get(page_origin, NS_CAP_POPUPS) : NS_PERM_ALLOW;
+    if (allowed == NS_PERM_DENY) return;
+    if (allowed == NS_PERM_ASK) {
+        GString *held = g_string_new("[");
+        rj_write(held, op);
+        g_string_append_c(held, ']');
+        ns_proc_view_hold_event(v, NS_CAP_POPUPS, NS_PROC_EVT_POPUP, held->str,
+                                page_origin);
+        g_string_free(held, TRUE);
+        return;
+    }
     gboolean linked = token && *token && !pw_popup_link_find(token);
     NsProcView *popup = proc_window_add_tab_opener(
         pw, url, TRUE, ns_proc_view_is_private(v), linked ? token : NULL,
