@@ -9,6 +9,10 @@ Changelog:
 * Packages: releases ship a `.deb` for the current Ubuntu (26.04) only; the
   Ubuntu 24.04 package is no longer built. Debian 13 and Fedora 45 packages
   and the portable Linux `.zip` are unchanged.
+* WebGPU (security): a `GPUBuffer` or `GPUCommandEncoder` now holds its own
+  reference to its device. Both kept the raw device handle without one, so
+  after a page dropped its last reference to the `GPUDevice` and the device
+  was collected, `mapAsync()` or `finish()` used a released handle.
 
 1.0.43:
 ======
