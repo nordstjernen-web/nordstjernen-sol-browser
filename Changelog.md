@@ -291,6 +291,11 @@ Changelog:
   computed, as `em` does against its font size; it was dropped, so
   `transform: translateY(-2lh)` did not move the box at all. openai.com's
   prompt placeholder sat 36 px below where Chrome draws it.
+* Layout: the min-content width of a `box-sizing: border-box` box with a
+  fixed width honours its `min-width` and `max-width` as border-box sizes
+  too. Its padding and border were added on top of them, so a flex item
+  holding a 280 px card with 64 px of padding could not shrink below
+  344 px. DuckDuckGo's review carousel spread out 64 px per card.
 
 1.0.43:
 ======
