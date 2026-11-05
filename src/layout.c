@@ -16854,14 +16854,44 @@ phantom_lines_move_to(ns_box *first, const ns_box *stop, double y)
         if (c->phantom_line && c->y != y) shift_box_tree(c, 0, y - c->y);
 }
 
+static void
+collapsed_blocks_move_to(ns_box *first, const ns_box *stop, double y)
+{
+    for (ns_box *c = first; c && c != stop; c = c->next_sibling) {
+        if (c->kind != NS_BOX_BLOCK || float_side_of(c->style) >= 0 ||
+            style_is_absolute_or_fixed(c->style))
+            continue;
+        double target = y - c->margin.top;
+        if (c->y != target) shift_box_tree(c, 0, target - c->y);
+    }
+}
+
+static gboolean
+empty_block_collapses_through_at(const ns_box *box, int clear, int depth)
+{
+    if (!(box && box->kind == NS_BOX_BLOCK && clear == 0 &&
+          box->content_height <= 0 &&
+          box->padding.top <= 0 && box->padding.bottom <= 0 &&
+          box->border.top <= 0 && box->border.bottom <= 0 &&
+          !box_establishes_bfc(box)))
+        return FALSE;
+    if (box->style && ns_display_is_table_wrapper(ns_css_display_of(box->style)))
+        return FALSE;
+    if (depth >= 32) return TRUE;
+    for (const ns_box *c = box->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_BOX_BLOCK && c->kind != NS_BOX_TABLE) continue;
+        if (float_side_of(c->style) >= 0 || style_is_absolute_or_fixed(c->style))
+            continue;
+        if (!empty_block_collapses_through_at(c, 0, depth + 1))
+            return FALSE;
+    }
+    return TRUE;
+}
+
 static gboolean
 empty_block_collapses_through(const ns_box *box, int clear)
 {
-    return box && box->kind == NS_BOX_BLOCK && clear == 0 &&
-           box->content_height <= 0 &&
-           box->padding.top <= 0 && box->padding.bottom <= 0 &&
-           box->border.top <= 0 && box->border.bottom <= 0 &&
-           !box_establishes_bfc(box);
+    return empty_block_collapses_through_at(box, clear, 0);
 }
 
 static double
@@ -17823,6 +17853,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     if (top_through != 0) {
         phantom_lines_move_to(box->first_child, top_collapse_child,
                               inner_y + top_through);
+        collapsed_blocks_move_to(box->first_child, top_collapse_child,
+                                 inner_y + top_through);
         box->margin.top += top_through;
         box->margin_top_through = top_through;
         inner_y += top_through;
