@@ -362,6 +362,13 @@ http_read_head(http_conn *c, http_head *out)
             memcpy(out->x_camera, val, vlen);
             out->x_camera[vlen] = '\0';
         }
+        else if (strcasecmp(line, "X-Capability") == 0) {
+            size_t vlen = strlen(val);
+            if (vlen >= sizeof out->x_capability)
+                vlen = sizeof out->x_capability - 1;
+            memcpy(out->x_capability, val, vlen);
+            out->x_capability[vlen] = '\0';
+        }
         else if (strcasecmp(line, "X-Download") == 0) {
             size_t vlen = strlen(val);
             if (vlen >= sizeof out->x_download)

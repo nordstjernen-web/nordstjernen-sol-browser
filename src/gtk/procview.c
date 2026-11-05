@@ -148,6 +148,7 @@ typedef struct {
     char            *remote_ip;
     char            *webgl;
     char            *camera;
+    char            *capability;
     char            *download;
     char            *config;
     char            *audio;
@@ -282,7 +283,7 @@ struct NsProcView {
     gboolean    perm_pending;
     char       *perm_origin;
     guint       perm_listener;
-    char       *camera_deferred_origin;
+    char       *capability_deferred[NS_CAP_COUNT];
 
     GtkWidget    *console_window;
     GtkWidget    *console_notebook;
@@ -629,7 +630,8 @@ pv_free(NsProcView *v)
     g_free(v->remote_ip);
     g_free(v->deferred_url);
     g_free(v->perm_origin);
-    g_free(v->camera_deferred_origin);
+    for (int k = 0; k < NS_CAP_COUNT; k++)
+        g_free(v->capability_deferred[k]);
     if (v->hourglass_cursor)
         g_object_unref(v->hourglass_cursor);
     g_mutex_clear(&v->proc_lock);
@@ -1289,6 +1291,10 @@ worker_main(gpointer data)
                     res->camera = g_strdup(fr.camera);
                     free(fr.camera);
                 }
+                if (fr.capability) {
+                    res->capability = g_strdup(fr.capability);
+                    free(fr.capability);
+                }
                 if (fr.download) {
                     res->download = g_strdup(fr.download);
                     free(fr.download);
@@ -1330,6 +1336,8 @@ worker_main(gpointer data)
                 res->nav = tick.nav ? g_strdup(tick.nav) : NULL;
                 res->webgl = tick.webgl ? g_strdup(tick.webgl) : NULL;
                 res->camera = tick.camera ? g_strdup(tick.camera) : NULL;
+                res->capability = tick.capability ? g_strdup(tick.capability)
+                                                  : NULL;
                 res->download = tick.download ? g_strdup(tick.download) : NULL;
                 res->config = tick.config ? g_strdup(tick.config) : NULL;
                 res->audio = tick.audio ? g_strdup(tick.audio) : NULL;
@@ -3309,7 +3317,8 @@ pv_on_permission_changed(const char *origin, ns_perm_kind kind,
     }
     gboolean blocked_changed =
         (state == NS_PERM_DENY) != (previous == NS_PERM_DENY);
-    if (kind == NS_PERM_WEBGL && blocked_changed)
+    const ns_capability_info *info = ns_capability_info_get(kind);
+    if (info && info->reload_on_change && blocked_changed)
         ns_proc_view_reload(v);
 }
 
@@ -3356,10 +3365,9 @@ pv_perm_bar_show(NsProcView *v, ns_perm_kind kind, const char *origin)
     v->perm_pending = TRUE;
     v->perm_kind = kind;
     v->perm_origin = g_strdup(origin);
-    const char *what =
-        kind == NS_PERM_WEBGL
-            ? ns_i18n("This site wants to use WebGL (3D graphics)")
-            : ns_i18n("This site wants to use your camera and microphone");
+    const ns_capability_info *info = ns_capability_info_get(kind);
+    const char *what = ns_i18n(info ? info->prompt
+                                    : "This site wants a permission");
     char *text = g_strdup_printf("%s — %s", what, origin);
     gtk_label_set_text(GTK_LABEL(v->perm_label), text);
     g_free(text);
@@ -3367,22 +3375,38 @@ pv_perm_bar_show(NsProcView *v, ns_perm_kind kind, const char *origin)
 }
 
 static void
-pv_camera_requested(NsProcView *v, const char *origin)
+pv_capability_requested(NsProcView *v, ns_perm_kind kind, const char *origin)
 {
     if (!pv_current_origin_is(v, origin)) {
         if (v->pending_url) {
-            g_free(v->camera_deferred_origin);
-            v->camera_deferred_origin = g_strdup(origin);
+            g_free(v->capability_deferred[kind]);
+            v->capability_deferred[kind] = g_strdup(origin);
         } else {
-            pv_send_permission(v, origin, NS_PERM_CAMERA, NS_PERM_DENY);
+            pv_send_permission(v, origin, kind, NS_PERM_DENY);
         }
         return;
     }
-    ns_perm_state st = ns_perm_get(origin, NS_PERM_CAMERA);
+    ns_perm_state st = ns_perm_get(origin, kind);
     if (st == NS_PERM_ASK)
-        pv_perm_bar_show(v, NS_PERM_CAMERA, origin);
+        pv_perm_bar_show(v, kind, origin);
     else
-        pv_send_permission(v, origin, NS_PERM_CAMERA, st);
+        pv_send_permission(v, origin, kind, st);
+}
+
+static void
+pv_capabilities_requested(NsProcView *v, const char *list)
+{
+    g_auto(GStrv) entries = g_strsplit(list, ";", -1);
+    for (char **e = entries; e && *e; e++) {
+        char *entry = g_strstrip(*e);
+        char *space = strchr(entry, ' ');
+        if (!space) continue;
+        *space = '\0';
+        ns_perm_kind kind;
+        const char *origin = space + 1;
+        if (!*origin || !ns_capability_from_name(entry, &kind)) continue;
+        pv_capability_requested(v, kind, origin);
+    }
 }
 
 static void
@@ -3568,10 +3592,11 @@ on_result(gpointer data)
         pv_set_entry_title(v, v->current_title);
         pv_apply_restore_scroll(v);
         pv_push_page_permissions(v);
-        if (v->camera_deferred_origin) {
-            char *origin = v->camera_deferred_origin;
-            v->camera_deferred_origin = NULL;
-            pv_camera_requested(v, origin);
+        for (int k = 0; k < NS_CAP_COUNT; k++) {
+            char *origin = v->capability_deferred[k];
+            if (!origin) continue;
+            v->capability_deferred[k] = NULL;
+            pv_capability_requested(v, (ns_perm_kind)k, origin);
             g_free(origin);
         }
         post_emit(v, NS_PROC_EVT_URL, v->current_url);
@@ -3593,8 +3618,8 @@ on_result(gpointer data)
         }
         if (current && res->ok && res->webgl && *res->webgl)
             post_emit(v, NS_PROC_EVT_WEBGL, "1");
-        if (current && res->ok && res->camera && *res->camera)
-            pv_camera_requested(v, res->camera);
+        if (current && res->ok && res->capability && *res->capability)
+            pv_capabilities_requested(v, res->capability);
         if (current && res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
         if (res->ok && res->config && *res->config)
@@ -3676,8 +3701,8 @@ on_result(gpointer data)
         }
         if (res->ok && res->webgl && *res->webgl)
             post_emit(v, NS_PROC_EVT_WEBGL, "1");
-        if (res->ok && res->camera && *res->camera)
-            pv_camera_requested(v, res->camera);
+        if (res->ok && res->capability && *res->capability)
+            pv_capabilities_requested(v, res->capability);
         if (res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
         if (res->ok && res->config && *res->config)
@@ -3964,6 +3989,7 @@ done:
     g_free(res->remote_ip);
     g_free(res->webgl);
     g_free(res->camera);
+    g_free(res->capability);
     g_free(res->download);
     g_free(res->config);
     g_free(res->audio);

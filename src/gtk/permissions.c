@@ -17,51 +17,10 @@ static char       *g_perm_path;
 static GArray     *g_perm_listeners;
 static guint       g_perm_next_listener = 1;
 
-static const char *const perm_kind_names[NS_PERM_N_KINDS] = {
-    [NS_PERM_CAMERA] = "camera",
-    [NS_PERM_WEBGL]  = "webgl",
-};
-
-const char *
-ns_perm_kind_name(ns_perm_kind kind)
-{
-    return kind < NS_PERM_N_KINDS ? perm_kind_names[kind] : "";
-}
-
-gboolean
-ns_perm_kind_from_name(const char *name, ns_perm_kind *out)
-{
-    for (int k = 0; k < NS_PERM_N_KINDS; k++) {
-        if (name && strcmp(name, perm_kind_names[k]) == 0) {
-            *out = (ns_perm_kind)k;
-            return TRUE;
-        }
-    }
-    return FALSE;
-}
-
-static const char *
-perm_state_name(ns_perm_state state)
-{
-    switch (state) {
-    case NS_PERM_ALLOW: return "allow";
-    case NS_PERM_DENY:  return "deny";
-    default:            return "ask";
-    }
-}
-
-static ns_perm_state
-perm_state_from_name(const char *name)
-{
-    if (g_strcmp0(name, "allow") == 0) return NS_PERM_ALLOW;
-    if (g_strcmp0(name, "deny") == 0) return NS_PERM_DENY;
-    return NS_PERM_ASK;
-}
-
 static char *
 perm_key(const char *origin, ns_perm_kind kind)
 {
-    return g_strdup_printf("%s %s", ns_perm_kind_name(kind), origin);
+    return g_strdup_printf("%s %s", ns_capability_name(kind), origin);
 }
 
 static gboolean
@@ -91,8 +50,8 @@ perm_load_locked(void)
     for (gsize i = 0; i < n_groups; i++) {
         for (int k = 0; k < NS_PERM_N_KINDS; k++) {
             char *v = g_key_file_get_string(g_perm_file, groups[i],
-                                            perm_kind_names[k], NULL);
-            ns_perm_state st = perm_state_from_name(v);
+                                            ns_capability_name((ns_perm_kind)k), NULL);
+            ns_perm_state st = ns_cap_state_from_name(v);
             if (st != NS_PERM_ASK)
                 g_hash_table_insert(g_perm_entries,
                                     perm_key(groups[i], (ns_perm_kind)k),
@@ -140,19 +99,28 @@ ns_perm_shutdown(void)
     g_mutex_unlock(&g_perm_lock);
 }
 
+static ns_perm_state
+perm_default(ns_perm_kind kind)
+{
+    const ns_capability_info *info = ns_capability_info_get(kind);
+    return info ? info->default_state : NS_PERM_ASK;
+}
+
 ns_perm_state
 ns_perm_get(const char *origin, ns_perm_kind kind)
 {
-    if (!origin || !*origin) return NS_PERM_ASK;
+    if (!origin || !*origin) return perm_default(kind);
     g_mutex_lock(&g_perm_lock);
-    ns_perm_state st = NS_PERM_ASK;
+    gpointer stored = NULL;
+    gboolean found = FALSE;
     if (g_perm_entries) {
         char *key = perm_key(origin, kind);
-        st = GPOINTER_TO_INT(g_hash_table_lookup(g_perm_entries, key));
+        found = g_hash_table_lookup_extended(g_perm_entries, key, NULL,
+                                             &stored);
         g_free(key);
     }
     g_mutex_unlock(&g_perm_lock);
-    return st;
+    return found ? (ns_perm_state)GPOINTER_TO_INT(stored) : perm_default(kind);
 }
 
 void
@@ -165,8 +133,10 @@ ns_perm_set(const char *origin, ns_perm_kind kind, ns_perm_state state)
         return;
     }
     char *key = perm_key(origin, kind);
-    ns_perm_state prev = GPOINTER_TO_INT(g_hash_table_lookup(g_perm_entries,
-                                                             key));
+    gpointer stored = NULL;
+    ns_perm_state prev = g_hash_table_lookup_extended(g_perm_entries, key,
+                                                      NULL, &stored)
+        ? (ns_perm_state)GPOINTER_TO_INT(stored) : perm_default(kind);
     if (state == NS_PERM_ASK)
         g_hash_table_remove(g_perm_entries, key);
     else
@@ -176,10 +146,10 @@ ns_perm_set(const char *origin, ns_perm_kind kind, ns_perm_state state)
     if (g_perm_file && perm_origin_storable(origin)) {
         if (state == NS_PERM_ASK)
             g_key_file_remove_key(g_perm_file, origin,
-                                  perm_kind_names[kind], NULL);
+                                  ns_capability_name(kind), NULL);
         else
-            g_key_file_set_string(g_perm_file, origin, perm_kind_names[kind],
-                                  perm_state_name(state));
+            g_key_file_set_string(g_perm_file, origin, ns_capability_name(kind),
+                                  ns_cap_state_name(state));
         gsize n_keys = 0;
         char **keys = g_key_file_get_keys(g_perm_file, origin, &n_keys, NULL);
         if (keys && n_keys == 0)
@@ -202,8 +172,8 @@ ns_perm_set(const char *origin, ns_perm_kind kind, ns_perm_state state)
 char *
 ns_perm_entry_line(const char *origin, ns_perm_kind kind, ns_perm_state state)
 {
-    return g_strdup_printf("%s %s %s\n", ns_perm_kind_name(kind),
-                           perm_state_name(state), origin);
+    return g_strdup_printf("%s %s %s\n", ns_capability_name(kind),
+                           ns_cap_state_name(state), origin);
 }
 
 char *
@@ -212,7 +182,7 @@ ns_perm_serialize_origin(const char *origin)
     GString *out = g_string_new(NULL);
     for (int k = 0; origin && *origin && k < NS_PERM_N_KINDS; k++) {
         ns_perm_state st = ns_perm_get(origin, (ns_perm_kind)k);
-        if (st != NS_PERM_ASK) {
+        if (st != perm_default((ns_perm_kind)k)) {
             char *line = ns_perm_entry_line(origin, (ns_perm_kind)k, st);
             g_string_append(out, line);
             g_free(line);
