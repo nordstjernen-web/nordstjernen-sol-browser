@@ -60,6 +60,16 @@
   </branding>
 
   <releases>
+    <release version="1.0.43" date="2026-11-05">
+      <description>
+        <p>Input, network and Windows packaging release.</p>
+        <ul>
+          <li>Pointer lock works: games can take over the mouse pointer, and Escape reaches the page.</li>
+          <li>TLS sends both post-quantum and classic X25519 key shares, fixing connections to servers without ML-KEM.</li>
+          <li>The sandboxed renderer on Windows no longer carries the administrator-rights relaunch code.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.42" date="2026-11-04">
       <description>
         <p>Architecture, cookies and security release.</p>

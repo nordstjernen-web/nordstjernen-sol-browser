@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.43-dev:
+1.0.43:
 ======
 * Windows: the sandboxed renderer no longer contains the code that drops
   Administrator rights by relaunching with the desktop shell's token. It
