@@ -1854,29 +1854,214 @@
     function XMLSerializer() {
         if (!(this instanceof XMLSerializer)) return new XMLSerializer();
     }
-    function xmlSerializeNode(node) {
-        if (!node) return '';
-        if (node.nodeType === 3) return String(node.nodeValue == null ? '' : node.nodeValue);
-        if (node.nodeType === 8) return '<!--' + String(node.nodeValue || '') + '-->';
-        if (typeof node.outerHTML === 'string') return node.outerHTML;
-        if (node.nodeType === 9) {
-            if (node.documentElement &&
-                typeof node.documentElement.outerHTML === 'string')
-                return node.documentElement.outerHTML;
+    var XML_SER_XML_NS = 'http://www.w3.org/XML/1998/namespace';
+    var XML_SER_XMLNS_NS = 'http://www.w3.org/2000/xmlns/';
+    var XML_SER_XHTML_NS = 'http://www.w3.org/1999/xhtml';
+    var XML_SER_VOID = {
+        area: 1, base: 1, basefont: 1, bgsound: 1, br: 1, col: 1, embed: 1,
+        frame: 1, hr: 1, img: 1, input: 1, keygen: 1, link: 1, menuitem: 1,
+        meta: 1, param: 1, source: 1, track: 1, wbr: 1
+    };
+    function xmlEscapeAttributeValue(v) {
+        return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/\t/g, '&#9;').replace(/\n/g, '&#xA;').replace(/\r/g, '&#xD;');
+    }
+    function xmlEscapeText(v) {
+        return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function xmlNormalizeNamespace(ns) {
+        return ns === '' ? null : ns;
+    }
+    function xmlPrefixMapClone(map) {
+        var copy = new Map();
+        map.forEach(function (list, ns) { copy.set(ns, list.slice()); });
+        return copy;
+    }
+    function xmlPrefixMapAdd(map, ns, prefix) {
+        var list = map.get(ns);
+        if (!list) { list = []; map.set(ns, list); }
+        list.push(prefix);
+    }
+    function xmlPrefixMapHas(map, ns, prefix) {
+        var list = map.get(ns);
+        return !!list && list.indexOf(prefix) !== -1;
+    }
+    function xmlPreferredPrefix(map, ns, preferred) {
+        var list = map.get(ns);
+        if (!list || !list.length) return null;
+        for (var i = 0; i < list.length; i++)
+            if (list[i] === preferred) return list[i];
+        return list[list.length - 1];
+    }
+    function xmlGeneratePrefix(map, ns, prefixIndex) {
+        var generated = 'ns' + prefixIndex.value;
+        prefixIndex.value++;
+        xmlPrefixMapAdd(map, ns, generated);
+        return generated;
+    }
+    function xmlNamespaceDeclaration(attr) {
+        if (attr.namespaceURI === XML_SER_XMLNS_NS)
+            return { prefix: attr.prefix === null ? null : attr.localName };
+        if (attr.namespaceURI !== null || attr.prefix !== null) return null;
+        if (attr.localName === 'xmlns') return { prefix: null };
+        if (attr.localName.indexOf('xmlns:') === 0)
+            return { prefix: attr.localName.slice(6) };
+        return null;
+    }
+    function xmlRecordNamespaces(element, map, localPrefixes) {
+        var defaultNamespace = null;
+        var attrs = element.attributes;
+        for (var i = 0; i < attrs.length; i++) {
+            var attr = attrs[i];
+            var declaration = xmlNamespaceDeclaration(attr);
+            if (!declaration) continue;
+            if (declaration.prefix === null) { defaultNamespace = attr.value; continue; }
+            var prefixDefinition = declaration.prefix;
+            var namespaceDefinition = attr.value;
+            if (namespaceDefinition === XML_SER_XML_NS) continue;
+            namespaceDefinition = xmlNormalizeNamespace(namespaceDefinition);
+            if (xmlPrefixMapHas(map, namespaceDefinition, prefixDefinition)) continue;
+            xmlPrefixMapAdd(map, namespaceDefinition, prefixDefinition);
+            localPrefixes.set(prefixDefinition, namespaceDefinition);
         }
-        if (node.nodeType === 11) {
-            var s = '';
-            var c = node.firstChild;
-            while (c) { s += xmlSerializeNode(c); c = c.nextSibling; }
-            return s;
+        return defaultNamespace;
+    }
+    function xmlSerializeAttributes(element, map, prefixIndex, localPrefixes,
+                                    ignoreNamespaceDefinition) {
+        var result = '';
+        var attrs = element.attributes;
+        for (var i = 0; i < attrs.length; i++) {
+            var attr = attrs[i];
+            var attributeNamespace = attr.namespaceURI;
+            var candidatePrefix = null;
+            var declaration = xmlNamespaceDeclaration(attr);
+            if (declaration) {
+                if (attr.value === XML_SER_XML_NS) continue;
+                if (declaration.prefix === null && ignoreNamespaceDefinition) continue;
+                var declared = xmlNormalizeNamespace(attr.value);
+                if (declaration.prefix !== null &&
+                    (!localPrefixes.has(declaration.prefix) ||
+                     localPrefixes.get(declaration.prefix) !== declared) &&
+                    xmlPrefixMapHas(map, declared, declaration.prefix))
+                    continue;
+                if (attr.prefix === 'xmlns') candidatePrefix = 'xmlns';
+            } else if (attributeNamespace !== null) {
+                candidatePrefix = xmlPreferredPrefix(map, attributeNamespace, attr.prefix);
+                if (candidatePrefix === null) {
+                    candidatePrefix = xmlGeneratePrefix(map, attributeNamespace, prefixIndex);
+                    result += ' xmlns:' + candidatePrefix + '="' +
+                        xmlEscapeAttributeValue(attributeNamespace) + '"';
+                }
+            }
+            result += ' ';
+            if (candidatePrefix !== null) result += candidatePrefix + ':';
+            result += attr.localName + '="' + xmlEscapeAttributeValue(attr.value) + '"';
         }
-        if (typeof node.innerHTML === 'string') return node.innerHTML;
-        return String(node);
+        return result;
+    }
+    function xmlSerializeChildren(parent, inheritedNs, map, prefixIndex) {
+        var markup = '';
+        for (var c = parent.firstChild; c; c = c.nextSibling)
+            markup += xmlSerializeNode(c, inheritedNs, map, prefixIndex);
+        return markup;
+    }
+    function xmlSerializeElement(node, contextNs, parentMap, prefixIndex) {
+        var markup = '<';
+        var qualifiedName = '';
+        var skipEndTag = false;
+        var ignoreNamespaceDefinition = false;
+        var map = xmlPrefixMapClone(parentMap);
+        var localPrefixes = new Map();
+        var localDefaultNamespace = xmlRecordNamespaces(node, map, localPrefixes);
+        var inheritedNs = contextNs;
+        var ns = node.namespaceURI;
+        if (inheritedNs === ns) {
+            if (localDefaultNamespace !== null) ignoreNamespaceDefinition = true;
+            qualifiedName = ns === XML_SER_XML_NS ? 'xml:' + node.localName : node.localName;
+            markup += qualifiedName;
+        } else {
+            var prefix = node.prefix;
+            var candidatePrefix = xmlPreferredPrefix(map, ns, prefix);
+            if (prefix === 'xmlns') candidatePrefix = prefix;
+            if (candidatePrefix !== null) {
+                qualifiedName = candidatePrefix + ':' + node.localName;
+                if (localDefaultNamespace !== null && localDefaultNamespace !== XML_SER_XML_NS)
+                    inheritedNs = xmlNormalizeNamespace(localDefaultNamespace);
+                markup += qualifiedName;
+            } else if (prefix !== null) {
+                if (localPrefixes.has(prefix))
+                    prefix = xmlGeneratePrefix(map, ns, prefixIndex);
+                else
+                    xmlPrefixMapAdd(map, ns, prefix);
+                qualifiedName = prefix + ':' + node.localName;
+                markup += qualifiedName + ' xmlns:' + prefix + '="' +
+                    xmlEscapeAttributeValue(ns) + '"';
+                if (localDefaultNamespace !== null)
+                    inheritedNs = xmlNormalizeNamespace(localDefaultNamespace);
+            } else if (localDefaultNamespace === null ||
+                       xmlNormalizeNamespace(localDefaultNamespace) !== ns) {
+                ignoreNamespaceDefinition = true;
+                qualifiedName = node.localName;
+                inheritedNs = ns;
+                markup += qualifiedName + ' xmlns="' +
+                    xmlEscapeAttributeValue(ns === null ? '' : ns) + '"';
+            } else {
+                qualifiedName = node.localName;
+                inheritedNs = ns;
+                markup += qualifiedName;
+            }
+        }
+        markup += xmlSerializeAttributes(node, map, prefixIndex, localPrefixes,
+                                         ignoreNamespaceDefinition);
+        if (ns === XML_SER_XHTML_NS && !node.firstChild &&
+            XML_SER_VOID[node.localName] === 1) {
+            markup += ' /';
+            skipEndTag = true;
+        }
+        if (ns !== XML_SER_XHTML_NS && !node.firstChild) {
+            markup += '/';
+            skipEndTag = true;
+        }
+        markup += '>';
+        if (skipEndTag) return markup;
+        if (ns === XML_SER_XHTML_NS && node.localName === 'template' && node.content)
+            markup += xmlSerializeChildren(node.content, inheritedNs, map, prefixIndex);
+        else
+            markup += xmlSerializeChildren(node, inheritedNs, map, prefixIndex);
+        return markup + '</' + qualifiedName + '>';
+    }
+    function xmlSerializeDoctype(node) {
+        var markup = '<!DOCTYPE ' + node.name;
+        if (node.publicId !== '')
+            markup += ' PUBLIC "' + node.publicId + '"';
+        else if (node.systemId !== '')
+            markup += ' SYSTEM';
+        if (node.systemId !== '') markup += ' "' + node.systemId + '"';
+        return markup + '>';
+    }
+    function xmlSerializeNode(node, contextNs, map, prefixIndex) {
+        switch (node.nodeType) {
+        case 1: return xmlSerializeElement(node, contextNs, map, prefixIndex);
+        case 3: return xmlEscapeText(node.data);
+        case 4: return '<![CDATA[' + node.data + ']]>';
+        case 7: return '<?' + node.target + ' ' + node.data + '?>';
+        case 8: return '<!--' + node.data + '-->';
+        case 9: return xmlSerializeChildren(node, contextNs, map, prefixIndex);
+        case 10: return xmlSerializeDoctype(node);
+        case 11: return xmlSerializeChildren(node, contextNs, map, prefixIndex);
+        default: return '';
+        }
     }
     XMLSerializer.prototype.serializeToString = function (node) {
-        return xmlSerializeNode(node);
+        if (!node || typeof node !== 'object' || typeof node.nodeType !== 'number')
+            throw new TypeError("Failed to execute 'serializeToString' on " +
+                                "'XMLSerializer': parameter 1 is not of type 'Node'.");
+        var map = new Map();
+        map.set(XML_SER_XML_NS, ['xml']);
+        return xmlSerializeNode(node, null, map, { value: 1 });
     };
-    defineCtor('XMLSerializer', XMLSerializer);
+    replaceCtor('XMLSerializer', XMLSerializer);
 
     function AbortSignal() {
         if (!(this instanceof AbortSignal)) return new AbortSignal();

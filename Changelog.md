@@ -3,6 +3,17 @@ Changelog:
 
 1.0.44-dev:
 ======
+* DOM: `XMLSerializer.serializeToString()` now follows the XML
+  serialization algorithm of the DOM Parsing specification instead of
+  returning `outerHTML`: empty elements outside the HTML namespace
+  self-close (`<child/>`), namespace declarations are resolved per
+  element with inherited prefixes reused and `ns1`, `ns2`, ... generated
+  for undeclared ones, redundant and inconsistent `xmlns` attributes are
+  dropped, HTML elements carry `xmlns="http://www.w3.org/1999/xhtml"`,
+  CDATA sections, processing instructions and doctypes serialize, and
+  attribute values escape tab, newline and carriage return. WPT
+  `domparsing/XMLSerializer-serializeToString.html` goes from 3 to 31 of
+  33 subtests and the parse/serialize round trip passes.
 * HSTS (security): a `Strict-Transport-Security` header is now remembered
   only from a top-level navigation or a same-site subresource. A
   third-party resource could set it for its own hosts before, and a

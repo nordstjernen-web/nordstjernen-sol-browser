@@ -212,17 +212,27 @@ need('scheduler.yield returns a Promise', function () {
 
 need('XMLSerializer text node', function () {
     var s = new XMLSerializer();
-    return s.serializeToString({ nodeType: 3, nodeValue: 'hi & bye' }) === 'hi & bye';
+    return s.serializeToString({ nodeType: 3, data: 'hi & <bye>' }) === 'hi &amp; &lt;bye&gt;';
 });
 need('XMLSerializer comment node', function () {
     var s = new XMLSerializer();
-    return s.serializeToString({ nodeType: 8, nodeValue: 'note' }) === '<!--note-->';
+    return s.serializeToString({ nodeType: 8, data: 'note' }) === '<!--note-->';
 });
 need('XMLSerializer document fragment', function () {
     var s = new XMLSerializer();
-    var t = { nodeType: 3, nodeValue: 'X', nextSibling: null };
+    var t = { nodeType: 3, data: 'X', nextSibling: null };
     var frag = { nodeType: 11, firstChild: t };
     return s.serializeToString(frag) === 'X';
+});
+need('XMLSerializer element namespaces', function () {
+    var s = new XMLSerializer();
+    var attr = { namespaceURI: null, prefix: null, localName: 'a', value: '1<"' };
+    var child = { nodeType: 1, namespaceURI: 'u1', prefix: 'p', localName: 'c',
+                  attributes: [], firstChild: null, nextSibling: null };
+    var root = { nodeType: 1, namespaceURI: null, prefix: null, localName: 'r',
+                 attributes: [attr], firstChild: child, nextSibling: null };
+    return s.serializeToString(root) ===
+        '<r a="1&lt;&quot;"><p:c xmlns:p="u1"/></r>';
 });
 
 need('DOMMatrix ctor', function () { return typeof DOMMatrix === 'function'; });
