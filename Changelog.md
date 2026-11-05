@@ -52,6 +52,10 @@ Changelog:
   any document could also close the devices, and nothing released them
   when the page went away. Releases now need the granting origin, and the
   devices are closed when the page's script context is torn down.
+* WebGL (security): a draw after a failed `linkProgram` is range-checked
+  again. A failed re-link made the vertex-attribute check see no active
+  attributes, while the previously linked program kept rendering, so its
+  draws read past the end of their vertex buffers unchecked.
 
 1.0.43:
 ======
