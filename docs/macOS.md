@@ -21,6 +21,13 @@ covers both **installing the prebuilt app** and **building from source**.
 2. Open the `.dmg` and drag **Nordstjernen** into `/Applications`.
 3. Launch it from Launchpad, Spotlight, or Finder.
 
+With [Homebrew](https://brew.sh), the same release `.dmg` installs from
+the project's tap, and `brew upgrade` follows new releases:
+
+```sh
+brew install --cask nordstjernen-web/tap/nordstjernen
+```
+
 The released `.dmg` is signed with an Apple **Developer ID** and
 **notarised**, so it opens straight away with no Gatekeeper prompt and no
 `xattr` step. (If you build your own `.dmg` without a Developer ID it is

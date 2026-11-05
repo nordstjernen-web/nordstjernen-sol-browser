@@ -3,6 +3,11 @@ Changelog:
 
 1.0.44-dev:
 ======
+* macOS: the browser installs with Homebrew, `brew install --cask
+  nordstjernen-web/tap/nordstjernen`. Publishing a release points the cask
+  in the nordstjernen-web/homebrew-tap repository at that release's
+  notarised `.dmg` (the `homebrew` workflow, which needs the
+  `HOMEBREW_TAP_TOKEN` secret).
 * Media: live MSE streams sit on the player's timeline. `SourceBuffer`
   `timestampOffset` is applied: each media segment's `tfdt` is shifted by
   the offset in its track's timescale before the segment is buffered; it
