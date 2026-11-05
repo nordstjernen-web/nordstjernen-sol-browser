@@ -322,6 +322,10 @@ static void ns_text_selection_set_state(JSContext *ctx,
                                         const char *direction);
 static void ns_js_process_pending_iframes(ns_js *js);
 static GBytes *ns_js_blob_url_lookup(ns_js *js, const char *url, char **out_type);
+static void ns_slot_note_child_change(ns_js *js, ns_node *parent);
+static void ns_slot_note_attr_change(ns_js *js, ns_node *target,
+                                     const char *name);
+static void ns_slot_scrub_node(ns_js *js, ns_node *n);
 static void ns_js_record_child_change(ns_js *js, ns_node *parent,
                                       ns_node *added, ns_node *removed,
                                       ns_node *previous_sibling, ns_node *next_sibling);
@@ -4880,6 +4884,7 @@ ns_invalidate_wrapper(ns_node *n)
     if (!n) return;
     ns_js *js = ns_active_js();
     ns_mut_scrub_node(js, n);
+    ns_slot_scrub_node(js, n);
     ns_attr_detach_owner(js, n);
     ns_attribute_map_release_owner(js, n);
     if (n->js_wrapper) {
@@ -31574,6 +31579,7 @@ ns_js_record_child_change(ns_js *js, ns_node *parent,
     else
         ns_css_mark_childlist_replaced(parent, added, &removed,
                                        removed ? 1 : 0);
+    ns_slot_note_child_change(js, parent);
     ns_mut_record_emit(js, "childList", parent, added, removed,
                        previous_sibling, next_sibling, NULL, NULL, NULL);
 }
@@ -31641,6 +31647,7 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
         ns_css_mark_childlist_replaced(parent, first_added,
             removed ? (ns_node *const *)removed->pdata : NULL,
             removed ? removed->len : 0);
+    ns_slot_note_child_change(js, parent);
     ns_mut_record_emit_child_list_arrays(js, parent, added, removed,
                                          previous_sibling, next_sibling);
 }
@@ -31763,6 +31770,7 @@ ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
             JS_FreeValue(ctx, past_map);
         }
     }
+    ns_slot_note_attr_change(js, target, name);
     ns_css_mark_attr_dirty(target, name, old_value);
     ns_mut_record_emit(js, "attributes", target, NULL, NULL,
                        NULL, NULL, name, namespace_uri, old_value);
@@ -43838,6 +43846,159 @@ ns_slot_collect_direct(GPtrArray *nodes, const ns_node *slot,
         }
         g_ptr_array_add(nodes, c);
     }
+}
+
+static ns_node *
+ns_slot_shadow_root_of(ns_node *n)
+{
+    for (; n; n = n->parent)
+        if (ns_node_is_shadow_root(n)) return n;
+    return NULL;
+}
+
+static guint
+ns_slot_assigned_hash(const ns_node *slot)
+{
+    GPtrArray *nodes = g_ptr_array_new();
+    ns_slot_collect_direct(nodes, slot, FALSE);
+    guint64 h = 1469598103934665603ULL;
+    for (guint i = 0; i < nodes->len; i++) {
+        h ^= (guint64)(guintptr)g_ptr_array_index(nodes, i);
+        h *= 1099511628211ULL;
+    }
+    guint len = nodes->len;
+    g_ptr_array_free(nodes, TRUE);
+    return len ? (guint)(h ^ (h >> 32)) | 1u : 0u;
+}
+
+static void
+ns_slot_scrub_node(ns_js *js, ns_node *n)
+{
+    if (!js || !n) return;
+    if (js->slot_assigned_hashes)
+        g_hash_table_remove(js->slot_assigned_hashes, n);
+    if (js->slot_dirty_roots)
+        g_hash_table_remove(js->slot_dirty_roots, n);
+}
+
+static void
+ns_slot_fire_change(ns_js *js, ns_node *slot)
+{
+    if (js->halted || js->in_pump) return;
+    JSValue event = ns_make_event(js->ctx, "slotchange", slot);
+    JS_SetPropertyStr(js->ctx, event, "bubbles", JS_TRUE);
+    JS_SetPropertyStr(js->ctx, event, "cancelable", JS_FALSE);
+    ns_js_dispatch_built_event(js, slot, "slotchange", event, NULL);
+}
+
+static void
+ns_slot_collect_slots(ns_node *n, GPtrArray *slots, int depth)
+{
+    if (!n || depth >= 512) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_shadow_root(c)) continue;
+        if (ns_node_is_slot(c)) g_ptr_array_add(slots, c);
+        ns_slot_collect_slots(c, slots, depth + 1);
+    }
+}
+
+static void
+ns_slot_record(ns_js *js, ns_node *slot, guint hash, GPtrArray *changed)
+{
+    gpointer old = g_hash_table_lookup(js->slot_assigned_hashes, slot);
+    if (GPOINTER_TO_UINT(old) == hash) return;
+    if (hash) {
+        ns_node_arm_js_invalidate(slot);
+        g_hash_table_insert(js->slot_assigned_hashes, slot,
+                            GUINT_TO_POINTER(hash));
+    } else {
+        g_hash_table_remove(js->slot_assigned_hashes, slot);
+    }
+    g_ptr_array_add(changed, slot);
+}
+
+static gint
+ns_slot_root_order(gconstpointer a, gconstpointer b, gpointer order)
+{
+    guint ia = GPOINTER_TO_UINT(g_hash_table_lookup(order,
+                                    *(gconstpointer const *)a));
+    guint ib = GPOINTER_TO_UINT(g_hash_table_lookup(order,
+                                    *(gconstpointer const *)b));
+    return ia < ib ? -1 : ia > ib;
+}
+
+static JSValue
+ns_slot_check_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->slot_dirty_roots) return JS_UNDEFINED;
+    js->slot_check_scheduled = FALSE;
+    GPtrArray *roots = g_ptr_array_new();
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, js->slot_dirty_roots);
+    while (g_hash_table_iter_next(&it, &key, &value))
+        g_ptr_array_add(roots, key);
+    g_ptr_array_sort_with_data(roots, ns_slot_root_order, js->slot_dirty_roots);
+    GPtrArray *slots = g_ptr_array_new();
+    for (guint i = 0; i < roots->len; i++)
+        ns_slot_collect_slots(g_ptr_array_index(roots, i), slots, 0);
+    g_ptr_array_free(roots, TRUE);
+    g_hash_table_remove_all(js->slot_dirty_roots);
+    GPtrArray *changed = g_ptr_array_new();
+    for (guint i = 0; i < slots->len; i++) {
+        ns_node *slot = g_ptr_array_index(slots, i);
+        ns_slot_record(js, slot, ns_slot_assigned_hash(slot), changed);
+    }
+    GPtrArray *detached = g_ptr_array_new();
+    g_hash_table_iter_init(&it, js->slot_assigned_hashes);
+    while (g_hash_table_iter_next(&it, &key, NULL))
+        if (!ns_slot_find_host(key)) g_ptr_array_add(detached, key);
+    for (guint i = 0; i < detached->len; i++)
+        ns_slot_record(js, g_ptr_array_index(detached, i), 0, changed);
+    for (guint i = 0; i < changed->len; i++)
+        ns_slot_fire_change(js, g_ptr_array_index(changed, i));
+    g_ptr_array_free(detached, TRUE);
+    g_ptr_array_free(changed, TRUE);
+    g_ptr_array_free(slots, TRUE);
+    return JS_UNDEFINED;
+}
+
+static void
+ns_slot_mark_root(ns_js *js, ns_node *root)
+{
+    if (!js || !js->ctx || !root) return;
+    if (!js->slot_dirty_roots) {
+        js->slot_dirty_roots = g_hash_table_new(g_direct_hash, g_direct_equal);
+        js->slot_assigned_hashes = g_hash_table_new(g_direct_hash,
+                                                    g_direct_equal);
+    }
+    ns_node_arm_js_invalidate(root);
+    if (!g_hash_table_contains(js->slot_dirty_roots, root))
+        g_hash_table_insert(js->slot_dirty_roots, root,
+            GUINT_TO_POINTER(g_hash_table_size(js->slot_dirty_roots) + 1));
+    if (js->slot_check_scheduled) return;
+    js->slot_check_scheduled = TRUE;
+    JS_EnqueueJob(js->ctx, ns_slot_check_job, 0, NULL);
+}
+
+static void
+ns_slot_note_child_change(ns_js *js, ns_node *parent)
+{
+    if (!js || !parent) return;
+    ns_slot_mark_root(js, ns_element_find_shadow_child(parent));
+    ns_slot_mark_root(js, ns_slot_shadow_root_of(parent));
+}
+
+static void
+ns_slot_note_attr_change(ns_js *js, ns_node *target, const char *name)
+{
+    if (!js || !target || !name) return;
+    if (g_ascii_strcasecmp(name, "slot") == 0 && target->parent)
+        ns_slot_mark_root(js, ns_element_find_shadow_child(target->parent));
+    else if (g_ascii_strcasecmp(name, "name") == 0 && ns_node_is_slot(target))
+        ns_slot_mark_root(js, ns_slot_shadow_root_of(target));
 }
 
 static void
@@ -66813,6 +66974,8 @@ ns_js_free(ns_js *js)
         g_ptr_array_free(js->mutation_observers, TRUE);
         js->mutation_observers = NULL;
     }
+    g_clear_pointer(&js->slot_dirty_roots, g_hash_table_destroy);
+    g_clear_pointer(&js->slot_assigned_hashes, g_hash_table_destroy);
     if (js->intersection_observers) {
         for (guint i = 0; i < js->intersection_observers->len; i++) {
             ns_io_observer *o = g_ptr_array_index(js->intersection_observers, i);

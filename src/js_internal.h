@@ -299,6 +299,9 @@ struct ns_js {
     int           synthetic_click_depth;
     GPtrArray    *mutation_observers;
     gboolean      mutation_drain_scheduled;
+    GHashTable   *slot_assigned_hashes;
+    GHashTable   *slot_dirty_roots;
+    gboolean      slot_check_scheduled;
     GPtrArray    *intersection_observers;
     GPtrArray    *media_query_lists;
     GPtrArray    *resize_observers;
