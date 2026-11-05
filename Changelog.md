@@ -3,6 +3,12 @@ Changelog:
 
 1.0.44-dev:
 ======
+* DOM: `slotchange` fires. When the nodes assigned to a `<slot>` change —
+  children inserted into or removed from a shadow host, a `slot` attribute
+  changed, a slot inserted, removed or renamed — the slot receives a
+  bubbling `slotchange` event in a microtask, as in Chrome. Components that
+  track their slotted content through it never saw any: Reddit's consent
+  card hid its "Godta alle" / "Avvis valgfrie" buttons as an empty footer.
 * JavaScript: installing a document defines its own properties instead of
   assigning them. When a document was installed again in the same realm,
   `Node.prototype`'s getter-only `nodeType`, `nodeName` and `baseURI`
