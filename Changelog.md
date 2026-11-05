@@ -8,7 +8,9 @@ Changelog:
   ran `meson setup` without `-Dglslang=disabled`, which fails because
   glslang is required unless disabled (GStreamer likewise on Linux). It
   now passes `-Dglslang=disabled` / `-Dgstreamer=disabled` for the
-  features it reports as left out.
+  features it reports as left out. The pypi workflow takes a post-release
+  number, so the fix ships for 1.0.44 as `nordstjernen-browser
+  1.0.44.post1`, which still builds the 1.0.44 browser.
 * Media: closing a tab stops its sound at once. The audio helper of a tab
   playing video or audio was shut down only when the last reference to
   the tab went away, so a YouTube video kept playing after its tab was

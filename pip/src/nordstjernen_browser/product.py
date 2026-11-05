@@ -4,7 +4,7 @@ import sys
 
 from . import __version__
 
-VERSION = __version__
+VERSION = __version__.split(".post")[0]
 NAME = "Nordstjernen"
 PACKAGE_NAME = "nordstjernen-browser"
 ENV_PREFIX = "NORDSTJERNEN"

@@ -14,9 +14,13 @@ on:
       tag:
         description: Published release to publish the pip package for
         required: true
+      post:
+        description: Post-release number, to republish the package for the same release (1 gives <tag>.post1)
+        required: false
+        default: ''
 
 concurrency:
-  group: pypi-${{ inputs.tag || github.event.release.tag_name }}
+  group: pypi-${{ inputs.tag || github.event.release.tag_name }}-${{ inputs.post }}
   cancel-in-progress: false
 
 permissions:
@@ -24,6 +28,7 @@ permissions:
 
 env:
   TAG: ${{ inputs.tag || github.event.release.tag_name }}
+  POST: ${{ inputs.post }}
 
 jobs:
   build:
@@ -37,7 +42,7 @@ jobs:
           fetch-depth: 0
 
       - name: Prepare the package for the release
-        run: python3 pip/prepare.py "$TAG"
+        run: python3 pip/prepare.py "$TAG" "$POST"
 
       - name: Build and check
         run: |

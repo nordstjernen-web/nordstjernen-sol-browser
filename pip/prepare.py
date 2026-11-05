@@ -1,4 +1,4 @@
-"""Prepares pip/ for a release build: sets the version to a published tag, records its source tarball's SHA-256 and copies the licence files in."""
+"""Prepares pip/ for a release build: sets the version to a published tag (or a post-release of it), records its source tarball's SHA-256 and copies the licence files in."""
 
 import hashlib
 import json
@@ -20,9 +20,13 @@ def fail(message):
 
 
 def main():
-    if len(sys.argv) != 2:
-        fail("usage: prepare.py <release tag>")
+    if len(sys.argv) not in (2, 3):
+        fail("usage: prepare.py <release tag> [post-release number]")
     tag = sys.argv[1]
+    post = sys.argv[2] if len(sys.argv) == 3 and sys.argv[2] else ""
+    if post and not re.fullmatch(r"[1-9]\d*", post):
+        fail(f"{post} is not a post-release number")
+    package_version = f"{tag}.post{post}" if post else tag
     if not re.fullmatch(r"\d+\.\d+\.\d+", tag):
         fail(f"{tag} is not a release tag")
     tagged = subprocess.run(["git", "show", f"refs/tags/{tag}:meson.build"], cwd=REPO,
@@ -35,7 +39,7 @@ def main():
 
     init = PACKAGE / "__init__.py"
     text = init.read_text(encoding="utf-8")
-    init.write_text(re.sub(r'__version__ = "[^"]*"', f'__version__ = "{tag}"', text),
+    init.write_text(re.sub(r'__version__ = "[^"]*"', f'__version__ = "{package_version}"', text),
                     encoding="utf-8", newline="\n")
 
     request = urllib.request.Request(SOURCE_URL.format(tag=tag),
@@ -47,6 +51,7 @@ def main():
     (PACKAGE / "source.json").write_text(
         json.dumps({"version": tag, "sha256": digest.hexdigest()}, indent=2) + "\n",
         encoding="utf-8", newline="\n")
+    print(f"package version {package_version}", file=sys.stderr)
     print(f"source tarball {tag}: sha256 {digest.hexdigest()}", file=sys.stderr)
 
     for name in ("License.md", "COPYING"):
