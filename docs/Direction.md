@@ -80,8 +80,9 @@ the request channel is generic (`X-Capability`, `/capability`,
 "Capabilities"), the ledger falls back to each kind's default, and the
 shell's prompt bar and site settings are driven by the vocabulary. Today it
 holds camera (ask), WebGL (allow, revocable), downloads (allow, gated in
-the shell where the file is written) and pop-up windows (allow, the
-engine refuses `window.open` on deny). The target extends the
+the shell where the file is written), pop-up windows (allow, the engine
+refuses `window.open` on deny) and pointer lock (allow, suspended in the
+engine on ask). The target extends the
 vocabulary without changing the shape:
 
 - **One vocabulary.** A capability enumeration shared by shell and renderer:

@@ -178,6 +178,7 @@ char *ns_browser_take_pending_webgl(ns_browser *browser);
 void  ns_browser_resolve_webgl(ns_browser *browser, const char *origin,
                                int allow);
 char *ns_browser_take_pending_camera(ns_browser *browser);
+char *ns_browser_take_pending_capabilities(ns_browser *browser);
 void  ns_browser_resolve_camera(ns_browser *browser, const char *origin,
                                 int allow);
 

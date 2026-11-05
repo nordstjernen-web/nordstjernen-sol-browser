@@ -5167,6 +5167,13 @@ ns_browser_take_pending_camera(ns_browser *browser)
     return ns_camera_take_pending_origin();
 }
 
+char *
+ns_browser_take_pending_capabilities(ns_browser *browser)
+{
+    (void)browser;
+    return ns_js_take_pending_capabilities();
+}
+
 static void
 browser_eval_quiet(ns_browser *browser, const char *src, const char *name)
 {
@@ -5190,7 +5197,7 @@ ns_browser_clear_permissions(void)
 {
     ns_webgl_clear_decisions();
     ns_camera_clear_decisions();
-    ns_js_clear_popup_states();
+    ns_js_clear_capability_states();
 }
 
 int
@@ -5220,11 +5227,12 @@ ns_browser_set_permission(ns_browser *browser, const char *kind,
         ns_webgl_set_state(origin, st);
         return 0;
     }
-    if (cap == NS_CAP_POPUPS) {
-        ns_js_set_popup_state(origin, st);
+    if (cap != NS_CAP_CAMERA) {
+        ns_js_set_capability_state((int)cap, origin, st);
+        if (browser && browser->js && st != (int)NS_CAP_ASK)
+            ns_js_capability_resume(browser->js, (int)cap, st == (int)NS_CAP_ALLOW);
         return 0;
     }
-    if (cap != NS_CAP_CAMERA) return 0;
     gboolean answered = ns_camera_set_state(origin, st);
     if (answered)
         browser_eval_quiet(browser,

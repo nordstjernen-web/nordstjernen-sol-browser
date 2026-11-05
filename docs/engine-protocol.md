@@ -99,6 +99,7 @@ name or a default:
 | `webgl` | allow | the page is reloaded when the blocked state flips |
 | `downloads` | allow | gated in the shell: an offer (`X-Download`) is held while the prompt is open and dropped on deny |
 | `popups` | allow | `window.open()` returns null on deny (the engine keeps the state); on ask the shell holds the open request while the prompt is open |
+| `pointer-lock` | allow | `requestPointerLock()` fires `pointerlockerror` on deny; on ask the element waits in the engine and the lock engages (`pointerlockchange`) or fails when the shell answers |
 
 The flow is the same for every kind:
 
