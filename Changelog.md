@@ -286,6 +286,11 @@ Changelog:
   through sits at its parent's top edge when a later sibling's margin
   collapses through the parent, instead of that margin above it. ESPN's
   main pane sat 10 px too low and BBC's front page 16 px too high.
+* CSS: the `lh` unit works in `transform` and `translate`. A translation
+  in `lh` resolves against the element's line height when its style is
+  computed, as `em` does against its font size; it was dropped, so
+  `transform: translateY(-2lh)` did not move the box at all. openai.com's
+  prompt placeholder sat 36 px below where Chrome draws it.
 
 1.0.43:
 ======

@@ -541,7 +541,7 @@ typedef struct ns_css_transform_op {
     double m3d[16];
     gboolean a_is_percent, b_is_percent;
     double a_pct, b_pct;
-    double em[3], rem[3];
+    double em[3], rem[3], lh[3];
 } ns_css_transform_op;
 
 #define NS_CSS_TRANSFORM_OPS_MAX 8
