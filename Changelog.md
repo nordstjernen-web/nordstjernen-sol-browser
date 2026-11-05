@@ -322,6 +322,13 @@ Changelog:
   wrapped the last word: eBay's footer country picker, which indents its
   label past a flag icon, broke "United States" over two lines and
   narrowed its column by 51 px.
+* Performance: the renderer loads SDL only when a page first captures the
+  microphone. It linked SDL at start-up for that one feature, and Homebrew
+  and newer Linux distributions ship SDL2 as sdl2-compat, whose start-up
+  code loads all of SDL3: every tab paid for 73 extra mapped images, about
+  44 M instructions and 4 MB of memory. The audio helper still links SDL
+  as before. When WebGL and WebGPU are both off on Linux, SDL is loaded
+  before the sandbox forbids executable mappings.
 
 1.0.43:
 ======
