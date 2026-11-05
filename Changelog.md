@@ -3,6 +3,12 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Local files (security): a page opened from a `file:` URL may now load
+  scripts, stylesheets, images, media, frames and workers only from its own
+  directory and the directories below it. Any readable file on the
+  computer could be embedded before, so a downloaded HTML file could show
+  or execute files from elsewhere in the home directory. Following a link
+  or typing a path still opens any local file.
 * Service workers (security): `navigator.serviceWorker.register()` now
   resolves the script URL and scope against the calling document's own
   URL and rejects a script whose origin differs from that document, as the
