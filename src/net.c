@@ -5431,18 +5431,31 @@ ns_fetch_omits_credentials(GPtrArray *extra_headers)
 }
 
 static const char *
-ns_fetch_initiator(GPtrArray *extra_headers)
+ns_fetch_marker_value(GPtrArray *extra_headers, const char *marker)
 {
     if (!extra_headers) return NULL;
+    gsize marker_len = strlen(marker);
     for (guint i = 0; i < extra_headers->len; i++) {
         const char *header = g_ptr_array_index(extra_headers, i);
-        if (header && g_ascii_strncasecmp(header, "X-ND-Initiator:", 15) == 0) {
-            const char *v = header + 15;
+        if (header && g_ascii_strncasecmp(header, marker, marker_len) == 0) {
+            const char *v = header + marker_len;
             while (*v == ' ' || *v == '\t') v++;
             return *v ? v : NULL;
         }
     }
     return NULL;
+}
+
+static const char *
+ns_fetch_initiator(GPtrArray *extra_headers)
+{
+    return ns_fetch_marker_value(extra_headers, "X-ND-Initiator:");
+}
+
+static const char *
+ns_fetch_top_level(GPtrArray *extra_headers)
+{
+    return ns_fetch_marker_value(extra_headers, "X-ND-Top-Level:");
 }
 
 static gboolean
@@ -5891,7 +5904,8 @@ ns_net_request_key(const char *url, const char *top_url, const char *method,
     g_string_append(key, partition);
     GPtrArray *sorted = g_ptr_array_new();
     for (int i = 0; extra_headers && extra_headers[i]; i++)
-        if (g_ascii_strncasecmp(extra_headers[i], "X-ND-CORS:", 10) != 0)
+        if (g_ascii_strncasecmp(extra_headers[i], "X-ND-CORS:", 10) != 0 &&
+            g_ascii_strncasecmp(extra_headers[i], "X-ND-Top-Level:", 15) != 0)
             g_ptr_array_add(sorted, (gpointer)extra_headers[i]);
     g_ptr_array_sort(sorted, ns_header_line_cmp);
     for (guint i = 0; i < sorted->len; i++) {
@@ -6079,12 +6093,19 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     const char *effective_ua = configured_ua;
     const char *accept_language = ns_net_effective_accept_language();
     const char *effective_top_url = is_navigation || !top_url ? url : top_url;
+    const char *top_level_url = is_navigation ? NULL
+                                              : ns_fetch_top_level(extra_headers);
+    const char *partition_url = top_level_url ? top_level_url
+                                              : effective_top_url;
     char *top_origin = ns_url_origin_from(effective_top_url);
-    char *top_site   = ns_url_site_from(effective_top_url);
+    char *top_site   = ns_url_site_from(partition_url);
+    g_autofree char *partition_origin = top_level_url
+        ? ns_url_origin_from(top_level_url) : NULL;
     const char *partition_key = (top_site && *top_site) ? top_site
+                              : partition_origin ? partition_origin
                               : (top_origin ? top_origin : "");
     char *cache_partition = ns_net_partition_key(url, is_navigation ? NULL
-                                                                    : top_url);
+                                                                    : partition_url);
     const char *request_accept = "*/*";
     for (guint i = 0; extra_headers && i < extra_headers->len; i++) {
         const char *h = g_ptr_array_index(extra_headers, i);
@@ -6121,7 +6142,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     gboolean cookies_allowed = request_http &&
         (cookie_policy != NS_COOKIE_NEVER);
     if (cookies_allowed && cookie_policy == NS_COOKIE_FIRST_PARTY &&
-        top_url && !ns_url_is_same_site(url, effective_top_url))
+        top_url && !ns_url_is_same_site(url, partition_url))
         cookies_allowed = FALSE;
     if (!*partition_key || ns_fetch_omits_credentials(extra_headers))
         cookies_allowed = FALSE;
@@ -6129,7 +6150,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     const char *same_site_ref = initiator ? initiator : top_url;
     gboolean cross_site_request = chain_cross_site ||
         (same_site_ref && *same_site_ref &&
-         !ns_url_is_same_site(url, same_site_ref));
+         !ns_url_is_same_site(url, same_site_ref)) ||
+        (top_level_url && !ns_url_is_same_site(url, top_level_url));
     if (cookies_allowed && cross_site_request)
         samesite_cross = is_navigation && is_simple_get(method) ? 1 : 2;
     const char *cookie_partition = cookies_allowed ? partition_key : NULL;

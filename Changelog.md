@@ -26,6 +26,12 @@ Changelog:
   cookie partition, SameSite, `Sec-Fetch-Site`, Referer and CSP), and
   `<base href="file:///">` made local files loadable as images. The
   document's own URL is now the request context; `<base>` only resolves.
+* Cookies (security): `fetch()` and `XMLHttpRequest` in a cross-site iframe
+  are partitioned by the tab's top-level site. They were partitioned by the
+  frame's own site, so a third-party frame's requests used its first-party
+  cookie jar and HTTP cache, getting past the default third-party cookie
+  block and SameSite. `Origin`, `Sec-Fetch-Site`, the Referer and CSP stay
+  relative to the frame, as the Fetch standard asks.
 
 1.0.43:
 ======
