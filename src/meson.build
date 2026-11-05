@@ -448,7 +448,7 @@ if not is_mobile
           'rproc_http.c', 'rproc_inproc.c') + [wpt_hook_h],
     link_with: libnordstjernen_static,
     include_directories: include_directories('.'),
-    dependencies: nordstjernen_deps + ns_sdl_deps + rproc_deps,
+    dependencies: nordstjernen_deps + rproc_deps,
     c_args: ns_lib_c_args,
     link_args: nordstjernen_exe_link_args,
     win_subsystem: 'windows',
