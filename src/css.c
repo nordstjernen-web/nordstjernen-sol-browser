@@ -3203,8 +3203,9 @@ font_unit_set(double *out_em, double *out_rem, ns_css_unit unit, double v,
 }
 
 static gboolean
-resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
-                       double *out_pct, double *out_em, double *out_rem)
+resolve_to_px_pct_units(const char *text, gsize len, double *out_px,
+                        double *out_pct, double *out_em, double *out_rem,
+                        double *out_lh)
 {
     char *s = g_strndup(text, len);
     g_strstrip(s);
@@ -3212,6 +3213,7 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
     *out_pct = 0;
     if (out_em) *out_em = 0;
     if (out_rem) *out_rem = 0;
+    if (out_lh) *out_lh = 0;
     ns_css_value *v = parse_calc(s);
     if (!v) {
         char *wrapped = g_strdup_printf("calc(%s)", s);
@@ -3228,6 +3230,7 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
             *out_px = rel == 0 ? v->u.calc.px : v->u.calc.px + rel;
         }
         *out_pct = v->u.calc.pct;
+        if (out_lh) *out_lh = v->u.calc.lh;
         ns_css_value_free(v);
         g_free(s);
         return TRUE;
@@ -3241,6 +3244,10 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
         case NS_CSS_UNIT_REM:
             font_unit_set(out_em, out_rem, v->u.length.unit, v->u.length.v,
                           out_px);
+            break;
+        case NS_CSS_UNIT_LH:
+            if (out_lh) *out_lh = v->u.length.v;
+            else *out_px = v->u.length.v;
             break;
         default:
             *out_px = v->u.length.v;
@@ -3259,6 +3266,10 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
         case NS_CSS_UNIT_EM:
         case NS_CSS_UNIT_REM:
             font_unit_set(out_em, out_rem, u, num, out_px);
+            break;
+        case NS_CSS_UNIT_LH:
+            if (out_lh) *out_lh = num;
+            else *out_px = num;
             break;
         case NS_CSS_UNIT_VW:      *out_px = num * g_viewport_w / 100.0; break;
         case NS_CSS_UNIT_VH:      *out_px = num * g_viewport_h / 100.0; break;
@@ -3283,6 +3294,14 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
     }
     g_free(s);
     return FALSE;
+}
+
+static gboolean
+resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
+                       double *out_pct, double *out_em, double *out_rem)
+{
+    return resolve_to_px_pct_units(text, len, out_px, out_pct, out_em,
+                                   out_rem, NULL);
 }
 
 static gboolean
@@ -7947,8 +7966,8 @@ parse_translate_len(const char *s, ns_css_transform_op *op, int axis)
     double *field = axis == 0 ? &op->a : axis == 1 ? &op->b : &op->c;
     gboolean *is_percent = axis == 0 ? &op->a_is_percent
                          : axis == 1 ? &op->b_is_percent : NULL;
-    double px = 0, pct = 0, em = 0, rem = 0;
-    if (!resolve_to_px_pct_font(s, strlen(s), &px, &pct, &em, &rem)) {
+    double px = 0, pct = 0, em = 0, rem = 0, lh = 0;
+    if (!resolve_to_px_pct_units(s, strlen(s), &px, &pct, &em, &rem, &lh)) {
         gboolean fallback_pct = FALSE;
         if (!parse_transform_len(s, field, &fallback_pct)) return FALSE;
         if (is_percent) *is_percent = fallback_pct;
@@ -7956,11 +7975,12 @@ parse_translate_len(const char *s, ns_css_transform_op *op, int axis)
     }
     op->em[axis] = em;
     op->rem[axis] = rem;
+    op->lh[axis] = lh;
     if (!is_percent) {
         *field = px;
         return pct == 0;
     }
-    if (pct != 0 && px == 0 && em == 0 && rem == 0) {
+    if (pct != 0 && px == 0 && em == 0 && rem == 0 && lh == 0) {
         *field = pct;
         *is_percent = TRUE;
         return TRUE;
@@ -8413,7 +8433,8 @@ static gboolean
 translate_axis_is_mixed(const ns_css_transform_op *op, int axis)
 {
     double pct = axis == 0 ? op->a_pct : axis == 1 ? op->b_pct : 0;
-    return pct != 0 || op->em[axis] != 0 || op->rem[axis] != 0;
+    return pct != 0 || op->em[axis] != 0 || op->rem[axis] != 0 ||
+           op->lh[axis] != 0;
 }
 
 static void
@@ -8429,14 +8450,14 @@ append_translate_length(GString *s, const ns_css_transform_op *op, int axis)
         g_string_append(s, is_percent ? "%" : "px");
         return;
     }
-    const double parts[4] = {
+    const double parts[5] = {
         axis == 0 ? op->a_pct : axis == 1 ? op->b_pct : 0,
-        v, op->em[axis], op->rem[axis],
+        v, op->em[axis], op->rem[axis], op->lh[axis],
     };
-    static const char *const units[4] = { "%", "px", "em", "rem" };
+    static const char *const units[5] = { "%", "px", "em", "rem", "lh" };
     gboolean first = TRUE;
     g_string_append(s, "calc(");
-    for (int k = 0; k < 4; k++) {
+    for (int k = 0; k < 5; k++) {
         if (parts[k] == 0) continue;
         if (!first) g_string_append(s, parts[k] < 0 ? " - " : " + ");
         char *t = ns_css_number_str(first ? parts[k] : fabs(parts[k]));
@@ -8575,7 +8596,8 @@ ns_css_transform_to_mat4(const ns_css_transform *tf,
         double *fields[] = { &sane.a, &sane.b, &sane.c, &sane.d,
                              &sane.e, &sane.f, &sane.a_pct, &sane.b_pct,
                              &sane.em[0], &sane.em[1], &sane.em[2],
-                             &sane.rem[0], &sane.rem[1], &sane.rem[2] };
+                             &sane.rem[0], &sane.rem[1], &sane.rem[2],
+                             &sane.lh[0], &sane.lh[1], &sane.lh[2] };
         for (gsize k = 0; k < G_N_ELEMENTS(fields); k++)
             if (!isfinite(*fields[k])) *fields[k] = dflt;
         const ns_css_transform_op *op = &sane;
@@ -8583,11 +8605,12 @@ ns_css_transform_to_mat4(const ns_css_transform *tf,
         case NS_CSS_TFN_TRANSLATE: {
             double dx = (op->a_is_percent ? op->a / 100.0 * bw : op->a) +
                         op->a_pct / 100.0 * bw +
-                        (op->em[0] + op->rem[0]) * 16.0;
+                        (op->em[0] + op->rem[0] + op->lh[0] * 1.2) * 16.0;
             double dy = (op->b_is_percent ? op->b / 100.0 * bh : op->b) +
                         op->b_pct / 100.0 * bh +
-                        (op->em[1] + op->rem[1]) * 16.0;
-            double dz = op->c + (op->em[2] + op->rem[2]) * 16.0;
+                        (op->em[1] + op->rem[1] + op->lh[1] * 1.2) * 16.0;
+            double dz = op->c +
+                        (op->em[2] + op->rem[2] + op->lh[2] * 1.2) * 16.0;
             ns_mat4_translate(out, dx, dy, dz);
             break;
         }
@@ -29021,7 +29044,8 @@ transform_ops_matrix2d(const ns_css_transform_op *ops, int n, double out[6])
         const ns_css_transform_op *op = &ops[i];
         if (op->kind == NS_CSS_TFN_TRANSLATE &&
             (op->a_is_percent || op->b_is_percent || op->a_pct != 0 || op->b_pct != 0 ||
-             op->em[0] != 0 || op->em[1] != 0 || op->rem[0] != 0 || op->rem[1] != 0))
+             op->em[0] != 0 || op->em[1] != 0 || op->rem[0] != 0 || op->rem[1] != 0 ||
+             op->lh[0] != 0 || op->lh[1] != 0))
             return FALSE;
     }
     ns_css_transform sub = { .n_ops = n };
@@ -29121,6 +29145,7 @@ transform_op_interpolate(const ns_css_transform_op *x, const ns_css_transform_op
     for (int k = 0; k < 3; k++) {
         o->em[k] = x->em[k] + (y->em[k] - x->em[k]) * t;
         o->rem[k] = x->rem[k] + (y->rem[k] - x->rem[k]) * t;
+        o->lh[k] = x->lh[k] + (y->lh[k] - x->lh[k]) * t;
     }
 }
 
@@ -29320,6 +29345,7 @@ transform_op_accumulate(const ns_css_transform_op *x, const ns_css_transform_op 
         for (int k = 0; k < 3; k++) {
             o->em[k] = x->em[k] + y->em[k];
             o->rem[k] = x->rem[k] + y->rem[k];
+            o->lh[k] = x->lh[k] + y->lh[k];
         }
         return TRUE;
     case NS_CSS_TFN_ROTATE:
@@ -32396,7 +32422,8 @@ transform_has_font_units(const ns_css_transform *tf)
 {
     for (int k = 0; k < tf->n_ops; k++)
         for (int m = 0; m < 3; m++)
-            if (tf->ops[k].em[m] != 0 || tf->ops[k].rem[m] != 0)
+            if (tf->ops[k].em[m] != 0 || tf->ops[k].rem[m] != 0 ||
+                tf->ops[k].lh[m] != 0)
                 return TRUE;
     return FALSE;
 }
@@ -32737,9 +32764,11 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
                 ns_css_transform_op *op = &v->u.transform.ops[k];
                 double *axes[3] = { &op->a, &op->b, &op->c };
                 for (int m = 0; m < 3; m++) {
-                    *axes[m] += op->em[m] * my_font_px + op->rem[m] * root_px;
+                    *axes[m] += op->em[m] * my_font_px + op->rem[m] * root_px +
+                                op->lh[m] * my_line_px;
                     op->em[m] = 0;
                     op->rem[m] = 0;
+                    op->lh[m] = 0;
                 }
             }
             continue;
