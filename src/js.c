@@ -26034,11 +26034,12 @@ ns_window_eventsource_ctor(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     if (argc < 1)
         return JS_ThrowTypeError(ctx, "EventSource requires a URL");
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_ThrowTypeError(ctx, "EventSource is unavailable");
     const char *url_raw = JS_ToCString(ctx, argv[0]);
     if (!url_raw) return JS_EXCEPTION;
-    ns_js *js = js_from_ctx(ctx);
     char *resolved = NULL;
-    if (js && js->current_url)
+    if (js->current_url)
         resolved = ns_url_resolve(js->current_url, url_raw);
     char *target = g_strdup(resolved ? resolved : url_raw);
     JS_FreeCString(ctx, url_raw);
