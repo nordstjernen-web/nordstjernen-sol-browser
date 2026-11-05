@@ -9,6 +9,13 @@ Changelog:
   ABI 6 kernels the ruleset also scopes signals to the sandbox domain, and
   renderers' rulesets scope abstract UNIX sockets too. A compromised tab
   could previously `kill(-1, SIGKILL)` every process of the user.
+* Security: a page can run at most 64 workers at once (dedicated, shared
+  and service workers together). Each worker is an OS thread with its own
+  JavaScript runtime, and a loop creating workers could previously spawn
+  threads until the kernel refused and peg every core. Beyond the limit a
+  `Worker` or `SharedWorker` fires `error` and `register()` rejects with
+  `QuotaExceededError`, each with a console line naming the limit;
+  terminating a worker frees a slot.
 * Security: the response-side CORS check and the canvas origin-clean check
   no longer treat every `blob:` URL as readable; a blob URL is readable
   only by documents of the origin that created it, the same rule the fetch

@@ -30482,6 +30482,27 @@ ns_worker_fail_job(JSContext *ctx, int argc, JSValueConst *argv)
     return JS_UNDEFINED;
 }
 
+#define NS_MAX_WORKERS_PER_PAGE 64
+
+static gboolean
+ns_js_worker_limit_reached(ns_js *js, const char *kind, const char *url)
+{
+    guint live = 0;
+    for (guint i = 0; js->workers && i < js->workers->len; i++) {
+        ns_worker_host *h = g_ptr_array_index(js->workers, i);
+        if (!g_atomic_int_get(&h->closing)) live++;
+    }
+    if (live < NS_MAX_WORKERS_PER_PAGE) return FALSE;
+    if (js->log_cb) {
+        char *line = g_strdup_printf("%s %s: this page already runs %u "
+                                     "workers; terminate one first",
+                                     kind, url ? url : "", live);
+        js->log_cb(line, js->log_user_data);
+        g_free(line);
+    }
+    return TRUE;
+}
+
 static JSValue
 ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -30559,6 +30580,8 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     if (!fails && ns_js_realm_csp(js, ctx) &&
         !ns_csp_allows(ns_js_realm_csp(js, ctx), NS_CSP_WORKER, abs_url,
                        ns_js_realm_url_or_current(js, ctx)))
+        fails = TRUE;
+    if (!fails && ns_js_worker_limit_reached(js, "Worker", abs_url))
         fails = TRUE;
 
     ns_new_class_id(&ns_worker_class_id);
@@ -30758,6 +30781,8 @@ ns_shared_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc,
         }
         fails = TRUE;
     }
+    if (!fails && ns_js_worker_limit_reached(js, "SharedWorker", abs_url))
+        fails = TRUE;
 
     JSValue proto = JS_IsObject(this_val)
         ? JS_GetPropertyStr(ctx, this_val, "prototype") : JS_NULL;
@@ -30929,6 +30954,13 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         g_free(scope);
         return ns_sw_reject(ctx, "SecurityError",
                             "blocked by Content-Security-Policy worker-src");
+    }
+    if (ns_js_worker_limit_reached(js, "ServiceWorker", abs_url)) {
+        g_free(abs_url);
+        g_free(scope);
+        return ns_sw_reject(ctx, "QuotaExceededError",
+                            "this page already runs the maximum number of "
+                            "workers");
     }
 
     ns_new_class_id(&ns_worker_class_id);
