@@ -649,6 +649,31 @@ ns_node_sandbox_blocks_scripts(const ns_node *node)
     return (sb & NS_SANDBOX_ACTIVE) && !(sb & NS_SANDBOX_ALLOW_SCRIPTS);
 }
 
+gboolean
+ns_js_sandbox_allows_form_navigation(ns_js *js, const ns_node *form,
+                                     const char *target,
+                                     gboolean user_activated)
+{
+    unsigned sb = ns_iframe_effective_sandbox(form);
+    if (!(sb & NS_SANDBOX_ACTIVE)) return TRUE;
+    gboolean to_top = target && g_ascii_strcasecmp(target, "_top") == 0;
+    gboolean to_blank = target && g_ascii_strcasecmp(target, "_blank") == 0;
+    gboolean activated = user_activated || ns_js_has_transient_activation(js);
+    gboolean top_nav = (sb & NS_SANDBOX_ALLOW_TOP_NAV) ||
+                       (activated && (sb & NS_SANDBOX_ALLOW_TOP_NAV_UA));
+    const char *why = NULL;
+    if (!(sb & NS_SANDBOX_ALLOW_FORMS))
+        why = "Blocked form submission: sandboxed iframe without allow-forms";
+    else if ((to_top || to_blank) && !top_nav)
+        why = "Blocked form submission: sandboxed iframe without "
+              "allow-top-navigation";
+    else if (to_blank && !(sb & NS_SANDBOX_ALLOW_POPUPS))
+        why = "Blocked form submission: sandboxed iframe without allow-popups";
+    if (!why) return TRUE;
+    if (js && js->log_cb) js->log_cb(why, js->log_user_data);
+    return FALSE;
+}
+
 static JSValue
 ns_mql_addListener(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)

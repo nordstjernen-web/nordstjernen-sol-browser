@@ -3909,7 +3909,8 @@ browser_form_target_leaves_frame(const char *target)
 
 static void
 browser_perform_form_navigation(ns_browser *b, const ns_node *form,
-                                const ns_node *clicked)
+                                const ns_node *clicked,
+                                gboolean user_activated)
 {
     if (!b || !form || !b->doc) return;
     gboolean from_text = clicked && ns_node_is_text_input(clicked);
@@ -3928,6 +3929,9 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
     const char *formtarget = (clicked && !from_text)
                              ? ns_element_get_attr(clicked, "formtarget") : NULL;
     if (formtarget && *formtarget) target = formtarget;
+    if (b->js && !ns_js_sandbox_allows_form_navigation(b->js, form, target,
+                                                       user_activated))
+        return;
     const char *frame_url = b->js ? ns_js_node_frame_url(b->js, form) : NULL;
     gboolean in_frame = frame_url && !browser_form_target_leaves_frame(target);
     g_autofree char *base = frame_url ? NULL : browser_document_base(b);
@@ -4007,7 +4011,8 @@ browser_js_form_submit(const ns_node *form, const ns_node *submitter,
 {
     ns_browser *b = user_data;
     if (!b || !form) return;
-    browser_perform_form_navigation(b, form, submitter ? submitter : form);
+    browser_perform_form_navigation(b, form, submitter ? submitter : form,
+                                    FALSE);
 }
 
 static void
@@ -4037,7 +4042,7 @@ browser_submit_form(ns_browser *b, const ns_node *clicked)
         if (prevented) return;
     }
 
-    browser_perform_form_navigation(b, form, clicked);
+    browser_perform_form_navigation(b, form, clicked, TRUE);
 }
 
 static const ns_node *
