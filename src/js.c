@@ -52187,11 +52187,39 @@ ns_media_prop_number(JSContext *ctx, JSValueConst this_val, const char *name)
     return out;
 }
 
+static gboolean
+ns_media_prop_double(JSContext *ctx, JSValueConst this_val, const char *name,
+                     double *out)
+{
+    JSValue v = JS_GetPropertyStr(ctx, this_val, name);
+    gboolean ok = JS_IsNumber(v) && JS_ToFloat64(ctx, out, v) == 0;
+    JS_FreeValue(ctx, v);
+    return ok;
+}
+
 static JSValue
 ns_media_get_seekable_ranges(JSContext *ctx, JSValueConst this_val)
 {
+    double duration = 0;
+    if (!ns_media_prop_double(ctx, this_val, "_nd_duration", &duration) ||
+        !isinf(duration) || duration < 0)
+        return ns_media_time_ranges_for(ctx,
+            ns_media_prop_number(ctx, this_val, "_nd_duration"));
+    double buffered_end = ns_media_prop_number(ctx, this_val, "_nd_buffered");
+    double buffered_start =
+        ns_media_prop_number(ctx, this_val, "_nd_buffered_start");
+    double live_start = 0, live_end = 0;
+    if (ns_media_prop_double(ctx, this_val, "_nd_live_start", &live_start) &&
+        ns_media_prop_double(ctx, this_val, "_nd_live_end", &live_end) &&
+        live_end > live_start) {
+        if (buffered_end > buffered_start) {
+            live_start = MIN(live_start, buffered_start);
+            live_end = MAX(live_end, buffered_end);
+        }
+        return ns_media_time_range_span(ctx, live_start, live_end);
+    }
     return ns_media_time_ranges_for(ctx,
-        ns_media_prop_number(ctx, this_val, "_nd_duration"));
+        buffered_end > buffered_start ? buffered_end : 0);
 }
 
 static JSValue
@@ -52333,6 +52361,8 @@ ns_media_run_load_algorithm(JSContext *ctx, JSValueConst this_val, ns_node *el)
     JS_SetPropertyStr(ctx, this_val, "_nd_duration", JS_UNDEFINED);
     JS_SetPropertyStr(ctx, this_val, "_nd_buffered", JS_UNDEFINED);
     JS_SetPropertyStr(ctx, this_val, "_nd_buffered_start", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, this_val, "_nd_live_start", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, this_val, "_nd_live_end", JS_UNDEFINED);
     JS_SetPropertyStr(ctx, this_val, "_nd_ended", JS_FALSE);
     JS_SetPropertyStr(ctx, this_val, "_nd_playing", JS_FALSE);
     JS_SetPropertyStr(ctx, this_val, "_nd_played_end", JS_NewFloat64(ctx, 0.0));

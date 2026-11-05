@@ -3,6 +3,17 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Media: live MSE streams sit on the player's timeline. `SourceBuffer`
+  `timestampOffset` is applied: each media segment's `tfdt` is shifted by
+  the offset in its track's timescale before the segment is buffered; it
+  was ignored, so a live HLS stream transmuxed with a negative offset was
+  buffered hundreds of seconds away from where the player looked for it.
+  `seekable` follows the MSE rules for an infinite duration: the live
+  seekable range set by `setLiveSeekableRange()` joined with what is
+  buffered, else 0 to the buffered end, else empty — it reported
+  `[0, Infinity]`, and a player seeking to its end threw "currentTime
+  must be finite". x.com's live broadcasts now show the live player
+  instead of "Infinity:NaN:NaN".
 * DOM: `slotchange` fires. When the nodes assigned to a `<slot>` change —
   children inserted into or removed from a shadow host, a `slot` attribute
   changed, a slot inserted, removed or renamed — the slot receives a
