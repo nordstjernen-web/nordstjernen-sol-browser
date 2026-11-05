@@ -271,6 +271,7 @@ static gboolean javascript_mime_essence_match(const char *s, gsize len);
 static void ns_js_nodes_inserted(ns_js *js, ns_node *parent, GPtrArray *nodes);
 static void ns_js_script_needs_prepare(ns_js *js, ns_node *script);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
+static void ns_js_shape_interface_objects(JSContext *ctx);
 static JSValue ns_popup_open(JSContext *ctx, ns_js *js, const char *url,
                              int argc, JSValueConst *argv);
 static gboolean ns_popup_supported(void);
@@ -30123,6 +30124,7 @@ ns_worker_js_new(ns_worker_host *host)
         JS_FreeValue(ctx, g);
     }
     ns_js_name_engine_members(ctx);
+    ns_js_shape_interface_objects(ctx);
     ns_realm_protos_capture(ctx);
     {
         JSValue crypto = JS_NewObject(ctx);
@@ -62001,10 +62003,10 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
             JSValue proto = JS_GetPropertyStr(ctx, ev_carrier, "prototype");
             for (gsize i = 0; i < G_N_ELEMENTS(evph); i++) {
                 JS_DefinePropertyValueStr(ctx, ev_carrier, evph[i].name,
-                    JS_NewInt32(ctx, evph[i].value), 0);
+                    JS_NewInt32(ctx, evph[i].value), JS_PROP_ENUMERABLE);
                 if (JS_IsObject(proto))
                     JS_DefinePropertyValueStr(ctx, proto, evph[i].name,
-                        JS_NewInt32(ctx, evph[i].value), 0);
+                        JS_NewInt32(ctx, evph[i].value), JS_PROP_ENUMERABLE);
             }
             JS_FreeValue(ctx, proto);
         }
@@ -66065,6 +66067,7 @@ ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx, gboolean main_realm)
     ns_install_node_shapes(ctx);
     ns_install_element_shapes(ctx);
     ns_js_brand_node_interfaces(ctx, ns_element_class_id, ns_attr_class_id);
+    ns_js_shape_interface_objects(ctx);
 }
 
 static void
@@ -67226,6 +67229,138 @@ ns_js_name_engine_members(JSContext *ctx)
     g_hash_table_destroy(mn.done);
     g_hash_table_destroy(mn.seen);
     JS_FreeValue(ctx, mn.to_string);
+    JS_FreeValue(ctx, global);
+}
+
+static gboolean
+ns_js_global_is_ecmascript_intrinsic(const char *name)
+{
+    static const char *const intrinsics[] = {
+        "AggregateError", "Array", "ArrayBuffer", "AsyncDisposableStack",
+        "AsyncIterator", "Atomics", "BigInt", "BigInt64Array",
+        "BigUint64Array", "Boolean", "DataView", "Date", "DisposableStack",
+        "Error", "EvalError", "FinalizationRegistry", "Float16Array",
+        "Float32Array", "Float64Array", "Function", "Infinity", "Int16Array",
+        "Int32Array", "Int8Array", "InternalError", "Intl", "Iterator", "JSON",
+        "Map", "Math", "NaN", "Number", "Object", "Promise", "Proxy",
+        "RangeError", "ReferenceError", "Reflect", "RegExp", "Set",
+        "SharedArrayBuffer", "String", "SuppressedError", "Symbol",
+        "SyntaxError", "Temporal", "TypeError", "URIError", "Uint16Array",
+        "Uint32Array", "Uint8Array", "Uint8ClampedArray", "WeakMap",
+        "WeakRef", "WeakSet",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(intrinsics); i++)
+        if (strcmp(name, intrinsics[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_js_name_is_idl_constant(const char *k)
+{
+    gboolean letter = FALSE;
+    for (const char *p = k; *p; p++) {
+        if (g_ascii_isupper((guchar)*p)) letter = TRUE;
+        else if (*p != '_' && !g_ascii_isdigit((guchar)*p)) return FALSE;
+    }
+    return letter;
+}
+
+static void
+ns_js_shape_interface_members(JSContext *ctx, JSValueConst o,
+                              gboolean interface_object)
+{
+    JSPropertyEnum *tab = NULL;
+    uint32_t len = 0;
+    if (JS_GetOwnPropertyNames(ctx, &tab, &len, o, JS_GPN_STRING_MASK) < 0) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return;
+    }
+    for (uint32_t i = 0; i < len; i++) {
+        const char *k = JS_AtomToCString(ctx, tab[i].atom);
+        if (!k) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+            continue;
+        }
+        gboolean skip = (k[0] == '_' && k[1] == '_') ||
+                        strcmp(k, "constructor") == 0 ||
+                        (interface_object && (strcmp(k, "prototype") == 0 ||
+                                              strcmp(k, "name") == 0 ||
+                                              strcmp(k, "length") == 0));
+        JSPropertyDescriptor d;
+        int has = skip ? 0 : JS_GetOwnProperty(ctx, &d, o, tab[i].atom);
+        if (has < 0) JS_FreeValue(ctx, JS_GetException(ctx));
+        if (has > 0) {
+            int flags = 0;
+            if (!(d.flags & JS_PROP_ENUMERABLE))
+                flags |= JS_PROP_HAS_ENUMERABLE | JS_PROP_ENUMERABLE;
+            if (!(d.flags & JS_PROP_GETSET) && (d.flags & JS_PROP_WRITABLE) &&
+                JS_IsNumber(d.value) && ns_js_name_is_idl_constant(k))
+                flags |= JS_PROP_HAS_WRITABLE;
+            if (flags && (d.flags & JS_PROP_CONFIGURABLE) &&
+                JS_DefineProperty(ctx, o, tab[i].atom, JS_UNDEFINED,
+                                  JS_UNDEFINED, JS_UNDEFINED, flags) < 0)
+                JS_FreeValue(ctx, JS_GetException(ctx));
+            JS_FreeValue(ctx, d.value);
+            JS_FreeValue(ctx, d.getter);
+            JS_FreeValue(ctx, d.setter);
+        }
+        JS_FreeCString(ctx, k);
+    }
+    JS_FreePropertyEnum(ctx, tab, len);
+}
+
+static void
+ns_js_shape_interface_objects(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSPropertyEnum *tab = NULL;
+    uint32_t len = 0;
+    if (JS_GetOwnPropertyNames(ctx, &tab, &len, global, JS_GPN_STRING_MASK) < 0) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, global);
+        return;
+    }
+    for (uint32_t i = 0; i < len; i++) {
+        const char *k = JS_AtomToCString(ctx, tab[i].atom);
+        if (!k) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+            continue;
+        }
+        if (g_ascii_isupper((guchar)k[0]) &&
+            !ns_js_global_is_ecmascript_intrinsic(k)) {
+            JSValue v = JS_GetProperty(ctx, global, tab[i].atom);
+            JSPropertyDescriptor gd;
+            int on_global = JS_GetOwnProperty(ctx, &gd, global, tab[i].atom);
+            if (on_global < 0) JS_FreeValue(ctx, JS_GetException(ctx));
+            if (on_global > 0) {
+                if ((gd.flags & JS_PROP_ENUMERABLE) &&
+                    (gd.flags & JS_PROP_CONFIGURABLE) &&
+                    JS_DefineProperty(ctx, global, tab[i].atom, JS_UNDEFINED,
+                                      JS_UNDEFINED, JS_UNDEFINED,
+                                      JS_PROP_HAS_ENUMERABLE) < 0)
+                    JS_FreeValue(ctx, JS_GetException(ctx));
+                JS_FreeValue(ctx, gd.value);
+                JS_FreeValue(ctx, gd.getter);
+                JS_FreeValue(ctx, gd.setter);
+            }
+            if (JS_IsException(v)) {
+                JS_FreeValue(ctx, JS_GetException(ctx));
+            } else if (JS_IsFunction(ctx, v)) {
+                ns_js_shape_interface_members(ctx, v, TRUE);
+                JSValue proto = JS_GetPropertyStr(ctx, v, "prototype");
+                if (JS_IsException(proto))
+                    JS_FreeValue(ctx, JS_GetException(ctx));
+                else if (JS_IsObject(proto))
+                    ns_js_shape_interface_members(ctx, proto, FALSE);
+                JS_FreeValue(ctx, proto);
+            } else if (JS_IsObject(v)) {
+                ns_js_shape_interface_members(ctx, v, FALSE);
+            }
+            JS_FreeValue(ctx, v);
+        }
+        JS_FreeCString(ctx, k);
+    }
+    JS_FreePropertyEnum(ctx, tab, len);
     JS_FreeValue(ctx, global);
 }
 
