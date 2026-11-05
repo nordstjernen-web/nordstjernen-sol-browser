@@ -718,6 +718,7 @@ wg_buffer_finalizer(JSRuntime *rt, JSValue val)
         g_array_free(b->mapped_ranges, TRUE);
     }
     if (b->buffer) wgpuBufferRelease(b->buffer);
+    if (b->device) wgpuDeviceRelease(b->device);
     g_free(b);
 }
 
@@ -873,6 +874,7 @@ wg_device_createBuffer(JSContext *ctx, JSValueConst this_val,
     b->buffer = wbuf;
     b->size = desc.size;
     b->usage = usage;
+    wgpuDeviceAddRef(d->device);
     b->device = d->device;
     if (desc.mappedAtCreation) {
         b->mapped = TRUE;
@@ -2271,6 +2273,7 @@ wg_encoder_finalizer(JSRuntime *rt, JSValue val)
     ns_wg_encoder *e = JS_GetOpaque(val, g_encoder_class);
     if (!e) return;
     if (e->enc) wgpuCommandEncoderRelease(e->enc);
+    if (e->device) wgpuDeviceRelease(e->device);
     g_free(e);
 }
 
@@ -2281,6 +2284,7 @@ wg_make_encoder(JSContext *ctx, WGPUCommandEncoder enc, const ns_wg_device *d)
     if (JS_IsException(obj)) return obj;
     ns_wg_encoder *e = g_new0(ns_wg_encoder, 1);
     e->enc = enc;
+    wgpuDeviceAddRef(d->device);
     e->device = d->device;
     e->sink = d->sink;
     JS_SetOpaque(obj, e);
