@@ -5,94 +5,29 @@ Nordstjernen web browser
 [![Latest release](https://img.shields.io/github/v/release/nordstjernen-web/nordstjernen-sol-browser?style=flat-square)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases/latest)
 [![Best viewed in Nordstjernen Browser](docs/best-viewed-in-nordstjernen-badge.svg)](https://nordstjernen.org)
 
-Nordstjernen (aka "Sol browser", shipped as **Nordstjernen Web Browser**, short name **Sol Explorer**) is a web
-browser written from scratch in C, focused on support for modern HTML, CSS
-and JavaScript standards.
-
-**Windows:** install Nordstjernen Web Browser from the [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl).
+Nordstjernen Sol is a web browser written from scratch in C, focused on
+modern HTML, CSS and JavaScript standards. It ships as **Nordstjernen Web
+Browser** on the desktop and as **Sol Explorer** on Android.
 
 ![Nordstjernen 1.0.42 playing a 4K travel documentary on YouTube](docs/screenshot.png)
 
-Supported platforms:
-* [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)
-* MacOS
-* Linux (glibc and musl/Alpine)
-* FreeBSD and NetBSD
-* [Android](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser)
-* Java
-* iOS (experimental port, built from source for arm64 devices and the simulator — see [docs/iOS.md](docs/iOS.md))
-
 **Current release:** **1.0.43** (November 2026) — see [Changelog.md](Changelog.md).
-
-**Standards.** Behaviour is measured against the spec text, section by
-section, not against another browser. The walk-through of the in-scope
-WHATWG HTML standard (§1–§16) in
-[docs/HTML-compatibility.md](docs/HTML-compatibility.md) records **141 spec
-rows fully implemented, 31 partial, 0 absent** (July 2026), besides a handful
-that are non-goals by design: `embed`/`object` plugins, `frame`/`frameset`,
-`applet`/`marquee`, telemetry, and AI-style web APIs.
-
-Conformance is also measured with the shared test suites, run locally
-against a static [web-platform-tests](https://github.com/web-platform-tests/wpt)
-checkout (October 2026). These are the subtests that pass:
-
-| Suite | Passing |
-|-------|---------|
-| WPT `css/` (6,991 test files) | 110,540 of 151,048 subtests (73.2 %) |
-| WPT `html/`, `dom/`, `url/` and related (4,899 test files) | 151,974 of 166,164 subtests (91.5 %) |
-| [test262](https://github.com/tc39/test262) on the QuickJS engine | 82,243 of 82,248 tests run (5 failures) |
-
-**Security.** Each tab's engine runs in its own renderer process behind an
-IPC + shared-memory boundary. On Linux the renderer is sandboxed with
-seccomp + Landlock (the UI shell with Landlock); on macOS a Seatbelt profile
-confines its file writes to the profile, cache, download and temporary
-directories; on Windows it runs with process mitigation policies (forced
-ASLR, strict handle checks, restricted image loads, no child processes) and
-the browser drops administrator rights at start-up. The FreeBSD and NetBSD
-builds have no renderer sandbox yet. No JIT, in either the JavaScript or the
-WebAssembly engine. The shell can parse the renderer's IPC messages with an
-optional memory-safe Rust parser (`-Dipc_rust=enabled`, off by default), and
-about:nordstjernen shows which parser and sandbox layers are active.
-
-**Minimalism.** The core engine is about 263,000 lines of project C and
-headers, excluding vendored libraries and generated assets — small enough for
-one person to read and audit end-to-end. See
-[docs/Software-Architecture.md](docs/Software-Architecture.md) for a map of
-the whole system.
-
-Sibling projects: [Nordstjernen Web Browser](https://github.com/nordstjernen-web/northstar-web-browser)
-(formerly Northstar), the GPL-licensed minimalist edition with one process
-and no tabs, and [Southstar](https://github.com/nordstjernen-web/southstar-browser),
-this browser rewritten in Rust.
-
-<img src="docs/nordstjernen-now.gif" alt="Nordstjernen Now!" width="140">
 
 ## Download
 
 | Platform | Download |
 |----------|----------|
-| Windows | [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl) |
-| Android | [Google Play](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser) |
-| macOS | notarised Apple Silicon `.dmg` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
-| Debian / Ubuntu / Fedora | `.deb` packages (Debian 13, Ubuntu 24.04 and 26.04), a Fedora 45 `.rpm` and a portable Linux `.zip` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
+| Windows 10 (1809 or later), x64 | [Microsoft Store](https://apps.microsoft.com/detail/9nw8t7w5z4pl) |
+| Android 14 or later (arm64, x86_64) | [Google Play](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser) |
+| macOS (Apple Silicon) | notarised `.dmg` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
+| Debian 13, Ubuntu 24.04 and 26.04, Fedora 45 | `.deb` and `.rpm` packages and a portable Linux `.zip` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
 | npm (Linux, macOS, BSD, Windows) | [`nordstjernen-browser`](https://www.npmjs.com/package/nordstjernen-browser), see below |
 | Java/JVM | [`org.nordstjernen:nordstjernen-java`](https://github.com/nordstjernen-web/nordstjernen-sol-browser/packages) on GitHub Packages (Maven) |
-| Source | [release tags](https://github.com/nordstjernen-web/nordstjernen-sol-browser/tags) |
+| Alpine (musl), Arch, FreeBSD, NetBSD, iOS (experimental) | build from source — see [docs/](docs/README.md) and [docs/iOS.md](docs/iOS.md) |
 
-Windows 10 version 1809 or later on x64 is required. Android 14 or later
-is required (arm64 and x86_64). Other platforms build from source — see
-"Build" below and the per-platform install notes in [docs/](docs/README.md);
-packaging scripts for `.deb`, AppImage, RPM, Alpine, the BSDs, the macOS `.dmg`,
-MSIX and the Windows installer are in `scripts/`, and the Arch `PKGBUILD` is in
-`packaging/arch/`.
-
-**Downloads** of the three browser variants:
-
-| Browser | All releases | Latest release |
-|---------|--------------|----------------|
-| [Nordstjernen Sol Browser](https://github.com/nordstjernen-web/nordstjernen-sol-browser) | [![GitHub All Releases](https://img.shields.io/github/downloads/nordstjernen-web/nordstjernen-sol-browser/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) | [![GitHub Release](https://img.shields.io/github/downloads/nordstjernen-web/nordstjernen-sol-browser/latest/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases/latest) |
-| [Southstar Browser](https://github.com/nordstjernen-web/southstar-browser) | [![GitHub All Releases](https://img.shields.io/github/downloads/nordstjernen-web/southstar-browser/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/southstar-browser/releases) | [![GitHub Release](https://img.shields.io/github/downloads/nordstjernen-web/southstar-browser/latest/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/southstar-browser/releases/latest) |
-| [Northstar Web Browser](https://github.com/nordstjernen-web/northstar-web-browser) | [![GitHub All Releases](https://img.shields.io/github/downloads/nordstjernen-web/northstar-web-browser/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/northstar-web-browser/releases) | [![GitHub Release](https://img.shields.io/github/downloads/nordstjernen-web/northstar-web-browser/latest/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/northstar-web-browser/releases/latest) |
+Packaging scripts for `.deb`, AppImage, RPM, Alpine, the BSDs, the macOS
+`.dmg`, MSIX and the Windows installer are in `scripts/`; the Arch `PKGBUILD`
+is in `packaging/arch/`.
 
 ### Install with npm
 
@@ -101,166 +36,163 @@ sudo npm install -g nordstjernen-browser
 nordstjernen https://nordstjernen.org
 ```
 
-On Linux, macOS and the BSDs, run the install with `sudo`, because npm's global
-directory belongs to root; on Windows, run it without `sudo`.
+Use `sudo` on Linux, macOS and the BSDs, where npm's global directory belongs
+to root, but not on Windows. Apple Silicon Macs get the notarised release
+build; everywhere else the package builds the release source against your
+system's libraries (on Windows with MSYS2's UCRT64 toolchain) and first names
+any build dependency that is missing. See [npm/README.md](npm/README.md).
 
-On Linux, the BSDs and Intel Macs the package builds Nordstjernen from the
-release source against your system's libraries, and first names any build
-dependency that is missing; on Windows it builds the same way with MSYS2's
-UCRT64 toolchain. Apple Silicon Macs get the notarised release build. See [npm/README.md](npm/README.md).
+## Standards, security and size
+
+**Standards.** Behaviour is measured against the spec text, section by
+section, not against another browser. The walk-through of the in-scope WHATWG
+HTML standard (§1–§16) in [docs/HTML-compatibility.md](docs/HTML-compatibility.md)
+records **141 spec rows fully implemented, 31 partial, 0 absent** (July 2026),
+besides a handful of non-goals by design: `embed`/`object` plugins,
+`frame`/`frameset`, `applet`/`marquee`, telemetry, and AI-style web APIs.
+The shared test suites, run locally:
+
+| Suite | Passing |
+|-------|---------|
+| WPT `css/` (6,991 test files, October 2026) | 110,540 of 151,048 subtests (73.2 %) |
+| WPT `html/`, `dom/`, `url/` and related (4,899 test files, October 2026) | 151,974 of 166,164 subtests (91.5 %) |
+| [test262](https://github.com/tc39/test262) on the QuickJS engine (test262 of October 2026) | all 82,248 tests (0 failures) |
+
+**Security.** Each tab's engine runs in its own renderer process behind an
+IPC and shared-memory boundary. On Linux the renderer is sandboxed with
+seccomp and Landlock (the UI shell with Landlock); on macOS a Seatbelt profile
+confines its file writes to the profile, cache, download and temporary
+directories; on Windows it runs with process mitigation policies (forced
+ASLR, strict handle checks, restricted image loads, no child processes), and
+the browser drops administrator rights at start-up. The FreeBSD and NetBSD
+builds have no renderer sandbox yet. Neither the JavaScript nor the
+WebAssembly engine has a JIT. An optional memory-safe Rust parser for the
+renderer's IPC messages is built with `-Dipc_rust=enabled` (off by default),
+and about:nordstjernen shows which parser and sandbox layers are active. See
+[SECURITY.md](SECURITY.md).
+
+**Minimalism.** The core engine is about 268,000 lines of project C and
+headers, excluding vendored libraries and generated assets — small enough for
+one person to read and audit end to end.
+[docs/Software-Architecture.md](docs/Software-Architecture.md) maps the whole
+system.
+
+## Browser variants
+
+| Browser | What it is | Downloads |
+|---------|------------|-----------|
+| **Nordstjernen Sol** (this repository) | the full browser: tabs in sandboxed renderer processes, builds for desktop and Android | [![GitHub All Releases](https://img.shields.io/github/downloads/nordstjernen-web/nordstjernen-sol-browser/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
+| [Northstar Web Browser](https://github.com/nordstjernen-web/northstar-web-browser) | the GPL-only minimalist edition: one process, one page per window | [![GitHub All Releases](https://img.shields.io/github/downloads/nordstjernen-web/northstar-web-browser/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/northstar-web-browser/releases) |
+| [Southstar](https://github.com/nordstjernen-web/southstar-browser) | this browser rewritten in Rust | [![GitHub All Releases](https://img.shields.io/github/downloads/nordstjernen-web/southstar-browser/total?style=flat-square&logo=github)](https://github.com/nordstjernen-web/southstar-browser/releases) |
+
+<img src="docs/nordstjernen-now.gif" alt="Nordstjernen Now!" width="140">
 
 ## Browser features
 
-- **HTML/CSS** — HTML is parsed by the in-tree lexbor engine; XHTML, SVG and
-  other XML documents go through an in-tree namespaced XML parser, and JSON
-  and XML responses are shown pretty-printed. The CSS engine covers the
+- **HTML and CSS** — HTML is parsed by the in-tree lexbor engine; XHTML, SVG
+  and other XML documents go through an in-tree namespaced XML parser, and
+  JSON and XML responses are shown pretty-printed. The CSS engine covers the
   modern cascade and CSSOM (`@layer`, `@scope`, nesting, `:has()`,
-  `@property`), Media Queries Level 4, size container queries and units,
-  flex, grid (with partial subgrid), multi-column, sticky positioning,
-  scroll snap, 2D and 3D transforms, filters, masks and blend modes,
-  gradients, transitions, animations, scroll-driven animations and
-  `text-wrap: balance`. It also covers CSS Color 4/5 (`oklch()`,
-  `color-mix()`, relative colors, `light-dark()`, `contrast-color()`) and
-  CSS anchor positioning with `@position-try` fallbacks. Vertical writing
-  modes lay out vertical text runs, but block flow is not yet turned
-  sideways. `clip-path` paints `circle()`, `ellipse()`, `polygon()` and
-  `inset()`; `path()`, `shape()` and `shape-outside` are parsed, and floats
-  do not yet wrap around a shape. Web Animations composition
-  (`add`/`accumulate`) works for transforms, filters, shapes, lengths and
-  colors, and 2D transform lists interpolate through matrix decomposition.
-  See [docs/CSS-compatibility.md](docs/CSS-compatibility.md).
-- **Text layout** — desktop builds shape text with **web-text-lib**, a Pango
-  fork vendored in-tree at `src/web-text-lib/` that caches shaped glyph
-  strings, itemization, line breaks and font metrics across layouts, so
-  measuring and painting a run reach HarfBuzz once instead of three times.
-  Android and iOS link the system Pango; `-Dweb-text-lib=disabled` builds
-  that path on the desktop too.
-- **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer APIs,
-  Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`, `OffscreenCanvas`),
-  WebCrypto (`crypto.subtle` over OpenSSL), custom elements including
-  customized built-ins (`is=` / `{extends}`), the `Navigation` API for
-  single-page routing, form-associated custom elements (`ElementInternals`),
-  `window.open()` popups in the GTK browser that message their opener
-  (including transferred `MessagePort`s), plus dedicated, module and shared
-  Web Workers, Service Workers (which intercept the page's own `fetch()`), Streams, IndexedDB (over
-  SQLite), WebSocket, `EventSource`, Web Animations (`Element.animate`),
-  Fullscreen and Pointer Lock. The quickjs-ng fork carries `Temporal`, the
-  full `Intl` suite without ICU, and `ShadowRealm`. Much of the higher-level
-  Web API surface is a JavaScript prelude (`data/js/polyfills.js`) compiled
-  into the binary. Each renderer keeps compiled script bytecode in memory, so
-  a script loaded again skips recompilation. The QuickJS engine is selectable at build time: the in-tree
-  quickjs-ng fork by default, or Fabrice Bellard's original QuickJS with
-  `-Dquickjs=quickjs` — see [docs/quickjs.md](docs/quickjs.md).
-- **Networking** over HTTP/2 with libcurl — HSTS, HTTPS-First (on by
+  `@property`), Media Queries Level 4, size container queries, flex, grid
+  (with partial subgrid), multi-column, sticky positioning, scroll snap, 2D
+  and 3D transforms, filters, masks and blend modes, transitions, animations,
+  scroll-driven animations, CSS Color 4/5 and anchor positioning. Not yet:
+  sideways block flow in vertical writing modes, painting
+  `clip-path: path()`/`shape()`, and floats wrapping around `shape-outside`. See
+  [docs/CSS-compatibility.md](docs/CSS-compatibility.md).
+- **Text layout** — desktop builds shape text with web-text-lib, a Pango fork
+  in `src/web-text-lib/` that caches shaped glyph strings and font metrics
+  across layouts, so a run reaches HarfBuzz once instead of three times.
+  Android and iOS use the system Pango.
+- **JavaScript** — the QuickJS interpreter: the in-tree quickjs-ng fork, with
+  `Temporal`, the full `Intl` suite without ICU and `ShadowRealm`, or Fabrice
+  Bellard's original QuickJS with `-Dquickjs=quickjs`
+  ([docs/quickjs.md](docs/quickjs.md)). It runs the DOM, Shadow DOM, custom
+  elements (including customized built-ins and `ElementInternals`), observer
+  APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`, `OffscreenCanvas`),
+  WebCrypto over OpenSSL, the Navigation API, `window.open()` popups that
+  message their opener, dedicated, module and shared Web Workers, Service
+  Workers, Streams, IndexedDB over SQLite, WebSocket, `EventSource`, Web
+  Animations, Fullscreen and Pointer Lock. Much of the higher-level Web API
+  is a JavaScript prelude (`data/js/polyfills.js`) compiled into the binary.
+- **Networking** — HTTP/2 over libcurl with HSTS, HTTPS-First (on by
   default), a Content Security Policy Level 2 subset, subresource integrity
   for scripts, CORS, mixed-content blocking, Fetch Metadata headers, cookies
-  partitioned by top-level site with third-party cookies blocked by default,
-  speculative subresource loading, request coalescing and a `Vary`-aware
-  HTTP cache. HTTP, HTTPS and SOCKS proxies ([docs/Proxy.md](docs/Proxy.md))
-  and DNS-over-HTTPS are configurable.
-- **Images and graphics** — Wuffs decodes PNG/APNG, GIF, BMP, JPEG and simple
-  lossy and lossless WebP; libwebp handles extended WebP (alpha and
-  animation); ICO and SVG are rendered in-engine, with optional AVIF (still
-  images), JPEG XL and inline PDF support (poppler renders each page as an
-  image). Animated images play as many times as their loop count asks. Web
-  fonts load as TTF/OTF, WOFF and WOFF2 (through FreeType, or an in-tree
-  decoder over brotli where FreeType cannot read WOFF2).
-- **Media** — `<video>` plays **inline** for MPEG-1 (decoded in-tree by
-  [pl_mpeg](https://github.com/phoboslab/pl_mpeg)), **WebM** and Ogg
-  (VP9/VP8/Theora + Opus/Vorbis) through FFmpeg's libav, which Linux and
-  Windows builds require, and **MP4 with H.264/AAC**, decoded by the
-  operating system — Media Foundation on Windows, VideoToolbox on macOS/iOS,
-  MediaCodec on Android and GStreamer on Linux/BSD — or by the system FFmpeg
-  where no OS decoder is available, never by a bundled decoder. A
-  distribution FFmpeg on Linux adds AV1 and HEVC. On Windows, Media
-  Foundation decodes H.264 on the GPU through DXVA (D3D11), falling back to
-  the CPU. With GStreamer on Linux, VP9, AV1 and HEVC decode in **hardware**
-  when a VA-API (or other hardware) decoder is installed, falling back to
-  FFmpeg otherwise. Where the OS decodes H.264, `MediaSource.isTypeSupported()`
-  and `canPlayType()` report VP9, AV1 and VP8 as unsupported unless a hardware
-  decoder exists for them, so sites such as YouTube stream H.264 through the
-  OS decoder instead of decoding VP9/AV1 in software. MSE/`blob:` streaming
-  decodes in the renderer, HLS and DASH manifests play through a built-in
-  player over MSE, and a `<track default>` WebVTT file is drawn over the
-  video. `<audio>` plays MP3 (via minimp3) and, with libav, WebM, Ogg and
-  Opus files. All audio, including the MP2 and AAC tracks of video, plays
-  through a separate `nordstjernen-audio` helper over SDL2. Other codecs
-  render a poster and play overlay. See [docs/media.md](docs/media.md).
+  partitioned by top-level site (third-party cookies blocked by default),
+  speculative subresource loading and a `Vary`-aware HTTP cache. HTTP, HTTPS
+  and SOCKS proxies ([docs/Proxy.md](docs/Proxy.md)) and DNS-over-HTTPS are
+  configurable.
+- **Images and fonts** — Wuffs decodes PNG/APNG, GIF, BMP, JPEG and simple
+  WebP; libwebp handles extended (alpha and animated) WebP; ICO and SVG are
+  rendered in-engine; AVIF, JPEG XL and inline PDF (poppler) are optional.
+  Web fonts load as TTF/OTF, WOFF and WOFF2.
+- **Media** — `<video>` plays inline: MPEG-1 decoded in-tree by
+  [pl_mpeg](https://github.com/phoboslab/pl_mpeg), WebM and Ogg (VP9, VP8,
+  Theora, Opus, Vorbis) through FFmpeg's libav, and MP4 with H.264/AAC through
+  the operating system's decoders (Media Foundation, VideoToolbox, MediaCodec,
+  GStreamer), never a bundled one, using the GPU where available. MSE and
+  `blob:` streaming, HLS and DASH through a built-in MSE player, and WebVTT
+  `<track default>` subtitles work. `<audio>` plays MP3 and, with libav, WebM,
+  Ogg and Opus. All audio plays through a separate `nordstjernen-audio` helper
+  over SDL2. See [docs/media.md](docs/media.md).
 - **Web Audio and capture** — `AudioContext`/`OfflineAudioContext` graphs are
-  mixed in-engine by a simplified mono renderer (no `AudioWorklet`);
-  `getUserMedia` reaches the microphone (SDL capture, read through an
-  `AnalyserNode`) and, on Linux, a V4L2 webcam, behind a per-site permission
-  prompt.
-- **WebGL / WebGPU / WebAssembly** — WebGL 1/2 on desktop builds, on by
-  default: over OpenGL ES on Linux and the BSDs, desktop OpenGL on Windows,
-  and WebGL 1 over OpenGL 4.1 on macOS ([docs/webgl.md](docs/webgl.md));
-  experimental `navigator.gpu` over wgpu-native (fetched and linked
-  statically on Linux, macOS and Windows when not installed), on by default
-  and switchable in Settings ([docs/webgpu.md](docs/webgpu.md)); the core
-  WebAssembly JS API (MVP, reference types, bulk memory and, with SIMDe,
-  SIMD) over a vendored WAMR interpreter ([docs/webassembly.md](docs/webassembly.md)).
-- **MathML** — a minimalist presentation-MathML renderer (`src/mathml.c`)
-  for fractions, roots, scripts, under/over and tables, laid out over
-  Pango/Cairo and embedded inline on the text baseline.
-- **Spell checking** — optional, via Enchant: misspelled words in editable
-  text get a red wavy underline, honouring the `spellcheck` attribute.
-- **Safe browsing** — a top-level navigation's host, including a form
-  submission's and each redirect's, is checked against a local SHA-256
-  blocklist before it is fetched, entirely on-device; a match shows a
-  full-page warning. The bundled list is only a seed: add hosts in
-  `~/.config/nordstjernen/safebrowsing.list`, or point
-  `NS_SAFEBROWSING_LIST` at a list that replaces it.
-- **Remote control for agents** — `nordstjernen --mcp` is a built-in MCP
-  server that lets a local agent such as Claude Code read and drive the
-  browser window (tabs, page outline with element refs, clicks, typing,
-  screenshots, JavaScript), starting a browser if none is running. Off
-  until allowed in Settings or with `--remote-control`; loopback only,
-  token-authenticated, with a toolbar badge while connected
-  ([docs/remote-control.md](docs/remote-control.md)).
-- **Process-per-tab** — each tab's engine runs in its own sandboxed
-  `nordstjernen-renderer` process; the GTK app is a thin shell that composites
-  the shared-memory tiles the renderer paints and forwards input over an
-  HTTP/JSON control channel, so a page can't take down the UI
-  ([docs/tab-isolation.md](docs/tab-isolation.md)). `--single-process` runs
-  the engine in the shell process instead, one tab per window
+  mixed in-engine by a simplified stereo renderer (no `AudioWorklet`);
+  `getUserMedia` reaches the microphone and, on Linux, a V4L2 webcam, behind
+  a per-site permission prompt.
+- **WebGL, WebGPU and WebAssembly** — WebGL 1/2, on by default (WebGL 1 only
+  on macOS, over OpenGL 4.1; [docs/webgl.md](docs/webgl.md)); experimental
+  `navigator.gpu` over wgpu-native, on by default and switchable in Settings
+  ([docs/webgpu.md](docs/webgpu.md)); the core WebAssembly JS API (MVP,
+  reference types, bulk memory and SIMD) on a vendored WAMR interpreter
+  ([docs/webassembly.md](docs/webassembly.md)).
+- **MathML** — a minimalist presentation-MathML renderer for fractions,
+  roots, scripts, under/over and tables, laid out inline on the text baseline.
+- **Process per tab** — the GTK app is a thin shell that composites the
+  shared-memory tiles each tab's sandboxed `nordstjernen-renderer` paints and
+  forwards input over an HTTP/JSON control channel, so a page can't take down
+  the UI ([docs/tab-isolation.md](docs/tab-isolation.md)). `--single-process`
+  limits the browser to one tab and one renderer process
   ([docs/single-process-mode.md](docs/single-process-mode.md)). A watchdog
-  supervisor restarts the browser after a crash or hang and reopens the tabs
-  that were open ([docs/watchdog.md](docs/watchdog.md)).
+  restarts the browser after a crash or hang and reopens its tabs
+  ([docs/watchdog.md](docs/watchdog.md)).
 - **Privacy** — no telemetry or update pings. HTTPS-First, stripping of
   tracking parameters (`utm_*`, `gclid`, `fbclid`, …) and blocking of
   third-party cookies are on by default; Do Not Track and Global Privacy
-  Control are opt-in. Client hints are standards-compliant, safe browsing is
-  local-only, and private tabs (`Ctrl+Alt+P`) and `--private` windows leave
-  no cookies, HTTP cache or IndexedDB data behind
-  ([docs/privacy-policy.md](docs/privacy-policy.md)).
-- **UI** — tabs, bookmarks, history, downloads, find-in-page, page zoom, full
-  screen, light/dark/system themes, `view-source:`, printing and saving as
-  PDF or PNG, Developer Tools (Console, Network, Performance, Layout and
-  Elements), a Task Manager (`Shift+Esc`) with per-process CPU and memory,
-  recovery of open tabs after a crash, settings, and a C embedding API
-  ([docs/Embedding.md](docs/Embedding.md)). A headless mode (`--headless`
-  with `--dump=text|dom|layout|png:FILE|pdf:FILE`, `--eval=` and
-  `--viewport=`) drives the engine from scripts; `nordstjernen --help` lists
-  the main options. The browser's name is translated into 40 languages and
-  the core interface into 13; the UI follows the operating-system language
-  ([docs/i18n.md](docs/i18n.md)).
+  Control are opt-in. Safe browsing checks each top-level navigation's host
+  against a local SHA-256 blocklist, entirely on-device (add hosts in
+  `~/.config/nordstjernen/safebrowsing.list`). Private tabs (`Ctrl+Alt+P`)
+  and `--private` windows leave no cookies, HTTP cache or IndexedDB data
+  behind ([docs/privacy-policy.md](docs/privacy-policy.md)).
+- **UI** — tabs, bookmarks, history, downloads, find-in-page, zoom, full
+  screen, light/dark/system themes, `view-source:`, printing and saving as PDF
+  or PNG, Developer Tools (Console, Network, Performance, Layout and
+  Elements), a Task Manager (`Shift+Esc`), recovery of open tabs after a
+  crash, optional spell checking through Enchant, and a C embedding API
+  ([docs/Embedding.md](docs/Embedding.md)). The UI follows the
+  operating-system language: 40 catalogues translate the browser's name and
+  13 also cover the core interface ([docs/i18n.md](docs/i18n.md)).
+- **Automation** — `--headless` with `--dump=text|dom|layout|png:FILE|pdf:FILE`,
+  `--eval=` and `--viewport=` drives the engine from scripts
+  (`nordstjernen --help` lists the options). `nordstjernen --mcp` is a
+  built-in MCP server that lets a local agent read and drive the browser
+  window; it is off until allowed in Settings or with `--remote-control`,
+  loopback only and token-authenticated
+  ([docs/remote-control.md](docs/remote-control.md)).
 - **Extensions** — initial support for simple, page-facing WebExtensions:
   content scripts, a slice of `browser.*`, and content blocking through
-  static `declarativeNetRequest` rules and Adblock Plus/EasyList filter
-  lists ([docs/extensions.md](docs/extensions.md)).
-- **Java/JVM** — `org.nordstjernen.Nordstjernen` drives fetch / parse / layout
-  / script / render from Java over a JNI bridge, or `RemoteBrowser` /
-  `RemotePage` drive a separate renderer process so an engine crash can't take
-  down the JVM. The nightly fat jar is both the embedding library and a Swing
-  browser (`java -jar nordstjernen-java.jar <url>`) that drives a
-  `nordstjernen-renderer` installed on the host; JDK 21 is required. See
+  static `declarativeNetRequest` rules and Adblock Plus/EasyList filter lists
+  ([docs/extensions.md](docs/extensions.md)).
+- **Java/JVM** — `org.nordstjernen.Nordstjernen` drives the engine from Java
+  over JNI, or `RemoteBrowser`/`RemotePage` drive a separate renderer process
+  so an engine crash can't take down the JVM. The fat jar is also a Swing
+  browser (`java -jar nordstjernen-java.jar <url>`); JDK 21 is required. See
   [java/README.md](java/README.md).
 
 ## Build
 
 On Debian and Ubuntu, `apt build-dep .` installs everything
-`debian/control` lists, so no optional feature (AVIF, JPEG XL, H.264
-video, spell checking, PDF) is silently left out:
+`debian/control` lists, so no optional feature (AVIF, JPEG XL, H.264 video,
+spell checking, PDF) is silently left out:
 
 ```sh
 sudo apt install git
@@ -275,37 +207,29 @@ Windows, Fedora, openSUSE, Arch Linux and macOS instructions are in
 [docs/](docs/README.md); keyboard, mouse and touch controls are in
 [docs/Controls.md](docs/Controls.md).
 
-### The `open-browser-nordstjernen` command
-
-`meson install` puts `open-browser-nordstjernen` beside `nordstjernen` in the
-binary directory, a symbolic link to it, so
-`open-browser-nordstjernen https://nordstjernen.org` starts Nordstjernen. The
-`.deb` and `.rpm` packages register it with `update-alternatives` instead of
-shipping the link, and the Alpine package creates the link at install time.
-On Windows the installer registers `open-browser-nordstjernen` as an App
-Paths alias (the Run dialog and `start open-browser-nordstjernen` find it)
-and the MSIX package declares it as an app execution alias. The command
-used to be called `internet-browser`; upgrading removes that old name.
+`meson install` also installs `open-browser-nordstjernen`, a link to
+`nordstjernen`. The `.deb` and `.rpm` packages register it with
+`update-alternatives`, and on Windows the installer and the MSIX package
+register it as a command alias. It replaces the old `internet-browser` name.
 
 ## Dependencies
 
 Nordstjernen is an independent engine — no upstream browser code.
 
-**Vendored in-tree**, built from the main tree with no submodules:
-[lexbor](https://github.com/lexbor/lexbor) (HTML5 → DOM parser, CSS, and the
-WHATWG URL module), [QuickJS](https://github.com/quickjs-ng/quickjs)
-(quickjs-ng fork, no JIT), [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime)
+**Vendored in-tree**, with no submodules:
+[lexbor](https://github.com/lexbor/lexbor) (HTML parser, CSS and the WHATWG
+URL module), [QuickJS](https://github.com/quickjs-ng/quickjs) (quickjs-ng
+fork, no JIT), [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime)
 (WebAssembly interpreter), [Wuffs](https://github.com/google/wuffs)
 (memory-safe image decoding), [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
-(MPEG-1 video + MP2 audio), [minimp3](https://github.com/lieff/minimp3)
-(MP3) and web-text-lib (`src/web-text-lib/`, the text-shaping Pango fork
-that began as the separate ns-pango repository). Unless they are installed,
-the first `meson setup` downloads two pinned subprojects: the
-[wgpu-native](https://github.com/gfx-rs/wgpu-native) release for WebGPU,
-linked statically (`-Dwebgpu=disabled` drops WebGPU), and the header-only
-[SIMDe](https://github.com/simd-everywhere/simde) library for WebAssembly
-SIMD (`-Dwasm_simd=disabled` drops it). With both disabled the build needs
-no network.
+(MPEG-1 video and MP2 audio), [minimp3](https://github.com/lieff/minimp3)
+(MP3) and web-text-lib (the Pango fork). Unless they are installed, the first
+`meson setup` downloads two pinned subprojects:
+[wgpu-native](https://github.com/gfx-rs/wgpu-native) for WebGPU, linked
+statically (`-Dwebgpu=disabled` drops it), and the header-only
+[SIMDe](https://github.com/simd-everywhere/simde) for WebAssembly SIMD
+(`-Dwasm_simd=disabled` drops it). With both disabled the build needs no
+network.
 
 **Required system libraries:**
 
@@ -325,19 +249,15 @@ no network.
 | libseccomp | — (Linux only) | renderer syscall sandbox |
 | GStreamer | ≥ 1.20 (Linux; optional on the BSDs) | H.264/AAC, and VP9/AV1/HEVC in hardware through VA-API |
 
-**Optional**, auto-detected or build-time-selected:
-SDL2 (audio output and microphone capture, `-Daudio`; without it the
-build is silent and meson warns),
-[FFmpeg](https://github.com/FFmpeg/FFmpeg) libav\* on macOS and the BSDs (inline WebM),
-GStreamer on the BSDs (`-Dgstreamer`), rustc (the memory-safe IPC
-parser, `-Dipc_rust`),
-vorbisfile / opusfile (Ogg audio without FFmpeg), brotli (`br` content
-encoding and WOFF2 fonts), zstd (`zstd` content encoding),
-poppler-glib (inline PDF), libavif (AVIF images, `-Davif`), libjxl (JPEG XL
-images, `-Djxl`),
-Enchant (spell checking), FreeType (WOFF/WOFF2 web-font unpacking), wgpu-native on platforms it publishes no release for (the BSDs, musl,
-Windows on Arm; WebGPU is not built for Android and iOS) and Fabrice
-Bellard's original
+**Optional**, auto-detected or selected at build time: SDL2 (audio output and
+microphone capture, `-Daudio`; without it the build is silent), FFmpeg libav\*
+on macOS and the BSDs, GStreamer on the BSDs (`-Dgstreamer`), rustc (the
+memory-safe IPC parser, `-Dipc_rust`), vorbisfile/opusfile (Ogg audio without
+FFmpeg), brotli (`br` content encoding and WOFF2 fonts), zstd (`zstd` content
+encoding), poppler-glib (inline PDF), libavif (`-Davif`), libjxl (`-Djxl`),
+Enchant (spell checking), FreeType (WOFF/WOFF2 unpacking), wgpu-native where
+it publishes no release (the BSDs, musl, Windows on Arm; WebGPU is not built
+for Android and iOS) and Fabrice Bellard's original
 [QuickJS](https://github.com/bellard/quickjs) (`-Dquickjs=quickjs`, fetched
 through a meson wrap).
 
@@ -347,8 +267,8 @@ Nordstjernen is dual-licensed: use it under **either** the Nordstjernen
 Source License v1.0 **or** the GNU General Public License version 3 or later,
 at your option (`LicenseRef-NSL-1.0 OR GPL-3.0-or-later`).
 
-- **GPL-3.0-or-later** — free software: use, modify and redistribute it for any
-  purpose, provided derivative works are also released under the GPL. See
+- **GPL-3.0-or-later** — free software: use, modify and redistribute it for
+  any purpose, provided derivative works are also released under the GPL. See
   [COPYING](COPYING).
 - **NSL-1.0** — use, modify and redistribute freely, except as a competing
   browser; each release becomes MIT after ten years. It is inspired by the
