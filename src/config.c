@@ -494,8 +494,8 @@ config_free_strings(ns_config *c)
 }
 
 static const char *const unprompted_keys[] = {
-    "gsk_renderer", "speculative_preload", "async_image_decode",
-    "images_enabled", "cache_cap_mb", "window_width_px", "window_height_px",
+    "speculative_preload", "async_image_decode", "images_enabled",
+    "cache_cap_mb", "window_width_px", "window_height_px",
     "layout_viewport_px",
 };
 
