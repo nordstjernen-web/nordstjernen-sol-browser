@@ -1048,6 +1048,91 @@
                             "parameter 1 is not of type '(ArrayBuffer or ArrayBufferView)'");
     }
 
+    function ndMp4EachBox(u8, start, end, fn) {
+        var p = start;
+        while (p + 8 <= end) {
+            var size = ((u8[p] << 24) >>> 0) + (u8[p + 1] << 16) + (u8[p + 2] << 8) + u8[p + 3];
+            var type = String.fromCharCode(u8[p + 4], u8[p + 5], u8[p + 6], u8[p + 7]);
+            var header = 8;
+            if (size === 1) {
+                if (p + 16 > end) return;
+                size = (((u8[p + 8] << 24) >>> 0) + (u8[p + 9] << 16) + (u8[p + 10] << 8) + u8[p + 11]) * 4294967296 +
+                       ((u8[p + 12] << 24) >>> 0) + (u8[p + 13] << 16) + (u8[p + 14] << 8) + u8[p + 15];
+                header = 16;
+            } else if (size === 0) {
+                size = end - p;
+            }
+            if (size < header || p + size > end) return;
+            if (fn(type, p + header, p + size) === false) return;
+            p += size;
+        }
+    }
+
+    function ndMp4ReadU32(u8, p) {
+        return ((u8[p] << 24) >>> 0) + (u8[p + 1] << 16) + (u8[p + 2] << 8) + u8[p + 3];
+    }
+
+    function ndMp4WriteU32(u8, p, v) {
+        u8[p] = (v >>> 24) & 255; u8[p + 1] = (v >>> 16) & 255;
+        u8[p + 2] = (v >>> 8) & 255; u8[p + 3] = v & 255;
+    }
+
+    function ndMp4TrackTimescales(u8) {
+        var scales = null;
+        ndMp4EachBox(u8, 0, u8.length, function (type, b, e) {
+            if (type !== 'moov') return;
+            ndMp4EachBox(u8, b, e, function (type, b, e) {
+                if (type !== 'trak') return;
+                var id = 0, scale = 0;
+                ndMp4EachBox(u8, b, e, function (type, b, e) {
+                    if (type === 'tkhd' && e - b >= 24)
+                        id = ndMp4ReadU32(u8, b + (u8[b] === 1 ? 20 : 12));
+                    if (type === 'mdia') ndMp4EachBox(u8, b, e, function (type, b, e) {
+                        if (type === 'mdhd' && e - b >= 24)
+                            scale = ndMp4ReadU32(u8, b + (u8[b] === 1 ? 20 : 12));
+                    });
+                });
+                if (id && scale) (scales = scales || {})[id] = scale;
+            });
+        });
+        return scales;
+    }
+
+    function ndMp4ShiftFragment(u8, scales, offset) {
+        ndMp4EachBox(u8, 0, u8.length, function (type, b, e) {
+            if (type !== 'moof') return;
+            ndMp4EachBox(u8, b, e, function (type, b, e) {
+                if (type !== 'traf') return;
+                var id = 0;
+                ndMp4EachBox(u8, b, e, function (type, b, e) {
+                    if (type === 'tfhd' && e - b >= 8) id = ndMp4ReadU32(u8, b + 4);
+                    if (type !== 'tfdt' || !scales[id]) return;
+                    var wide = u8[b] === 1;
+                    if (e - b < (wide ? 12 : 8)) return;
+                    var time = wide ? ndMp4ReadU32(u8, b + 4) * 4294967296 + ndMp4ReadU32(u8, b + 8)
+                                    : ndMp4ReadU32(u8, b + 4);
+                    time = Math.max(0, time + Math.round(offset * scales[id]));
+                    if (wide) {
+                        ndMp4WriteU32(u8, b + 4, Math.floor(time / 4294967296));
+                        ndMp4WriteU32(u8, b + 8, time % 4294967296);
+                    } else if (time <= 4294967295) {
+                        ndMp4WriteU32(u8, b + 4, time);
+                    }
+                });
+            });
+        });
+    }
+
+    function ndSourceBufferApplyOffset(s, copy) {
+        var scales = ndMp4TrackTimescales(copy);
+        if (scales) {
+            s.trackTimescales = scales;
+            return;
+        }
+        if (s.timestampOffset && s.trackTimescales)
+            ndMp4ShiftFragment(copy, s.trackTimescales, s.timestampOffset);
+    }
+
     function mediaSourceMedia(url) {
         if (!url) return [];
         if (typeof global.__ndMediaBySrc === 'function') {
@@ -1082,6 +1167,18 @@
                 if (typeof el.dispatchEvent === 'function' &&
                     typeof Event === 'function')
                     el.dispatchEvent(new Event('durationchange'));
+            } catch (e) {}
+        }
+    }
+
+    function mediaSourceSyncLiveRange(ms) {
+        var s = mediaSources.get(ms);
+        var range = s.liveSeekableRange;
+        var media = mediaSourceMedia(s.url);
+        for (var i = 0; i < media.length; i++) {
+            try {
+                media[i]._nd_live_start = range ? range.start : undefined;
+                media[i]._nd_live_end = range ? range.end : undefined;
             } catch (e) {}
         }
     }
@@ -1318,12 +1415,14 @@
             if (isNaN(start) || isNaN(end) || start < 0 || start > end)
                 throw new TypeError("Failed to execute 'setLiveSeekableRange' on 'MediaSource': The provided range is not valid.");
             s.liveSeekableRange = { start: start, end: end };
+            mediaSourceSyncLiveRange(this);
         }
         clearLiveSeekableRange() {
             var s = mediaSourceOf(this);
             if (s.readyState !== 'open')
                 throw ndDomError('InvalidStateError', "Failed to execute 'clearLiveSeekableRange' on 'MediaSource': The MediaSource's readyState is not 'open'.");
             s.liveSeekableRange = null;
+            mediaSourceSyncLiveRange(this);
         }
     }
     if (!ndWorkerScope) delete MediaSource.prototype.handle;
@@ -1464,6 +1563,7 @@
             if (sourceBufferBytes(s) + copy.length > ndSourceBufferQuota)
                 throw ndDomError('QuotaExceededError',
                                  'SourceBuffer is full; remove buffered media first');
+            ndSourceBufferApplyOffset(s, copy);
             var buffer = this;
             sourceBufferUpdate(buffer, s, function () {
                 var ok = true;
