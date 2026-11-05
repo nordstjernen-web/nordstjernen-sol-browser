@@ -1,6 +1,12 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.44-dev:
+======
+* Android: the app is now labelled Nordstjernen Browser on the home screen
+  and in its title bar, matching its Google Play listing, instead of Sol
+  Explorer.
+
 1.0.43:
 ======
 * Windows: the sandboxed renderer no longer contains the code that drops
