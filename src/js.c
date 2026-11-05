@@ -9592,6 +9592,13 @@ ns_header_name_is_forbidden(const char *name)
     return FALSE;
 }
 
+static char *
+ns_js_top_level_marker(ns_js *js)
+{
+    const char *top = js ? ns_js_top_url(js) : "";
+    return *top ? g_strdup_printf("X-ND-Top-Level: %s", top) : NULL;
+}
+
 typedef struct ns_js_fetch_state {
     JSContext     *ctx;
     JSContext     *timeline;
@@ -10542,6 +10549,8 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     }
     if (body && !content_type)
         content_type = g_strdup("text/plain;charset=UTF-8");
+    char *top_level_marker = ns_js_top_level_marker(js_from_ctx(ctx));
+    if (top_level_marker) g_ptr_array_add(extras, top_level_marker);
     g_ptr_array_add(extras, NULL);
     ns_js_fetch_state *st = g_new0(ns_js_fetch_state, 1);
     st->ctx = ctx;
@@ -22567,6 +22576,8 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     if (!ns_xhr_with_credentials(ctx, this_val) &&
         !ns_url_same_origin(ns_js_realm_url_or_current(st->js, ctx), st->url))
         g_ptr_array_add(hdr_terminated, (gpointer)"X-ND-Credentials: omit");
+    g_autofree char *top_level_marker = ns_js_top_level_marker(st->js);
+    if (top_level_marker) g_ptr_array_add(hdr_terminated, top_level_marker);
     g_ptr_array_add(hdr_terminated, NULL);
 
     const char *effective_ct = NULL;
