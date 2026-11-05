@@ -3,6 +3,12 @@ Changelog:
 
 1.0.44-dev:
 ======
+* DOM: interface members now have the property attributes Web IDL
+  requires. Attributes, operations and constants on every interface
+  prototype and interface object are enumerable, constants are read-only,
+  and the interface objects themselves (`Event`, `Node`, ...) are no longer
+  enumerable properties of `window`. This adds about 330 passing subtests
+  across the `dom` and `html/dom` idlharness files.
 * DOM: `XMLSerializer.serializeToString()` now follows the XML
   serialization algorithm of the DOM Parsing specification instead of
   returning `outerHTML`: empty elements outside the HTML namespace
