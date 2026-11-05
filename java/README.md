@@ -37,8 +37,18 @@ java -jar nordstjernen-java.jar https://example.com
 
 Point it at the renderer binary with the `nordstjernen.renderer` system
 property or the `NORDSTJERNEN_RENDERER` environment variable; otherwise it
-probes `nordstjernen-renderer` on the working directory and `builddir/src/`.
-Page audio plays when a `nordstjernen-audio` helper sits beside the renderer.
+looks for `nordstjernen-renderer` beside the jar, in the `builddir/src/` of
+the source checkout the jar was built in, and then on `PATH`. The working
+directory is never searched, so a renderer planted next to a document you
+open cannot be picked up. Page audio plays when a `nordstjernen-audio` helper
+sits beside the renderer.
+
+The renderer is checked with the engine protocol handshake when it starts,
+and every request to it has a deadline (two minutes, or the
+`nordstjernen.timeout.ms` system property, or `RemoteBrowser.setTimeout`). A
+renderer that does not answer in time is stopped and the call fails with
+`RendererTimeoutException`; one that has crashed fails the next call at once
+with its exit code.
 
 ### Keyboard & mouse
 
