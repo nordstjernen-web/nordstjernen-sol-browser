@@ -75,6 +75,7 @@ nordstjernen_engine_sources = files(
   'bytecode_cache.c',
   'bookmarks.c',
   'cache.c',
+  'capability.c',
   'config.c',
   'cookies.c',
   'csp.c',
@@ -179,6 +180,7 @@ endif
 
 nordstjernen_platform_sources = files(
   'bookmarks.c',
+  'capability.c',
   'config.c',
   'db.c',
   'debuglog.c',

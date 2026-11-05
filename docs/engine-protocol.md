@@ -53,7 +53,7 @@ Every request is `POST <path>` with an `application/json` body. The reply is
 | Editing | `/focused-editable`, `/focused-editable-state`, `/focused-editable-selection`, `/clipboard`, `/find` |
 | Scripting and diagnostics | `/eval`, `/console` |
 | Popups and downloads | `/popup-poll`, `/popup-deliver`, `/download-start`, `/download-poll`, `/download-cancel` |
-| Permissions and capabilities | `/permission`, `/camera`, `/webgl` |
+| Permissions and capabilities | `/permission`, `/capability` (`/camera` and `/webgl` are deprecated aliases) |
 | Storage | `/session-storage` |
 | Media | `/media`, `/audio-event` |
 
@@ -72,8 +72,9 @@ the next `/render` or `/tick` reply as an `X-*` header (or a field of the
 | `X-Nav` | a script- or link-initiated navigation the shell must perform |
 | `X-Download` | a download offer (the shell decides, prompts and writes the file) |
 | `X-Popup` | a `window.open` request |
-| `X-Camera` | a request to use a capability that needs the user's decision |
-| `X-WebGL` | WebGL activity, for the status bar and the WebGL permission |
+| `X-Capability` | one or more `<kind> <origin>` entries separated by `;`: the page is suspended until the shell decides (see "Capabilities") |
+| `X-Camera` | deprecated: the origin of a pending camera request, kept for shells that predate `X-Capability` |
+| `X-WebGL` | WebGL activity, for the status bar |
 | `X-Audio` | commands for the audio helper the shell runs |
 | `X-Config` | a settings change requested by a privileged page |
 | `X-Window-Action` | fullscreen enter/exit |
@@ -83,6 +84,43 @@ The shell validates every side-channel value before acting on it (allowed
 schemes, allowed actions, allowed paths; see
 [SECURITY.md](../SECURITY.md), "Process isolation"). The renderer is the
 untrusted side of this boundary.
+
+## Capabilities
+
+Everything a page may do beyond rendering its own content is a
+**capability** with a name, a user-facing label and prompt, a default state
+and a revoke action. The vocabulary lives in `src/capability.h` and is linked
+into both the shell and the engine, so the two sides never disagree about a
+name or a default:
+
+| Kind | Default | On change |
+|------|---------|-----------|
+| `camera` | ask | live tracks are stopped when the state becomes deny |
+| `webgl` | allow | the page is reloaded when the blocked state flips |
+
+The flow is the same for every kind:
+
+1. The engine reaches a gate (for the camera, `getUserMedia`). With a
+   recorded decision it proceeds or refuses at once. Without one it
+   **suspends** the operation at its asynchronous point (the pending promise)
+   and queues a request.
+2. The next `/render` or `/tick` reply carries `X-Capability: camera
+   https://example.org`. The engine does not poll and has no timeout; the
+   page simply waits.
+3. The shell looks the origin up in its ledger (`src/gtk/permissions.c`,
+   `permissions.ini`). A stored or default decision is pushed back at once;
+   otherwise the shell shows its prompt bar.
+4. The decision reaches the engine as `POST /permission` with `entries` of
+   `<kind> <state> <origin>` lines (the ledger format, also used to push a
+   site's whole state on navigation and whenever the user changes a setting),
+   or as `POST /capability` with `{"kind", "origin", "allow"}` for a single
+   answer. The engine records it, resumes or rejects the suspended operation
+   and, on a later deny, runs the kind's revoke action.
+
+A grant or a revocation therefore works the same whether it happens before
+the page loads (site settings) or while it runs (the prompt bar or a settings
+change), and adding a capability means adding one row to the vocabulary, a
+gate in the engine and nothing in the shell.
 
 ## What a shell may depend on
 

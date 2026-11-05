@@ -2122,10 +2122,9 @@ show_site_permissions(ProcWindow *pw)
     GtkWidget *grid = gtk_grid_new();
     gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
     gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
-    site_permission_row(grid, 0, origin, NS_PERM_CAMERA,
-                        ns_i18n("Camera and microphone"));
-    site_permission_row(grid, 1, origin, NS_PERM_WEBGL,
-                        ns_i18n("WebGL (3D graphics)"));
+    for (int k = 0; k < NS_CAP_COUNT; k++)
+        site_permission_row(grid, k, origin, (ns_perm_kind)k,
+                            ns_i18n(ns_capability_info_get((ns_perm_kind)k)->label));
     gtk_box_append(GTK_BOX(box), grid);
     g_free(origin);
 

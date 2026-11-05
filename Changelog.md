@@ -3,6 +3,16 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Architecture: site permissions are now capabilities from one vocabulary
+  shared by the window process and the renderer (`src/capability.h`): a
+  name, a label, a prompt, a default state and whether a change needs a
+  reload. The renderer reports a page's request through a generic
+  `X-Capability` event instead of a camera-specific one, the window process
+  answers through the same ledger channel for every kind, the site
+  settings and the prompt bar are generated from the vocabulary, and the
+  ledger falls back to each kind's default (WebGL shows as allowed rather
+  than "ask"). `/capability` answers a single request; `/camera`, `/webgl`
+  and `X-Camera` remain as deprecated aliases for older shells.
 * Architecture: the shell and the renderer now agree on a versioned engine
   protocol. The first request to a new renderer is `/hello`, which reports
   the protocol version, engine name and build version, and a renderer that

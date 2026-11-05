@@ -41,6 +41,7 @@
 #include "svg_external.h"
 #include "video.h"
 #include "camera.h"
+#include "capability.h"
 #include "webgl.h"
 #include "glctx.h"
 
@@ -5192,17 +5193,32 @@ ns_browser_clear_permissions(void)
 }
 
 int
+ns_browser_resolve_capability(ns_browser *browser, const char *kind,
+                              const char *origin, int allow)
+{
+    ns_capability cap;
+    if (!origin || !*origin || !ns_capability_from_name(kind, &cap))
+        return -1;
+    switch (cap) {
+    case NS_CAP_CAMERA: ns_browser_resolve_camera(browser, origin, allow); break;
+    case NS_CAP_WEBGL:  ns_browser_resolve_webgl(browser, origin, allow); break;
+    default: return -1;
+    }
+    return 0;
+}
+
+int
 ns_browser_set_permission(ns_browser *browser, const char *kind,
                           const char *state, const char *origin)
 {
-    if (!kind || !state || !origin || !*origin) return -1;
-    int st = strcmp(state, "allow") == 0 ? 1
-           : strcmp(state, "deny") == 0  ? 2 : 0;
-    if (strcmp(kind, "webgl") == 0) {
+    ns_capability cap;
+    if (!state || !origin || !*origin || !ns_capability_from_name(kind, &cap))
+        return -1;
+    int st = (int)ns_cap_state_from_name(state);
+    if (cap == NS_CAP_WEBGL) {
         ns_webgl_set_state(origin, st);
         return 0;
     }
-    if (strcmp(kind, "camera") != 0) return -1;
     gboolean answered = ns_camera_set_state(origin, st);
     if (answered)
         browser_eval_quiet(browser,

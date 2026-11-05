@@ -74,9 +74,13 @@ Remaining work, in order:
 Every ability a page has beyond rendering its own content is a
 **capability** with an origin, a state (`ask`, `allow`, `deny`) and a
 decision point. The shell owns the ledger (`src/gtk/permissions.c`); the
-renderer owns the gate. Today the ledger knows camera and WebGL, and the
-gate exists for the camera (`ns_camera_permission`, resumed through
-`/camera`). The target generalises this without changing its shape:
+renderer owns the gate. The vocabulary is shared (`src/capability.h`),
+the request channel is generic (`X-Capability`, `/capability`,
+`/permission`; see [engine-protocol.md](engine-protocol.md),
+"Capabilities"), the ledger falls back to each kind's default, and the
+shell's prompt bar and site settings are driven by the vocabulary. Today it
+holds camera (ask) and WebGL (allow, revocable). The target extends the
+vocabulary without changing the shape:
 
 - **One vocabulary.** A capability enumeration shared by shell and renderer:
   camera, microphone, geolocation, notifications, clipboard read, downloads,

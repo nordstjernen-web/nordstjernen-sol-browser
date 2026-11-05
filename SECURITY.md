@@ -358,6 +358,17 @@ in a more private space, which also defeats DNS rebinding; WebSocket and
 EventSource connections carry the same guard, and proxied requests are
 left to the proxy.
 
+### Capabilities
+
+What a page may do beyond rendering its own content is a capability
+with a name, a default and a revoke action, defined once in
+`src/capability.h` for both the shell and the engine. A page that reaches
+a gate without a decision is suspended at that point and the request
+travels to the shell as an `X-Capability` event; the shell's ledger or
+prompt answers through `/permission`, and a later revocation is pushed to
+the renderer the same way and stops what was granted. The renderer never
+decides a capability for itself. See `docs/engine-protocol.md`.
+
 ### Origin isolation
 
 - Cookies and the HTTP cache are partitioned per top-level **site**

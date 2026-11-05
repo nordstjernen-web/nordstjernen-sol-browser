@@ -735,6 +735,7 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
     out->nav = head_field_dup(head->x_nav);
     out->webgl = head_field_dup(head->x_webgl);
     out->camera = head_field_dup(head->x_camera);
+    out->capability = head_field_dup(head->x_capability);
     out->download = head_field_dup(head->x_download);
     out->config = head_field_dup(head->x_config);
     out->audio = head_field_dup(head->x_audio);
@@ -1059,6 +1060,7 @@ ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out)
     out->nav = json_get_str(body, "nav");
     out->webgl = json_get_str(body, "webgl");
     out->camera = json_get_str(body, "camera");
+    out->capability = json_get_str(body, "capability");
     out->download = json_get_str(body, "download");
     out->config = json_get_str(body, "config");
     out->audio = json_get_str(body, "audio");
@@ -1087,6 +1089,7 @@ ns_rproc_http_tick_clear(ns_rproc_http_tick *out)
     free(out->nav);
     free(out->webgl);
     free(out->camera);
+    free(out->capability);
     free(out->download);
     free(out->config);
     free(out->audio);
@@ -1628,6 +1631,23 @@ ns_rproc_http_audio_event(ns_rproc_http *r, const char *line)
         json = NULL;
     free(le);
     return request_ok(r, "/audio-event", json);
+}
+
+int
+ns_rproc_http_resolve_capability(ns_rproc_http *r, const char *kind,
+                                 const char *origin, int allow)
+{
+    if (!r || !kind || !origin)
+        return -1;
+    char *ke = json_escape(kind);
+    char *oe = json_escape(origin);
+    char *json = NULL;
+    if (asprintf(&json, "{\"kind\":\"%s\",\"origin\":\"%s\",\"allow\":%d}",
+                 ke ? ke : "", oe ? oe : "", allow ? 1 : 0) < 0)
+        json = NULL;
+    free(ke);
+    free(oe);
+    return request_ok(r, "/capability", json);
 }
 
 int

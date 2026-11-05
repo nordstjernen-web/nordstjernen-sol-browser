@@ -34,6 +34,7 @@ typedef struct {
     char  x_nav[2048];
     char  x_webgl[2048];
     char  x_camera[2048];
+    char  x_capability[2304];
     char  x_download[3072];
     char  x_config[12288];
     char  x_audio[16384];

@@ -45,6 +45,7 @@ typedef struct {
     char                *nav;
     char                *webgl;
     char                *camera;
+    char                *capability;
     char                *download;
     char                *config;
     char                *audio;
@@ -66,6 +67,7 @@ typedef struct {
     char *nav;
     char *webgl;
     char *camera;
+    char *capability;
     char *download;
     char *config;
     char *audio;
@@ -195,6 +197,8 @@ int   ns_rproc_http_find(ns_rproc_http *r, const char *query,
                          int *out_total, int *out_current, int *out_scroll_y);
 int   ns_rproc_http_set_viewport(ns_rproc_http *r, int width, int height,
                                  ns_rproc_http_page *out);
+int   ns_rproc_http_resolve_capability(ns_rproc_http *r, const char *kind,
+                                       const char *origin, int allow);
 int   ns_rproc_http_resolve_camera(ns_rproc_http *r, const char *origin,
                                    int allow);
 int   ns_rproc_http_resolve_webgl(ns_rproc_http *r, const char *origin,

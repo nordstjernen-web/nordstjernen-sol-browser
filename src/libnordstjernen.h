@@ -181,6 +181,8 @@ char *ns_browser_take_pending_camera(ns_browser *browser);
 void  ns_browser_resolve_camera(ns_browser *browser, const char *origin,
                                 int allow);
 
+int   ns_browser_resolve_capability(ns_browser *browser, const char *kind,
+                                    const char *origin, int allow);
 int   ns_browser_set_permission(ns_browser *browser, const char *kind,
                                 const char *state, const char *origin);
 void  ns_browser_clear_permissions(void);

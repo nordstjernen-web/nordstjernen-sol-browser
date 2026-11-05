@@ -4,6 +4,7 @@
 #define _GNU_SOURCE 1
 #include "renderer_serve.h"
 #include "cache.h"
+#include "capability.h"
 #include "engine_protocol.h"
 #include "version.h"
 #include "download.h"
@@ -564,6 +565,12 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Nav", nav, 2000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-WebGL", webgl, 2000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Camera", camera, 2000);
+    char *capability = camera && *camera
+        ? g_strdup_printf("%s %s", ns_capability_name(NS_CAP_CAMERA), camera)
+        : NULL;
+    hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Capability", capability,
+                          2100);
+    g_free(capability);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Download", download,
                           3000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Config", config, 12000);
@@ -769,6 +776,22 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/capability") == 0) {
+        char *kind = json_get_str(body, "kind");
+        char *origin = json_get_str(body, "origin");
+        long allow = 0;
+        json_get_long(body, "allow", &allow);
+        int rc = s->cur && kind && origin
+            ? ns_browser_resolve_capability(s->cur, kind, origin, (int)allow)
+            : -1;
+        s->frame_valid = 0;
+        http_write_response(ctrl_w, rc == 0 ? 200 : 400, "text/plain", NULL,
+                            NULL, 0);
+        free(kind);
+        free(origin);
+        return 0;
+    }
+
     if (strcmp(head->path, "/open") == 0) {
         ns_config_reload();
         char *url = json_get_str(body, "url");
@@ -903,6 +926,11 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         char *nav_e = json_escape(nav ? nav : "");
         char *webgl_e = json_escape(webgl ? webgl : "");
         char *camera_e = json_escape(camera ? camera : "");
+        char *capability = camera && *camera
+            ? g_strdup_printf("%s %s", ns_capability_name(NS_CAP_CAMERA), camera)
+            : NULL;
+        char *capability_e = json_escape(capability ? capability : "");
+        g_free(capability);
         char *download_e = json_escape(download ? download : "");
         char *config_e = json_escape(config ? config : "");
         char *audio_e = json_escape(audio ? audio : "");
@@ -918,14 +946,15 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         int n = asprintf(&json,
             "{\"ok\":1,\"changed\":%d,\"animating\":%d,\"wake_ms\":%d,"
             "\"page_width\":%d,\"page_height\":%d,\"nav\":\"%s\","
-            "\"webgl\":\"%s\",\"camera\":\"%s\","
+            "\"webgl\":\"%s\",\"camera\":\"%s\",\"capability\":\"%s\","
             "\"download\":\"%s\",\"config\":\"%s\",\"audio\":\"%s\","
             "\"window_action\":\"%s\",\"title\":\"%s\",\"url\":\"%s\","
             "\"url_pushed\":%d,\"popup\":%d,\"pointer_lock\":%d,"
             "\"session_gen\":%lu}",
             changed != 0, session_animating(s) ? 1 : 0, session_wake_ms(s),
             page_w, page_h, nav_e ? nav_e : "", webgl_e ? webgl_e : "",
-            camera_e ? camera_e : "", download_e ? download_e : "",
+            camera_e ? camera_e : "", capability_e ? capability_e : "",
+            download_e ? download_e : "",
             config_e ? config_e : "",
             audio_e ? audio_e : "", window_action_e ? window_action_e : "",
             title_e ? title_e : "", url_e ? url_e : "", url_pushed,
@@ -939,6 +968,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         free(nav_e);
         free(webgl_e);
         free(camera_e);
+        free(capability_e);
         free(download_e);
         free(config_e);
         free(audio_e);
