@@ -187,6 +187,7 @@ nordstjernen_platform_sources = files(
   'json_string.c',
   'netutil.c',
   'security.c',
+  'security_root.c',
 )
 
 nordstjernen_platform_deps = [glib, gobject, gio, sqlite3]

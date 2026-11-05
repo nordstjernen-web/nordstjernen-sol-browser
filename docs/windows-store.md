@@ -72,7 +72,7 @@ for Nordstjernen:
   writes of our own.
 - Per-user by design, which matches the browser's policy of never
   running with Administrator rights — it drops them if it is launched
-  elevated (`src/security.c::ns_security_refuse_root`).
+  elevated (`src/security_root.c::ns_security_refuse_root`).
 
 [Package requirements](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/app-package-requirements)
 that shaped the manifest:

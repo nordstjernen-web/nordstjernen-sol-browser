@@ -215,7 +215,7 @@ Build the installer from the UCRT64 shell:
 The installer is intentionally **per-user**:
 
 - `RequestExecutionLevel user` — no UAC prompt, no Administrator
-  rights. This matches `src/security.c::ns_security_refuse_root`:
+  rights. This matches `src/security_root.c::ns_security_refuse_root`:
   if the browser is launched with an elevated token it drops it by
   relaunching de-elevated (see below), so it never keeps running in an
   Administrator context and a Program-Files install would buy nothing.
@@ -368,7 +368,7 @@ bundled copy there.
   Job Object sandbox is not implemented.
 - **Drops Administrator rights.** Elevation is detected via
   `CheckTokenMembership` against the builtin Administrators SID
-  (`src/security.c::ns_security_refuse_root`). Instead of the Linux
+  (`src/security_root.c::ns_security_refuse_root`). Instead of the Linux
   refuse-and-exit, the Windows build relaunches itself with the desktop
   shell's medium-integrity token (`CreateProcessWithTokenW`) and lets
   the elevated instance exit, so the browsing session runs unprivileged.
