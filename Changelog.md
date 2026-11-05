@@ -3,6 +3,12 @@ Changelog:
 
 1.0.44-dev:
 ======
+* JavaScript: installing a document defines its own properties instead of
+  assigning them. When a document was installed again in the same realm,
+  `Node.prototype`'s getter-only `nodeType`, `nodeName` and `baseURI`
+  made the assignments throw, and the pending exception surfaced as the
+  error of the next script to run — x.com's client entry module failed
+  with "Cannot set property nodeType which has only a getter".
 * Painting: the rounded clip of a replaced element (`<img>`, `<video>`,
   `<canvas>`) with `border-radius` sits on its content box, with the radii
   inset by border and padding. It was drawn at the margin-box origin, so an
