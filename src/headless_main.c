@@ -298,6 +298,7 @@ ns_headless_main(int argc, char **argv)
     ns_security_win32_mitigations_init(FALSE);
     headless_add_output_dirs(argc, argv);
     ns_os_media_preinit();
+    ns_security_landlock_scope_abstract_sockets();
     ns_security_sandbox_init(self_exe);
     ns_security_seccomp_init();
     ns_thread_dump_install_signal("nordstjernen");

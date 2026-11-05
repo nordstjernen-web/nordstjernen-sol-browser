@@ -3,6 +3,12 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Security: a sandboxed renderer can no longer signal other processes.
+  The seccomp filter allows `kill` and `tgkill` only against the
+  renderer's own PID and drops `tkill` and `pidfd_send_signal`; on Landlock
+  ABI 6 kernels the ruleset also scopes signals to the sandbox domain, and
+  renderers' rulesets scope abstract UNIX sockets too. A compromised tab
+  could previously `kill(-1, SIGKILL)` every process of the user.
 * Security: `EventSource` follows redirects in the engine instead of inside
   libcurl. Each hop is checked like the engine's own redirect loop — at most
   10 redirects, no https→http downgrade, `connect-src` and the safe-browsing

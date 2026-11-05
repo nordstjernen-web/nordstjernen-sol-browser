@@ -154,7 +154,16 @@ compromised renderer cannot truncate the shell's mapping from under it.
   `CLONE_NEW*` namespace flags and `clone3` returns `ENOSYS` (so libc
   falls back to `clone`), and `socket` only creates `AF_INET`,
   `AF_INET6` and `AF_NETLINK` sockets in the renderer (the audio
-  helper also keeps `AF_UNIX` for the sound server). Landlock does
+  helper also keeps `AF_UNIX` for the sound server). `kill` and
+  `tgkill` are allowed only with the process's own PID as the target
+  (what `abort()`, `pthread_kill` and the thread-dump signal need);
+  `tkill` and `pidfd_send_signal` are not on the list, so a compromised
+  renderer cannot signal the shell, other renderers or any other
+  process of the user. On kernels with Landlock ABI 6 or newer the
+  ruleset additionally scopes signals (every sandboxed process) and
+  abstract UNIX sockets (renderers) to the sandbox domain, so the same
+  holds on architectures where seccomp argument filtering is not
+  compiled in. Landlock does
   not govern `connect()` to a UNIX socket, so without that rule a
   compromised renderer could reach the session D-Bus and have it start
   programs outside the sandbox. On setups whose EGL lacks the surfaceless
