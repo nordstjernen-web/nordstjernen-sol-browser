@@ -375,6 +375,9 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     ns_net_apply_curl_tls(curl);
     ns_net_apply_curl_proxy(curl, es->url);
+    ns_net_address_guard address_guard;
+    ns_net_address_guard_init(&address_guard, es->origin, es->url);
+    ns_net_apply_curl_address_guard(curl, &address_guard);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 20L);
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
@@ -414,7 +417,7 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     *opened_out = p.opened;
-    gboolean fatal = p.fatal;
+    gboolean fatal = p.fatal || address_guard.blocked;
     g_byte_array_free(p.line, TRUE);
     g_string_free(p.data, TRUE);
     g_free(p.event_type);

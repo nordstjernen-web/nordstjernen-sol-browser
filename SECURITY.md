@@ -342,7 +342,14 @@ proceed past a certificate error only for the top-level navigation
 itself, never for an HSTS host; that retried navigation sends and stores
 no cookies, and the address bar marks the page as not secure. A
 subresource, frame, `fetch()`, worker or media request that fails
-verification is never retried without it.
+verification is never retried without it. Private Network Access: the
+address space of every document is recorded from the connection that
+served it (public, private or loopback, with a hostname heuristic for
+documents that came from the cache), and a non-navigation request from
+that document is refused at socket-open time when the resolved target is
+in a more private space, which also defeats DNS rebinding; WebSocket and
+EventSource connections carry the same guard, and proxied requests are
+left to the proxy.
 
 ### Origin isolation
 

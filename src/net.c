@@ -120,6 +120,7 @@ typedef struct ns_hop_req {
     const char        *cookie_partition;
     int                samesite_cross;
     gboolean           top_level_navigation;
+    const char        *document_url;
     int                priority_urgency;
     gboolean           priority_incremental;
     gboolean           follow_redirects;
@@ -2056,6 +2057,196 @@ ns_net_apply_curl_proxy(void *curl_handle, const char *url)
     const char *no_proxy = ns_net_configured_no_proxy();
     if (no_proxy && *no_proxy)
         curl_easy_setopt(curl, CURLOPT_NOPROXY, no_proxy);
+}
+
+static GMutex g_address_space_lock;
+static GHashTable *g_address_space_by_origin;
+
+static ns_address_space
+ns_address_space_of_inet(GInetAddress *addr)
+{
+    if (!addr) return NS_ADDRESS_SPACE_UNKNOWN;
+    if (g_inet_address_get_is_loopback(addr) || g_inet_address_get_is_any(addr))
+        return NS_ADDRESS_SPACE_LOCAL;
+    if (g_inet_address_get_is_site_local(addr) ||
+        g_inet_address_get_is_link_local(addr))
+        return NS_ADDRESS_SPACE_PRIVATE;
+    const guint8 *bytes = g_inet_address_to_bytes(addr);
+    if (g_inet_address_get_family(addr) == G_SOCKET_FAMILY_IPV6) {
+        static const guint8 v4_mapped_prefix[12] =
+            { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
+        if (memcmp(bytes, v4_mapped_prefix, sizeof v4_mapped_prefix) == 0) {
+            g_autoptr(GInetAddress) v4 =
+                g_inet_address_new_from_bytes(bytes + 12, G_SOCKET_FAMILY_IPV4);
+            return ns_address_space_of_inet(v4);
+        }
+        if ((bytes[0] & 0xfe) == 0xfc) return NS_ADDRESS_SPACE_PRIVATE;
+        return NS_ADDRESS_SPACE_PUBLIC;
+    }
+    if (bytes[0] == 0) return NS_ADDRESS_SPACE_LOCAL;
+    if (bytes[0] == 100 && (bytes[1] & 0xc0) == 64)
+        return NS_ADDRESS_SPACE_PRIVATE;
+    return NS_ADDRESS_SPACE_PUBLIC;
+}
+
+static ns_address_space
+ns_address_space_of_ip_string(const char *ip)
+{
+    if (!ip || !*ip) return NS_ADDRESS_SPACE_UNKNOWN;
+    g_autofree char *bare = g_strdup(ip);
+    size_t n = strlen(bare);
+    if (n >= 2 && bare[0] == '[' && bare[n - 1] == ']') {
+        bare[n - 1] = '\0';
+        memmove(bare, bare + 1, n - 1);
+    }
+    char *zone = strchr(bare, '%');
+    if (zone) *zone = '\0';
+    g_autoptr(GInetAddress) addr = g_inet_address_new_from_string(bare);
+    return addr ? ns_address_space_of_inet(addr) : NS_ADDRESS_SPACE_UNKNOWN;
+}
+
+static ns_address_space
+ns_address_space_of_sockaddr(const struct sockaddr *sa, gsize len)
+{
+    g_autoptr(GSocketAddress) gsa =
+        g_socket_address_new_from_native((gpointer)sa, len);
+    if (!gsa || !G_IS_INET_SOCKET_ADDRESS(gsa)) return NS_ADDRESS_SPACE_UNKNOWN;
+    return ns_address_space_of_inet(
+        g_inet_socket_address_get_address(G_INET_SOCKET_ADDRESS(gsa)));
+}
+
+static gboolean
+ns_host_name_is_private(const char *host)
+{
+    static const char *const suffixes[] = {
+        ".local", ".localdomain", ".internal", ".home.arpa", ".lan",
+        ".intranet", ".corp", ".home", ".private", NULL,
+    };
+    g_autofree char *lower = g_ascii_strdown(host, -1);
+    for (int i = 0; suffixes[i]; i++)
+        if (g_str_has_suffix(lower, suffixes[i])) return TRUE;
+    return strchr(lower, '.') == NULL;
+}
+
+static ns_address_space
+ns_address_space_of_document(const char *document_url)
+{
+    g_autofree char *origin = ns_url_origin_from(document_url);
+    if (!origin || !*origin) return NS_ADDRESS_SPACE_UNKNOWN;
+    g_mutex_lock(&g_address_space_lock);
+    gpointer seen = g_address_space_by_origin
+        ? g_hash_table_lookup(g_address_space_by_origin, origin) : NULL;
+    g_mutex_unlock(&g_address_space_lock);
+    if (seen) return (ns_address_space)(GPOINTER_TO_INT(seen) - 1);
+    g_autofree char *host = ns_url_host_from(document_url);
+    if (!host || !*host) return NS_ADDRESS_SPACE_UNKNOWN;
+    if (ns_host_is_loopback(host)) return NS_ADDRESS_SPACE_LOCAL;
+    ns_address_space literal = ns_address_space_of_ip_string(host);
+    if (literal != NS_ADDRESS_SPACE_UNKNOWN) return literal;
+    return ns_host_name_is_private(host) ? NS_ADDRESS_SPACE_PRIVATE
+                                         : NS_ADDRESS_SPACE_PUBLIC;
+}
+
+static void
+ns_net_record_address_space(const char *url, const char *remote_ip)
+{
+    ns_address_space space = ns_address_space_of_ip_string(remote_ip);
+    if (space == NS_ADDRESS_SPACE_UNKNOWN) return;
+    char *origin = ns_url_origin_from(url);
+    if (!origin || !*origin) {
+        g_free(origin);
+        return;
+    }
+    g_mutex_lock(&g_address_space_lock);
+    if (!g_address_space_by_origin)
+        g_address_space_by_origin =
+            g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    g_hash_table_replace(g_address_space_by_origin, origin,
+                         GINT_TO_POINTER((int)space + 1));
+    g_mutex_unlock(&g_address_space_lock);
+}
+
+static gboolean
+ns_host_in_no_proxy_list(const char *host, const char *list)
+{
+    if (!host || !list || !*list) return FALSE;
+    g_auto(GStrv) entries = g_strsplit(list, ",", -1);
+    for (char **e = entries; *e; e++) {
+        g_autofree char *entry = g_ascii_strdown(g_strstrip(*e), -1);
+        if (!*entry) continue;
+        if (strcmp(entry, "*") == 0) return TRUE;
+        const char *bare = entry[0] == '.' ? entry + 1 : entry;
+        size_t hn = strlen(host), bn = strlen(bare);
+        if (g_ascii_strcasecmp(host, bare) == 0) return TRUE;
+        if (hn > bn && host[hn - bn - 1] == '.' &&
+            g_ascii_strcasecmp(host + hn - bn, bare) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+ns_net_environment_proxy_applies(const char *url)
+{
+    const char *proxy = NULL;
+    if (g_str_has_prefix(url, "https://") || g_str_has_prefix(url, "wss://")) {
+        proxy = g_getenv("https_proxy");
+        if (!proxy || !*proxy) proxy = g_getenv("HTTPS_PROXY");
+    } else {
+        proxy = g_getenv("http_proxy");
+    }
+    if (!proxy || !*proxy) proxy = g_getenv("all_proxy");
+    if (!proxy || !*proxy) proxy = g_getenv("ALL_PROXY");
+    if (!proxy || !*proxy) return FALSE;
+    g_autofree char *host = ns_url_host_from(url);
+    const char *no_proxy = g_getenv("no_proxy");
+    if (!no_proxy || !*no_proxy) no_proxy = g_getenv("NO_PROXY");
+    return !ns_host_in_no_proxy_list(host, no_proxy);
+}
+
+void
+ns_net_address_guard_init(ns_net_address_guard *guard,
+                          const char *document_url, const char *request_url)
+{
+    guard->document_space = NS_ADDRESS_SPACE_UNKNOWN;
+    guard->blocked = FALSE;
+    if (!document_url || !*document_url || !request_url) return;
+    if (ns_net_pick_configured_proxy(request_url)) return;
+    if (ns_net_environment_proxy_applies(request_url)) return;
+    guard->document_space = ns_address_space_of_document(document_url);
+}
+
+static curl_socket_t
+ns_net_guarded_open_socket(void *clientp, curlsocktype purpose,
+                           struct curl_sockaddr *address)
+{
+    ns_net_address_guard *guard = clientp;
+    if (purpose == CURLSOCKTYPE_IPCXN &&
+        guard->document_space != NS_ADDRESS_SPACE_UNKNOWN) {
+        ns_address_space target =
+            ns_address_space_of_sockaddr(&address->addr, address->addrlen);
+        if (target > guard->document_space) {
+            guard->blocked = TRUE;
+            return CURL_SOCKET_BAD;
+        }
+    }
+    return socket(address->family, address->socktype, address->protocol);
+}
+
+void
+ns_net_apply_curl_address_guard(void *curl_handle, ns_net_address_guard *guard)
+{
+    CURL *curl = curl_handle;
+    curl_easy_setopt(curl, CURLOPT_OPENSOCKETFUNCTION,
+                     ns_net_guarded_open_socket);
+    curl_easy_setopt(curl, CURLOPT_OPENSOCKETDATA, guard);
+}
+
+const char *
+ns_net_address_guard_message(void)
+{
+    return "blocked: a page from a more public network may not reach "
+           "a private or local network address";
 }
 
 const char *
@@ -5646,6 +5837,9 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
     ns_net_apply_curl_tls(curl);
+    ns_net_address_guard address_guard;
+    ns_net_address_guard_init(&address_guard, req->document_url, req->url);
+    ns_net_apply_curl_address_guard(curl, &address_guard);
 
     if (req->cookie_partition) {
         g_autofree char *cookie = ns_cookie_store_header(req->cookie_partition,
@@ -5768,6 +5962,8 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
         char *ip = NULL;
         curl_easy_getinfo(curl, CURLINFO_PRIMARY_IP, &ip);
         if (ip && *ip) out->remote_ip = g_strdup(ip);
+        if (rc == CURLE_OK && out->remote_ip && !(req->proxy && *req->proxy))
+            ns_net_record_address_space(req->url, out->remote_ip);
     }
     {
         long hv = 0, nc = 0;
@@ -5779,13 +5975,16 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
     out->tls_verify_failed = (rc == CURLE_PEER_FAILED_VERIFICATION ||
                               rc == CURLE_SSL_CACERT_BADFILE ||
                               rc == CURLE_SSL_ISSUER_ERROR);
-    out->connect_failed = (rc == CURLE_COULDNT_CONNECT ||
+    out->connect_failed = !address_guard.blocked &&
+                          (rc == CURLE_COULDNT_CONNECT ||
                            rc == CURLE_OPERATION_TIMEDOUT ||
                            rc == CURLE_COULDNT_RESOLVE_HOST);
     if (rc == CURLE_FILESIZE_EXCEEDED)
         wctx->exceeded = TRUE;
     out->ok = (rc == CURLE_OK);
-    if (rc != CURLE_OK && wctx->decode_failed)
+    if (address_guard.blocked)
+        out->error_message = g_strdup(ns_net_address_guard_message());
+    else if (rc != CURLE_OK && wctx->decode_failed)
         out->error_message = g_strdup("content decoding failed");
     else if (rc != CURLE_OK && !wctx->exceeded)
         out->error_message =
@@ -6466,6 +6665,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         .cookie_partition = cookie_partition,
         .samesite_cross = samesite_cross,
         .top_level_navigation = is_navigation,
+        .document_url = is_navigation ? NULL : top_url,
         .priority_urgency = priority_urgency,
         .priority_incremental = priority_incremental,
         .follow_redirects = follow_redirects,
