@@ -56,6 +56,13 @@ Changelog:
   again. A failed re-link made the vertex-attribute check see no active
   attributes, while the previously linked program kept rendering, so its
   draws read past the end of their vertex buffers unchecked.
+* Painting (security): a `border-image` whose source is a gradient no longer
+  allocates a surface the size of its whole outset area on every paint.
+  `border-image-outset: 16000` on a 1px element made each painted tile
+  allocate and fill about 4 GB (the headless renderer peaked at 3.9 GB and
+  took 20 s; it now uses 70 MB and 1.6 s). The gradient is rasterised at
+  most 2048 pixels on a side and scaled; areas beyond 4 million pixels are
+  not painted.
 
 1.0.43:
 ======
