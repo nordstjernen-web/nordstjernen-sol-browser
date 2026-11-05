@@ -7,6 +7,9 @@ package org.nordstjernen;
 
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.IntBuffer;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -85,29 +88,46 @@ public final class Page implements AutoCloseable {
      * @param scale   CSS-pixel to device-pixel scale (1.0 for 1:1)
      */
     public byte[] renderRgba(int scrollX, int scrollY, int width, int height, double scale) {
+        IntBuffer argb = renderArgb(scrollX, scrollY, width, height, scale);
+        byte[] rgba = new byte[width * height * 4];
+        for (int i = 0, p = 0; p < rgba.length; i++, p += 4) {
+            int pixel = argb.get(i);
+            rgba[p] = (byte) (pixel >> 16);
+            rgba[p + 1] = (byte) (pixel >> 8);
+            rgba[p + 2] = (byte) pixel;
+            rgba[p + 3] = (byte) (pixel >>> 24);
+        }
+        return rgba;
+    }
+
+    /**
+     * Render a viewport region to a premultiplied-ARGB image. The engine
+     * paints straight into one native buffer, which is then copied once into
+     * the image.
+     */
+    public BufferedImage render(int scrollX, int scrollY, int width, int height, double scale) {
+        IntBuffer argb = renderArgb(scrollX, scrollY, width, height, scale);
+        BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
+        argb.get(((DataBufferInt) img.getRaster().getDataBuffer()).getData());
+        return img;
+    }
+
+    private IntBuffer renderArgb(int scrollX, int scrollY, int width, int height, double scale) {
         if (width <= 0 || height <= 0) {
             throw new IllegalArgumentException("width and height must be positive");
         }
-        byte[] px = Nordstjernen.nativeRenderRgba(handle(), scrollX, scrollY, width, height, scale);
-        if (px == null) {
-            throw new NordstjernenException("render failed");
+        long bytes = (long) width * height * 4L;
+        if (bytes > Integer.MAX_VALUE - 8) {
+            throw new IllegalArgumentException(width + "x" + height
+                + " pixels is more than one image can hold");
         }
-        return px;
-    }
-
-    /** Convenience wrapper around {@link #renderRgba} producing a premultiplied-ARGB image. */
-    public BufferedImage render(int scrollX, int scrollY, int width, int height, double scale) {
-        byte[] rgba = renderRgba(scrollX, scrollY, width, height, scale);
-        BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
-        int[] data = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
-        for (int i = 0, p = 0; i < data.length; i++, p += 4) {
-            int r = rgba[p] & 0xFF;
-            int g = rgba[p + 1] & 0xFF;
-            int b = rgba[p + 2] & 0xFF;
-            int a = rgba[p + 3] & 0xFF;
-            data[i] = (a << 24) | (r << 16) | (g << 8) | b;
+        ByteBuffer pixels = ByteBuffer.allocateDirect((int) bytes).order(ByteOrder.nativeOrder());
+        int rc = Nordstjernen.nativeRenderArgb(handle(), scrollX, scrollY, width, height,
+                                               scale, pixels);
+        if (rc != 0) {
+            throw new NordstjernenException("render failed (rc=" + rc + ")");
         }
-        return img;
+        return pixels.asIntBuffer();
     }
 
     /** Largest full-page render dimension, in device pixels, to bound memory. */

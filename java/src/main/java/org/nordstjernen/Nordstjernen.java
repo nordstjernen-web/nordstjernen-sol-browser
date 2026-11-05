@@ -121,8 +121,9 @@ public final class Nordstjernen {
 
     static native String nativeLinks(long handle);
 
-    static native byte[] nativeRenderRgba(long handle, int scrollX, int scrollY,
-                                          int width, int height, double scale);
+    static native int nativeRenderArgb(long handle, int scrollX, int scrollY,
+                                       int width, int height, double scale,
+                                       java.nio.ByteBuffer pixels);
 
     static native int nativeRenderImage(long handle, String path);
 

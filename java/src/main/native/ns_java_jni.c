@@ -204,29 +204,21 @@ Java_org_nordstjernen_Nordstjernen_nativeLinks(JNIEnv *env, jclass clazz,
     return take_string(env, ns_browser_links(as_browser(handle)));
 }
 
-JNIEXPORT jbyteArray JNICALL
-Java_org_nordstjernen_Nordstjernen_nativeRenderRgba(JNIEnv *env, jclass clazz,
+JNIEXPORT jint JNICALL
+Java_org_nordstjernen_Nordstjernen_nativeRenderArgb(JNIEnv *env, jclass clazz,
                                                     jlong handle, jint scroll_x,
                                                     jint scroll_y, jint width,
-                                                    jint height, jdouble scale)
+                                                    jint height, jdouble scale,
+                                                    jobject pixels)
 {
     (void)clazz;
-    if (width <= 0 || height <= 0) return NULL;
-    int stride = width * 4;
-    size_t len = (size_t)stride * (size_t)height;
-    unsigned char *buf = malloc(len);
-    if (!buf) return NULL;
-
-    int rc = ns_browser_render_rgba(as_browser(handle), scroll_x, scroll_y,
-                                    width, height, scale, buf, stride);
-    if (rc != 0) {
-        free(buf);
-        return NULL;
-    }
-    jbyteArray arr = (*env)->NewByteArray(env, (jsize)len);
-    if (arr) (*env)->SetByteArrayRegion(env, arr, 0, (jsize)len, (const jbyte *)buf);
-    free(buf);
-    return arr;
+    if (width <= 0 || height <= 0 || !pixels) return -1;
+    unsigned char *buf = (*env)->GetDirectBufferAddress(env, pixels);
+    jlong capacity = (*env)->GetDirectBufferCapacity(env, pixels);
+    jlong need = (jlong)width * 4 * (jlong)height;
+    if (!buf || capacity < need) return -1;
+    return ns_browser_render_argb32(as_browser(handle), scroll_x, scroll_y,
+                                    width, height, scale, buf, width * 4);
 }
 
 JNIEXPORT jint JNICALL
