@@ -153,6 +153,12 @@ ns_crypto_generate_secret(const char *algo, const char *hash, int length_bits,
         if (err) *err = g_strdup("OperationError: invalid key length");
         return NULL;
     }
+    if (algo && g_ascii_strncasecmp(algo, "AES", 3) == 0 &&
+        length_bits != 128 && length_bits != 192 && length_bits != 256) {
+        if (err) *err = g_strdup("OperationError: AES keys are 128, 192 or "
+                                 "256 bits");
+        return NULL;
+    }
     gsize len = (gsize)length_bits / 8;
     guint8 *buf = g_malloc(len);
     if (RAND_bytes(buf, (int)len) != 1) {
@@ -1137,6 +1143,14 @@ ns_crypto_ecdh(const ns_crypto_key *k, const ns_crypto_params *p, int length_bit
 {
     if (!k->pkey || !p->peer || !p->peer->pkey) {
         if (err) *err = g_strdup("InvalidAccessError: ECDH");
+        return NULL;
+    }
+    if (k->type != NS_CK_PRIVATE || p->peer->type != NS_CK_PUBLIC ||
+        g_ascii_strcasecmp(k->algo ? k->algo : "",
+                           p->peer->algo ? p->peer->algo : "") != 0 ||
+        g_strcmp0(k->curve, p->peer->curve) != 0) {
+        if (err) *err = g_strdup("InvalidAccessError: the public key must be "
+                                 "a public key of the same algorithm and curve");
         return NULL;
     }
     EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_pkey(NULL, k->pkey, NULL);
