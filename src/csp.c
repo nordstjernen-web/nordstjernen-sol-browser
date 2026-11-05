@@ -12,6 +12,7 @@
 typedef struct {
     GPtrArray *sources[NS_CSP_KIND_COUNT];
     gboolean   set[NS_CSP_KIND_COUNT];
+    gboolean   upgrade_insecure_requests;
 } ns_csp_policy;
 
 struct ns_csp {
@@ -72,6 +73,11 @@ policy_parse(const char *policy_text)
         if (!*clause) continue;
         char **toks = g_strsplit_set(clause, " \t", -1);
         if (!toks || !toks[0]) { g_strfreev(toks); continue; }
+        if (g_ascii_strcasecmp(toks[0], "upgrade-insecure-requests") == 0) {
+            p->upgrade_insecure_requests = TRUE;
+            g_strfreev(toks);
+            continue;
+        }
         ns_csp_kind k = directive_kind(toks[0]);
         if (k == NS_CSP_KIND_COUNT || p->set[k]) { g_strfreev(toks); continue; }
         p->set[k] = TRUE;
@@ -498,6 +504,17 @@ ns_csp_inline_event_handler_allowed(const ns_csp *csp)
             return FALSE;
     }
     return TRUE;
+}
+
+gboolean
+ns_csp_upgrades_insecure_requests(const ns_csp *csp)
+{
+    if (!csp) return FALSE;
+    for (guint i = 0; i < csp->policies->len; i++) {
+        const ns_csp_policy *p = g_ptr_array_index(csp->policies, i);
+        if (p->upgrade_insecure_requests) return TRUE;
+    }
+    return FALSE;
 }
 
 static gboolean

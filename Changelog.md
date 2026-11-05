@@ -3,6 +3,14 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Mixed content (security): an `http:` image, video, audio, font or
+  stylesheet referenced from an `https:` page is now requested over
+  `https:` instead of being loaded in the clear, as Chrome and Firefox do;
+  scripts, frames, `fetch()` and sockets stay blocked. The
+  `upgrade-insecure-requests` CSP directive is now honoured: with it, every
+  `http:` subresource, `fetch()`, `XMLHttpRequest`, worker, EventSource and
+  WebSocket request of the document is rewritten to `https:`/`wss:` before
+  it is made, and so is a navigation back to the document's own host.
 * Network (security): a page served from the public internet can no longer
   make requests to private-network or loopback addresses, and a page on a
   private network can no longer reach loopback, following the Private

@@ -52,6 +52,8 @@ gboolean ns_csp_inline_event_handler_allowed(const ns_csp *csp);
 
 gboolean ns_csp_eval_allowed(const ns_csp *csp, gboolean wasm);
 
+gboolean ns_csp_upgrades_insecure_requests(const ns_csp *csp);
+
 
 G_END_DECLS
 
