@@ -74,6 +74,19 @@ GPU API on, the filter must allow executable mappings, because the GPU
 drivers behind them (Mesa's llvmpipe among them) compile shaders to
 machine code; a separate GPU process would lift that.
 
+### GPU shader validation (`src/glsl_validate.c`, `src/webgpu.c`)
+
+Page shaders never reach a GPU driver unchecked. Every WebGL shader is
+checked against the WebGL source rules and then parsed and linked by the
+Khronos glslang front end before `glShaderSource` sees it; a rejected
+shader is replaced by a one-line `#error`. The WebGL context is created
+with robust buffer access (`EGL_EXT_create_context_robustness` /
+`WGL_ARB_create_context_robustness`) or not at all, so out-of-range
+accesses inside shaders return defined values. WebGPU shaders are
+validated by naga inside wgpu-native, which also injects bounds checks on
+the Vulkan, Metal and D3D12 backends; the GL backend, which injects none,
+is not enabled. See `docs/webgl.md` and `docs/webgpu.md`.
+
 ### Privilege drop (`src/security_root.c`)
 
 - Linux/macOS: refuses to start as root — prints a diagnostic and exits

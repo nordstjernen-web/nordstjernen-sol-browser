@@ -44,7 +44,7 @@ Debian/Ubuntu:
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev \
+    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev glslang-dev \
     libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
 ```
 
@@ -53,7 +53,7 @@ Fedora/RHEL (`ffmpeg-devel` comes from RPM Fusion):
 ```sh
 sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
     openssl-devel uchardet-devel libpsl-devel sqlite-devel \
-    libseccomp-devel libwebp-devel SDL2-devel ffmpeg-devel
+    libseccomp-devel libwebp-devel SDL2-devel glslang-devel ffmpeg-devel
 ```
 
 openSUSE (`ffmpeg-devel` comes from Packman):
@@ -61,21 +61,21 @@ openSUSE (`ffmpeg-devel` comes from Packman):
 ```sh
 sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
     libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libwebp-devel sdl2-compat-devel ffmpeg-devel
+    libseccomp-devel libwebp-devel sdl2-compat-devel glslang-devel ffmpeg-devel
 ```
 
 macOS on Intel ([Homebrew](https://brew.sh)):
 
 ```sh
 brew install meson ninja pkg-config gtk4 libepoxy curl openssl@3 \
-    uchardet libpsl sqlite webp sdl2 ffmpeg
+    uchardet libpsl sqlite webp sdl2 glslang ffmpeg
 ```
 
 Windows: install [MSYS2](https://www.msys2.org) in `C:\msys64` (or set
 `MSYS2_ROOT`), then in its UCRT64 terminal:
 
 ```sh
-pacman -S --needed tar mingw-w64-ucrt-x86_64-{clang,pkgconf,meson,ninja,gtk4,libepoxy,curl,uchardet,libpsl,sqlite3,libwebp,SDL2,ffmpeg}
+pacman -S --needed tar mingw-w64-ucrt-x86_64-{clang,pkgconf,meson,ninja,gtk4,libepoxy,curl,uchardet,libpsl,sqlite3,libwebp,SDL2,glslang,ffmpeg}
 ```
 
 The browser runs against the MSYS2 libraries it was built with, so keep MSYS2

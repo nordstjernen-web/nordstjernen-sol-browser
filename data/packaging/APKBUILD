@@ -35,6 +35,7 @@ makedepends="
 	libvorbis-dev
 	opusfile-dev
 	sdl2-dev
+	glslang-dev
 	"
 source="$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/$pkgver.tar.gz"
 # GitHub names the archive root after the repository, not after $pkgname.

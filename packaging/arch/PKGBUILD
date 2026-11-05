@@ -21,6 +21,7 @@ depends=(
   glibc
   gst-plugins-base-libs
   gstreamer
+  glslang
   gtk4
   harfbuzz
   hicolor-icon-theme

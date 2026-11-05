@@ -11,7 +11,7 @@ plain build-from-source instructions see `Linux.md`.
 
 ```sh
 sudo pacman -S --needed base-devel git meson gtk4 libepoxy curl uchardet \
-    libpsl sqlite libseccomp libwebp sdl2 ffmpeg gstreamer gst-plugins-base-libs \
+    libpsl sqlite libseccomp libwebp sdl2 glslang ffmpeg gstreamer gst-plugins-base-libs \
     libavif libjxl enchant poppler-glib opusfile libvorbis
 git clone https://github.com/nordstjernen-web/nordstjernen-sol-browser.git
 cd nordstjernen-sol-browser

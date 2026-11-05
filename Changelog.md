@@ -9,6 +9,18 @@ Changelog:
   ABI 6 kernels the ruleset also scopes signals to the sandbox domain, and
   renderers' rulesets scope abstract UNIX sockets too. A compromised tab
   could previously `kill(-1, SIGKILL)` every process of the user.
+* Security: WebGL shaders are validated before they reach the GPU driver.
+  `shaderSource()` checks the WebGL source rules (character set, identifier
+  length, reserved `webgl_` names, nesting, allowed directives, `#version`
+  and `#extension`) and then parses and links the shader with the Khronos
+  glslang front end as GLSL ES 1.00 or 3.00, with the ES 1.00 Appendix A
+  limits; a rejected shader is replaced by a `#error` line, fails to
+  compile and reports the validator's message in `getShaderInfoLog()`.
+  glslang is now a required desktop build dependency (`glslang-dev`,
+  `glslang-devel` or `glslang`; `-Dglslang=disabled` drops WebGL). The GL
+  context is created with robust buffer access
+  (`EGL_EXT_create_context_robustness`, `WGL_ARB_create_context_robustness`)
+  or not at all. `getShaderSource()` now returns the page's own source.
 * Security: the shell↔renderer IPC parser reads every numeric `X-*` header
   through a range-checked parser clamped to ±2³⁰ instead of `atol`, the
   JSON number helper reports an out-of-range value as absent, and the

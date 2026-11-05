@@ -45,7 +45,8 @@ kill switch for WebGL context creation.
 
 `src/webgl.c` is the whole implementation; it is compiled into the engine
 only when `NS_ENABLE_WEBGL` is defined (every desktop build — Linux, macOS,
-Windows), and runs in the engine wherever it is hosted, including the
+Windows — that found the glslang shader validator, `-Dglslang`; see
+[Security](#security)), and runs in the engine wherever it is hosted, including the
 out-of-process renderer. Mobile engine builds (Android, iOS) do not define
 it, so `getContext("webgl")` returns `null` there. The status-bar activity indicator belongs to the GTK shell; the GL
 implementation itself contains no toolkit UI code.
@@ -56,6 +57,10 @@ implementation itself contains no toolkit UI code.
    so it needs no display server, with a 1×1 pbuffer fallback where
    surfaceless current is unsupported; GLES is requested so GLSL ES shaders
    (`#version 100` / `#version 300 es`) compile natively, no translation.
+   The context is always created with `EGL_EXT_create_context_robustness`
+   (robust buffer access, lose-context-on-reset); a driver without that
+   extension gets no WebGL context. Windows does the same through
+   `WGL_ARB_create_context_robustness`.
    On Windows it is a desktop-OpenGL context created via **WGL** on a
    hidden popup window, where GLSL-ES shaders rely on the desktop driver
    accepting them. On macOS it is a **CGL** context on the GL 4.1 core
@@ -192,6 +197,30 @@ mitigations focus on the parts a hostile page can actually reach.
 
 - **Global control.** The Settings switch can prevent all new context
   creation.
+- **Shader validation ahead of the driver.** `shaderSource()` never hands
+  page GLSL to the GPU driver unchecked. `src/glsl_validate.c` first applies
+  the WebGL source rules — the GLSL ES source character set (other bytes
+  only inside comments), identifiers of at most 256 characters, no
+  `webgl_`/`_webgl_` names, a nesting cap, only the standard preprocessor
+  directives, `#version 100` (or `300 es` on a WebGL 2 context) and only the
+  `#extension` names WebGL exposes — then parses and links the shader with
+  the Khronos [glslang](https://github.com/KhronosGroup/glslang) front end
+  as GLSL ES 1.00 or 3.00. For ES 1.00 the Appendix A limits apply (no
+  `while` loops, inductive `for` loops only, constant-index-expressions for
+  uniform, varying, sampler and attribute arrays). A rejected shader never
+  reaches the driver: it is given a one-line `#error` source instead, so
+  `COMPILE_STATUS` is false and `getShaderInfoLog()` returns the validator's
+  message; `getShaderSource()` returns the page's original text. glslang is
+  therefore a build requirement for WebGL (`-Dglslang`); without it WebGL is
+  not built rather than built unvalidated.
+- **Robust buffer access contexts.** The GL context is created with
+  `EGL_EXT_create_context_robustness` (Linux and the BSDs) or
+  `WGL_ARB_create_context_robustness` (Windows) and lose-context-on-reset,
+  so out-of-range buffer and texture reads inside shaders return defined
+  values instead of neighbouring GPU memory, and a reset takes down only
+  that context. A driver that cannot create such a context gets no WebGL
+  context at all. macOS's CGL has no robustness extension, so the
+  requirement cannot be enforced there.
 - **No JS-heap out-of-bounds.** Every pixel-transfer entry point validates
   the caller-supplied `ArrayBufferView` against the exact number of bytes
   GL will touch — computed from width/height/depth, format, type and the
@@ -258,9 +287,10 @@ mitigations focus on the parts a hostile page can actually reach.
   out as opaque session ids via an indirection table, not pointer values.
 
 What is **not** done: there is no full GL command-stream validator (the
-ANGLE model). Index-buffer bounds are now checked, but vertex-attribute
-range validation (does the largest index fit every enabled attribute
-array?) and shader resource limits are still left to the driver. So is
+ANGLE model). Index-buffer bounds are now checked and shaders are
+validated before compilation, but vertex-attribute range validation (does
+the largest index fit every enabled attribute array?) is left to the
+driver's robust buffer access, which the context requires. So is
 "robust resource initialization": storage allocated by `texStorage2D/3D`
 and `renderbufferStorage[Multisample]` is left in the driver's hands, so a
 page that attaches a never-cleared renderbuffer or immutable texture to
@@ -279,6 +309,10 @@ GL stack can disable WebGL globally in Settings.
   `webglcontextrestored` fire through `WEBGL_lose_context`, never because the
   driver lost the context.
 - Antialiasing depends on the driver advertising `GL_MAX_SAMPLES > 1`.
+- WebGL needs a driver that can create a robust-access context
+  (`EGL_EXT_create_context_robustness`, `WGL_ARB_create_context_robustness`);
+  Mesa's drivers, llvmpipe included, do. macOS's CGL has no such extension,
+  so robust access is not enforced there.
 - WebGL 2 is not available on macOS (see [How it works](#how-it-works)).
 
 These are deliberate: the goal is a small, readable bridge that runs the

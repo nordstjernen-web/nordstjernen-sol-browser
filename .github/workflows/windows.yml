@@ -66,6 +66,7 @@ jobs:
             mingw-w64-ucrt-x86_64-libavif
             mingw-w64-ucrt-x86_64-libjxl
             mingw-w64-ucrt-x86_64-SDL2
+            mingw-w64-ucrt-x86_64-glslang
             mingw-w64-ucrt-x86_64-nasm
             make
             zip
