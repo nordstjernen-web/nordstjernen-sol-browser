@@ -307,7 +307,6 @@ ns_headless_main(int argc, char **argv)
 
     ns_headless_opts hopts = {
         .dump = NS_DUMP_TEXT,
-        .viewport_width = 1000,
         .settle_ms = 200,
         .time_ms = 1000,
     };

@@ -13,6 +13,13 @@
 
 typedef struct { double top, bottom; } ns_print_span;
 
+typedef struct {
+    GArray *forced;
+    GArray *spans;
+    GArray *content;
+    double page_h;
+} ns_print_scan;
+
 void
 ns_print_setup_apply_page_rule(ns_print_setup *setup,
                                const ns_css_page_rule *rule)
@@ -83,7 +90,15 @@ add_text_line_spans(GArray *spans, const ns_box *b, double top, double bottom,
 }
 
 static void
-collect_breaks(const ns_box *b, GArray *forced, GArray *spans, double page_h)
+add_content(GArray *content, double top, double bottom)
+{
+    if (!(bottom > top) || content->len >= NS_PRINT_MAX_SPANS) return;
+    ns_print_span s = { top, bottom };
+    g_array_append_val(content, s);
+}
+
+static void
+collect_breaks(const ns_box *b, ns_print_scan *scan)
 {
     if (!b) return;
     double top, bottom;
@@ -91,24 +106,26 @@ collect_breaks(const ns_box *b, GArray *forced, GArray *spans, double page_h)
 
     if (b->parent) {
         if (forces_page_break(break_keyword(b, NS_CSS_BREAK_BEFORE)))
-            g_array_append_val(forced, top);
+            g_array_append_val(scan->forced, top);
         if (forces_page_break(break_keyword(b, NS_CSS_BREAK_AFTER)))
-            g_array_append_val(forced, bottom);
+            g_array_append_val(scan->forced, bottom);
         if (avoids_page_break(break_keyword(b, NS_CSS_BREAK_INSIDE))) {
-            add_span(spans, top, bottom, page_h);
+            add_span(scan->spans, top, bottom, scan->page_h);
+            add_content(scan->content, top, bottom);
             return;
         }
     }
 
     if (!b->first_child) {
         if (b->kind == NS_BOX_INLINE && b->text && *b->text)
-            add_text_line_spans(spans, b, top, bottom, page_h);
+            add_text_line_spans(scan->spans, b, top, bottom, scan->page_h);
         else
-            add_span(spans, top, bottom, page_h);
+            add_span(scan->spans, top, bottom, scan->page_h);
+        add_content(scan->content, top, bottom);
         return;
     }
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
-        collect_breaks(c, forced, spans, page_h);
+        collect_breaks(c, scan);
 }
 
 static int
@@ -118,12 +135,26 @@ cmp_double(gconstpointer a, gconstpointer b)
     return x < y ? -1 : (x > y ? 1 : 0);
 }
 
-static double
-next_forced_break(const GArray *forced, double after, double limit)
+static gboolean
+has_content_between(const GArray *content, double from, double to)
 {
-    for (guint i = 0; i < forced->len; i++) {
-        double f = g_array_index(forced, double, i);
-        if (f > after + 0.5 && f <= limit + 0.5) return f;
+    for (guint i = 0; i < content->len; i++) {
+        const ns_print_span *s = &g_array_index(content, ns_print_span, i);
+        if (s->top < to - 0.5 && s->bottom > from + 0.5) return TRUE;
+    }
+    return FALSE;
+}
+
+static double
+next_forced_break(const ns_print_scan *scan, double page_top, double limit)
+{
+    for (guint i = 0; i < scan->forced->len; i++) {
+        double f = g_array_index(scan->forced, double, i);
+        if (f <= page_top + 0.5) continue;
+        if (f > limit + 0.5) break;
+        if (has_content_between(scan->content, page_top, f) &&
+            has_content_between(scan->content, f, G_MAXDOUBLE))
+            return f;
     }
     return -1;
 }
@@ -154,25 +185,32 @@ ns_print_page_offsets(const ns_box *root, double page_content_height)
     g_array_append_val(offsets, zero);
     if (!root || !(page_content_height > 1)) return offsets;
 
-    GArray *forced = g_array_new(FALSE, FALSE, sizeof(double));
-    GArray *spans = g_array_new(FALSE, FALSE, sizeof(ns_print_span));
-    collect_breaks(root, forced, spans, page_content_height);
-    g_array_sort(forced, cmp_double);
+    ns_print_scan scan = {
+        .forced = g_array_new(FALSE, FALSE, sizeof(double)),
+        .spans = g_array_new(FALSE, FALSE, sizeof(ns_print_span)),
+        .content = g_array_new(FALSE, FALSE, sizeof(ns_print_span)),
+        .page_h = page_content_height,
+    };
+    collect_breaks(root, &scan);
+    g_array_sort(scan.forced, cmp_double);
 
     double doc_bottom = ns_box_max_bottom(root, 0);
     double cur = 0;
-    while (cur + page_content_height < doc_bottom - 0.5 &&
-           offsets->len < 4096) {
+    while (offsets->len < 4096) {
         double limit = cur + page_content_height;
-        double cut = next_forced_break(forced, cur, limit);
-        if (cut < 0) cut = pull_above_spans(spans, cur, limit);
+        double cut = next_forced_break(&scan, cur, limit);
+        if (cut < 0) {
+            if (limit >= doc_bottom - 0.5) break;
+            cut = pull_above_spans(scan.spans, cur, limit);
+        }
         if (cut <= cur + 1) cut = limit;
         g_array_append_val(offsets, cut);
         cur = cut;
     }
 
-    g_array_free(forced, TRUE);
-    g_array_free(spans, TRUE);
+    g_array_free(scan.forced, TRUE);
+    g_array_free(scan.spans, TRUE);
+    g_array_free(scan.content, TRUE);
     return offsets;
 }
 

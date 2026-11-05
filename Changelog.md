@@ -3,6 +3,19 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Printing: `--dump=print:FILE` lays the page out at the sheet's content
+  width again. The headless driver started with a viewport of 1000 pixels,
+  which the print path took for an explicit `--viewport`, so a page was
+  laid out 1000 wide and clipped to the 698 pixels of an A4 sheet: the right
+  third of every line was missing unless `--viewport=698` was passed.
+  `--help` now lists `print:FILE`.
+* Printing: a forced page break is honoured in a document shorter than one
+  page. `break-before: page` and `page-break-before: always` were only
+  looked at while more than a sheet of content remained, so a two-part
+  letter or an invoice with its terms on a second page printed as one
+  sheet. A forced break with nothing before it on the sheet (a first
+  heading) or nothing after it (`break-after` on the last element) no
+  longer produces a blank page.
 * Java: the renderer-process client can no longer hang or be fed a planted
   binary. Every request has a deadline (two minutes by default,
   `nordstjernen.timeout.ms` or `RemoteBrowser.setTimeout`); a renderer that
