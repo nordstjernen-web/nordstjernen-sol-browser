@@ -4,6 +4,7 @@
 #include "i18n.h"
 #include "pagelayers.h"
 #include "pointerlock.h"
+#include "ns_webauthn.h"
 #include "permissions.h"
 
 #include "proc_limits.h"
@@ -66,7 +67,7 @@ typedef enum {
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
     REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLLBAR,
     REQ_PERMISSION, REQ_COLOR_SCHEME, REQ_FAVICON,
-    REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_DOWNLOAD, REQ_POPUP,
+    REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_DOWNLOAD, REQ_POPUP, REQ_WEBAUTHN,
     REQ_SESSION_PULL, REQ_CLEAR_CACHE, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_CONTEXT } LinkAct;
@@ -131,7 +132,8 @@ typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
     RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
     RES_CONSOLE, RES_EVAL, RES_DUMP, RES_FAVICON, RES_DROPFILES,
-    RES_SCROLLBAR, RES_TICK, RES_PRINT, RES_DOWNLOAD, RES_POPUP, RES_SESSION
+    RES_SCROLLBAR, RES_TICK, RES_PRINT, RES_DOWNLOAD, RES_POPUP, RES_SESSION,
+    RES_WEBAUTHN
 } ResType;
 
 typedef struct {
@@ -154,6 +156,7 @@ typedef struct {
     char            *audio;
     char            *window_action;
     gboolean         popup;
+    gboolean         webauthn;
     gboolean         pointer_lock;
     unsigned long    session_gen;
     char            *clipboard;
@@ -196,6 +199,8 @@ struct NsProcView {
     char            *opener_token;
     char            *opener_origin;
     gboolean         popup_poll_pending;
+    gboolean         webauthn_poll_pending;
+    NsWebAuthn      *webauthn;
     grefcount   rc;
 
     GtkWidget     *root;
@@ -649,6 +654,7 @@ pv_swap_proc(NsProcView *v, ns_rproc_http *newp)
 {
     if (newp) {
         ns_rproc_http_set_opener(newp, v->opener_token, v->opener_origin);
+        ns_rproc_http_set_webauthn_support(newp, ns_webauthn_support_flags());
         g_mutex_lock(&v->proc_lock);
         char *storage = g_strdup(v->session_storage);
         g_mutex_unlock(&v->proc_lock);
@@ -1316,6 +1322,7 @@ worker_main(gpointer data)
                     free(fr.window_action);
                 }
                 res->popup = fr.popup ? TRUE : FALSE;
+                res->webauthn = fr.webauthn ? TRUE : FALSE;
                 res->pointer_lock = fr.pointer_lock ? TRUE : FALSE;
                 res->session_gen = fr.session_gen;
                 if (fr.clipboard && v->proc)
@@ -1351,6 +1358,7 @@ worker_main(gpointer data)
                 res->url = tick.url ? g_strdup(tick.url) : NULL;
                 res->url_pushed = tick.url_pushed ? TRUE : FALSE;
                 res->popup = tick.popup ? TRUE : FALSE;
+                res->webauthn = tick.webauthn ? TRUE : FALSE;
                 res->pointer_lock = tick.pointer_lock ? TRUE : FALSE;
                 res->session_gen = tick.session_gen;
                 ns_rproc_http_tick_clear(&tick);
@@ -1550,6 +1558,17 @@ worker_main(gpointer data)
                 post(res);
             } else if (v->proc) {
                 ns_rproc_http_popup_deliver(v->proc, req->query);
+            }
+        } else if (req->type == REQ_WEBAUTHN) {
+            if (req->kind == 0) {
+                Res *res = g_new0(Res, 1);
+                res->view = pv_ref(v);
+                res->type = RES_WEBAUTHN;
+                res->seq = req->seq;
+                res->href = v->proc ? ns_rproc_http_webauthn_poll(v->proc) : NULL;
+                post(res);
+            } else if (v->proc) {
+                ns_rproc_http_webauthn_deliver(v->proc, req->query);
             }
         } else if (req->type == REQ_DOWNLOAD) {
             Res *res = g_new0(Res, 1);
@@ -3510,6 +3529,30 @@ pv_popup_poll(NsProcView *v)
     push_req(v, req);
 }
 
+static void
+pv_webauthn_poll(NsProcView *v)
+{
+    if (!v || v->closed || v->webauthn_poll_pending) return;
+    v->webauthn_poll_pending = TRUE;
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_WEBAUTHN;
+    req->kind = 0;
+    push_req(v, req);
+}
+
+static void
+pv_webauthn_deliver(gpointer owner, const char *json)
+{
+    NsProcView *v = owner;
+    if (!v || v->closed || !json) return;
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_WEBAUTHN;
+    req->kind = 1;
+    req->query = g_strdup(json);
+    push_req(v, req);
+    request_render(v);
+}
+
 void
 ns_proc_view_popup_deliver(NsProcView *v, const char *json)
 {
@@ -3560,6 +3603,13 @@ on_result(gpointer data)
         }
         goto done;
     }
+    if (res->type == RES_WEBAUTHN) {
+        v->webauthn_poll_pending = FALSE;
+        if (!v->closed && v->webauthn && res->href && *res->href &&
+            strcmp(res->href, "[]") != 0)
+            ns_webauthn_handle(v->webauthn, v->current_url, res->href);
+        goto done;
+    }
     if (res->type == RES_POPUP) {
         v->popup_poll_pending = FALSE;
         if (!v->closed && res->href && *res->href && strcmp(res->href, "[]") != 0)
@@ -3601,6 +3651,7 @@ on_result(gpointer data)
                       ns_i18n("Stopped after too many redirects"));
         }
         v->js_redirects = 0;
+        ns_webauthn_cancel_all(v->webauthn);
         g_free(v->current_url);
         v->current_url = g_strdup(res->url);
         g_clear_pointer(&v->pending_url, g_free);
@@ -3662,6 +3713,8 @@ on_result(gpointer data)
             pv_sync_pointer_lock(v, res->pointer_lock);
         if (res->ok && res->popup)
             pv_popup_poll(v);
+        if (res->ok && res->webauthn)
+            pv_webauthn_poll(v);
         if (current && res->ok && !navigated)
             pv_follow_same_document_state(v, res->url, res->url_pushed,
                                           res->title);
@@ -3745,6 +3798,8 @@ on_result(gpointer data)
             pv_sync_pointer_lock(v, res->pointer_lock);
         if (res->ok && res->popup)
             pv_popup_poll(v);
+        if (res->ok && res->webauthn)
+            pv_webauthn_poll(v);
         if (res->ok && res->clipboard && v->area) {
             gdk_clipboard_set_text(gtk_widget_get_clipboard(v->area),
                                    res->clipboard);
@@ -5065,6 +5120,8 @@ on_area_destroy(GtkWidget *widget, gpointer data)
     v->closed = TRUE;
     ns_pointer_lock_free(v->plock);
     v->plock = NULL;
+    ns_webauthn_free(v->webauthn);
+    v->webauthn = NULL;
     if (v->perm_listener) {
         ns_perm_remove_listener(v->perm_listener);
         v->perm_listener = 0;
@@ -5569,6 +5626,7 @@ ns_proc_view_new(void)
     v->overlay = gtk_overlay_new();
     gtk_overlay_set_child(GTK_OVERLAY(v->overlay), grid);
     v->plock = ns_pointer_lock_new(v->area, v->overlay);
+    v->webauthn = ns_webauthn_new(v->area, pv_webauthn_deliver, v);
     gtk_widget_set_vexpand(v->overlay, TRUE);
     build_perm_bar(v);
     v->root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);

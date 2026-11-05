@@ -10,6 +10,7 @@ nordstjernen_gtk_sources = files(
   'remotectl.c',
   'rjson.c',
   'titlerow.c',
+  'ns_webauthn.c',
   '../rproc_http.c',
   '../ipc_http.c',
   '../threaddump.c',
@@ -20,7 +21,10 @@ if gtk4_dep.version().version_compare('<4.22')
 endif
 
 nordstjernen_gtk_deps = nordstjernen_platform_deps + [gtk4_dep, cairo, libcrypto,
-                                                    libm]
+                                                    libm, libpsl]
+if host_machine.system() == 'windows'
+  nordstjernen_gtk_sources += files('webauthn_win.c')
+endif
 if have_fontconfig
   nordstjernen_gtk_deps += [libfontconfig]
 endif

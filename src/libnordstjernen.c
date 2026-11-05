@@ -1694,6 +1694,35 @@ ns_browser_popup_deliver(ns_browser *b, const char *json)
 }
 
 void
+ns_browser_set_webauthn_support(int flags)
+{
+    ns_js_webauthn_set_support(flags);
+}
+
+int
+ns_browser_webauthn_pending(void)
+{
+    return ns_js_webauthn_pending() ? 1 : 0;
+}
+
+char *
+ns_browser_webauthn_take(void)
+{
+    char *json = ns_js_webauthn_take_outbox();
+    char *out = json ? strdup(json) : NULL;
+    g_free(json);
+    return out;
+}
+
+void
+ns_browser_webauthn_deliver(ns_browser *b, const char *json)
+{
+    if (!b || !b->js || !json) return;
+    ns_js_webauthn_deliver(b->js, json);
+    b->dirty = TRUE;
+}
+
+void
 ns_browser_set_color_scheme(int dark)
 {
     ns_css_set_color_scheme(dark ? NS_CSS_COLOR_SCHEME_DARK

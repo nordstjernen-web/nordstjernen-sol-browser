@@ -298,6 +298,8 @@ struct ns_js {
     int           console_eval_depth;
     int           synthetic_click_depth;
     GPtrArray    *mutation_observers;
+    GHashTable   *webauthn_pending;
+    guint         webauthn_next_id;
     gboolean      mutation_drain_scheduled;
     GHashTable   *slot_assigned_hashes;
     GHashTable   *slot_dirty_roots;
@@ -425,6 +427,9 @@ typedef struct ns_draw_path_ud {
 
 double ns_arg_d(JSContext *ctx, JSValueConst v);
 void ns_bind_fn(JSContext *ctx, JSValueConst obj, const char *name, JSCFunction *fn, int argc);
+void ns_js_microtask_checkpoint(ns_js *js);
+void ns_js_webauthn_install(JSContext *ctx, JSValueConst global);
+void ns_js_webauthn_reset(ns_js *js);
 const ns_box *ns_box_find_by_dom(const ns_box *root, const ns_node *target);
 uint32_t ns_js_array_length(JSContext *ctx, JSValueConst arr);
 gboolean ns_webaudio_render_offline(JSContext *ctx, JSValueConst destination,

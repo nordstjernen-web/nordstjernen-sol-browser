@@ -154,6 +154,10 @@ void ns_browser_set_popups_supported(int supported);
 void ns_browser_set_opener(const char *token, const char *origin);
 int  ns_browser_popup_pending(void);
 char *ns_browser_popup_take(void);
+void ns_browser_set_webauthn_support(int flags);
+int  ns_browser_webauthn_pending(void);
+char *ns_browser_webauthn_take(void);
+void ns_browser_webauthn_deliver(ns_browser *b, const char *json);
 void ns_browser_popup_deliver(ns_browser *b, const char *json);
 
 typedef struct ns_session_storage ns_session_storage;

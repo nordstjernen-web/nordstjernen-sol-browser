@@ -112,6 +112,7 @@ struct ns_rproc_http {
     char          *opener_token;
     char          *opener_origin;
     int            popups;
+    int            webauthn;
 };
 
 static ns_rproc_inproc_attach_fn g_inproc_attach;
@@ -596,11 +597,12 @@ rproc_open(ns_rproc_http *r, const char *url, int viewport_width,
                       "{\"url\":\"%s\",\"width\":%d,\"height\":%d,"
                       "\"settle_ms\":%d,\"history\":%d,"
                       "\"user_activated\":%d,\"reload\":%d,"
-                      "\"dpr\":%d.%03d,\"popups\":%d,"
+                      "\"dpr\":%d.%03d,\"popups\":%d,\"webauthn\":%d,"
                       "\"opener_token\":\"%s\",\"opener_origin\":\"%s\"}",
                       ue, viewport_width, viewport_height, settle_ms,
                       history ? 1 : 0, user_activated ? 1 : 0,
                       reload ? 1 : 0, dpr / 1000, dpr % 1000, r->popups,
+                      r->webauthn,
                       te ? te : "", oe ? oe : "");
     free(ue);
     free(te);
@@ -741,6 +743,7 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
     out->audio = head_field_dup(head->x_audio);
     out->window_action = head_field_dup(head->x_window_action);
     out->popup = head->x_popup != 0;
+    out->webauthn = head->x_webauthn != 0;
     out->pointer_lock = head->x_pointer_lock != 0;
     out->session_gen = head->x_session_gen;
     out->clipboard = head->x_clipboard > 0;
@@ -1077,8 +1080,10 @@ ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out)
     out->config = json_get_str(body, "config");
     out->audio = json_get_str(body, "audio");
     out->window_action = json_get_str(body, "window_action");
-    long popup = 0, pointer_lock = 0;
+    long popup = 0, pointer_lock = 0, webauthn = 0;
     json_get_long(body, "popup", &popup);
+    json_get_long(body, "webauthn", &webauthn);
+    out->webauthn = webauthn != 0;
     json_get_long(body, "pointer_lock", &pointer_lock);
     out->popup = popup != 0;
     out->pointer_lock = pointer_lock != 0;
@@ -1444,6 +1449,32 @@ ns_rproc_http_popup_deliver(ns_rproc_http *r, const char *json)
     if (!r || !json)
         return -1;
     char *body = request(r, "/popup-deliver", json);
+    if (!body)
+        return -1;
+    free(body);
+    return 0;
+}
+
+void
+ns_rproc_http_set_webauthn_support(ns_rproc_http *r, int flags)
+{
+    if (r) r->webauthn = flags;
+}
+
+char *
+ns_rproc_http_webauthn_poll(ns_rproc_http *r)
+{
+    if (!r)
+        return NULL;
+    return request(r, "/webauthn-poll", "{}");
+}
+
+int
+ns_rproc_http_webauthn_deliver(ns_rproc_http *r, const char *json)
+{
+    if (!r || !json)
+        return -1;
+    char *body = request(r, "/webauthn-deliver", json);
     if (!body)
         return -1;
     free(body);

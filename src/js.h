@@ -126,6 +126,11 @@ void   ns_js_set_window_action_cb(ns_js *js, ns_js_window_action_cb cb,
                                   gpointer user_data);
 void   ns_js_window_action_applied(ns_js *js);
 void   ns_js_set_popups_supported(gboolean supported);
+#define NS_WEBAUTHN_PLATFORM 1
+void   ns_js_webauthn_set_support(int flags);
+gboolean ns_js_webauthn_pending(void);
+char  *ns_js_webauthn_take_outbox(void);
+void   ns_js_webauthn_deliver(ns_js *js, const char *json);
 void   ns_js_set_capability_state(int capability, const char *origin, int state);
 void   ns_js_clear_capability_states(void);
 void   ns_js_capability_resume(ns_js *js, int capability, gboolean allow);
