@@ -144,7 +144,9 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
-          sparse-checkout: Changelog.md
+          sparse-checkout: |
+            Changelog.md
+            scripts/check-no-profile-data.sh
           sparse-checkout-cone-mode: false
 
       - name: Download packages
