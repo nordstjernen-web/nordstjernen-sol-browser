@@ -2152,6 +2152,7 @@ on_image_fetch_async_done(GObject *src, GAsyncResult *result,
 
 ns_engine_img_session *
 ns_engine_fetch_images_start(ns_box *root, const char *base_url,
+                             const char *document_url,
                              ns_image_cache *cache,
                              GHashTable *requested,
                              double scroll_y, double viewport_h,
@@ -2159,7 +2160,7 @@ ns_engine_fetch_images_start(ns_box *root, const char *base_url,
                              void (*arrived_cb)(gpointer user_data),
                              gpointer user_data)
 {
-    if (!root || !base_url || !cache) return NULL;
+    if (!root || !base_url || !document_url || !cache) return NULL;
     GHashTable *wanted = engine_collect_wanted_images(root, base_url, cache,
                                                       scroll_y, viewport_h,
                                                       deferred_any);
@@ -2196,7 +2197,7 @@ ns_engine_fetch_images_start(ns_box *root, const char *base_url,
         item->abs = g_strdup(key);
         s->refs++;
         ns_net_request_async(
-            item->abs, base_url, "GET", NULL, 0, NULL,
+            item->abs, document_url, "GET", NULL, 0, NULL,
             ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), NULL,
             on_image_fetch_async_done, item);
     }
