@@ -718,11 +718,10 @@ ns_pango_fc_font_create_hb_font (NsPangoFont *font)
 
       /* Fontconfig asks for a bold face to be synthesised when the family has
        * none, which is what CSS calls font-synthesis: weight, and cairo obliges
-       * with FT_GlyphSlot_Embolden. FreeType grows the advance by a 24th of the
-       * em along with the outline; HarfBuzz has to be told to do the same, or
-       * the glyphs are drawn wider than the advances they were measured with and
-       * synthesised bold text sets too tight -- touching, in CJK, where the
-       * glyphs already fill the em box.
+       * with FT_GlyphSlot_Embolden. The outline thickens in place and the
+       * advances stay those of the regular face, as in Blink, so synthesised
+       * bold text breaks into lines exactly where pages laid out against
+       * Chrome expect it to.
        */
       if (FcPatternGetBool (pattern, FC_EMBOLDEN, 0, &fc_embolden) == FcResultMatch &&
           fc_embolden)
@@ -772,7 +771,7 @@ ns_pango_fc_font_create_hb_font (NsPangoFont *font)
 #endif
 
 #if HB_VERSION_ATLEAST (7, 0, 0)
-  hb_font_set_synthetic_bold (hb_font, embolden, embolden, FALSE);
+  hb_font_set_synthetic_bold (hb_font, embolden, embolden, TRUE);
 #endif
 
   if (key)
