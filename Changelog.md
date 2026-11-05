@@ -3,6 +3,12 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Fonts: weight synthesis follows Blink. A face lighter than 600 is
+  emboldened whenever weight 600 or more is asked for (fontconfig waited
+  for 700), and the emboldened glyphs keep the regular face's advances, so
+  synthesised bold text wraps where it does in Chrome. Facebook's
+  "Utforsk tingene du elsker" heading (a 500 face at weight 600) was drawn
+  regular, then broke mid-word once emboldened.
 * Security: a sandboxed renderer can no longer signal other processes.
   The seccomp filter allows `kill` and `tgkill` only against the
   renderer's own PID and drops `tkill` and `pidfd_send_signal`; on Landlock

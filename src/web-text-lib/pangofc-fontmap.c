@@ -1250,6 +1250,41 @@ ns_pango_fc_fontset_get_key (NsPangoFcFontset *fontset)
   return fontset->key;
 }
 
+static gboolean
+ns_pango_fc_pattern_weight (FcPattern *pattern, double *weight)
+{
+  FcValue value;
+
+  if (FcPatternGet (pattern, FC_WEIGHT, 0, &value) != FcResultMatch)
+    return FALSE;
+  if (value.type == FcTypeInteger)
+    *weight = value.u.i;
+  else if (value.type == FcTypeDouble)
+    *weight = value.u.d;
+  else if (value.type == FcTypeRange)
+    {
+      double begin;
+      if (!FcRangeGetDouble (value.u.r, &begin, weight))
+        return FALSE;
+    }
+  else
+    return FALSE;
+  return TRUE;
+}
+
+static gboolean
+ns_pango_fc_needs_synthetic_bold (FcPattern *request, FcPattern *font)
+{
+  double wanted, available;
+  FcBool embolden;
+
+  if (FcPatternGetBool (font, FC_EMBOLDEN, 0, &embolden) == FcResultMatch)
+    return FALSE;
+  return ns_pango_fc_pattern_weight (request, &wanted) &&
+         ns_pango_fc_pattern_weight (font, &available) &&
+         wanted >= FC_WEIGHT_DEMIBOLD && available < FC_WEIGHT_DEMIBOLD;
+}
+
 static NsPangoFont *
 ns_pango_fc_fontset_load_next_font (NsPangoFcFontset *fontset)
 {
@@ -1270,6 +1305,18 @@ ns_pango_fc_fontset_load_next_font (NsPangoFcFontset *fontset)
 
       if (G_UNLIKELY (!font_pattern))
 	return NULL;
+    }
+
+  if (ns_pango_fc_needs_synthetic_bold (pattern, font_pattern))
+    {
+      if (!prepare)
+        {
+          font_pattern = FcPatternDuplicate (font_pattern);
+          if (G_UNLIKELY (!font_pattern))
+            return NULL;
+          prepare = TRUE;
+        }
+      FcPatternAddBool (font_pattern, FC_EMBOLDEN, FcTrue);
     }
 
   font = ns_pango_fc_font_map_new_font (fontset->key->fontmap,
