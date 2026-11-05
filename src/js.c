@@ -66350,28 +66350,41 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
 
     JSValue document = JS_NewObjectClass(ctx, ns_element_class_id);
     if (js->current_doc) JS_SetOpaque(document, js->current_doc);
-    JS_SetPropertyStr(ctx, document, "URL",         JS_NewString(ctx, js->current_url));
-    JS_SetPropertyStr(ctx, document, "documentURI", JS_NewString(ctx, js->current_url));
-    JS_SetPropertyStr(ctx, document, "baseURI",     JS_NewString(ctx, js->current_url));
-    JS_SetPropertyStr(ctx, document, "characterSet", JS_NewString(ctx, "UTF-8"));
+    JS_DefinePropertyValueStr(ctx, document, "URL",
+                              JS_NewString(ctx, js->current_url), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, document, "documentURI",
+                              JS_NewString(ctx, js->current_url), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, document, "baseURI",
+                              JS_NewString(ctx, js->current_url), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, document, "characterSet",
+                              JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, document, "charset",
                               JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
-    JS_SetPropertyStr(ctx, document, "inputEncoding", JS_NewString(ctx, "UTF-8"));
-    JS_SetPropertyStr(ctx, document, "contentType",  JS_NewString(ctx, "text/html"));
+    JS_DefinePropertyValueStr(ctx, document, "inputEncoding",
+                              JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, document, "contentType",
+                              JS_NewString(ctx, "text/html"), JS_PROP_C_W_E);
     {
         char *dom_host = ns_url_host_from(js->current_url);
-        JS_SetPropertyStr(ctx, document, "domain",
-                          JS_NewString(ctx, dom_host ? dom_host : ""));
+        JS_DefinePropertyValueStr(ctx, document, "domain",
+            JS_NewString(ctx, dom_host ? dom_host : ""), JS_PROP_C_W_E);
         g_free(dom_host);
     }
-    JS_SetPropertyStr(ctx, document, "defaultView",  JS_DupValue(ctx, global));
-    JS_SetPropertyStr(ctx, document, "ownerDocument", JS_NULL);
-    JS_SetPropertyStr(ctx, document, "nodeName",     JS_NewString(ctx, "#document"));
-    JS_SetPropertyStr(ctx, document, "nodeType",     JS_NewInt32(ctx, 9));
+    JS_DefinePropertyValueStr(ctx, document, "defaultView",
+                              JS_DupValue(ctx, global), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, document, "ownerDocument",
+                              JS_NULL, JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, document, "nodeName",
+                              JS_NewString(ctx, "#document"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, document, "nodeType",
+                              JS_NewInt32(ctx, 9), JS_PROP_C_W_E);
     ns_synthdoc_define_getter(ctx, document, "doctype", ns_synthdoc_get_doctype);
-    JS_SetPropertyStr(ctx, document, "xmlVersion",   JS_NewString(ctx, "1.0"));
-    JS_SetPropertyStr(ctx, document, "xmlEncoding",  JS_NULL);
-    JS_SetPropertyStr(ctx, document, "xmlStandalone", JS_FALSE);
+    JS_DefinePropertyValueStr(ctx, document, "xmlVersion",
+                              JS_NewString(ctx, "1.0"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, document, "xmlEncoding",
+                              JS_NULL, JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, document, "xmlStandalone",
+                              JS_FALSE, JS_PROP_C_W_E);
     JS_SetPropertyFunctionList(ctx, document, ns_document_funcs,
                                G_N_ELEMENTS(ns_document_funcs));
     ns_install_event_handler_props(ctx, document);
