@@ -21,6 +21,12 @@ Changelog:
   context is created with robust buffer access
   (`EGL_EXT_create_context_robustness`, `WGL_ARB_create_context_robustness`)
   or not at all. `getShaderSource()` now returns the page's own source.
+* Security: WebGPU enables only the Vulkan, Metal and D3D12 backends of
+  wgpu-native, whose shader translation injects bounds checks; the GL
+  backend, which does not, is no longer used, so the software fallback is
+  lavapipe rather than llvmpipe. The WGSL source passed to
+  `createShaderModule()` is capped at 4 MiB. `NS_WEBGPU_VALIDATION=1` turns
+  on wgpu's backend validation layers for development.
 * Security: the shell↔renderer IPC parser reads every numeric `X-*` header
   through a range-checked parser clamped to ±2³⁰ instead of `atol`, the
   JSON number helper reports an out-of-range value as absent, and the

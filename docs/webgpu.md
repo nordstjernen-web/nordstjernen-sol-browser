@@ -185,6 +185,27 @@ must be mapped, the offset must be a multiple of 8, the size a multiple of
 an `OperationError` in JavaScript. The wrapper tracks the mapped range
 from `mappedAtCreation`, `mapAsync()` and `unmap()`/`destroy()`.
 
+### Shader validation and bounds checks
+
+WebGPU never hands page shaders to a GPU driver: wgpu-native parses the
+WGSL with naga and validates the module unconditionally
+(`naga::valid::ValidationFlags::all()` in wgpu-core's
+`create_shader_module`) before translating it to SPIR-V, MSL or HLSL, so
+the driver only ever sees code naga generated. Out-of-range buffer, array
+and texture accesses inside shaders are made safe per backend: on Vulkan
+naga clamps indices and either clamps buffer accesses or relies on the
+device's `robustBufferAccess2`, on Metal it applies its bounds-check
+policy to every access, and on D3D12 it restricts indexing. wgpu's **GL
+backend injects no bounds checks at all** and requests no robustness
+extension ([gfx-rs/wgpu#6151](https://github.com/gfx-rs/wgpu/issues/6151)),
+so `src/webgpu.c` creates the instance with only the Vulkan, Metal and
+D3D12 backends enabled: a machine whose only GPU path is OpenGL gets no
+adapter rather than an unchecked one, and the software fallback is
+lavapipe (Mesa's Vulkan), not llvmpipe. The WGSL source handed to
+`createShaderModule()` is capped at 4 MiB, the same limit WebGL applies.
+`NS_WEBGPU_VALIDATION=1` additionally turns on wgpu's backend validation
+layers and debug labels for development.
+
 ### Not yet implemented
 
 Real timestamp queries (accepted, but they record nothing), compilation
@@ -198,8 +219,9 @@ skipped.
 
 - The implementation talks to the standard multi-vendor `webgpu.h` C ABI, so
   it is backend-agnostic; wgpu-native selects a backend (Vulkan / Metal /
-  D3D12 / GL) at runtime and falls back to software (llvmpipe / lavapipe)
-  when no GPU is present.
+  D3D12 — the GL backend is excluded, see
+  [Shader validation and bounds checks](#shader-validation-and-bounds-checks))
+  at runtime and falls back to software (lavapipe) when no GPU is present.
 - wgpu-native is, by a wide margin, the largest dependency the project can
   pull in (tens of MB, plus a Rust toolchain to build from source) and is
   not auditable by a single maintainer. This is why it is never vendored
@@ -212,6 +234,11 @@ skipped.
   development does not need device access.
 
 ## Quick check
+
+Without a GPU this needs Mesa's Vulkan software driver (lavapipe:
+`mesa-vulkan-drivers` on Debian/Ubuntu, `mesa-vulkan-drivers` on Fedora,
+`vulkan-swrast` on Arch); the GL backend is not used, so llvmpipe alone
+yields no adapter.
 
 ```sh
 LD_LIBRARY_PATH=/path/to/release/lib \
