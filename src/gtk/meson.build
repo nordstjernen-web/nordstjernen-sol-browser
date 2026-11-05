@@ -37,13 +37,6 @@ if gtk4_dep.version().version_compare('<4.22')
   nordstjernen_gtk_deps += nordstjernen_deps
   nordstjernen_gtk_link = [libnordstjernen_static]
   nordstjernen_gtk_sources += files('../security_root.c')
-  if sdl2_dep.found()
-    if host_machine.system() == 'windows'
-      nordstjernen_gtk_deps += [cc.find_library('SDL2')]
-    else
-      nordstjernen_gtk_deps += [sdl2_dep.partial_dependency(links: true)]
-    endif
-  endif
 endif
 
 nordstjernen_gtk_platform_sources = []

@@ -7,6 +7,7 @@
 
 G_BEGIN_DECLS
 
+void     ns_mic_preload(void);
 gboolean ns_mic_acquire(void);
 void     ns_mic_release(void);
 

@@ -29,6 +29,7 @@
 #include "image.h"
 #include "js.h"
 #include "layout.h"
+#include "mic.h"
 #include "net.h"
 #include "spellcheck.h"
 #include "paint.h"
@@ -1193,8 +1194,10 @@ ns_browser_sandbox(const char *self_exe)
     if (ns_config_get()->webgl_enabled)
         ns_gl_prepare_for_sandbox();
     ns_security_seccomp_deny_unix_sockets();
-    if (!gpu_apis)
+    if (!gpu_apis) {
+        ns_mic_preload();
         ns_security_seccomp_deny_exec_memory();
+    }
     ns_security_seccomp_init();
 }
 
