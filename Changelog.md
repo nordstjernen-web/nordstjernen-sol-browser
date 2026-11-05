@@ -291,6 +291,12 @@ Changelog:
   computed, as `em` does against its font size; it was dropped, so
   `transform: translateY(-2lh)` did not move the box at all. openai.com's
   prompt placeholder sat 36 px below where Chrome draws it.
+* Layout: `text-indent` counts in the min-content and max-content width
+  of a block's first line, as in Chrome. A shrink-to-fit box sized itself
+  to its text alone, then indented the first line inside that width and
+  wrapped the last word: eBay's footer country picker, which indents its
+  label past a flag icon, broke "United States" over two lines and
+  narrowed its column by 51 px.
 
 1.0.43:
 ======
