@@ -316,6 +316,12 @@ Changelog:
   too. Its padding and border were added on top of them, so a flex item
   holding a 280 px card with 64 px of padding could not shrink below
   344 px. DuckDuckGo's review carousel spread out 64 px per card.
+* Layout: `text-indent` counts in the min-content and max-content width
+  of a block's first line, as in Chrome. A shrink-to-fit box sized itself
+  to its text alone, then indented the first line inside that width and
+  wrapped the last word: eBay's footer country picker, which indents its
+  label past a flag icon, broke "United States" over two lines and
+  narrowed its column by 51 px.
 
 1.0.43:
 ======

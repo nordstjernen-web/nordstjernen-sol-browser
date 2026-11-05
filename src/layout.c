@@ -10826,6 +10826,14 @@ text_input_intrinsic_width(const ns_box *box)
 
 static double ratio_transferred_width(const ns_box *box);
 
+static void
+set_first_line_indent(NsPangoLayout *layout, const ns_box *run,
+                      const ns_style *parent_style)
+{
+    double ti = ns_inline_text_indent_px(run, parent_style, 0);
+    if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
+}
+
 static double
 measure_natural_width(ns_box *box, const ns_style *parent_style)
 {
@@ -10881,6 +10889,17 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
                 slack = MAX(slack, letter_spacing_slack(r->letter_spacing_px));
         }
         double pw = ceil((double)logical.width / NS_PANGO_SCALE + slack);
+        double indent = ns_inline_text_indent_px(box, parent_style, 0);
+        if (indent > 0) {
+            NsPangoLayoutLine *first = ns_pango_layout_get_line_readonly(layout, 0);
+            NsPangoRectangle line_rect;
+            if (first) {
+                ns_pango_layout_line_get_extents(first, NULL, &line_rect);
+                double fw = ceil((double)line_rect.width / NS_PANGO_SCALE +
+                                 slack + indent);
+                if (fw > pw) pw = fw;
+            }
+        }
         if (box->inline_atomics) {
             for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
                 const ns_inline_atomic *a = &g_array_index(
@@ -11152,7 +11171,8 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         if (cacheable && box->inline_min_cache_valid &&
             box->inline_min_cache_style == parent_style)
             return box->inline_min_cache_width;
-        double fast = measure_inline_ascii_min_width(box, parent_style);
+        double fast = ns_inline_text_indent_px(box, parent_style, 0) > 0
+            ? -1 : measure_inline_ascii_min_width(box, parent_style);
         if (fast >= 0) {
             if (cacheable) {
                 box->inline_min_cache_style = parent_style;
@@ -11164,6 +11184,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         NsPangoLayout *layout = make_pango_layout(parent_style);
         ns_pango_layout_set_width(layout, 1);
         ns_pango_layout_set_wrap(layout, NS_PANGO_WRAP_WORD);
+        set_first_line_indent(layout, box, parent_style);
         GArray *saved = measure_inline_atomics_begin(box, parent_style, FALSE);
         ns_pango_layout_set_text(layout, box->text, -1);
         NsPangoAttrList *i18n = ns_pango_attr_list_new();
