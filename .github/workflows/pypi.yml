@@ -1,0 +1,89 @@
+name: pypi
+
+# Publishes the nordstjernen-browser pip package for a release once the
+# release is published. PyPI trusts this workflow through Trusted Publishing:
+# a publisher for project nordstjernen-browser, repository
+# nordstjernen-web/nordstjernen-sol-browser, workflow pypi.yml and
+# environment pypi must be registered on pypi.org. No token is stored here.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release to publish the pip package for
+        required: true
+
+concurrency:
+  group: pypi-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ inputs.tag || github.event.release.tag_name }}
+
+jobs:
+  build:
+    name: Build the sdist and wheel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Prepare the package for the release
+        run: python3 pip/prepare.py "$TAG"
+
+      - name: Build and check
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet build twine
+          .venv/bin/python -m build --outdir dist pip
+          .venv/bin/twine check --strict dist/*
+          ls -l dist
+
+      - name: Upload the distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: pypi-dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/nordstjernen-browser/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download the distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: pypi-dist
+          path: dist
+
+      - name: Upload with a token minted from the workflow identity
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet twine
+          audience=$(curl -fsS https://pypi.org/_/oidc/audience \
+                     | python3 -c 'import json,sys; print(json.load(sys.stdin)["audience"])')
+          oidc=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                   "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$audience" \
+                 | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')
+          echo "::add-mask::$oidc"
+          token=$(python3 -c 'import json,sys; print(json.dumps({"token": sys.argv[1]}))' "$oidc" \
+                  | curl -fsS -X POST -H 'Content-Type: application/json' --data @- \
+                         https://pypi.org/_/oidc/mint-token \
+                  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+          echo "::add-mask::$token"
+          TWINE_USERNAME=__token__ TWINE_PASSWORD="$token" \
+            .venv/bin/twine upload --non-interactive dist/*
