@@ -4,6 +4,8 @@
 #define _GNU_SOURCE 1
 #include "renderer_serve.h"
 #include "cache.h"
+#include "engine_protocol.h"
+#include "version.h"
 #include "download.h"
 #include "libnordstjernen.h"
 #include "renderer_tiles.h"
@@ -667,6 +669,21 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
     if (strcmp(head->path, "/quit") == 0) {
         http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
         return 1;
+    }
+
+    if (strcmp(head->path, NS_ENGINE_PROTOCOL_HELLO) == 0) {
+        char *json = NULL;
+        int n = asprintf(&json,
+                         "{\"protocol\":%d,\"engine\":\"%s\",\"version\":\"%s\"}",
+                         NS_ENGINE_PROTOCOL_VERSION, NS_ENGINE_PROTOCOL_ENGINE,
+                         NS_VERSION);
+        if (n > 0)
+            http_write_response(ctrl_w, 200, "application/json", NULL, json,
+                                (size_t)n);
+        else
+            http_write_response(ctrl_w, 500, "text/plain", NULL, NULL, 0);
+        free(json);
+        return 0;
     }
 
     if (strcmp(head->path, "/webgl") == 0) {
