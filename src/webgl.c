@@ -866,6 +866,22 @@ wgl_forget_program(ns_webgl *g, GLuint prog)
         g_hash_table_remove(g->attrib_masks, GUINT_TO_POINTER(prog));
 }
 
+static void
+wgl_check_all_attribs_for(ns_webgl *g, GLuint prog)
+{
+    if (prog == 0) return;
+    if (!g->attrib_masks)
+        g->attrib_masks = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                                NULL, g_free);
+    GLint max_attribs = 0;
+    glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &max_attribs);
+    if (max_attribs <= 0) max_attribs = 16;
+    guint64 *mask = g_new(guint64, 1);
+    *mask = max_attribs >= 64 ? G_MAXUINT64
+                              : (((guint64)1 << max_attribs) - 1);
+    g_hash_table_insert(g->attrib_masks, GUINT_TO_POINTER(prog), mask);
+}
+
 static gboolean
 wgl_elem_max_index(const uint8_t *data, size_t len, GLintptr offset,
                    GLsizei count, int isz, int version, uint64_t *out_max)
@@ -2324,8 +2340,14 @@ static JSValue
 wgl_linkProgram(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    wgl_forget_program(g, (GLuint)wgl_name(ctx, argv[0]));
-    glLinkProgram((GLuint)wgl_name(ctx, argv[0]));
+    GLuint prog = (GLuint)wgl_name(ctx, argv[0]);
+    glLinkProgram(prog);
+    GLint linked = GL_FALSE;
+    glGetProgramiv(prog, GL_LINK_STATUS, &linked);
+    if (linked)
+        wgl_forget_program(g, prog);
+    else
+        wgl_check_all_attribs_for(g, prog);
     return JS_UNDEFINED;
 }
 
