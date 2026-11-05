@@ -3,6 +3,13 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Java: `RemotePage.renderFullPage()` returns the whole page. It rendered
+  through the renderer's framebuffer, which `RemotePage` sizes at 2560 by
+  4096 pixels, so a longer page came back silently cut at 4096. The
+  renderer has a new `/screenshot` request (`ns_browser_render_png` in the C
+  API) that paints the document, or a region of it, in one pass and answers
+  with PNG bytes; `RemotePage` and `RemoteBrowser` expose it as
+  `screenshotPng`. A `position: fixed` element appears once in the result.
 * Java (in-process `Page`): text with emoji survives, and three other
   defects are gone. Strings crossed the JNI bridge as modified UTF-8, which
   has no four-byte sequences, so a title, page text, link or file path

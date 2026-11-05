@@ -48,7 +48,7 @@ Every request is `POST <path>` with an `application/json` body. The reply is
 | Area | Paths |
 |------|-------|
 | Lifecycle | `/hello`, `/quit`, `/viewport`, `/colorscheme`, `/clear-cache` |
-| Navigation and rendering | `/open`, `/render`, `/tick`, `/favicon`, `/dump`, `/export`, `/print` |
+| Navigation and rendering | `/open`, `/render`, `/tick`, `/favicon`, `/dump`, `/export`, `/print`, `/screenshot` |
 | Pointer and keyboard | `/click`, `/hover`, `/scroll`, `/scrollbar-press`, `/scrollbar-drag`, `/scrollbar-release`, `/release`, `/key`, `/select`, `/link`, `/dropfiles`, `/contextmenu` |
 | Editing | `/focused-editable`, `/focused-editable-state`, `/focused-editable-selection`, `/clipboard`, `/find` |
 | Scripting and diagnostics | `/eval`, `/console` |
@@ -135,3 +135,14 @@ for one purpose, rasterising its own SVG icons through the engine's SVG
 renderer (`src/gtk/icons.c`); that is the remaining coupling to remove, by
 moving icon rasterisation behind the protocol or pre-rendering the icons at
 build time.
+
+## Screenshots
+
+`POST /screenshot` with `{"x", "y", "width", "height", "scale"}` (CSS pixels
+and a device scale; a zero `width` or `height` means up to the page's edge,
+so an empty object is the whole page) answers with an `image/png` body and
+`X-W` / `X-H`, the image's size in device pixels. The renderer paints the
+document in one pass into a surface of its own, so the result is not bound
+by the framebuffer the shell asked for at spawn and a `position: fixed`
+element appears once. Each side is capped at 30,000 device pixels. An empty
+body means there was nothing to capture.

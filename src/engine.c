@@ -2256,11 +2256,56 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
     g_hash_table_destroy(wanted);
 }
 
+#define NS_ENGINE_PNG_MAX_SIDE 30000
+
+static cairo_status_t
+png_bytes_append(void *closure, const unsigned char *data, unsigned int length)
+{
+    g_byte_array_append(closure, data, length);
+    return CAIRO_STATUS_SUCCESS;
+}
+
+GByteArray *
+ns_engine_png_bytes(const ns_box *root, double x, double y, double width,
+                    double height, double scale, int *out_width,
+                    int *out_height)
+{
+    if (!root || !(width > 0) || !(height > 0)) return NULL;
+    if (!(scale > 0)) scale = 1.0;
+    int w = (int)MIN(ceil(width * scale), (double)NS_ENGINE_PNG_MAX_SIDE);
+    int h = (int)MIN(ceil(height * scale), (double)NS_ENGINE_PNG_MAX_SIDE);
+    if (w < 1 || h < 1) return NULL;
+    cairo_surface_t *surf =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surf);
+        return NULL;
+    }
+    cairo_t *cr = cairo_create(surf);
+    cairo_scale(cr, scale, scale);
+    cairo_translate(cr, -x, -y);
+    ns_paint(cr, root, NULL);
+    cairo_destroy(cr);
+    GByteArray *png = g_byte_array_new();
+    gint64 encode_t0 = g_get_monotonic_time();
+    cairo_status_t st =
+        cairo_surface_write_to_png_stream(surf, png_bytes_append, png);
+    g_engine_encode_us += g_get_monotonic_time() - encode_t0;
+    cairo_surface_destroy(surf);
+    if (st != CAIRO_STATUS_SUCCESS) {
+        g_byte_array_free(png, TRUE);
+        return NULL;
+    }
+    if (out_width) *out_width = w;
+    if (out_height) *out_height = h;
+    return png;
+}
+
 int
 ns_engine_write_png(const ns_box *root, const char *path)
 {
     if (!root || !path) return 2;
-    const int kCairoMax = 30000;
+    const int kCairoMax = NS_ENGINE_PNG_MAX_SIDE;
     double cw = root->content_width;
     if (!(cw > 0)) cw = 1024;
     if (cw > kCairoMax) cw = kCairoMax;

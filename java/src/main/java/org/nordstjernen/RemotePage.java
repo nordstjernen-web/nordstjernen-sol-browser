@@ -5,11 +5,16 @@
 
 package org.nordstjernen;
 
+import java.awt.AlphaComposite;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import javax.imageio.ImageIO;
 
 /**
  * A web page driven through a separate {@code nordstjernen-renderer} process,
@@ -167,11 +172,85 @@ public final class RemotePage implements AutoCloseable {
         return lastFrame;
     }
 
-    /** Render the whole page (top to bottom, full width) at {@code scale}. */
+    /**
+     * Render the whole page (top to bottom, full width) at {@code scale}. The
+     * renderer paints the document in one pass, so an element with
+     * {@code position: fixed} appears once, where it sits at the top of the
+     * page. Each side is capped at 30,000 device pixels.
+     */
     public BufferedImage renderFullPage(double scale) {
-        int width = clampPx(Math.round(pageWidth * scale), MAX_W);
-        int height = clampPx(Math.round(pageHeight * scale), MAX_H);
-        return render(0, 0, width, height, scale);
+        byte[] png = screenshot(0, 0, 0, 0, scale);
+        if (png == null) {
+            int width = clampPx(Math.round(pageWidth * scale), MAX_W);
+            int height = clampPx(Math.round(pageHeight * scale), MAX_H);
+            return render(0, 0, width, height, scale);
+        }
+        try {
+            BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(png));
+            if (decoded == null) {
+                throw new NordstjernenException("the renderer returned an unreadable PNG");
+            }
+            BufferedImage img = new BufferedImage(decoded.getWidth(), decoded.getHeight(),
+                                                  BufferedImage.TYPE_INT_ARGB_PRE);
+            Graphics2D g = img.createGraphics();
+            g.setComposite(AlphaComposite.Src);
+            g.drawImage(decoded, 0, 0, null);
+            g.dispose();
+            return img;
+        } catch (IOException e) {
+            throw new NordstjernenException("the renderer returned an unreadable PNG", e);
+        }
+    }
+
+    /**
+     * The whole page as PNG bytes at {@code scale}, encoded by the renderer.
+     * Each side is capped at 30,000 device pixels.
+     */
+    public byte[] screenshotPng(double scale) {
+        return requireScreenshot(screenshot(0, 0, 0, 0, scale));
+    }
+
+    /**
+     * A region of the page as PNG bytes: {@code width} by {@code height} CSS
+     * pixels from the document point {@code (x, y)}, at {@code scale}.
+     */
+    public byte[] screenshotPng(int x, int y, int width, int height, double scale) {
+        if (width <= 0 || height <= 0) {
+            throw new IllegalArgumentException("width and height must be positive");
+        }
+        return requireScreenshot(screenshot(x, y, width, height, scale));
+    }
+
+    private static byte[] requireScreenshot(byte[] png) {
+        if (png == null) {
+            throw new NordstjernenException("this renderer cannot take screenshots;"
+                + " it predates the /screenshot request");
+        }
+        return png;
+    }
+
+    private byte[] screenshot(int x, int y, int width, int height, double scale) {
+        return screenshot(renderer, x, y, width, height, scale);
+    }
+
+    /**
+     * Ask {@code renderer} for a PNG; zero {@code width} or {@code height}
+     * means up to the page's edge. Null when the renderer does not know the
+     * request (an older engine answers 404).
+     */
+    static byte[] screenshot(RendererProcess renderer, int x, int y, int width, int height,
+                             double scale) {
+        String body = "{\"x\":" + x + ",\"y\":" + y + ",\"width\":" + width
+            + ",\"height\":" + height + ",\"scale\":" + formatScale(scale) + "}";
+        RendererProcess.Response resp =
+            renderer.exchange("/screenshot", body, renderer.timeoutMs());
+        if (resp.status == 404) {
+            return null;
+        }
+        if (resp.status != 200 || resp.body.length == 0) {
+            throw new NordstjernenException("the renderer could not take the screenshot");
+        }
+        return resp.body;
     }
 
     /** The rendered (laid-out) text content of the page. */
@@ -257,7 +336,7 @@ public final class RemotePage implements AutoCloseable {
         }
     }
 
-    private static String formatScale(double scale) {
+    static String formatScale(double scale) {
         if (!(scale > 0)) {
             scale = 1.0;
         }

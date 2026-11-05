@@ -37,6 +37,11 @@ char *ns_browser_dump_performance(ns_browser *browser);
 
 int ns_browser_render_image(ns_browser *browser, const char *path);
 
+unsigned char *ns_browser_render_png(ns_browser *browser, double x, double y,
+                                     double width, double height,
+                                     double scale, size_t *out_len,
+                                     int *out_width, int *out_height);
+
 int ns_browser_page_size(ns_browser *browser, int *out_width, int *out_height);
 
 int ns_browser_snap_document(ns_browser *browser, double viewport_w,

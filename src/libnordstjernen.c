@@ -2114,6 +2114,40 @@ ns_browser_render_image(ns_browser *browser, const char *path)
     return rc;
 }
 
+unsigned char *
+ns_browser_render_png(ns_browser *browser, double x, double y, double width,
+                      double height, double scale, size_t *out_len,
+                      int *out_width, int *out_height)
+{
+    if (out_len) *out_len = 0;
+    if (!browser || !browser->layout || !out_len) return NULL;
+    int page_w = 0, page_h = 0;
+    if (ns_browser_page_size(browser, &page_w, &page_h) != 0) return NULL;
+    if (!(x > 0)) x = 0;
+    if (!(y > 0)) y = 0;
+    if (!(width > 0)) width = (double)page_w - x;
+    if (!(height > 0)) height = (double)page_h - y;
+    if (!(width > 0) || !(height > 0)) return NULL;
+
+    browser_wait_images(browser);
+
+    ns_paint_set_js(browser->js);
+    ns_paint_set_anim(browser->anim);
+    GByteArray *png = ns_engine_png_bytes(browser->layout, x, y, width, height,
+                                          scale, out_width, out_height);
+    ns_paint_set_anim(NULL);
+    ns_paint_set_js(NULL);
+    if (!png) return NULL;
+
+    unsigned char *out = malloc(png->len ? png->len : 1);
+    if (out) {
+        memcpy(out, png->data, png->len);
+        *out_len = png->len;
+    }
+    g_byte_array_free(png, TRUE);
+    return out;
+}
+
 GPtrArray *
 ns_browser_print_pages(ns_browser *browser, ns_print_setup *out_setup)
 {

@@ -658,6 +658,30 @@ public final class RemoteBrowser implements AutoCloseable {
         return new Media(url, Json.flag(json, "is_video"), Json.flag(json, "stream"));
     }
 
+    /**
+     * The whole page as PNG bytes at {@code scale}, encoded by the renderer in
+     * one pass over the document, so nothing is cut at the framebuffer size
+     * and a {@code position: fixed} element appears once. Each side is capped
+     * at 30,000 device pixels.
+     */
+    public byte[] screenshotPng(double scale) {
+        return screenshotPng(0, 0, 0, 0, scale);
+    }
+
+    /**
+     * A region of the page as PNG bytes: {@code width} by {@code height} CSS
+     * pixels from the document point {@code (x, y)}, at {@code scale}. Zero
+     * for {@code width} or {@code height} means up to the page's edge.
+     */
+    public byte[] screenshotPng(int x, int y, int width, int height, double scale) {
+        byte[] png = RemotePage.screenshot(renderer, x, y, width, height, scale);
+        if (png == null) {
+            throw new NordstjernenException("this renderer cannot take screenshots;"
+                + " it predates the /screenshot request");
+        }
+        return png;
+    }
+
     /** Render the whole page to {@code path} (a {@code .pdf} → PDF, else PNG); true on success. */
     public boolean export(String path) {
         String body = "{\"path\":\"" + Json.escape(path) + "\"}";

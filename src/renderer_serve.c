@@ -1521,6 +1521,31 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/screenshot") == 0) {
+        double x = 0, y = 0, width = 0, height = 0, scale = 1.0;
+        json_get_double(body, "x", &x);
+        json_get_double(body, "y", &y);
+        json_get_double(body, "width", &width);
+        json_get_double(body, "height", &height);
+        json_get_double(body, "scale", &scale);
+        if (!(scale >= 0.1) || scale > 8)
+            scale = 1.0;
+        size_t len = 0;
+        int w = 0, h = 0;
+        s->frame_valid = 0;
+        unsigned char *png = s->cur
+            ? ns_browser_render_png(s->cur, x, y, width, height, scale, &len,
+                                    &w, &h)
+            : NULL;
+        char hdrs[64];
+        int hn = snprintf(hdrs, sizeof hdrs, "X-W: %d\r\nX-H: %d\r\n",
+                          png ? w : 0, png ? h : 0);
+        http_write_response(ctrl_w, 200, "image/png", hn > 0 ? hdrs : NULL,
+                            png, png ? len : 0);
+        free(png);
+        return 0;
+    }
+
     if (strcmp(head->path, "/print") == 0) {
         char *prefix = json_get_str(body, "prefix");
         double scale = 0;
