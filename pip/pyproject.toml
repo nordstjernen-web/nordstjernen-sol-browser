@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nordstjernen-browser"
+dynamic = ["version"]
+description = "Nordstjernen Web Browser: a minimal, secure web browser written from scratch in C with GTK 4"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "LicenseRef-NSL-1.0 OR GPL-3.0-or-later"
+license-files = ["License.md", "COPYING"]
+authors = [{ name = "Andreas Røsdal", email = "andreas.rosdal@gmail.com" }]
+keywords = ["browser", "web-browser", "gtk", "gtk4", "html", "javascript", "css"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: X11 Applications :: GTK",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: BSD",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: C",
+    "Programming Language :: Python :: 3",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+]
+
+[project.urls]
+Homepage = "https://nordstjernen.org"
+Source = "https://github.com/nordstjernen-web/nordstjernen-sol-browser"
+Issues = "https://github.com/nordstjernen-web/nordstjernen-sol-browser/issues"
+Changelog = "https://github.com/nordstjernen-web/nordstjernen-sol-browser/blob/main/Changelog.md"
+
+[project.scripts]
+nordstjernen = "nordstjernen_browser.cli:main"
+nordstjernen-install = "nordstjernen_browser.cli:install_main"
+
+[tool.setuptools.dynamic]
+version = { attr = "nordstjernen_browser.__version__" }
+
+[tool.setuptools.package-data]
+nordstjernen_browser = ["source.json"]

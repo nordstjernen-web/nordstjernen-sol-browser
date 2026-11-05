@@ -1,0 +1,7 @@
+License.md
+COPYING
+src/nordstjernen_browser/source.json
+build/
+dist/
+*.egg-info/
+__pycache__/

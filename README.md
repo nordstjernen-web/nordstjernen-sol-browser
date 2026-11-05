@@ -44,6 +44,23 @@ build; everywhere else the package builds the release source against your
 system's libraries (on Windows with MSYS2's UCRT64 toolchain) and first names
 any build dependency that is missing. See [npm/README.md](npm/README.md).
 
+### Install with pip
+
+```sh
+pip install nordstjernen-browser
+nordstjernen https://nordstjernen.org
+```
+
+The first `nordstjernen` run puts the browser in place the same way as the
+npm package, in your user data directory; `nordstjernen-install --remove`
+deletes it again. See [pip/README.md](pip/README.md).
+
+### Install with Homebrew (macOS)
+
+```sh
+brew install --cask nordstjernen-web/tap/nordstjernen
+```
+
 ## Standards, security and size
 
 **Standards.** Behaviour is measured against the spec text, section by

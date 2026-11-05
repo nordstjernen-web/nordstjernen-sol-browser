@@ -1,6 +1,16 @@
 Changelog:
 ==Significant changes in each release:
 
+Unreleased:
+======
+* pip: `pip install nordstjernen-browser` installs the browser. The package
+  carries a small launcher; the first `nordstjernen` run (or
+  `nordstjernen-install`) builds the release from its checksum-verified
+  source against the system libraries, or on Apple silicon copies the
+  notarised release, into the user data directory. Publishing a release
+  uploads the package to PyPI through Trusted Publishing. See
+  `docs/pip.md`.
+
 1.0.44:
 ======
 * Web Authentication: passkeys and security keys work.
