@@ -3,6 +3,11 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Painting: the rounded clip of a replaced element (`<img>`, `<video>`,
+  `<canvas>`) with `border-radius` sits on its content box, with the radii
+  inset by border and padding. It was drawn at the margin-box origin, so an
+  image with a left margin lost everything past its width measured from
+  the margin edge — Facebook's landing collage was cut off on the right.
 * Fonts: weight synthesis follows Blink. A face lighter than 600 is
   emboldened whenever weight 600 or more is asked for (fontconfig waited
   for 700), and the emboldened glyphs keep the regular face's advances, so
