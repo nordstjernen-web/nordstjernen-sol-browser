@@ -11215,23 +11215,27 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
             double w = value_is_percent(wv) && !box_is_compressible_control(box)
                 ? -1 : length_resolve(wv, 0, -1);
             if (w >= 0) {
+                double extras = 0;
                 if (ns_css_keyword_is(box->style->values[NS_CSS_BOX_SIZING],
                                       "border-box")) {
                     ns_edges m = {0}, pd = {0}, bd = {0};
                     edges_from_style(box->style, 0, &m, &pd, &bd);
-                    w -= pd.left + pd.right + bd.left + bd.right;
+                    extras = pd.left + pd.right + bd.left + bd.right;
+                    w -= extras;
                     if (w < 0) w = 0;
                 }
                 const ns_css_value *mxw = box->style->values[NS_CSS_MAX_WIDTH];
                 if (mxw && (mxw->kind == NS_CSS_V_LENGTH ||
                             mxw->kind == NS_CSS_V_CALC)) {
                     double m = length_resolve(mxw, 0, -1);
+                    if (m >= 0) m = MAX(m - extras, 0);
                     if (m >= 0 && w > m) w = m;
                 }
                 const ns_css_value *mnw = box->style->values[NS_CSS_MIN_WIDTH];
                 if (mnw && (mnw->kind == NS_CSS_V_LENGTH ||
                             mnw->kind == NS_CSS_V_CALC)) {
                     double m = length_resolve(mnw, 0, -1);
+                    if (m >= 0) m = MAX(m - extras, 0);
                     if (m >= 0 && w < m) w = m;
                 }
                 return width_contribution_keyword_limits(box, w, parent_style,

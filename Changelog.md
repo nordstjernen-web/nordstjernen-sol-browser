@@ -311,6 +311,11 @@ Changelog:
   that width, so a `width: max-content` box whose containing block was
   narrow wrapped text that Chrome keeps on one line. GitHub's navigation
   menus came out 90 px narrower, with their links wrapped.
+* Layout: the min-content width of a `box-sizing: border-box` box with a
+  fixed width honours its `min-width` and `max-width` as border-box sizes
+  too. Its padding and border were added on top of them, so a flex item
+  holding a 280 px card with 64 px of padding could not shrink below
+  344 px. DuckDuckGo's review carousel spread out 64 px per card.
 
 1.0.43:
 ======
