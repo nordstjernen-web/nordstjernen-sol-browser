@@ -26,6 +26,13 @@ static const ns_capability_info capabilities[NS_CAP_COUNT] = {
         .default_state = NS_CAP_ALLOW,
         .reload_on_change = FALSE,
     },
+    [NS_CAP_POPUPS] = {
+        .name = "popups",
+        .label = "Pop-up windows",
+        .prompt = "This site wants to open a new window",
+        .default_state = NS_CAP_ALLOW,
+        .reload_on_change = FALSE,
+    },
 };
 
 const ns_capability_info *

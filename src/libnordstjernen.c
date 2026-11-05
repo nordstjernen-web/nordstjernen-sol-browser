@@ -5190,6 +5190,7 @@ ns_browser_clear_permissions(void)
 {
     ns_webgl_clear_decisions();
     ns_camera_clear_decisions();
+    ns_js_clear_popup_states();
 }
 
 int
@@ -5217,6 +5218,10 @@ ns_browser_set_permission(ns_browser *browser, const char *kind,
     int st = (int)ns_cap_state_from_name(state);
     if (cap == NS_CAP_WEBGL) {
         ns_webgl_set_state(origin, st);
+        return 0;
+    }
+    if (cap == NS_CAP_POPUPS) {
+        ns_js_set_popup_state(origin, st);
         return 0;
     }
     if (cap != NS_CAP_CAMERA) return 0;

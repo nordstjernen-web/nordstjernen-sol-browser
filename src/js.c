@@ -272,6 +272,7 @@ static void ns_js_nodes_inserted(ns_js *js, ns_node *parent, GPtrArray *nodes);
 static void ns_js_script_needs_prepare(ns_js *js, ns_node *script);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
 static void ns_js_shape_interface_objects(JSContext *ctx);
+static gboolean ns_popup_blocked_for(ns_js *js, JSContext *realm);
 static JSValue ns_popup_open(JSContext *ctx, ns_js *js, const char *url,
                              int argc, JSValueConst *argv);
 static gboolean ns_popup_supported(void);
@@ -20241,6 +20242,17 @@ ns_window_open_method(JSContext *ctx, JSValueConst this_val,
             return JS_NULL;
         }
         ns_js_consume_user_activation(js);
+        if (ns_popup_blocked_for(js, ctx)) {
+            if (js->log_cb) {
+                char *line = g_strdup_printf(
+                    "Blocked a popup: window.open(%.256s) is not allowed "
+                    "by this site's settings", *url ? url : "about:blank");
+                js->log_cb(line, js->log_user_data);
+                g_free(line);
+            }
+            JS_FreeCString(ctx, url);
+            return JS_NULL;
+        }
         if (ns_popup_supported()) {
             JSValue popup = ns_popup_open(ctx, js, url, argc, argv);
             JS_FreeCString(ctx, url);
@@ -27068,6 +27080,35 @@ ns_wire_decode_value(JSContext *ctx, JSValueConst wire, JSValueConst ports)
 
 static gboolean g_popups_supported;
 static GString *g_popup_outbox;
+static GHashTable *g_popup_blocked_origins;
+
+void
+ns_js_set_popup_state(const char *origin, int state)
+{
+    if (!origin || !*origin) return;
+    if (!g_popup_blocked_origins)
+        g_popup_blocked_origins = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                        g_free, NULL);
+    if (state == 2)
+        g_hash_table_add(g_popup_blocked_origins, g_strdup(origin));
+    else
+        g_hash_table_remove(g_popup_blocked_origins, origin);
+}
+
+void
+ns_js_clear_popup_states(void)
+{
+    if (g_popup_blocked_origins) g_hash_table_remove_all(g_popup_blocked_origins);
+}
+
+static gboolean
+ns_popup_blocked_for(ns_js *js, JSContext *realm)
+{
+    if (!g_popup_blocked_origins || !js) return FALSE;
+    const char *url = ns_js_realm_url_or_current(js, realm);
+    g_autofree char *origin = url ? ns_url_origin_from(url) : NULL;
+    return origin && g_hash_table_contains(g_popup_blocked_origins, origin);
+}
 
 typedef struct ns_popup_link {
     ns_node *frame;

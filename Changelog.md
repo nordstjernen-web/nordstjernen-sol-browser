@@ -3,6 +3,11 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Pop-up windows are a site capability. The site settings popover gains a
+  Pop-up windows row; a blocked site's `window.open()` returns null (the
+  page is told in the console) and with Ask the window waits behind the
+  prompt bar. Allow stays the default: popups still require a user
+  gesture as before.
 * Downloads are a site capability. The site settings popover gains a
   Downloads row (Ask / Allow / Block) next to Camera and WebGL; a blocked
   site's download offers are dropped, and with Ask the offer is held while

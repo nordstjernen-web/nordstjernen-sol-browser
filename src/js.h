@@ -126,6 +126,8 @@ void   ns_js_set_window_action_cb(ns_js *js, ns_js_window_action_cb cb,
                                   gpointer user_data);
 void   ns_js_window_action_applied(ns_js *js);
 void   ns_js_set_popups_supported(gboolean supported);
+void   ns_js_set_popup_state(const char *origin, int state);
+void   ns_js_clear_popup_states(void);
 void   ns_js_set_opener(ns_js *js, const char *token, const char *origin);
 gboolean ns_js_popup_pending(void);
 char  *ns_js_popup_take_outbox(void);
