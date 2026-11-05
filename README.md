@@ -11,7 +11,7 @@ modern HTML, CSS and JavaScript standards.
 
 **Windows:** install Nordstjernen Web Browser from the [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl).
 
-![Nordstjernen 1.0.42 playing a 4K travel documentary on YouTube](docs/screenshot.png)
+![Nordstjernen 1.0.44 playing The Great Gatsby trailer on YouTube](docs/screenshot.png)
 
 **Current release:** **1.0.44** (November 2026) — see [Changelog.md](Changelog.md).
 
