@@ -747,12 +747,20 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
 }
 
 static int
+frame_geometry_fits(const ns_rproc_http *r, const http_head *head, int width,
+                    int height)
+{
+    return head->x_w >= 1 && head->x_w <= r->max_w && head->x_w <= width &&
+           head->x_h >= 1 && head->x_h <= r->max_h && head->x_h <= height &&
+           head->x_stride >= head->x_w * 4 &&
+           head->x_stride <= (long)r->max_w * 4;
+}
+
+static int
 frame_head_fits(const ns_rproc_http *r, const http_head *head, int width,
                 int height)
 {
-    if (head->x_w < 1 || head->x_w > r->max_w || head->x_w > width ||
-        head->x_h < 1 || head->x_h > r->max_h || head->x_h > height ||
-        head->x_stride < head->x_w * 4 || head->x_stride > (long)r->max_w * 4)
+    if (!frame_geometry_fits(r, head, width, height))
         return 0;
     return r->shm || (uint64_t)head->content_length >=
                      (uint64_t)head->x_stride * (uint64_t)head->x_h;
@@ -860,12 +868,16 @@ tiles_request_json(char *json, size_t cap, int jn,
 }
 
 static int
-tiles_read_body(ns_rproc_http *r, const http_head *head,
-                ns_rproc_http_frame *out)
+tiles_read_body(ns_rproc_http *r, const http_head *head, int width,
+                int height, ns_rproc_http_frame *out)
 {
     if (head->content_length <= 0 ||
         head->content_length > NS_HTTP_MAX_REPLY)
         return -1;
+    if (!frame_geometry_fits(r, head, width, height)) {
+        http_skip_body(&r->conn, head->content_length);
+        return -1;
+    }
     char *desc = malloc((size_t)head->content_length + 1);
     if (!desc) return -1;
     if (http_read_body(&r->conn, head->content_length, desc) != 0) {
@@ -937,7 +949,7 @@ ns_rproc_http_render_tiles(ns_rproc_http *r, int width, int height,
     if (http_read_head(&r->conn, &head) != 0)
         return -1;
     if (head.x_tiles > 0)
-        return tiles_read_body(r, &head, out);
+        return tiles_read_body(r, &head, width, height, out);
     return tiles_read_frame(r, &head, width, height, out);
 }
 

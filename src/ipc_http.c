@@ -255,6 +255,21 @@ http_skip_body(http_conn *c, long n)
     return 0;
 }
 
+static long
+head_number(const char *val)
+{
+    errno = 0;
+    char *end = NULL;
+    long long n = strtoll(val, &end, 10);
+    if (end == val)
+        return 0;
+    if (errno == ERANGE || n > NS_HTTP_MAX_NUMBER)
+        return NS_HTTP_MAX_NUMBER;
+    if (n < -NS_HTTP_MAX_NUMBER)
+        return -NS_HTTP_MAX_NUMBER;
+    return (long)n;
+}
+
 int
 http_read_head(http_conn *c, http_head *out)
 {
@@ -308,39 +323,39 @@ http_read_head(http_conn *c, http_head *out)
         while (*val == ' ')
             val++;
         if (strcasecmp(line, "Content-Length") == 0)
-            out->content_length = atol(val);
+            out->content_length = head_number(val);
         else if (strcasecmp(line, "X-W") == 0)
-            out->x_w = atol(val);
+            out->x_w = head_number(val);
         else if (strcasecmp(line, "X-H") == 0)
-            out->x_h = atol(val);
+            out->x_h = head_number(val);
         else if (strcasecmp(line, "X-Stride") == 0)
-            out->x_stride = atol(val);
+            out->x_stride = head_number(val);
         else if (strcasecmp(line, "X-Anim") == 0)
-            out->x_anim = atol(val);
+            out->x_anim = head_number(val);
         else if (strcasecmp(line, "X-PageW") == 0)
-            out->x_page_w = atol(val);
+            out->x_page_w = head_number(val);
         else if (strcasecmp(line, "X-PageH") == 0)
-            out->x_page_h = atol(val);
+            out->x_page_h = head_number(val);
         else if (strcasecmp(line, "X-ScrollY") == 0)
-            out->x_scroll_y = atol(val);
+            out->x_scroll_y = head_number(val);
         else if (strcasecmp(line, "X-ScrollX") == 0)
-            out->x_scroll_x = atol(val);
+            out->x_scroll_x = head_number(val);
         else if (strcasecmp(line, "X-Unchanged") == 0)
-            out->x_unchanged = atol(val);
+            out->x_unchanged = head_number(val);
         else if (strcasecmp(line, "X-Render-RC") == 0)
-            out->x_render_rc = atol(val);
+            out->x_render_rc = head_number(val);
         else if (strcasecmp(line, "X-Clipboard") == 0)
-            out->x_clipboard = atol(val);
+            out->x_clipboard = head_number(val);
         else if (strcasecmp(line, "X-Tiles") == 0)
-            out->x_tiles = atol(val);
+            out->x_tiles = head_number(val);
         else if (strcasecmp(line, "X-Session-Gen") == 0)
             out->x_session_gen = strtoul(val, NULL, 10);
         else if (strcasecmp(line, "X-Wake") == 0)
-            out->x_wake = atol(val);
+            out->x_wake = head_number(val);
         else if (strcasecmp(line, "X-Popup") == 0)
-            out->x_popup = atol(val);
+            out->x_popup = head_number(val);
         else if (strcasecmp(line, "X-Pointer-Lock") == 0)
-            out->x_pointer_lock = atol(val);
+            out->x_pointer_lock = head_number(val);
         else if (strcasecmp(line, "X-Nav") == 0) {
             size_t vlen = strlen(val);
             if (vlen >= sizeof out->x_nav)
@@ -547,7 +562,12 @@ json_get_long(const char *body, const char *key, long *out)
     const char *v = json_find_value(body, key);
     if (!v)
         return -1;
-    *out = atol(v);
+    errno = 0;
+    char *end = NULL;
+    long n = strtol(v, &end, 10);
+    if (errno == ERANGE)
+        return -1;
+    *out = end == v ? 0 : n;
     return 0;
 }
 

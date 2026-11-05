@@ -9,6 +9,12 @@ Changelog:
   ABI 6 kernels the ruleset also scopes signals to the sandbox domain, and
   renderers' rulesets scope abstract UNIX sockets too. A compromised tab
   could previously `kill(-1, SIGKILL)` every process of the user.
+* Security: the shell↔renderer IPC parser reads every numeric `X-*` header
+  through a range-checked parser clamped to ±2³⁰ instead of `atol`, the
+  JSON number helper reports an out-of-range value as absent, and the
+  shell validates a tiled render reply's width, height and stride against
+  the viewport and the shared framebuffer exactly as it already did for
+  linear frames.
 * Security: a page can run at most 64 workers at once (dedicated, shared
   and service workers together). Each worker is an OS thread with its own
   JavaScript runtime, and a loop creating workers could previously spawn
