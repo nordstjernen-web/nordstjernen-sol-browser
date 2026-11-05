@@ -6,6 +6,9 @@ Changelog:
 * Android: the app is now labelled Nordstjernen Browser on the home screen
   and in its title bar, matching its Google Play listing, instead of Sol
   Explorer.
+* Packages: releases ship a `.deb` for the current Ubuntu (26.04) only; the
+  Ubuntu 24.04 package is no longer built. Debian 13 and Fedora 45 packages
+  and the portable Linux `.zip` are unchanged.
 
 1.0.43:
 ======
