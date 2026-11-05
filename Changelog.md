@@ -3,6 +3,13 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Printing: a forced page break is honoured in a document shorter than one
+  page. `break-before: page` and `page-break-before: always` were only
+  looked at while more than a sheet of content remained, so a two-part
+  letter or an invoice with its terms on a second page printed as one
+  sheet. A forced break with nothing before it on the sheet (a first
+  heading) or nothing after it (`break-after` on the last element) no
+  longer produces a blank page.
 * Java: the renderer-process client can no longer hang or be fed a planted
   binary. Every request has a deadline (two minutes by default,
   `nordstjernen.timeout.ms` or `RemoteBrowser.setTimeout`); a renderer that
