@@ -3,6 +3,10 @@ Changelog:
 
 1.0.44-dev:
 ======
+* TLS (security): connections now require TLS 1.2 or newer. libcurl's
+  default floor is TLS 1.0, which Chrome, Firefox and Safari dropped in
+  2020; no current site needs it and the older versions are vulnerable to
+  downgrade attacks.
 * Audio (security): the window process no longer lets a renderer showing a
   `file:` page hand the audio helper an arbitrary `file://` path. Every
   audio source is staged into the media cache directory first, so the
