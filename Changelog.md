@@ -3,6 +3,23 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Downloads: saving a `blob:` or `data:` link no longer writes an empty
+  file. The renderer streams a download into its staging file chunk by
+  chunk, but a response that is not fetched over the network arrives whole,
+  with no chunks, and the body was dropped. This affected every shell.
+* Java browser: downloads go through the renderer. The Swing shell used to
+  fetch the URL again itself with `java.net.http`, so the request carried
+  none of the page's cookies (a download behind a login saved the login
+  page), announced itself as `User-Agent: Nordstjernen`, and could not
+  resolve a `blob:` URL at all. It now uses `/download-start` and
+  `/download-poll` like the GTK shell, shows progress in the status bar,
+  checks that the reported file lies in the renderer's staging directory
+  before moving it, and marks the saved file with its origin (the mark of
+  the web on Windows). `RemoteBrowser` exposes `downloadStart`,
+  `downloadPoll` and `downloadCancel`, and `Downloads.moveIntoPlace` does
+  the checked move. On Windows the audio helper also accepts streams the
+  renderer staged under GLib's real cache directory (`INetCache`), which
+  the Java shell looked for in the wrong place.
 * Java: `RemotePage.renderFullPage()` returns the whole page. It rendered
   through the renderer's framebuffer, which `RemotePage` sizes at 2560 by
   4096 pixels, so a longer page came back silently cut at 4096. The

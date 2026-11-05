@@ -689,6 +689,81 @@ public final class RemoteBrowser implements AutoCloseable {
         return Json.integer(new String(resp.body, StandardCharsets.UTF_8), "ok", -1) == 0;
     }
 
+    /** The progress of a download the renderer is fetching; see {@link #downloadPoll}. */
+    public static final class Download {
+        /** Still transferring. */
+        public static final int RUNNING = 0;
+        /** Finished; {@link #path} names the staged file. */
+        public static final int DONE = 1;
+        /** Failed or cancelled; {@link #error} says why. */
+        public static final int FAILED = 2;
+
+        public final int state;
+        public final long bytes;
+        /** The size the server announced, or 0 when it did not say. */
+        public final long total;
+        /** The staging file holding the bytes once {@link #state} is {@link #DONE}, else null. */
+        public final String path;
+        /** The URL the bytes came from, after redirects, or null. */
+        public final String finalUrl;
+        public final String contentType;
+        public final String error;
+
+        Download(int state, long bytes, long total, String path, String finalUrl,
+                 String contentType, String error) {
+            this.state = state;
+            this.bytes = bytes;
+            this.total = total;
+            this.path = path;
+            this.finalUrl = finalUrl;
+            this.contentType = contentType;
+            this.error = error;
+        }
+    }
+
+    /**
+     * Have the renderer fetch {@code url} into a staging file, as a download
+     * the page offered ({@link Frame#download}). The request carries the
+     * session's cookies, and a {@code blob:} or {@code data:} URL the page
+     * built resolves, which a fetch from the JVM could do neither of.
+     *
+     * @return an id for {@link #downloadPoll} and {@link #downloadCancel}, or
+     *         0 when the renderer could not start it
+     */
+    public long downloadStart(String url) {
+        if (url == null || url.isEmpty()) {
+            return 0;
+        }
+        RendererProcess.Response resp = renderer.request("POST", "/download-start",
+            "{\"url\":\"" + Json.escape(url) + "\"}");
+        return Json.longInteger(resp.text(), "id", 0);
+    }
+
+    /**
+     * The state of a download. Once it is {@link Download#DONE}, hand
+     * {@link Download#path} to {@link Downloads#moveIntoPlace}.
+     */
+    public Download downloadPoll(long id) {
+        RendererProcess.Response resp = renderer.request("POST", "/download-poll",
+            "{\"id\":" + id + "}");
+        String json = resp.text();
+        if (!Json.flag(json, "known")) {
+            return new Download(Download.FAILED, 0, 0, null, null, null, "unknown download");
+        }
+        return new Download(Json.integer(json, "state", Download.FAILED),
+                            Json.longInteger(json, "bytes", 0),
+                            Json.longInteger(json, "total", 0),
+                            Json.stringOrNull(json, "path"),
+                            Json.stringOrNull(json, "final_url"),
+                            Json.stringOrNull(json, "content_type"),
+                            Json.stringOrNull(json, "error"));
+    }
+
+    /** Stop a download and discard what it had fetched. */
+    public void downloadCancel(long id) {
+        renderer.request("POST", "/download-cancel", "{\"id\":" + id + "}");
+    }
+
     /** Allow or block WebGL for {@code origin} for the rest of the session. */
     public void resolveWebgl(String origin, boolean allow) {
         renderer.request("POST", "/webgl",

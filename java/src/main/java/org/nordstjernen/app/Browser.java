@@ -6,6 +6,7 @@
 package org.nordstjernen.app;
 
 import org.nordstjernen.AudioHelper;
+import org.nordstjernen.Downloads;
 import org.nordstjernen.RemoteBrowser;
 import org.nordstjernen.RendererTimeoutException;
 
@@ -19,20 +20,12 @@ import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
-import java.net.ProxySelector;
-import java.net.URLDecoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -89,6 +82,7 @@ public final class Browser {
     private static final int MAX_RESTARTS = 3;
     private static final int CONSOLE_POLL_MS = 250;
     private static final int IDLE_REFRESH_MS = 120;
+    private static final int DOWNLOAD_POLL_MS = 250;
     private static final int ANIMATION_REFRESH_MS = 33;
     private static final String SEARCH_URL = "https://duckduckgo.com/?q=";
     private static final String VERSION = resolveVersion();
@@ -158,6 +152,7 @@ public final class Browser {
     private boolean closed = false;
 
     private final Set<String> cameraAsked = new HashSet<>();
+    private final Set<Long> activeDownloads = new HashSet<>();
 
     private JDialog console;
     private JTextArea consoleOut;
@@ -219,8 +214,17 @@ public final class Browser {
         frame.dispose();
         if (refreshTimer != null) refreshTimer.stop();
         if (consolePoll != null) consolePoll.stop();
+        final List<Long> unfinished = new ArrayList<>(activeDownloads);
+        activeDownloads.clear();
         io.submit(() -> {
             audio.close();
+            for (long id : unfinished) {
+                try {
+                    engine.downloadCancel(id);
+                } catch (RuntimeException ex) {
+                    break;
+                }
+            }
             engine.close();
             if (last) {
                 System.exit(0);
@@ -1866,10 +1870,6 @@ public final class Browser {
         if (url.startsWith("file:") && (page == null || !page.startsWith("file:"))) {
             return;
         }
-        if (url.startsWith("blob:")) {
-            setStatus("Cannot save a blob: download from this shell");
-            return;
-        }
         JFileChooser chooser = new JFileChooser(downloadsDir());
         chooser.setSelectedFile(new java.io.File(chooser.getCurrentDirectory(),
                                                  downloadFileName(url, suggestedName)));
@@ -1882,12 +1882,97 @@ public final class Browser {
             setStatus("Cannot save to " + chooser.getSelectedFile());
             return;
         }
-        setStatus("Downloading " + url + " …");
+        final String name = dest.getFileName().toString();
+        setStatus("Downloading " + name + " …");
         io.submit(() -> {
-            boolean ok = downloadTo(url, dest);
-            SwingUtilities.invokeLater(() ->
-                setStatus(ok ? "Downloaded " + dest : "Download failed: " + url));
+            long id;
+            try {
+                id = engine.downloadStart(url);
+            } catch (RuntimeException ex) {
+                id = 0;
+            }
+            final long started = id;
+            SwingUtilities.invokeLater(() -> {
+                if (started <= 0) {
+                    setStatus("Download failed: " + name);
+                    return;
+                }
+                activeDownloads.add(started);
+                pollDownloadLater(started, dest, name);
+            });
         });
+    }
+
+    /**
+     * The renderer fetches a download while its event loop runs, and the loop
+     * runs only inside a request, so each poll first ticks the engine.
+     */
+    private void pollDownloadLater(long id, Path dest, String name) {
+        javax.swing.Timer timer = new javax.swing.Timer(DOWNLOAD_POLL_MS, e -> {
+            if (closed) {
+                return;
+            }
+            io.submit(() -> {
+                RemoteBrowser.Download d;
+                try {
+                    engine.tick();
+                    d = engine.downloadPoll(id);
+                } catch (RuntimeException ex) {
+                    d = null;
+                }
+                final RemoteBrowser.Download state = d;
+                SwingUtilities.invokeLater(() -> onDownloadPolled(id, dest, name, state));
+            });
+        });
+        timer.setRepeats(false);
+        timer.start();
+    }
+
+    private void onDownloadPolled(long id, Path dest, String name,
+                                  RemoteBrowser.Download d) {
+        if (closed) {
+            return;
+        }
+        if (d != null && d.state == RemoteBrowser.Download.RUNNING) {
+            setStatus("Downloading " + name + " — " + formatBytes(d.bytes)
+                + (d.total > 0 ? " / " + formatBytes(d.total) : ""));
+            pollDownloadLater(id, dest, name);
+            return;
+        }
+        activeDownloads.remove(id);
+        if (d == null || d.state != RemoteBrowser.Download.DONE || d.path == null) {
+            setStatus("Download failed: " + name
+                + (d != null && d.error != null ? " (" + d.error + ")" : ""));
+            return;
+        }
+        final String staged = d.path;
+        final String origin = d.finalUrl;
+        Thread mover = new Thread(() -> {
+            String outcome;
+            try {
+                Downloads.moveIntoPlace(Path.of(staged), dest, origin);
+                outcome = "Downloaded " + dest;
+            } catch (RuntimeException ex) {
+                outcome = "Download failed: " + ex.getMessage();
+            }
+            setStatusLater(outcome);
+        }, "ns-download-save");
+        mover.setDaemon(true);
+        mover.start();
+    }
+
+    private static String formatBytes(long bytes) {
+        if (bytes < 1024) {
+            return bytes + " B";
+        }
+        double value = bytes;
+        String[] units = { "kB", "MB", "GB", "TB" };
+        int unit = -1;
+        do {
+            value /= 1024.0;
+            unit++;
+        } while (value >= 1024.0 && unit < units.length - 1);
+        return String.format("%.1f %s", value, units[unit]);
     }
 
     private static java.io.File downloadsDir() {
@@ -1919,51 +2004,6 @@ public final class Browser {
             name = name.replaceAll("[^\\x20-\\x7e]", "_");
         }
         return name.isEmpty() || name.equals(".") || name.equals("..") ? "download" : name;
-    }
-
-    private static boolean downloadTo(String url, Path dest) {
-        try {
-            if (url.startsWith("data:")) {
-                Files.write(dest, decodeDataUrl(url));
-                return true;
-            }
-            URI uri = URI.create(url);
-            if ("file".equalsIgnoreCase(uri.getScheme())) {
-                Files.copy(Path.of(uri), dest, StandardCopyOption.REPLACE_EXISTING);
-                return true;
-            }
-            HttpClient client = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .proxy(ProxySelector.getDefault()).build();
-            HttpRequest req = HttpRequest.newBuilder(uri)
-                .header("User-Agent", "Nordstjernen").GET().build();
-            HttpResponse<InputStream> resp =
-                client.send(req, HttpResponse.BodyHandlers.ofInputStream());
-            if (resp.statusCode() / 100 != 2) return false;
-            try (InputStream in = resp.body()) {
-                Files.copy(in, dest, StandardCopyOption.REPLACE_EXISTING);
-            }
-            return true;
-        } catch (IOException | InterruptedException | IllegalArgumentException
-                 | UnsupportedOperationException ex) {
-            return false;
-        }
-    }
-
-    /** The bytes of a {@code data:} URL, base64 or percent-encoded. */
-    static byte[] decodeDataUrl(String url) {
-        int comma = url.indexOf(',');
-        if (comma < 0) {
-            throw new IllegalArgumentException("malformed data: URL");
-        }
-        String meta = url.substring(5, comma);
-        String payload = url.substring(comma + 1);
-        if (meta.endsWith(";base64")) {
-            return Base64.getMimeDecoder().decode(
-                URLDecoder.decode(payload, StandardCharsets.US_ASCII));
-        }
-        return URLDecoder.decode(payload.replace("+", "%2B"), StandardCharsets.UTF_8)
-            .getBytes(StandardCharsets.UTF_8);
     }
 
     // --- Camera trust prompt -------------------------------------------------
