@@ -3349,6 +3349,7 @@ pv_perm_resolve(NsProcView *v, gboolean allow)
     v->perm_origin = NULL;
     if (v->perm_revealer)
         gtk_revealer_set_reveal_child(GTK_REVEALER(v->perm_revealer), FALSE);
+    if (v->area) gtk_widget_grab_focus(v->area);
     if (allow)
         ns_perm_set(origin, kind, NS_PERM_ALLOW);
     else

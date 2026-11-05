@@ -3,6 +3,11 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Pointer lock is a site capability. The site settings popover gains a
+  Pointer lock row; a blocked site's `requestPointerLock()` fails with
+  `pointerlockerror`, and with Ask the request waits in the page until the
+  prompt bar is answered. Allow stays the default and a user gesture is
+  still required.
 * Pop-up windows are a site capability. The site settings popover gains a
   Pop-up windows row; a blocked site's `window.open()` returns null (the
   page is told in the console) and with Ask the window waits behind the

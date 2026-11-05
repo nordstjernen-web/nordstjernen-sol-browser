@@ -198,6 +198,7 @@ struct ns_js {
     int            popover_hiding_count;
     GArray        *attr_element_refs;
     const ns_node *pointer_lock_element;
+    const ns_node *pointer_lock_pending;
     gboolean       locked_movement;
     int            locked_move_x;
     int            locked_move_y;

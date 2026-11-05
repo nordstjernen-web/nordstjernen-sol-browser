@@ -5,6 +5,7 @@
 
 #include "js.h"
 #include "js_classid.h"
+#include "capability.h"
 
 JSClassID ns_new_class_id(JSClassID *pclass_id)
 {
@@ -273,6 +274,7 @@ static void ns_js_script_needs_prepare(ns_js *js, ns_node *script);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
 static void ns_js_shape_interface_objects(JSContext *ctx);
 static gboolean ns_popup_blocked_for(ns_js *js, JSContext *realm);
+static gboolean ns_js_doc_contains(const ns_js *js, const ns_node *node);
 static JSValue ns_popup_open(JSContext *ctx, ns_js *js, const char *url,
                              int argc, JSValueConst *argv);
 static gboolean ns_popup_supported(void);
@@ -27080,34 +27082,88 @@ ns_wire_decode_value(JSContext *ctx, JSValueConst wire, JSValueConst ports)
 
 static gboolean g_popups_supported;
 static GString *g_popup_outbox;
-static GHashTable *g_popup_blocked_origins;
+static GHashTable *g_capability_states[NS_CAP_COUNT];
+static GString *g_capability_pending;
 
 void
-ns_js_set_popup_state(const char *origin, int state)
+ns_js_set_capability_state(int capability, const char *origin, int state)
 {
-    if (!origin || !*origin) return;
-    if (!g_popup_blocked_origins)
-        g_popup_blocked_origins = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                                        g_free, NULL);
-    if (state == 2)
-        g_hash_table_add(g_popup_blocked_origins, g_strdup(origin));
+    if (capability < 0 || capability >= NS_CAP_COUNT || !origin || !*origin)
+        return;
+    GHashTable **table = &g_capability_states[capability];
+    if (!*table)
+        *table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    const ns_capability_info *info = ns_capability_info_get(capability);
+    if (state == (int)info->default_state)
+        g_hash_table_remove(*table, origin);
     else
-        g_hash_table_remove(g_popup_blocked_origins, origin);
+        g_hash_table_insert(*table, g_strdup(origin), GINT_TO_POINTER(state + 1));
 }
 
 void
-ns_js_clear_popup_states(void)
+ns_js_clear_capability_states(void)
 {
-    if (g_popup_blocked_origins) g_hash_table_remove_all(g_popup_blocked_origins);
+    for (int k = 0; k < NS_CAP_COUNT; k++)
+        if (g_capability_states[k]) g_hash_table_remove_all(g_capability_states[k]);
+}
+
+static int
+ns_js_capability_state(ns_js *js, JSContext *realm, ns_capability capability,
+                       char **origin_out)
+{
+    const char *url = ns_js_realm_url_or_current(js, realm);
+    char *origin = url ? ns_url_origin_from(url) : NULL;
+    int state = (int)ns_capability_info_get(capability)->default_state;
+    gpointer stored = origin && g_capability_states[capability]
+        ? g_hash_table_lookup(g_capability_states[capability], origin) : NULL;
+    if (stored) state = GPOINTER_TO_INT(stored) - 1;
+    if (origin_out) *origin_out = origin;
+    else g_free(origin);
+    return state;
+}
+
+static void
+ns_js_capability_request(ns_capability capability, const char *origin)
+{
+    if (!origin || !*origin) return;
+    if (!g_capability_pending) g_capability_pending = g_string_new(NULL);
+    if (g_capability_pending->len) g_string_append_c(g_capability_pending, ';');
+    g_string_append_printf(g_capability_pending, "%s %s",
+                           ns_capability_name(capability), origin);
+}
+
+char *
+ns_js_take_pending_capabilities(void)
+{
+    if (!g_capability_pending || !g_capability_pending->len) return NULL;
+    char *out = g_strdup(g_capability_pending->str);
+    g_string_truncate(g_capability_pending, 0);
+    return out;
+}
+
+void
+ns_js_capability_resume(ns_js *js, int capability, gboolean allow)
+{
+    if (!js) return;
+    if (capability == NS_CAP_POINTER_LOCK && js->pointer_lock_pending) {
+        const ns_node *el = js->pointer_lock_pending;
+        js->pointer_lock_pending = NULL;
+        if (allow && ns_js_doc_contains(js, el)) {
+            js->pointer_lock_element = el;
+            if (js->current_doc)
+                ns_js_dispatch_event(js, js->current_doc, "pointerlockchange",
+                                     NULL);
+        } else if (js->current_doc) {
+            ns_js_dispatch_event(js, js->current_doc, "pointerlockerror", NULL);
+        }
+    }
 }
 
 static gboolean
 ns_popup_blocked_for(ns_js *js, JSContext *realm)
 {
-    if (!g_popup_blocked_origins || !js) return FALSE;
-    const char *url = ns_js_realm_url_or_current(js, realm);
-    g_autofree char *origin = url ? ns_url_origin_from(url) : NULL;
-    return origin && g_hash_table_contains(g_popup_blocked_origins, origin);
+    return js && ns_js_capability_state(js, realm, NS_CAP_POPUPS, NULL) ==
+                 (int)NS_CAP_DENY;
 }
 
 typedef struct ns_popup_link {
@@ -43223,7 +43279,6 @@ ns_element_get_baseURI(JSContext *ctx, JSValueConst this_val)
     return JS_NewString(ctx, base && *base ? base : "about:blank");
 }
 
-static gboolean ns_js_doc_contains(const ns_js *js, const ns_node *node);
 
 static JSValue
 ns_element_requestPointerLock(JSContext *ctx, JSValueConst this_val,
@@ -43233,13 +43288,23 @@ ns_element_requestPointerLock(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     const ns_node *el = ns_unwrap_element(this_val);
     if (!js || !el || js->pointer_lock_element == el) return JS_UNDEFINED;
+    char *origin = NULL;
+    int state = ns_js_capability_state(js, ctx, NS_CAP_POINTER_LOCK, &origin);
     if ((!js->pointer_lock_element && !ns_js_has_transient_activation(js)) ||
-        !ns_js_doc_contains(js, el)) {
+        !ns_js_doc_contains(js, el) || state == (int)NS_CAP_DENY) {
+        g_free(origin);
         if (js->current_doc)
             ns_js_dispatch_event(js, js->current_doc, "pointerlockerror",
                                  NULL);
         return JS_UNDEFINED;
     }
+    if (state == (int)NS_CAP_ASK) {
+        js->pointer_lock_pending = el;
+        ns_js_capability_request(NS_CAP_POINTER_LOCK, origin);
+        g_free(origin);
+        return JS_UNDEFINED;
+    }
+    g_free(origin);
     js->pointer_lock_element = el;
     if (js->current_doc)
         ns_js_dispatch_event(js, js->current_doc, "pointerlockchange", NULL);
@@ -43254,6 +43319,7 @@ ns_document_exitPointerLock(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     if (js && js->pointer_lock_element) {
         js->pointer_lock_element = NULL;
+        js->pointer_lock_pending = NULL;
         if (js->current_doc)
             ns_js_dispatch_event(js, js->current_doc,
                                  "pointerlockchange", NULL);
@@ -43272,6 +43338,7 @@ ns_document_get_pointerLockElement(JSContext *ctx, JSValueConst this_val)
         if (n == js->pointer_lock_element)
             return ns_make_element(ctx, n);
     js->pointer_lock_element = NULL;
+        js->pointer_lock_pending = NULL;
     return JS_NULL;
 }
 
@@ -47368,6 +47435,7 @@ ns_js_pointer_event_target(ns_js *js, const ns_node *hit)
         if (ns_js_doc_contains(js, js->pointer_lock_element))
             return js->pointer_lock_element;
         js->pointer_lock_element = NULL;
+        js->pointer_lock_pending = NULL;
     }
     if (js->pointer_capture_element) {
         if (ns_js_doc_contains(js, js->pointer_capture_element))
@@ -47383,6 +47451,7 @@ ns_js_pointer_locked(ns_js *js)
     if (!js || !js->pointer_lock_element) return FALSE;
     if (ns_js_doc_contains(js, js->pointer_lock_element)) return TRUE;
     js->pointer_lock_element = NULL;
+        js->pointer_lock_pending = NULL;
     return FALSE;
 }
 

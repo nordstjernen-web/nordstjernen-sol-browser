@@ -520,6 +520,26 @@ render_take_line(ns_browser *b, char *(*take)(ns_browser *), int keep_lf)
     return v;
 }
 
+static char *
+session_capability_events(ns_browser *cur, const char *camera)
+{
+    GString *out = g_string_new(NULL);
+    if (camera && *camera)
+        g_string_append_printf(out, "%s %s", ns_capability_name(NS_CAP_CAMERA),
+                               camera);
+    char *more = cur ? ns_browser_take_pending_capabilities(cur) : NULL;
+    if (more && *more) {
+        if (out->len) g_string_append_c(out, ';');
+        g_string_append(out, more);
+    }
+    free(more);
+    if (!out->len) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
 static void
 render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
              const GString *tiles)
@@ -565,11 +585,9 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Nav", nav, 2000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-WebGL", webgl, 2000);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Camera", camera, 2000);
-    char *capability = camera && *camera
-        ? g_strdup_printf("%s %s", ns_capability_name(NS_CAP_CAMERA), camera)
-        : NULL;
+    char *capability = session_capability_events(s->cur, camera);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Capability", capability,
-                          2100);
+                          4200);
     g_free(capability);
     hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Download", download,
                           3000);
@@ -926,9 +944,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         char *nav_e = json_escape(nav ? nav : "");
         char *webgl_e = json_escape(webgl ? webgl : "");
         char *camera_e = json_escape(camera ? camera : "");
-        char *capability = camera && *camera
-            ? g_strdup_printf("%s %s", ns_capability_name(NS_CAP_CAMERA), camera)
-            : NULL;
+        char *capability = session_capability_events(s->cur, camera);
         char *capability_e = json_escape(capability ? capability : "");
         g_free(capability);
         char *download_e = json_escape(download ? download : "");
