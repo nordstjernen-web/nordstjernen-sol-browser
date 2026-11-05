@@ -356,7 +356,7 @@ if not webgpu_feature.disabled() and not is_mobile
   endif
 endif
 
-libpoppler = dependency('poppler-glib', required: false)
+libpoppler = dependency('poppler-glib', required: get_option('poppler'))
 have_poppler = libpoppler.found() and not is_mobile
 if have_poppler
   add_project_arguments('-DNS_HAVE_POPPLER=1', language: 'c')
@@ -441,7 +441,11 @@ endif
 # macOS/Windows packages bundle a minimal LGPL FFmpeg built by
 # scripts/build-ffmpeg-lgpl.sh. Below 6.0 the required build fails on
 # Linux/Windows and WebM disables on macOS.
-libav_required = host_machine.system() == 'windows' or host_machine.system() == 'linux'
+libav_required = get_option('libav')
+if libav_required.auto() and (host_machine.system() == 'windows' or
+                              host_machine.system() == 'linux')
+  libav_required = true
+endif
 libavformat = dependency('libavformat', version: '>=60', required: libav_required)
 libavcodec = dependency('libavcodec', version: '>=60', required: libav_required)
 libavutil = dependency('libavutil', version: '>=58', required: libav_required)
@@ -534,7 +538,7 @@ if not is_mobile and get_option('audio').allowed()
     add_project_arguments('-DNS_AUDIO_NATIVE_OPUS=1', language: 'c')
   endif
 endif
-libenchant = dependency('enchant-2', required: false)
+libenchant = dependency('enchant-2', required: get_option('enchant'))
 have_enchant = libenchant.found() and not is_mobile
 if have_enchant
   add_project_arguments('-DNS_HAVE_ENCHANT=1', language: 'c')
