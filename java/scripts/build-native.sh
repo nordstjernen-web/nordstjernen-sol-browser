@@ -37,10 +37,13 @@ release_build_or_die "$BUILDDIR"
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"
+PIC=-fPIC
 case "$OS" in
-    Linux)  P_OS=linux  ; SOEXT=so    ; RPATH='-Wl,-rpath,$ORIGIN'          ;;
-    Darwin) P_OS=macos  ; SOEXT=dylib ; RPATH='-Wl,-rpath,@loader_path'     ;;
-    *)      P_OS=linux  ; SOEXT=so    ; RPATH='-Wl,-rpath,$ORIGIN'          ;;
+    Linux)  P_OS=linux   ; SOEXT=so    ; JNI_MD=linux  ; RPATH='-Wl,-rpath,$ORIGIN'      ;;
+    Darwin) P_OS=macos   ; SOEXT=dylib ; JNI_MD=darwin ; RPATH='-Wl,-rpath,@loader_path' ;;
+    MINGW*|MSYS*)
+            P_OS=windows ; SOEXT=dll   ; JNI_MD=win32  ; RPATH='' ; PIC=''               ;;
+    *)      P_OS=linux   ; SOEXT=so    ; JNI_MD=linux  ; RPATH='-Wl,-rpath,$ORIGIN'      ;;
 esac
 case "$ARCH" in
     x86_64|amd64)  P_ARCH=x86_64  ;;
@@ -55,20 +58,23 @@ if [ -z "$ENGINE" ]; then
     exit 1
 fi
 
-JNI_MD_DIR="$JAVA_HOME/include/$P_OS"
+JNI_MD_DIR="$JAVA_HOME/include/$JNI_MD"
 [ -d "$JNI_MD_DIR" ] || JNI_MD_DIR="$JAVA_HOME/include/linux"
+
+JNI_LIB="libnordstjernenjni.$SOEXT"
+[ "$P_OS" = windows ] && JNI_LIB="nordstjernenjni.dll"
 
 OUTDIR="$REPO_ROOT/java/src/main/resources/native/$PLAT"
 mkdir -p "$OUTDIR"
 
 CC="${CC:-cc}"
-$CC -shared -fPIC -O2 \
+$CC -shared $PIC -O2 -Wall -Wextra \
     -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" -I"$REPO_ROOT/src" \
     "$REPO_ROOT/java/src/main/native/ns_java_jni.c" \
     -L"$(dirname "$ENGINE")" -lnordstjernen \
     $RPATH \
-    -o "$OUTDIR/libnordstjernenjni.$SOEXT"
+    -o "$OUTDIR/$JNI_LIB"
 
 cp -f "$ENGINE" "$OUTDIR/libnordstjernen.$SOEXT"
 
-echo "Staged libnordstjernen.$SOEXT + libnordstjernenjni.$SOEXT into $OUTDIR"
+echo "Staged libnordstjernen.$SOEXT + $JNI_LIB into $OUTDIR"

@@ -3,6 +3,18 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Java (in-process `Page`): text with emoji survives, and three other
+  defects are gone. Strings crossed the JNI bridge as modified UTF-8, which
+  has no four-byte sequences, so a title, page text, link or file path
+  holding an emoji or any other character outside the Basic Multilingual
+  Plane was corrupted in both directions; they now cross as UTF-16.
+  `render()` painted into a native buffer, copied that into a second one,
+  into a `byte[]` and then pixel by pixel into the image; the engine now
+  paints into one direct buffer that is copied once. The bundled native
+  libraries were unpacked into a new temp directory on every start and never
+  removed on Windows; they are unpacked once into a per-user cache
+  directory (`nordstjernen.cache.dir`). `java/scripts/build-native.sh`
+  builds the bridge under MSYS2, so the in-process API works on Windows.
 * Printing: a page break no longer cuts a line of text in half. The
   paginator guessed where the lines of a paragraph were by stepping its CSS
   `line-height` down from the top of the text, which drifts as soon as one
