@@ -134,6 +134,10 @@ struct ns_js {
     gpointer      window_action_user_data;
     const ns_node *pending_fullscreen_event_target;
     JSValue       pending_fullscreen_resolve;
+    JSContext    *fullscreen_request_ctx;
+    JSValue       fullscreen_request_element;
+    JSValue       fullscreen_request_resolve;
+    JSValue       fullscreen_request_reject;
     JSValue       history_state;
     int           history_length;
     GPtrArray    *history_entries;

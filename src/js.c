@@ -274,6 +274,11 @@ static void ns_js_script_needs_prepare(ns_js *js, ns_node *script);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
 static void ns_js_shape_interface_objects(JSContext *ctx);
 static gboolean ns_popup_blocked_for(ns_js *js, JSContext *realm);
+static void ns_fullscreen_request_clear(ns_js *js);
+static void ns_fullscreen_request_resume(ns_js *js, gboolean allow);
+static void ns_js_capability_request(ns_capability capability, const char *origin);
+static int ns_js_capability_state(ns_js *js, JSContext *realm, ns_capability capability, char **origin_out);
+static void ns_js_microtask_checkpoint(ns_js *js);
 static gboolean ns_js_doc_contains(const ns_js *js, const ns_node *node);
 static JSValue ns_popup_open(JSContext *ctx, ns_js *js, const char *url,
                              int argc, JSValueConst *argv);
@@ -27157,6 +27162,8 @@ ns_js_capability_resume(ns_js *js, int capability, gboolean allow)
             ns_js_dispatch_event(js, js->current_doc, "pointerlockerror", NULL);
         }
     }
+    if (capability == NS_CAP_FULLSCREEN)
+        ns_fullscreen_request_resume(js, allow);
 }
 
 static gboolean
@@ -52527,31 +52534,106 @@ ns_fullscreen_error_job(JSContext *ctx, int argc, JSValueConst *argv)
     return JS_UNDEFINED;
 }
 
+static void
+ns_fullscreen_reject(JSContext *ctx, JSValueConst reject, JSValueConst element,
+                     const char *message)
+{
+    JSValueConst args[1] = { element };
+    JS_EnqueueJob(ctx, ns_fullscreen_error_job, 1, args);
+    JSValue err = JS_NewError(ctx);
+    JS_SetPropertyStr(ctx, err, "name", JS_NewString(ctx, "TypeError"));
+    JS_SetPropertyStr(ctx, err, "message", JS_NewString(ctx, message));
+    JSValue r = JS_Call(ctx, reject, JS_UNDEFINED, 1, (JSValueConst[]){ err });
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, err);
+}
+
+static JSValue
+ns_fullscreen_rejected(JSContext *ctx, JSValueConst element,
+                       const char *log_line, const char *message)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (js && js->log_cb) js->log_cb(log_line, js->log_user_data);
+    JSValue resolving[2];
+    JSValue promise = JS_NewPromiseCapability(ctx, resolving);
+    if (JS_IsException(promise)) return promise;
+    ns_fullscreen_reject(ctx, resolving[1], element, message);
+    JS_FreeValue(ctx, resolving[0]);
+    JS_FreeValue(ctx, resolving[1]);
+    return promise;
+}
+
 static JSValue
 ns_fullscreen_rejected_without_activation(JSContext *ctx,
                                           JSValueConst element)
 {
-    ns_js *js = js_from_ctx(ctx);
-    if (js && js->log_cb)
-        js->log_cb("Blocked requestFullscreen(): the page has no recent "
-                   "user interaction", js->log_user_data);
-    JSValueConst args[1] = { element };
-    JS_EnqueueJob(ctx, ns_fullscreen_error_job, 1, args);
+    return ns_fullscreen_rejected(ctx, element,
+        "Blocked requestFullscreen(): the page has no recent user "
+        "interaction",
+        "Fullscreen request denied: no transient user activation");
+}
+
+static void
+ns_fullscreen_request_clear(ns_js *js)
+{
+    JSContext *ctx = js->fullscreen_request_ctx ? js->fullscreen_request_ctx
+                                                : js->ctx;
+    JS_FreeValue(ctx, js->fullscreen_request_element);
+    JS_FreeValue(ctx, js->fullscreen_request_resolve);
+    JS_FreeValue(ctx, js->fullscreen_request_reject);
+    js->fullscreen_request_element = JS_UNDEFINED;
+    js->fullscreen_request_resolve = JS_UNDEFINED;
+    js->fullscreen_request_reject = JS_UNDEFINED;
+    js->fullscreen_request_ctx = NULL;
+}
+
+static JSValue
+ns_fullscreen_request_suspended(JSContext *ctx, ns_js *js,
+                                JSValueConst element, const char *origin)
+{
     JSValue resolving[2];
     JSValue promise = JS_NewPromiseCapability(ctx, resolving);
     if (JS_IsException(promise)) return promise;
-    JSValue err = JS_NewError(ctx);
-    JS_SetPropertyStr(ctx, err, "name", JS_NewString(ctx, "TypeError"));
-    JS_SetPropertyStr(ctx, err, "message",
-                      JS_NewString(ctx, "Fullscreen request denied: "
-                                        "no transient user activation"));
-    JSValue r = JS_Call(ctx, resolving[1], JS_UNDEFINED, 1,
-                        (JSValueConst[]){ err });
-    JS_FreeValue(ctx, r);
-    JS_FreeValue(ctx, err);
-    JS_FreeValue(ctx, resolving[0]);
-    JS_FreeValue(ctx, resolving[1]);
+    ns_fullscreen_request_clear(js);
+    js->fullscreen_request_ctx = ctx;
+    js->fullscreen_request_element = JS_DupValue(ctx, element);
+    js->fullscreen_request_resolve = resolving[0];
+    js->fullscreen_request_reject = resolving[1];
+    ns_js_capability_request(NS_CAP_FULLSCREEN, origin);
     return promise;
+}
+
+static void
+ns_fullscreen_request_resume(ns_js *js, gboolean allow)
+{
+    JSContext *ctx = js->fullscreen_request_ctx;
+    if (!ctx || JS_IsUndefined(js->fullscreen_request_element)) return;
+    JSValue element = js->fullscreen_request_element;
+    JSValue resolve = js->fullscreen_request_resolve;
+    JSValue reject = js->fullscreen_request_reject;
+    js->fullscreen_request_element = JS_UNDEFINED;
+    js->fullscreen_request_resolve = JS_UNDEFINED;
+    js->fullscreen_request_reject = JS_UNDEFINED;
+    js->fullscreen_request_ctx = NULL;
+    const ns_node *node = ns_unwrap_element(element);
+    if (allow && node && ns_js_doc_contains(js, node)) {
+        ns_set_fullscreen_element(ctx, element, "fullscreen-enter");
+        if (js->window_action_cb) {
+            JS_FreeValue(ctx, js->pending_fullscreen_resolve);
+            js->pending_fullscreen_resolve = JS_DupValue(ctx, resolve);
+        } else {
+            JSValue r = JS_Call(ctx, resolve, JS_UNDEFINED, 0, NULL);
+            JS_FreeValue(ctx, r);
+        }
+    } else {
+        ns_fullscreen_reject(ctx, reject, element,
+                             "Fullscreen request denied by the site's "
+                             "settings");
+    }
+    JS_FreeValue(ctx, element);
+    JS_FreeValue(ctx, resolve);
+    JS_FreeValue(ctx, reject);
+    ns_js_microtask_checkpoint(js);
 }
 
 static JSValue
@@ -52563,6 +52645,22 @@ ns_element_request_fullscreen(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     if (!ns_js_has_transient_activation(js))
         return ns_fullscreen_rejected_without_activation(ctx, this_val);
+    char *origin = NULL;
+    int state = js ? ns_js_capability_state(js, ctx, NS_CAP_FULLSCREEN, &origin)
+                   : (int)NS_CAP_ALLOW;
+    if (state == (int)NS_CAP_DENY) {
+        g_free(origin);
+        return ns_fullscreen_rejected(ctx, this_val,
+            "Blocked requestFullscreen(): not allowed by this site's settings",
+            "Fullscreen request denied by the site's settings");
+    }
+    if (state == (int)NS_CAP_ASK) {
+        JSValue promise = ns_fullscreen_request_suspended(ctx, js, this_val,
+                                                          origin);
+        g_free(origin);
+        return promise;
+    }
+    g_free(origin);
     ns_set_fullscreen_element(ctx, this_val, "fullscreen-enter");
     return ns_fullscreen_transition_promise(ctx);
 }
@@ -62637,6 +62735,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->navigation = JS_UNDEFINED;
     js->iframe_doc = JS_UNDEFINED;
     js->pending_fullscreen_resolve = JS_UNDEFINED;
+    js->fullscreen_request_element = JS_UNDEFINED;
+    js->fullscreen_request_resolve = JS_UNDEFINED;
+    js->fullscreen_request_reject = JS_UNDEFINED;
     js->history_length = 1;
     js->timers = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                        NULL, ns_timer_free);
@@ -66625,6 +66726,7 @@ ns_js_free(ns_js *js)
     }
     ns_storage_free_deferred_events(js);
     JS_FreeValue(js->ctx, js->pending_fullscreen_resolve);
+    ns_fullscreen_request_clear(js);
     JS_FreeValue(js->ctx, js->pristine_promise);
     JS_FreeValue(js->ctx, js->fonts_set);
     if (js->dom_protos_set) {
