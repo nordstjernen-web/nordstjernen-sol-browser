@@ -3016,10 +3016,7 @@ about_logo_data_uri(void)
         return cached;
     }
 
-    gchar *embedded = g_base64_encode((const guchar *)about_logo_gif_bytes,
-                                      sizeof about_logo_gif_bytes - 1);
-    cached = g_strconcat("data:image/gif;base64,", embedded, NULL);
-    g_free(embedded);
+    cached = g_strconcat("data:image/gif;base64,", about_logo_gif_b64, NULL);
     return cached;
 }
 

@@ -70,15 +70,6 @@ wpt_hook_h = custom_target(
             'ns_wpt_hook_src'],
 )
 
-about_logo_gif_h = custom_target(
-  'about_logo_gif.h',
-  input: ['../scripts/embed-text.py',
-          '../data/icons/hicolor/scalable/apps/nordstjernen.gif'],
-  output: 'about_logo_gif.h',
-  command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
-            'about_logo_gif_bytes'],
-)
-
 nordstjernen_engine_sources = files(
   'anim.c',
   'bytecode_cache.c',
@@ -396,7 +387,7 @@ endif
 nordstjernen_embed_sources = nordstjernen_engine_sources + files(
   'embed_shim.c',
   'libnordstjernen.c',
-) + [polyfills_h, streaming_h, about_logo_gif_h]
+) + [polyfills_h, streaming_h]
 
 if is_android
   nordstjernen_embed_sources += files(

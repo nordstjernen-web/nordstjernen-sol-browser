@@ -3,9 +3,6 @@ Changelog:
 
 1.0.44-dev:
 ======
-* Build: the start-page logo is embedded from
-  `data/icons/hicolor/scalable/apps/nordstjernen.gif` at build time; the
-  generated `src/about_logo_gif.h` is no longer committed.
 * Pop-up windows are a site capability. The site settings popover gains a
   Pop-up windows row; a blocked site's `window.open()` returns null (the
   page is told in the console) and with Ask the window waits behind the
