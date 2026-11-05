@@ -1,8 +1,16 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.43-dev:
+1.0.43:
 ======
+* Windows: the sandboxed renderer no longer contains the code that drops
+  Administrator rights by relaunching with the desktop shell's token. It
+  moved from `src/security.c` to `src/security_root.c`, which only the
+  window process links; the renderer never ran it, but carrying
+  OpenProcessToken/DuplicateTokenEx/CreateProcessWithTokenW next to a
+  hidden child spawn with redirected stdio got
+  `nordstjernen-renderer.exe` in the 1.0.42 MSIX flagged as malware by
+  the Microsoft Store scan.
 * Pointer lock: `element.requestPointerLock()` now takes over the mouse
   pointer for real. It used to only record the element. The renderer
   grants the lock only with a user gesture (otherwise

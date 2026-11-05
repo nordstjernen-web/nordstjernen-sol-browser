@@ -74,7 +74,7 @@ GPU API on, the filter must allow executable mappings, because the GPU
 drivers behind them (Mesa's llvmpipe among them) compile shaders to
 machine code; a separate GPU process would lift that.
 
-### Privilege drop (`src/security.c`)
+### Privilege drop (`src/security_root.c`)
 
 - Linux/macOS: refuses to start as root — prints a diagnostic and exits
   before any page is loaded.

@@ -5,7 +5,7 @@
 # wraps it with NSIS (Modern UI 2) into a single per-user installer.
 # Per-user means $LOCALAPPDATA\Programs\Nordstjernen — no Administrator
 # rights are required, which matches the binary's refuse-to-run-elevated
-# policy (src/security.c::ns_security_refuse_root).
+# policy (src/security_root.c::ns_security_refuse_root).
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
