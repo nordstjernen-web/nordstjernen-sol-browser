@@ -32,6 +32,12 @@ Changelog:
   cookie jar and HTTP cache, getting past the default third-party cookie
   block and SameSite. `Origin`, `Sec-Fetch-Site`, the Referer and CSP stay
   relative to the frame, as the Fetch standard asks.
+* CSP (security): following a `javascript:` link now honours the page's
+  Content Security Policy and iframe sandbox. The code ran even under
+  `script-src 'self'` and in frames sandboxed without `allow-scripts`; it
+  now needs `'unsafe-inline'` (with no nonce, hash or `'strict-dynamic'`),
+  runs in the realm of the link's own frame, and the scheme is matched the
+  way the URL parser does (any case, after leading spaces).
 
 1.0.43:
 ======

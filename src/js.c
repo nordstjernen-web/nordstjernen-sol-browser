@@ -642,6 +642,13 @@ ns_node_sandbox_blocks_forms(const ns_node *node)
     return (sb & NS_SANDBOX_ACTIVE) && !(sb & NS_SANDBOX_ALLOW_FORMS);
 }
 
+static gboolean
+ns_node_sandbox_blocks_scripts(const ns_node *node)
+{
+    unsigned sb = ns_iframe_effective_sandbox(node);
+    return (sb & NS_SANDBOX_ACTIVE) && !(sb & NS_SANDBOX_ALLOW_SCRIPTS);
+}
+
 static JSValue
 ns_mql_addListener(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
@@ -49477,6 +49484,37 @@ ns_js_anchor_fragment_navigate(ns_js *js, const char *abs_url)
     return TRUE;
 }
 
+static const char *
+ns_href_javascript_body(const char *href)
+{
+    if (!href) return NULL;
+    const char *p = href;
+    while (*p && (unsigned char)*p <= 0x20) p++;
+    for (const char *s = "javascript:"; *s; p++) {
+        if (*p == '\t' || *p == '\n' || *p == '\r') continue;
+        if (g_ascii_tolower(*p) != *s) return NULL;
+        s++;
+    }
+    return p;
+}
+
+static void
+ns_js_run_javascript_url(ns_js *js, const ns_node *anchor, const char *body)
+{
+    if (ns_node_sandbox_blocks_scripts(anchor)) return;
+    if (!ns_csp_inline_event_handler_allowed(ns_js_node_csp(js, anchor)))
+        return;
+    JSContext *realm = ns_js_node_realm_context(js, anchor);
+    if (!realm) realm = js->main_realm_ctx;
+    ns_realm_scope scope;
+    ns_js_realm_scope_enter(js, realm, &scope);
+    char *code = g_uri_unescape_string(body, NULL);
+    char *r = ns_js_eval_source(js, code ? code : body, "javascript-url");
+    g_free(r);
+    g_free(code);
+    ns_js_realm_scope_leave(js, &scope);
+}
+
 static JSValue
 ns_element_activation_behavior(JSContext *ctx, const ns_node *act,
                                const ns_node *target)
@@ -49494,14 +49532,9 @@ ns_element_activation_behavior(JSContext *ctx, const ns_node *act,
     if (ns_node_is_element_named(act, "a") ||
         ns_node_is_element_named(act, "area")) {
         g_autofree char *href = g_strdup(ns_element_get_attr(act, "href"));
-        if (href && g_str_has_prefix(href, "javascript:")) {
-            char *code = g_uri_unescape_string(href + strlen("javascript:"),
-                                               NULL);
-            char *r = ns_js_eval_source(js, code ? code
-                                        : href + strlen("javascript:"),
-                                        "javascript-url");
-            g_free(r);
-            g_free(code);
+        const char *js_body = ns_href_javascript_body(href);
+        if (js_body) {
+            ns_js_run_javascript_url(js, act, js_body);
             return JS_UNDEFINED;
         }
         if (ns_iframe_follow_href(ctx, act, href))
