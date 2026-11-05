@@ -3,6 +3,13 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Documentation: the software architecture diagram is redrawn as a layered
+  figure (supervisor, shell, the shell/renderer boundary with the profile
+  and media helpers beside it, the renderer's subsystems, then every
+  significant in-tree and system library as its own box) by a Pillow-only
+  generator, `scripts/arch-diagram/build_diagram.py`, which reads module
+  line counts and the version from the tree. `docs/Software-Architecture.md`
+  describes the capability model and the versioned engine protocol.
 * Architecture: site permissions are now capabilities from one vocabulary
   shared by the window process and the renderer (`src/capability.h`): a
   name, a label, a prompt, a default state and whether a change needs a
