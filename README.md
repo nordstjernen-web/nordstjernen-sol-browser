@@ -7,7 +7,7 @@ Nordstjernen web browser
 
 Nordstjernen Sol is a web browser written from scratch in C, focused on
 modern HTML, CSS and JavaScript standards. It ships as **Nordstjernen Web
-Browser** on the desktop and as **Sol Explorer** on Android.
+Browser** on the desktop and as **Nordstjernen Browser** on Android.
 
 **Windows:** install Nordstjernen Web Browser from the [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl).
 
