@@ -470,6 +470,8 @@ typedef struct shadow_blur_key {
     double       hole_x, hole_y, hole_w, hole_h;
 } shadow_blur_key;
 
+#define NS_BORDER_IMAGE_RASTER_MAX 2048.0
+#define NS_BORDER_IMAGE_MAX_AREA_PX 4194304.0
 #define NS_SHADOW_BLUR_CACHE_BYTES (32u << 20)
 #define NS_SHADOW_BLUR_ENTRY_BYTES (4u << 20)
 
@@ -1925,10 +1927,20 @@ paint_border_image(cairo_t *cr, const ns_box *b, const ns_style *s,
         surf = texture_surface_cached(img->texture, NULL);
         if (!surf) return FALSE;
     } else {
+        if (!(area_w <= NS_BORDER_IMAGE_MAX_AREA_PX &&
+              area_h <= NS_BORDER_IMAGE_MAX_AREA_PX))
+            return FALSE;
         iw = ceil(area_w);
         ih = ceil(area_h);
-        owned = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-                                           (int)iw, (int)ih);
+        double raster_scale = MIN(1.0, NS_BORDER_IMAGE_RASTER_MAX / MAX(iw, ih));
+        int pw = MAX((int)ceil(iw * raster_scale), 1);
+        int ph = MAX((int)ceil(ih * raster_scale), 1);
+        owned = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+        if (cairo_surface_status(owned) != CAIRO_STATUS_SUCCESS) {
+            cairo_surface_destroy(owned);
+            return FALSE;
+        }
+        cairo_surface_set_device_scale(owned, pw / iw, ph / ih);
         cairo_t *gc = cairo_create(owned);
         corner_radii square = {0};
         paint_bg_gradient_core(gc, &src->u.gradient, 0, 0, iw, ih,
