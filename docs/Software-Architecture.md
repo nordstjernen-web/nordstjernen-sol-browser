@@ -154,7 +154,11 @@ pixels travel through shared memory (see [Rendering.md](Rendering.md)).
 
 The protocol is readable in a trace and trivial to extend, which is the
 whole point: a browser's process boundary is normally the least
-inspectable part of the system.
+inspectable part of the system. It is versioned: the shell's first request
+to a new renderer is `/hello`, and a renderer whose
+`NS_ENGINE_PROTOCOL_VERSION` (`src/engine_protocol.h`) differs from the
+shell's is refused at spawn. The endpoint-by-endpoint reference is
+[engine-protocol.md](engine-protocol.md).
 
 ---
 

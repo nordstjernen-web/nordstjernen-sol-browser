@@ -2,6 +2,7 @@
 
 #define _GNU_SOURCE 1
 #include "rproc_http.h"
+#include "engine_protocol.h"
 #include "ipc_http.h"
 #include <cairo.h>
 
@@ -115,6 +116,8 @@ struct ns_rproc_http {
 
 static ns_rproc_inproc_attach_fn g_inproc_attach;
 static ns_rproc_inproc_print_fn  g_inproc_print;
+
+static ns_rproc_http *spawn_checked(ns_rproc_http *r);
 
 void
 ns_rproc_http_set_inproc(ns_rproc_inproc_attach_fn attach)
@@ -528,8 +531,9 @@ ns_rproc_http *
 ns_rproc_http_spawn(const char *renderer_path, int max_width, int max_height)
 {
     if (g_inproc_attach)
-        return spawn_inproc(max_width, max_height);
-    return spawn_common(renderer_path, max_width, max_height, 0, 0);
+        return spawn_checked(spawn_inproc(max_width, max_height));
+    return spawn_checked(spawn_common(renderer_path, max_width, max_height,
+                                      0, 0));
 }
 
 ns_rproc_http *
@@ -537,8 +541,9 @@ ns_rproc_http_spawn_shm(const char *renderer_path, int max_width,
                         int max_height)
 {
     if (g_inproc_attach)
-        return spawn_inproc(max_width, max_height);
-    return spawn_common(renderer_path, max_width, max_height, 1, 0);
+        return spawn_checked(spawn_inproc(max_width, max_height));
+    return spawn_checked(spawn_common(renderer_path, max_width, max_height,
+                                      1, 0));
 }
 
 ns_rproc_http *
@@ -546,8 +551,9 @@ ns_rproc_http_spawn_shm_ex(const char *renderer_path, int max_width,
                            int max_height, int private_mode)
 {
     if (g_inproc_attach)
-        return spawn_inproc(max_width, max_height);
-    return spawn_common(renderer_path, max_width, max_height, 1, private_mode);
+        return spawn_checked(spawn_inproc(max_width, max_height));
+    return spawn_checked(spawn_common(renderer_path, max_width, max_height,
+                                      1, private_mode));
 }
 
 void
@@ -985,6 +991,48 @@ resolve_permission(ns_rproc_http *r, const char *path, const char *origin,
         json = NULL;
     free(oe);
     return request_ok(r, path, json);
+}
+
+int
+ns_rproc_http_hello(ns_rproc_http *r, ns_rproc_http_engine *out)
+{
+    if (!r || !out) return -1;
+    memset(out, 0, sizeof *out);
+    char *body = request(r, NS_ENGINE_PROTOCOL_HELLO, "{}");
+    if (!body) return -1;
+    long protocol = 0;
+    json_get_long(body, "protocol", &protocol);
+    char *engine = json_get_str(body, "engine");
+    char *version = json_get_str(body, "version");
+    out->protocol = (int)protocol;
+    snprintf(out->engine, sizeof out->engine, "%s", engine ? engine : "");
+    snprintf(out->version, sizeof out->version, "%s", version ? version : "");
+    free(engine);
+    free(version);
+    free(body);
+    return 0;
+}
+
+static ns_rproc_http *
+spawn_checked(ns_rproc_http *r)
+{
+    if (!r) return NULL;
+    ns_rproc_http_engine info;
+    if (ns_rproc_http_hello(r, &info) != 0) {
+        fprintf(stderr, "nordstjernen: the renderer did not answer the "
+                        "engine protocol handshake\n");
+        ns_rproc_http_close(r);
+        return NULL;
+    }
+    if (info.protocol != NS_ENGINE_PROTOCOL_VERSION) {
+        fprintf(stderr, "nordstjernen: renderer %s %s speaks engine protocol "
+                        "%d but this shell needs %d\n",
+                info.engine, info.version, info.protocol,
+                NS_ENGINE_PROTOCOL_VERSION);
+        ns_rproc_http_close(r);
+        return NULL;
+    }
+    return r;
 }
 
 int

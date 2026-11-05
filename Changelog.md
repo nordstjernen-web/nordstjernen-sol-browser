@@ -3,6 +3,14 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Architecture: the shell and the renderer now agree on a versioned engine
+  protocol. The first request to a new renderer is `/hello`, which reports
+  the protocol version, engine name and build version, and a renderer that
+  does not answer or speaks another version is refused at spawn with a
+  clear message. The contract is documented endpoint by endpoint in
+  `docs/engine-protocol.md`, and `docs/Direction.md` states who the browser
+  is for and the architectural commitments (pluggable engine, revocable
+  capabilities, sessions as persistent data, isolation first).
 * DOM: read-only attributes such as `nodeType`, `tagName`, `form`,
   `naturalWidth` or `validity` no longer carry a setter that silently
   swallows assignments. As in other browsers, assigning to them is ignored

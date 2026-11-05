@@ -78,6 +78,14 @@ typedef struct {
     unsigned long session_gen;
 } ns_rproc_http_tick;
 
+typedef struct ns_rproc_http_engine {
+    int  protocol;
+    char engine[64];
+    char version[64];
+} ns_rproc_http_engine;
+
+int ns_rproc_http_hello(ns_rproc_http *r, ns_rproc_http_engine *out);
+
 ns_rproc_http *ns_rproc_http_spawn(const char *renderer_path, int max_width,
                                    int max_height);
 ns_rproc_http *ns_rproc_http_spawn_shm(const char *renderer_path,
