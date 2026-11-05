@@ -3,6 +3,11 @@ Changelog:
 
 1.0.44-dev:
 ======
+* Fullscreen is a site capability. The site settings popover gains a
+  Fullscreen row; a blocked site's `requestFullscreen()` rejects with a
+  `TypeError` and `fullscreenerror`, and with Ask the promise waits until
+  the prompt bar is answered. Allow stays the default and a user gesture is
+  still required.
 * Pointer lock is a site capability. The site settings popover gains a
   Pointer lock row; a blocked site's `requestPointerLock()` fails with
   `pointerlockerror`, and with Ask the request waits in the page until the
