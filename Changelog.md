@@ -3,6 +3,11 @@ Changelog:
 
 1.0.44-dev:
 ======
+* HSTS (security): a `Strict-Transport-Security` header is now remembered
+  only from a top-level navigation or a same-site subresource. A
+  third-party resource could set it for its own hosts before, and a
+  tracker that spreads such entries over a set of subdomains can read them
+  back later as a cross-site identifier, the HSTS supercookie.
 * Settings (security): changing the `gsk_renderer` key from the Settings
   page now asks for confirmation like the other security-relevant keys.
   It was on the list of keys a renderer may change silently, so a

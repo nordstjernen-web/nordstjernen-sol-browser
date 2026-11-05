@@ -336,7 +336,9 @@ minimum protocol version, `http,https`
 as the only allowed protocols, redirects clamped to HTTPS once the
 initial scheme is HTTPS, max ten redirects, an explicit response-size
 cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
-`CURLOPT_HSTS`; Alt-Svc is honoured. Active mixed content (an `http:`
+`CURLOPT_HSTS`, but a `Strict-Transport-Security` header is stored only
+from a top-level navigation or a same-site subresource, which denies a
+third-party tracker the HSTS supercookie; Alt-Svc is honoured. Active mixed content (an `http:`
 script, frame, worker, `fetch()`, XHR or socket inside an `https:`
 document) is blocked, and passive mixed content (images, media, fonts and
 stylesheets) is upgraded to `https:` rather than fetched in the clear; a
