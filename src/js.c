@@ -9863,8 +9863,9 @@ ns_strv_with_cors_marker(char **headers)
 static gboolean
 cors_allows(const char *doc_url, const char *resp_url, const char *cors_header)
 {
+    if (resp_url && g_str_has_prefix(resp_url, "blob:"))
+        return ns_net_blob_url_visible_to(resp_url, doc_url);
     if (resp_url && (g_str_has_prefix(resp_url, "data:") ||
-                     g_str_has_prefix(resp_url, "blob:") ||
                      g_str_has_prefix(resp_url, "about:"))) return TRUE;
     if (ns_url_same_origin(doc_url, resp_url)) return TRUE;
     if (!cors_header || !*cors_header) return FALSE;
@@ -9893,7 +9894,6 @@ cors_allows_credentialed(const char *doc_url, const char *resp_url,
     if (!credentialed || !cors_header || ns_url_same_origin(doc_url, resp_url))
         return TRUE;
     if (resp_url && (g_str_has_prefix(resp_url, "data:") ||
-                     g_str_has_prefix(resp_url, "blob:") ||
                      g_str_has_prefix(resp_url, "about:"))) return TRUE;
     g_autofree char *origin = g_strstrip(g_strdup(cors_header));
     if (strcmp(origin, "*") == 0) return FALSE;
@@ -50610,9 +50610,10 @@ ns_js_resource_origin_clean(ns_js *js, JSContext *ctx, const char *url,
                             const char *cors_allow_origin)
 {
     if (!js || !url) return FALSE;
-    if (g_str_has_prefix(url, "data:") || g_str_has_prefix(url, "blob:"))
-        return TRUE;
+    if (g_str_has_prefix(url, "data:")) return TRUE;
     const char *doc_url = ns_js_caller_document_url(js, ctx);
+    if (g_str_has_prefix(url, "blob:"))
+        return ns_net_blob_url_visible_to(url, doc_url);
     if (ns_js_urls_same_origin(url, doc_url)) return TRUE;
     return cors_allow_origin && cors_allows(doc_url, url, cors_allow_origin);
 }

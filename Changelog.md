@@ -9,6 +9,10 @@ Changelog:
   ABI 6 kernels the ruleset also scopes signals to the sandbox domain, and
   renderers' rulesets scope abstract UNIX sockets too. A compromised tab
   could previously `kill(-1, SIGKILL)` every process of the user.
+* Security: the response-side CORS check and the canvas origin-clean check
+  no longer treat every `blob:` URL as readable; a blob URL is readable
+  only by documents of the origin that created it, the same rule the fetch
+  layer already applied.
 * Security: `EventSource` follows redirects in the engine instead of inside
   libcurl. Each hop is checked like the engine's own redirect loop — at most
   10 redirects, no https→http downgrade, `connect-src` and the safe-browsing
