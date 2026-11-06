@@ -21082,6 +21082,8 @@ typedef struct ns_xhr_state {
     gsize         signalled_len;
     gint64        last_signal_us;
     gboolean      headers_signalled;
+    gboolean      sync;
+    gboolean      in_chunk;
 } ns_xhr_state;
 
 static gint64
@@ -22082,6 +22084,7 @@ ns_xhr_on_chunk(gpointer user_data, long status, const char *raw_headers,
     g_free(allow_origin);
     if (!allowed) return;
     st->last_signal_us = now;
+    st->in_chunk = TRUE;
     ns_budget_guard bg = {0};
     ns_js_budget_push(st->js, &bg);
     if (!st->headers_signalled) {
@@ -22099,6 +22102,7 @@ ns_xhr_on_chunk(gpointer user_data, long status, const char *raw_headers,
         ns_target_fire_event(ctx, st->obj, "readystatechange");
         if (ns_xhr_gen(ctx, st->obj) != st->gen || !st->ctx) {
             ns_js_budget_pop(st->js, &bg);
+            st->in_chunk = FALSE;
             return;
         }
     }
@@ -22123,13 +22127,22 @@ ns_xhr_on_chunk(gpointer user_data, long status, const char *raw_headers,
                                    (double)st->partial->len, 0, FALSE);
     ns_drain_mutations(st->js);
     ns_js_budget_pop(st->js, &bg);
+    st->in_chunk = FALSE;
+}
+
+static gboolean
+ns_xhr_delivery_held(const ns_xhr_state *st)
+{
+    if (!st) return FALSE;
+    if (st->in_chunk) return TRUE;
+    return !st->sync && st->js && ns_js_page_tasks_held(st->js);
 }
 
 static gboolean
 ns_on_xhr_deliver_idle(gpointer user_data)
 {
     ns_xhr_delivery *d = user_data;
-    if (d->st && d->st->js && ns_js_page_tasks_held(d->st->js)) {
+    if (ns_xhr_delivery_held(d->st)) {
         ns_js_attach_timeout(d->st->js, 4, ns_on_xhr_deliver_idle, d);
         return G_SOURCE_REMOVE;
     }
@@ -22145,7 +22158,7 @@ ns_on_xhr_done(GObject *src, GAsyncResult *result, gpointer user_data)
     ns_xhr_state *st = user_data;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
-    if (st->js && ns_js_page_tasks_held(st->js)) {
+    if (ns_xhr_delivery_held(st)) {
         ns_xhr_delivery *d = g_new0(ns_xhr_delivery, 1);
         d->st = st;
         d->resp = resp;
@@ -22160,7 +22173,7 @@ static gboolean
 ns_xhr_emit_blocked_idle(gpointer user_data)
 {
     ns_xhr_state *st = user_data;
-    if (st->js && ns_js_page_tasks_held(st->js)) {
+    if (ns_xhr_delivery_held(st)) {
         ns_js_attach_timeout(st->js, 4, ns_xhr_emit_blocked_idle, st);
         return G_SOURCE_REMOVE;
     }
@@ -22305,11 +22318,14 @@ static void
 ns_xhr_pump_until_done(JSContext *ctx, JSValueConst this_val)
 {
     ns_js *js = js_from_ctx(ctx);
-    GMainContext *mc = js && js->main_context ? js->main_context : NULL;
+    if (!js) return;
+    GMainContext *mc = js->main_context ? js->main_context : NULL;
     gint64 pump_start_us = g_get_monotonic_time();
     gint64 deadline = pump_start_us + 60 * G_USEC_PER_SEC;
+    gboolean saved = js->in_pump;
+    js->in_pump = TRUE;
     while (g_get_monotonic_time() < deadline) {
-        if (js && js->halted)
+        if (js->halted)
             break;
         JSValue rs = JS_GetPropertyStr(ctx, this_val, "readyState");
         int32_t state = 0;
@@ -22319,6 +22335,7 @@ ns_xhr_pump_until_done(JSContext *ctx, JSValueConst this_val)
             break;
         g_main_context_iteration(mc, TRUE);
     }
+    js->in_pump = saved;
     ns_js_credit_pumped_time(js, pump_start_us);
 }
 
@@ -22713,6 +22730,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         }
         JS_FreeValue(ctx, upload);
     }
+    st->sync = ns_xhr_is_sync(ctx, this_val);
     if (blocked_mixed || blocked_csp) {
         ns_js_attach_idle(st->js, ns_xhr_emit_blocked_idle, st);
         g_ptr_array_free(hdr_terminated, TRUE);
