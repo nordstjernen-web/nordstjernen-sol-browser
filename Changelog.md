@@ -3,6 +3,11 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Layout: `grid-auto-flow: column` places items pinned to a column
+  before the auto-placed ones and adds rows for them, and counts the rows
+  that row-placed items span. An item pinned to a full column was pushed
+  into a new column, so a two-column story grid grew to 24 columns with
+  the lead story collapsed and the headlines drawn over each other.
 * Text: a web font that has a glyph for an emoji code point is used for
   it. Emoji-presentation characters were always shaped with the system
   colour emoji font, whatever `font-family` said, so icon fonts that map
