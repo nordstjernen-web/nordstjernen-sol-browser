@@ -134,8 +134,10 @@ session_stash_post(ns_renderer_session *s, const char *href)
 {
     if (!s || !s->cur)
         return;
-    free(s->page_nav);
-    s->page_nav = (href && *href) ? strdup(href) : NULL;
+    if (href && *href) {
+        free(s->page_nav);
+        s->page_nav = strdup(href);
+    }
     size_t len = 0;
     char *ct = NULL;
     char *pb = ns_browser_take_post(s->cur, &len, &ct);
