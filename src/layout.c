@@ -7672,11 +7672,11 @@ inline_attr_affects_measure(ns_inline_attr_kind k)
     }
 }
 
+static guint g_layout_generation;
+
 static gboolean
-inline_box_measure_cacheable(const ns_box *box)
+inline_box_attrs_cacheable(const ns_box *box)
 {
-    if (!box || (box->inline_atomics && box->inline_atomics->len > 0))
-        return FALSE;
     if (!box->attrs) return TRUE;
     for (guint i = 0; i < box->attrs->len; i++) {
         const ns_inline_attr *a =
@@ -7684,6 +7684,48 @@ inline_box_measure_cacheable(const ns_box *box)
         if (!inline_attr_cacheable_kind(a->kind)) return FALSE;
     }
     return TRUE;
+}
+
+static gboolean
+inline_box_measure_cacheable(const ns_box *box)
+{
+    if (!box || (box->inline_atomics && box->inline_atomics->len > 0))
+        return FALSE;
+    return inline_box_attrs_cacheable(box);
+}
+
+static gboolean replaced_width_is_cyclic(const ns_box *box);
+static gboolean replaced_width_is_percent(const ns_box *box);
+static gboolean replaced_max_width_is_percent(const ns_box *box);
+
+static gboolean
+inline_box_measure_pass_cacheable(const ns_box *box)
+{
+    if (!box || !box->inline_atomics || box->inline_atomics->len == 0)
+        return FALSE;
+    if (!inline_box_attrs_cacheable(box)) return FALSE;
+    for (guint i = 0; i < box->inline_atomics->len; i++) {
+        const ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, i).box;
+        if (!ab) continue;
+        if (g_abs_ph_set && g_hash_table_contains(g_abs_ph_set, ab)) return FALSE;
+        if (replaced_width_is_cyclic(ab) || replaced_width_is_percent(ab) ||
+            replaced_max_width_is_percent(ab))
+            return FALSE;
+        gboolean replaced = ab->kind == NS_BOX_IMAGE || ab->kind == NS_BOX_VIDEO ||
+                            ab->kind == NS_BOX_SVG;
+        if (!replaced && ab->kind != NS_BOX_BLOCK && ab->kind != NS_BOX_TABLE)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+inline_measure_cache_hit(gboolean cacheable, gboolean pass_cacheable,
+                         gboolean valid, const ns_style *cached_style,
+                         guint cached_gen, const ns_style *parent_style)
+{
+    if (!valid || cached_style != parent_style) return FALSE;
+    return cacheable || (pass_cacheable && cached_gen == g_layout_generation);
 }
 
 static double measure_natural_width(ns_box *box, const ns_style *parent_style);
@@ -10863,8 +10905,12 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
             return sum;
         }
         gboolean cacheable = inline_box_measure_cacheable(box);
-        if (cacheable && box->inline_natural_cache_valid &&
-            box->inline_natural_cache_style == parent_style)
+        gboolean pass_cacheable = !cacheable &&
+                                  inline_box_measure_pass_cacheable(box);
+        if (inline_measure_cache_hit(cacheable, pass_cacheable,
+                                     box->inline_natural_cache_valid,
+                                     box->inline_natural_cache_style,
+                                     box->inline_natural_cache_gen, parent_style))
             return box->inline_natural_cache_width;
         NsPangoLayout *layout = make_pango_layout(parent_style);
         ns_pango_layout_set_width(layout, -1);
@@ -10913,10 +10959,11 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         }
         measure_inline_atomics_end(saved);
         g_object_unref(layout);
-        if (cacheable) {
+        if (cacheable || pass_cacheable) {
             box->inline_natural_cache_style = parent_style;
             box->inline_natural_cache_width = pw;
             box->inline_natural_cache_valid = TRUE;
+            box->inline_natural_cache_gen = g_layout_generation;
         }
         return pw;
     }
@@ -11168,16 +11215,21 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         if (keyword_is(ws, "nowrap") || keyword_is(ws, "pre"))
             return measure_natural_width(box, parent_style);
         gboolean cacheable = inline_box_measure_cacheable(box);
-        if (cacheable && box->inline_min_cache_valid &&
-            box->inline_min_cache_style == parent_style)
+        gboolean pass_cacheable = !cacheable &&
+                                  inline_box_measure_pass_cacheable(box);
+        if (inline_measure_cache_hit(cacheable, pass_cacheable,
+                                     box->inline_min_cache_valid,
+                                     box->inline_min_cache_style,
+                                     box->inline_min_cache_gen, parent_style))
             return box->inline_min_cache_width;
         double fast = ns_inline_text_indent_px(box, parent_style, 0) > 0
             ? -1 : measure_inline_ascii_min_width(box, parent_style);
         if (fast >= 0) {
-            if (cacheable) {
+            if (cacheable || pass_cacheable) {
                 box->inline_min_cache_style = parent_style;
                 box->inline_min_cache_width = fast;
                 box->inline_min_cache_valid = TRUE;
+                box->inline_min_cache_gen = g_layout_generation;
             }
             return fast;
         }
@@ -11199,10 +11251,11 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         text_measure_pixel_size(layout, &pw, &ph);
         measure_inline_atomics_end(saved);
         g_object_unref(layout);
-        if (cacheable) {
+        if (cacheable || pass_cacheable) {
             box->inline_min_cache_style = parent_style;
             box->inline_min_cache_width = pw;
             box->inline_min_cache_valid = TRUE;
+            box->inline_min_cache_gen = g_layout_generation;
         }
         return pw;
     }
@@ -12162,6 +12215,7 @@ inline_balance(ns_box *box, double width, const ns_style *style)
 static void
 layout_box(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
+    if (!box->parent) g_layout_generation++;
     box->definite_height_read = FALSE;
     box->last_layout_width = parent_content_width;
     if (box_is_query_container(box)) g_cq_seen_container = TRUE;
@@ -20888,6 +20942,7 @@ compute_paint_bounds(ns_box *b)
 static ns_box *
 ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
 {
+    g_layout_generation++;
     g_abs_pending = g_array_new(FALSE, FALSE, sizeof(ns_abs_entry));
     g_abs_seen = g_hash_table_new(g_direct_hash, g_direct_equal);
     g_abs_ph_set = g_hash_table_new(g_direct_hash, g_direct_equal);
