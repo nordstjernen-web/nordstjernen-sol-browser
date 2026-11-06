@@ -3,6 +3,11 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Service workers: the request for a service worker's script carries
+  `Service-Worker: script`, as the specification requires. Servers use
+  the header to tell a registration from a page fetching the file;
+  `chat.google.com/serviceworker.js` answers 400 without it and 200 with
+  it, so the Chat frames in Gmail never got their worker.
 * Frames: `message`, `hashchange` and `popstate` listeners on a frame's
   window follow the listener rules. A frame keeps these three in lists of
   its own, and the lists held bare functions: a listener given as an
