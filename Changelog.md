@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Frames: a frame reaches a same-origin sibling through its cross-origin
+  parent. `parent[name]`, `parent.frames[name]` and `parent[index]` gave
+  an opaque proxy for every child of a cross-origin parent, also for a
+  child with the reader's own origin, so a callback path such as
+  `parent['brain']._frameReady` threw SecurityError. The frame now gets
+  the sibling's real window when the origins recorded for the two realms
+  match, its own window for its own name, and the proxy otherwise. Gmail's
+  Chat frames start this way: the Chat view's navigation was empty with
+  five SecurityErrors in the console and now lists the conversations.
 * Security: closing a page used a freed table. Tearing a page down
   destroyed its canvas-state table and left the pointer in place, then
   freed the DOM nodes that scripts had detached; freeing a node looks its

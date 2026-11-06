@@ -15481,6 +15481,22 @@ ns_message_event_source(JSContext *ctx, ns_js *js, JSValueConst receiver,
     return source;
 }
 
+static JSValue
+ns_iframe_same_origin_window(JSContext *ctx, JSValueConst this_val, int argc,
+                             JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || argc < 1 || !JS_IsObject(argv[0])) return JS_NULL;
+    JSValue forwarded = ns_window_forward_of(js, argv[0]);
+    JSValue window = JS_IsObject(forwarded) ? forwarded
+                                            : JS_DupValue(ctx, argv[0]);
+    if (ns_realms_same_origin(js, ctx, ns_window_owning_realm(js, window)))
+        return window;
+    JS_FreeValue(ctx, window);
+    return JS_NULL;
+}
+
 static void
 ns_port_adopt(JSContext *ctx, JSContext *realm, JSValueConst port)
 {
@@ -53476,7 +53492,7 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents, nativeFetch, frameStorage, nativeRealm, frameNavigate){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents, nativeFetch, frameStorage, nativeRealm, frameNavigate, sameOriginWindow){"
     "  var url = initialURL || 'about:blank';"
     "  var shown = docURL || '';"
     "  function vis(){ return shown || url; }"
@@ -53500,7 +53516,10 @@ static const char ns_iframe_global_bootstrap[] =
     "      if (typeof p !== 'string' || typeof childFrameOf !== 'function') return undefined;"
     "      var child;"
     "      try { child = childFrameOf(target, p); } catch (e) { return undefined; }"
-    "      return child && typeof child === 'object' ? crossWindow(child, proxy) : undefined; }"
+    "      if (!child || typeof child !== 'object') return undefined;"
+    "      var own = sameOriginWindow(child);"
+    "      if (own === G) return win;"
+    "      return own || crossWindow(child, proxy); }"
     "    loc = crossLocation(target, denied);"
     "    proxy = new Proxy({}, {"
     "      get:function(t,p){"
@@ -54996,13 +55015,16 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         JSValue frame_navigate = iframe
             ? JS_NewCFunctionData(fctx, ns_frame_scope_navigate, 1, 0, 1, &frame_el)
             : JS_UNDEFINED;
-        JSValueConst args[17] = { fg, parent_global, iframe_doc, urlv, sbv,
+        JSValue same_origin_window = JS_NewCFunction(fctx,
+            ns_iframe_same_origin_window, "sameOriginWindow", 1);
+        JSValueConst args[18] = { fg, parent_global, iframe_doc, urlv, sbv,
                                   platform, frame_el, frame_name_v,
                                   child_frame_of, post_message, docv,
                                   realm_clone, window_events, native_fetch,
                                   frame_storage, JS_NewBool(fctx, native),
-                                  frame_navigate };
-        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 17, args);
+                                  frame_navigate, same_origin_window };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 18, args);
+        JS_FreeValue(fctx, same_origin_window);
         JS_FreeValue(fctx, frame_navigate);
         JS_FreeValue(fctx, frame_storage);
         JS_FreeValue(fctx, native_fetch);
