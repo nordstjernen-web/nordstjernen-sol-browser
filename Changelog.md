@@ -3,6 +3,12 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Network: the alt-svc cache file is used only when HTTP/3 is enabled.
+  libcurl read `altsvc.txt` when each request was set up and rewrote it
+  when each request ended, though its records only ever lead to HTTP/3,
+  which is off unless `NS_FORCE_HTTP3` is set. On Windows, opening a file
+  that was rewritten a moment ago can wait on the antivirus scanner for
+  seconds; on x.com three requests were seen parked in that open for 15 s.
 * Fixed: the first change after a burst of script layout reads could take
   0.7 s to show. The layout dampener, which rations relayouts for a page
   that keeps mutating itself with nobody at the keyboard, also counted the
