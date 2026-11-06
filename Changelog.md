@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Layout: an `<iframe>` styled `display: flex`, `grid`, `inline-flex` or
+  `table` shows its document. The frame's box became a flex or grid
+  container and its document, which is not an element, was not laid out
+  or painted at all; `display: table` gave the frame the height of the
+  page. A frame lays its document out itself, so only the outer display
+  type applies and the inner one is used as `flow-root`;
+  `getComputedStyle` still reports the authored value. Gmail's Chat view
+  sizes its main frame with `display: flex`: the pane was blank and now
+  shows the conversation list.
 * Scripts: script elements a page inserts run in the order they were
   inserted. An element inserted while a script, a timer or an event
   handler was running went on one queue, one inserted from a
