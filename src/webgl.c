@@ -327,6 +327,8 @@ wgl_resolve_blit(int w, int h)
     if (scissor) glEnable(GL_SCISSOR_TEST);
 }
 
+static void wgl_pbo_release(ns_webgl *g);
+
 static void
 ns_webgl_sync_size(ns_webgl *g)
 {
@@ -340,6 +342,7 @@ ns_webgl_sync_size(ns_webgl *g)
     if (w == g->w && h == g->h) return;
     g->w = w;
     g->h = h;
+    wgl_pbo_release(g);
     ns_webgl_alloc_storage(g, w, h);
     glViewport(0, 0, w, h);
     wgl_mark_dirty(g);
@@ -6083,9 +6086,16 @@ wgl_pbo_issue(ns_webgl *g, int w, int h, int stride)
 }
 
 static gboolean
-wgl_pbo_collect(ns_webgl *g, int slot, unsigned char *dst, gboolean wait)
+wgl_pbo_collect(ns_webgl *g, int slot, unsigned char *dst, size_t dst_len,
+                gboolean wait)
 {
     if (!g->pbo_pending[slot]) return FALSE;
+    if (g->pbo_size != dst_len) {
+        glDeleteSync(g->pbo_fence[slot]);
+        g->pbo_fence[slot] = NULL;
+        g->pbo_pending[slot] = FALSE;
+        return FALSE;
+    }
     GLenum st = glClientWaitSync(g->pbo_fence[slot], GL_SYNC_FLUSH_COMMANDS_BIT,
                                  wait ? (GLuint64)1000000000 : 0);
     if (st != GL_ALREADY_SIGNALED && st != GL_CONDITION_SATISFIED)
@@ -6136,10 +6146,11 @@ wgl_readback_streaming(ns_webgl *g, int w, int h, unsigned char *dst,
     if (g->dirty) g->last_readback_us = now;
     if (!g->pbo_pending[0] && !g->pbo_pending[1] && !streaming)
         return FALSE;
+    size_t dst_len = (size_t)stride * (size_t)h;
     gboolean issued = FALSE;
     if (g->dirty) {
         if (!streaming) {
-            for (int i = 0; i < 2; i++) wgl_pbo_collect(g, i, dst, TRUE);
+            for (int i = 0; i < 2; i++) wgl_pbo_collect(g, i, dst, dst_len, TRUE);
             return FALSE;
         }
         issued = wgl_pbo_issue(g, w, h, stride);
@@ -6149,8 +6160,8 @@ wgl_readback_streaming(ns_webgl *g, int w, int h, unsigned char *dst,
     }
     int newest = g->pbo_next ^ 1;
     int oldest = g->pbo_next;
-    gboolean copied = wgl_pbo_collect(g, oldest, dst, FALSE);
-    copied = wgl_pbo_collect(g, newest, dst, FALSE) || copied;
+    gboolean copied = wgl_pbo_collect(g, oldest, dst, dst_len, FALSE);
+    copied = wgl_pbo_collect(g, newest, dst, dst_len, FALSE) || copied;
     if (g->pbo_pending[0] || g->pbo_pending[1])
         wgl_pbo_schedule_collect(g);
     return copied || issued;

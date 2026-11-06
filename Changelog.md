@@ -3,6 +3,13 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: an animated WebGL canvas that shrinks no longer overflows its
+  picture. On Windows and macOS an animated canvas is copied out through
+  two pixel buffers sized for the frame; resizing the canvas replaced
+  the picture but kept the buffers, and a frame still in flight was then
+  copied whole into the smaller picture, a heap overflow of the page's
+  own pixels. The buffers are now dropped on resize, and a frame is only
+  copied into a picture of the size it was read for.
 * Security: a WebGL call keeps its own GL context while page script runs
   inside it. Converting an argument can run page script (`valueOf`, a
   getter, `toString`), and that script could call a second WebGL
