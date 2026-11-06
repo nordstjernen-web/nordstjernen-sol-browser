@@ -88,6 +88,7 @@ jobs:
           JAR=$(ls java/build/libs/nordstjernen-java-*.jar \
                 | grep -Ev -- '-(sources|javadoc)\.jar$' | head -1)
           javac -cp "$JAR" -d out java/examples/PageExample.java
+          javac -cp "$JAR" -d out java/examples/BrowserViewExample.java
           NORDSTJERNEN_RENDERER="$PWD/builddir-java/src/nordstjernen-renderer" \
             java -cp "$JAR:out" PageExample about:start | tee page-smoke.txt
           grep -q 'ok:     true' page-smoke.txt

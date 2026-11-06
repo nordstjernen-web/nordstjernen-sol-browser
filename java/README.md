@@ -222,6 +222,47 @@ addresses, `--allow-host` / `--deny-host` narrow it further, and `--help`
 lists the rest. Unlike the desktop browser's `--mcp`, which drives the
 window on the user's screen, this one is headless and needs no display.
 
+### A page in a Swing application (`org.nordstjernen.swing.BrowserView`)
+
+`BrowserView` is a `JPanel` that shows a page and lets the user work it. It
+is the part of the Java browser that is not window chrome, and the browser
+itself is built on it:
+
+```java
+Engine engine = Engine.launch();
+BrowserView view = new BrowserView(engine.newContext().newPage());
+frame.add(view, BorderLayout.CENTER);
+view.navigate("https://example.com");
+
+view.addListener(new BrowserView.Listener() {
+    @Override public void titleChanged(String title) { frame.setTitle(title); }
+    @Override public void urlChanged(String url)     { address.setText(url); }
+    @Override public void statusChanged(String text) { status.setText(text); }
+});
+```
+
+The view paints the page (sharp on HiDPI screens), scrolls it with its own
+scrollbars, the wheel and the keyboard, zooms, selects text, cuts, copies and
+pastes with the system clipboard, takes dropped files, keeps the back and
+forward list, follows the navigations a page asks for, keeps its timers
+running while nothing moves, and restarts a renderer that died. Its methods
+cover what a toolbar needs: `navigate`, `back`, `forward`, `reload`,
+`zoomIn`, `zoomOut`, `find`, `copy`, `paste`, `selectAll`.
+
+What only the application can decide arrives at the `Listener`, every method
+of which has an empty default: the title, address, security state, favicon
+and status line to show; `downloadRequested`; `capabilitiesRequested` (camera,
+fullscreen, popups and so on, answered with `view.resolveCapability`);
+`contextMenuRequested` with the link under the pointer; `newWindowRequested`
+and `popupOperations` for the windows a page opens; `mediaRequested`,
+`windowActionRequested` and `audioCommands`. Keys the window has bound
+itself (in its root pane's `WHEN_IN_FOCUSED_WINDOW` input map) never reach
+the page.
+
+`examples/BrowserViewExample.java` is a complete window in sixty lines.
+Input methods work through Swing's own composition window; composing text
+in place inside the page is not done.
+
 ### In-process pages over JNI (`Nordstjernen`, `Page`)
 
 The older in-process path loads the engine into the JVM through its C
