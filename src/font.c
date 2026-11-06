@@ -994,7 +994,7 @@ ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
 
 void
 ns_font_request(const char *family, const char *src_url, const char *base_url,
-                ns_font_descriptors descriptors)
+                const char *document_url, ns_font_descriptors descriptors)
 {
     if (!ns_font_available()) return;
     if (!g_entries) ns_font_init();
@@ -1047,7 +1047,8 @@ ns_font_request(const char *family, const char *src_url, const char *base_url,
     ns_font_fetch_ctx *ctx = g_new0(ns_font_fetch_ctx, 1);
     ctx->url = g_strdup(existing->url);
     ns_net_request_async(
-        existing->url, base_url, "GET", NULL, 0, NULL,
+        existing->url, document_url ? document_url : base_url, "GET", NULL, 0,
+        NULL,
         ns_net_accept_headers_for(NS_FETCH_DEST_FONT), existing->cancel,
         ns_font_on_fetched, ctx);
 }

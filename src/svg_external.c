@@ -21,6 +21,20 @@ typedef struct {
     gboolean  pending;
 } svg_external_doc;
 
+typedef struct {
+    char *base_url;
+    char *document_url;
+} svg_external_base;
+
+static void
+svg_external_base_free(gpointer data)
+{
+    svg_external_base *b = data;
+    g_free(b->base_url);
+    g_free(b->document_url);
+    g_free(b);
+}
+
 static GHashTable *g_bases;
 static GHashTable *g_docs;
 static guint       g_pending;
@@ -35,23 +49,35 @@ svg_external_doc_free(gpointer data)
 }
 
 void
-ns_svg_external_note_base(const ns_node *doc, const char *base_url)
+ns_svg_external_note_base(const ns_node *doc, const char *base_url,
+                          const char *document_url)
 {
     if (!doc || !base_url) return;
+    if (!document_url) document_url = base_url;
     if (!g_bases)
         g_bases = g_hash_table_new_full(g_direct_hash, g_direct_equal,
-                                        NULL, g_free);
-    const char *known = g_hash_table_lookup(g_bases, doc);
-    if (known && strcmp(known, base_url) == 0) return;
-    g_hash_table_insert(g_bases, (gpointer)doc, g_strdup(base_url));
+                                        NULL, svg_external_base_free);
+    const svg_external_base *known = g_hash_table_lookup(g_bases, doc);
+    if (known && strcmp(known->base_url, base_url) == 0 &&
+        strcmp(known->document_url, document_url) == 0)
+        return;
+    svg_external_base *b = g_new0(svg_external_base, 1);
+    b->base_url = g_strdup(base_url);
+    b->document_url = g_strdup(document_url);
+    g_hash_table_insert(g_bases, (gpointer)doc, b);
 }
 
-static const char *
+static const svg_external_base *
 svg_external_base_for(const ns_node *n)
 {
     if (!g_bases) return NULL;
-    while (n && n->parent) n = n->parent;
-    return n ? g_hash_table_lookup(g_bases, n) : NULL;
+    const svg_external_base *found = NULL;
+    for (; n; n = n->parent) {
+        if (n->kind != NS_NODE_DOCUMENT && n->parent) continue;
+        found = g_hash_table_lookup(g_bases, n);
+        if (found) break;
+    }
+    return found;
 }
 
 static void
@@ -97,14 +123,14 @@ ns_svg_external_target(const ns_node *referrer, const char *href)
 {
     const char *hash = href ? strchr(href, '#') : NULL;
     if (!hash || hash == href || !hash[1]) return NULL;
-    const char *base = svg_external_base_for(referrer);
+    const svg_external_base *base = svg_external_base_for(referrer);
     if (!base) return NULL;
     g_autofree char *raw = g_strndup(href, (gsize)(hash - href));
-    g_autofree char *url = ns_url_resolve(base, raw);
+    g_autofree char *url = ns_url_resolve(base->base_url, raw);
     if (!url || !ns_url_is_http_or_https(url) ||
-        !ns_url_same_origin(url, base))
+        !ns_url_same_origin(url, base->document_url))
         return NULL;
-    svg_external_doc *d = svg_external_doc_for(url, base);
+    svg_external_doc *d = svg_external_doc_for(url, base->document_url);
     if (!d || !d->doc) return NULL;
     return ns_node_find_by_id(d->doc, hash + 1);
 }

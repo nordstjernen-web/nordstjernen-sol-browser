@@ -1730,7 +1730,7 @@ ns_engine_restyle(ns_node *doc, const char *page_url,
                   const ns_node *focused, const ns_node *hover)
 {
     g_autofree char *base_url = ns_js_base_url_for_document(js, doc, page_url);
-    ns_svg_external_note_base(doc, base_url);
+    ns_svg_external_note_base(doc, base_url, page_url);
     GPtrArray *sheets, *sheet_docs;
     engine_pass_begin(doc, page_url, base_url, js, css_cache, &sheets,
                       &sheet_docs);
@@ -1745,6 +1745,7 @@ ns_engine_restyle(ns_node *doc, const char *page_url,
         .zoom            = 1.0,
         .images          = images,
         .base_url        = base_url,
+        .document_url    = page_url,
         .anim            = anim,
         .js              = js,
         .focused_input   = focused,
@@ -1770,7 +1771,7 @@ ns_engine_relayout(ns_node *doc, const char *page_url,
                    gsize sel_anchor_byte, ns_box **out_layout)
 {
     g_autofree char *base_url = ns_js_base_url_for_document(js, doc, page_url);
-    ns_svg_external_note_base(doc, base_url);
+    ns_svg_external_note_base(doc, base_url, page_url);
     GPtrArray *sheets, *sheet_docs;
     engine_pass_begin(doc, page_url, base_url, js, css_cache, &sheets,
                       &sheet_docs);
@@ -1786,6 +1787,7 @@ ns_engine_relayout(ns_node *doc, const char *page_url,
         .zoom            = 1.0,
         .images          = images,
         .base_url        = base_url,
+        .document_url    = page_url,
         .anim            = anim,
         .js              = js,
         .focused_input   = focused,
