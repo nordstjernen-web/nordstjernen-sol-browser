@@ -3,6 +3,19 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: a cross-origin frame could reach the real window of its
+  parent, of a sibling frame or of the top page, and with it their
+  documents. The proxy a frame holds for a foreign window kept its cache
+  in a WeakMap and built `postMessage` arguments with `concat`, both
+  through prototypes the frame's own page can replace, so an overridden
+  `WeakMap.prototype.has` or `Array.prototype.concat` was handed the
+  window behind the proxy. A message from one frame to another carried a
+  `source` proxy made for the top page, whose `parent` and `top` are the
+  top page's window. The proxy now calls the built-ins it captured before
+  any page script ran, the `source` of a message is chosen by the engine
+  for the realm that receives it, and whether two windows share an origin
+  is read from the origin recorded when each frame's realm was created,
+  never from `origin` or `location`, which a page can redefine.
 * Network: the HSTS store is kept in memory and written only when it
   changes. Every request handed libcurl the HSTS file, which libcurl read
   at the start of the transfer, on the one thread that drives all

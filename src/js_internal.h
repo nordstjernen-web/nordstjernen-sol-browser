@@ -150,6 +150,7 @@ struct ns_js {
     char         *document_origin;
     ns_node       *current_doc;
     GHashTable    *frame_urls;
+    GHashTable    *realm_doc_origins;
     GHashTable    *frame_referrers;
     gpointer       realm_scope_base;
     char         **top_url_slot;
