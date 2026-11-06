@@ -3,6 +3,14 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: a form submitted with the keyboard is a page navigation. The
+  renderer remembers the address a page asked to open so the shell can
+  tell a page's navigation from one the user typed, but the key release
+  that follows Enter erased it before the shell opened the address. A
+  form sent to another site by pressing Enter therefore went out like a
+  typed address, with that site's `SameSite=Strict` cookies,
+  `Sec-Fetch-Site: none` and the target's own `Origin`. The address is
+  now kept until the next navigation replaces it.
 * Forms: pressing Enter in a field submits with the form's default
   button, and a `method="dialog"` form never navigates. Enter submitted
   with the text field itself, so a login form whose button said
