@@ -3,6 +3,11 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Layout: `grid-auto-flow: column` places items pinned to a column
+  before the auto-placed ones and adds rows for them, and counts the rows
+  that row-placed items span. An item pinned to a full column was pushed
+  into a new column, so a two-column story grid grew to 24 columns with
+  the lead story collapsed and the headlines drawn over each other.
 * Frames: `scrollTo`, `scrollBy` and the root element's `scrollTop` /
   `scrollLeft` inside an iframe no longer scroll the top-level page, and
   `scrollIntoView` from a cross-origin frame no longer moves it. An ad
