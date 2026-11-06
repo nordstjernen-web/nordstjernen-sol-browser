@@ -16186,15 +16186,26 @@ layout_grid(ns_box *box, double cw,
                         !cols_subgrid && !rows_subgrid;
     if (col_flow) {
         int flow_rows = rows_template ? rows_template->n : 0;
+        for (guint i = 0; i < items->len; i++) {
+            int rs_start = g_array_index(row_starts, int, i);
+            int rs = MAX(g_array_index(row_spans, int, i), 1);
+            int end = rs_start >= 0 ? rs_start + rs : rs;
+            if (end > flow_rows) flow_rows = end;
+        }
         if (flow_rows <= 0) flow_rows = 1;
         if (flow_rows > NS_CSS_TRACKS_MAX) flow_rows = NS_CSS_TRACKS_MAX;
         int tmpl_cols = (cols_v && cols_v->kind == NS_CSS_V_TRACKS &&
                          !cols_v->u.tracks.subgrid)
                         ? cols->n : 0;
         gboolean occ[NS_CSS_TRACKS_MAX][NS_CSS_TRACKS_MAX] = {{FALSE}};
+        int col_cursor[NS_CSS_TRACKS_MAX] = {0};
         int cur_col = 0, cur_row = 0;
         int used_cols = tmpl_cols;
-        for (guint i = 0; i < items->len; i++) {
+        g_array_set_size(placed_cols, items->len);
+        g_array_set_size(placed_rows, items->len);
+        for (guint step = 0; step < 3 * items->len; step++) {
+            guint i = step % items->len;
+            guint phase = step / items->len;
             int s = g_array_index(col_starts, int, i);
             int sp = g_array_index(col_spans, int, i);
             int rs_start = g_array_index(row_starts, int, i);
@@ -16202,16 +16213,20 @@ layout_grid(ns_box *box, double cw,
             if (sp < 1) sp = 1;
             if (sp > NS_CSS_TRACKS_MAX) sp = NS_CSS_TRACKS_MAX;
             if (rs < 1) rs = 1;
-            if (rs > flow_rows) rs = flow_rows;
+            if (rs > NS_CSS_TRACKS_MAX) rs = NS_CSS_TRACKS_MAX;
             gboolean fixed_col = s >= 0 && s + sp <= NS_CSS_TRACKS_MAX;
             gboolean fixed_row = rs_start >= 0 && rs_start + rs <= flow_rows;
+            guint item_phase = fixed_col ? (fixed_row ? 0 : 1) : 2;
+            if (phase != item_phase) continue;
+            int row_limit = item_phase == 1 ? NS_CSS_TRACKS_MAX : flow_rows;
             int pc = -1, pr = -1;
             int c0 = fixed_col ? s : (dense ? 0 : cur_col);
             for (int c = c0; c + sp <= NS_CSS_TRACKS_MAX && pc < 0; c++) {
                 if (fixed_col && c != s) break;
                 int r0 = fixed_row ? rs_start
-                       : (!fixed_col && !dense && c == c0) ? cur_row : 0;
-                for (int r = r0; r + rs <= flow_rows; r++) {
+                       : item_phase == 1 ? (dense ? 0 : col_cursor[c])
+                       : (!dense && c == c0) ? cur_row : 0;
+                for (int r = r0; r + rs <= row_limit; r++) {
                     if (fixed_row && r != rs_start) break;
                     gboolean is_free = TRUE;
                     for (int rr = r; rr < r + rs && is_free; rr++)
@@ -16220,14 +16235,20 @@ layout_grid(ns_box *box, double cw,
                     if (is_free) { pc = c; pr = r; break; }
                 }
             }
-            if (pc < 0) { pc = NS_CSS_TRACKS_MAX - sp; pr = 0; }
-            for (int rr = pr; rr < pr + rs; rr++)
+            if (pc < 0) {
+                pc = fixed_col ? s : NS_CSS_TRACKS_MAX - sp;
+                pr = MAX(MIN(fixed_row ? rs_start : 0, row_limit - rs), 0);
+            }
+            for (int rr = pr; rr < pr + rs && rr < NS_CSS_TRACKS_MAX; rr++)
                 for (int cc = pc; cc < pc + sp; cc++)
                     occ[rr][cc] = TRUE;
-            g_array_append_val(placed_cols, pc);
-            g_array_append_val(placed_rows, pr);
+            g_array_index(placed_cols, int, i) = pc;
+            g_array_index(placed_rows, int, i) = pr;
             if (pc + sp > used_cols) used_cols = pc + sp;
-            if (!fixed_col || !fixed_row) {
+            if (item_phase == 1) {
+                col_cursor[pc] = pr + rs;
+                if (pr + rs > flow_rows) flow_rows = MIN(pr + rs, NS_CSS_TRACKS_MAX);
+            } else if (item_phase == 2) {
                 cur_col = pc;
                 cur_row = pr + rs;
                 if (cur_row >= flow_rows) { cur_col = pc + sp; cur_row = 0; }
@@ -17580,6 +17601,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     box->content_width = cw;
 
     if (explicit_width && !style_is_absolute_or_fixed(box->style) &&
+        float_side_of(box->style) < 0 &&
         ns_css_display_of(box->style).outer != NS_DISPLAY_OUTER_INLINE) {
         gboolean ml_auto = length_is_auto(box->style ? box->style->values[NS_CSS_MARGIN_LEFT]  : NULL);
         gboolean mr_auto = length_is_auto(box->style ? box->style->values[NS_CSS_MARGIN_RIGHT] : NULL);

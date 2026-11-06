@@ -3,6 +3,21 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Layout: `grid-auto-flow: column` places items pinned to a column
+  before the auto-placed ones and adds rows for them, and counts the rows
+  that row-placed items span. An item pinned to a full column was pushed
+  into a new column, so a two-column story grid grew to 24 columns with
+  the lead story collapsed and the headlines drawn over each other.
+* Frames: `scrollTo`, `scrollBy` and the root element's `scrollTop` /
+  `scrollLeft` inside an iframe no longer scroll the top-level page, and
+  `scrollIntoView` from a cross-origin frame no longer moves it. An ad
+  frame calling `scrollTo(0, 0)` repainted the top page at its start
+  while the page itself stayed scrolled, so a scrolled news page showed
+  its header and first stories instead of the content at that position.
+* Layout: auto horizontal margins on a float compute to zero. A
+  `float: right` box with `margin-right: auto` and a set width took the
+  free space as margin and ended up at the left edge, with the text that
+  should wrap beside it pushed below it.
 * CSS: `vw`, `vh`, `vmin` and `vmax` lengths resolved by the shared
   dimension helper (the `<img sizes>` attribute, font sizes and a few
   paint paths) came out as the bare number, so `sizes="40vw"` meant 40px
