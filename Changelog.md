@@ -56,6 +56,16 @@ Changelog:
   timer is due. The title and address follow a script that changes them
   (`document.title`, `history.pushState`), and the context menu offers
   "Open Link in New Window".
+* Security: WebGPU no longer lets a page drive the renderer into
+  wgpu-native's fatal paths. `createBuffer` with an invalid descriptor used
+  to produce a buffer the browser still treated as mapped, so one
+  `getMappedRange()` call aborted the process; and the canvas readback the
+  compositor performs each frame submitted its copy command without
+  validation, so a destroyed current texture, an unusable `configure()`
+  format or usage, a tiny `maxBufferSize` limit or a destroyed device
+  aborted the renderer on the next paint. Buffer, target-texture and
+  readback creation and the readback copy now run inside a validation
+  error scope, and a failed step is dropped instead of submitted.
 * Security: WebGL refuses `vertexAttribPointer` and `vertexAttribIPointer`
   when no array buffer is bound, and refuses every draw call when no program
   is in use, with `INVALID_OPERATION` as the specification requires. Both
