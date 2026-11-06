@@ -3,6 +3,16 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: a navigation started by a `data:` document is cross-site. The
+  engine names the page that starts a navigation by its origin and
+  dropped the name when the page had none, so the request looked as if
+  the user had typed the address. A page could navigate itself to a
+  `data:` document that submits a form to another site, and the POST
+  went out with that site's `SameSite=Strict` cookies,
+  `Sec-Fetch-Site: none` and the target's own `Origin`, which beat every
+  CSRF defence short of a token. Such navigations now carry an opaque
+  initiator: no Strict cookies, `Sec-Fetch-Site: cross-site` and
+  `Origin: null`.
 * Security: the tab icon is fetched as an image of the page. The icon a
   page names in `<link rel=icon>` was requested with no page behind it,
   the way the browser fetches for itself, so it carried the icon site's

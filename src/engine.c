@@ -105,6 +105,9 @@ engine_request_blocking(const char *url, const char *top_url,
     st.loop = g_main_loop_new(NULL, FALSE);
     g_autofree char *initiator_origin =
         navigation && initiator ? ns_url_origin_from(initiator) : NULL;
+    if (navigation && initiator && *initiator && !initiator_origin &&
+        g_ascii_strncasecmp(initiator, "about:", 6) != 0)
+        initiator_origin = g_strdup("null");
     g_autofree char *initiator_header =
         initiator_origin && *initiator_origin &&
         !strpbrk(initiator_origin, "\r\n")
