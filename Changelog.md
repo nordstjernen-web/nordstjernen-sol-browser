@@ -3,6 +3,22 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Printing: paged PDF from a program. Until now only the command line
+  (`--dump=print:FILE`) could reach the paginator; the C API, the engine
+  protocol and Java all wrote one page as tall as the document, laid out for
+  the screen. `ns_browser_render_pdf`, `POST /pdf` and
+  `Page.pdf(PdfOptions)` return the paged document as bytes, with options
+  for the sheet, margins, landscape, content scale, page ranges, print or
+  screen styles, title, author and creation date, and header and footer
+  texts with `{page}`, `{pages}`, `{title}`, `{url}` and `{date}`. Links
+  stay clickable, headings become the document outline, the title is in the
+  metadata, and the page sees `beforeprint` and `afterprint`. The Java
+  browser's "Save page as PDF" uses it.
+* Printing: better page breaks. A table row is kept whole, `orphans` and
+  `widows` are honoured (two lines each by default), a heading stays with
+  what follows it, `break-before: avoid` and `break-after: avoid` work, and
+  a `break-inside: avoid` box taller than a sheet is split between its
+  children instead of at an arbitrary pixel row.
 * Java: a browser API, `org.nordstjernen.browser`. `Engine`,
   `BrowserContext` and `Page` replace the two earlier families
   (`RemotePage`/`RemoteBrowser` and their numbered `select(int kind, …)`

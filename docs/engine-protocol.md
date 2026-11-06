@@ -48,7 +48,7 @@ Every request is `POST <path>` with an `application/json` body. The reply is
 | Area | Paths |
 |------|-------|
 | Lifecycle | `/hello`, `/quit`, `/viewport`, `/colorscheme`, `/clear-cache` |
-| Navigation and rendering | `/open`, `/render`, `/tick`, `/favicon`, `/dump`, `/export`, `/print`, `/screenshot` |
+| Navigation and rendering | `/open`, `/render`, `/tick`, `/favicon`, `/dump`, `/export`, `/print`, `/screenshot`, `/pdf` |
 | Pointer and keyboard | `/click`, `/hover`, `/scroll`, `/scrollbar-press`, `/scrollbar-drag`, `/scrollbar-release`, `/release`, `/key`, `/select`, `/link`, `/dropfiles`, `/contextmenu` |
 | Editing | `/focused-editable`, `/focused-editable-state`, `/focused-editable-selection`, `/clipboard`, `/find` |
 | Scripting and diagnostics | `/eval`, `/console` |
@@ -146,3 +146,14 @@ document in one pass into a surface of its own, so the result is not bound
 by the framebuffer the shell asked for at spawn and a `position: fixed`
 element appears once. Each side is capped at 30,000 device pixels. An empty
 body means there was nothing to capture.
+
+## Paged PDF
+
+`POST /pdf` answers with an `application/pdf` body and `X-Pages`, the number
+of sheets. Every field is optional: `width`, `height` and the four
+`margin_*` values in CSS pixels (A4 and half an inch by default), `scale`,
+`landscape`, `ignore_css_page_size`, `screen_media`, `title`, `author`,
+`creation_date`, `page_ranges`, and `header_left` / `header_center` /
+`header_right` / `footer_left` / `footer_center` / `footer_right`. See
+[printing.md](printing.md), "PDF from a program". An empty body means the
+document could not be printed.

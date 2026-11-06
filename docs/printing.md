@@ -62,10 +62,48 @@ figure, table { break-inside: avoid; }
 ```
 
 A sheet is cut at a forced break when one falls before the sheet is full.
-Otherwise the cut is pulled up above any box it would split — which means
-every leaf box, every line of a paragraph, and anything asking for
-`break-inside: avoid`. The on-screen layout is restored afterwards, so
-printing leaves the page as it found it.
+Otherwise the cut is pulled up above any box it would split: every leaf
+box, every line of a paragraph, every table row, and anything asking for
+`break-inside: avoid` that fits on a sheet. `orphans` and `widows` (two
+lines each unless the page says otherwise) keep the first and last lines of
+a paragraph from being left alone, a heading stays with what follows it, and
+`break-after: avoid` / `break-before: avoid` glue two boxes together. A
+forced break with nothing before it on the sheet, or nothing after it in the
+document, makes no blank page. The on-screen layout is restored afterwards,
+so printing leaves the page as it found it.
+
+Not done: a table's header row is not repeated on later sheets, `@page`
+selectors (`:first`, `:left`, `:right`, named pages) and margin boxes are
+not read, and running headers, footnotes and cross-references to page
+numbers are out of scope.
+
+## PDF from a program
+
+`ns_browser_render_pdf` in the C embedding API, `POST /pdf` in the engine
+protocol and `Page.pdf(PdfOptions)` in Java all return the paged document
+as bytes. The options are the sheet (A4 unless given, turned on its side
+for landscape), the four margins, a scale for the content, a page-range
+list such as `1-3,5`, whether an `@page` rule may override the sheet,
+whether to lay out with screen styles instead of print ones, the title,
+author and creation date of the document metadata, and up to three texts
+each for the top and bottom margin. Those may hold `{page}`, `{pages}`,
+`{title}`, `{url}` and `{date}`:
+
+```java
+byte[] pdf = page.pdf(PdfOptions.a4()
+    .margins(15)
+    .footer(null, "Page {page} of {pages}", null));
+```
+
+The page sees `beforeprint` before it is laid out for the sheet and
+`afterprint` once the screen layout is back. In the document, text is real
+text with embedded font subsets, links to `http(s):`, `mailto:` and `tel:`
+targets stay clickable, and `h1` to `h6` become the outline. With a fixed
+creation date the same page prints to the same bytes.
+
+`--dump=pdf:FILE`, `/export` with a `.pdf` path and `ns_browser_render_image`
+are a different thing: one page as tall as the document, laid out for the
+screen.
 
 ## Checking the result
 
