@@ -3,6 +3,16 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Navigation: a form, a link or `window.open()` that names a frame loads
+  that frame. `target="name"`, `formtarget` and the second argument of
+  `window.open` were only understood as `_blank`, `_top` and friends; any
+  other name was treated as the current window, so a form posted into a
+  hidden `<iframe name=...>` replaced the page with the server's reply
+  and a link meant for a sibling frame loaded in place of its own. The
+  name is now looked up among the frames of the document, then of the
+  whole page for documents of the same origin, and the request, POST body
+  included, goes to that frame. `window.open` into an existing frame is
+  not a popup and needs no user gesture.
 * Frames: `innerWidth` and `innerHeight` in a cross-origin frame are the
   frame's size. A frame's window reads them from its frame element, but
   the engine's own update of the window metrics assigned the top window's
