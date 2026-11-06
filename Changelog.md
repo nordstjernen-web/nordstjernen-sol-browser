@@ -3,6 +3,10 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Layout: auto horizontal margins on a float compute to zero. A
+  `float: right` box with `margin-right: auto` and a set width took the
+  free space as margin and ended up at the left edge, with the text that
+  should wrap beside it pushed below it.
 * Text: a web font that has a glyph for an emoji code point is used for
   it. Emoji-presentation characters were always shaped with the system
   colour emoji font, whatever `font-family` said, so icon fonts that map

@@ -17580,6 +17580,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     box->content_width = cw;
 
     if (explicit_width && !style_is_absolute_or_fixed(box->style) &&
+        float_side_of(box->style) < 0 &&
         ns_css_display_of(box->style).outer != NS_DISPLAY_OUTER_INLINE) {
         gboolean ml_auto = length_is_auto(box->style ? box->style->values[NS_CSS_MARGIN_LEFT]  : NULL);
         gboolean mr_auto = length_is_auto(box->style ? box->style->values[NS_CSS_MARGIN_RIGHT] : NULL);
