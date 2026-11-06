@@ -82,6 +82,26 @@ jobs:
           java -Djava.awt.headless=true -cp "$JAR:out" Example about:start | tee smoke.txt
           grep -q Nordstjernen smoke.txt
 
+      - name: Smoke test (browser API against the renderer process)
+        run: |
+          set -o pipefail
+          JAR=$(ls java/build/libs/nordstjernen-java-*.jar \
+                | grep -Ev -- '-(sources|javadoc)\.jar$' | head -1)
+          javac -cp "$JAR" -d out java/examples/PageExample.java
+          NORDSTJERNEN_RENDERER="$PWD/builddir-java/src/nordstjernen-renderer" \
+            java -cp "$JAR:out" PageExample about:start | tee page-smoke.txt
+          grep -q 'ok:     true' page-smoke.txt
+          grep -q '6 \* 7 = 42' page-smoke.txt
+
+      - name: Build jar with Maven
+        working-directory: java
+        run: |
+          mvn -q -B package
+          JAR=$(ls target/nordstjernen-java-*.jar \
+                | grep -Ev -- '-(sources|javadoc)\.jar$' | head -1)
+          unzip -l "$JAR" | grep -q 'org/nordstjernen/browser/Page.class'
+          unzip -l "$JAR" | grep -q 'META-INF/License.md'
+
       - name: Upload jar
         if: hashFiles('java/build/libs/*.jar') != ''
         uses: actions/upload-artifact@v7

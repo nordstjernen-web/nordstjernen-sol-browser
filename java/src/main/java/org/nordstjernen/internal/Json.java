@@ -3,19 +3,19 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
 
-package org.nordstjernen;
+package org.nordstjernen.internal;
 
 /**
  * Just enough JSON for the flat objects the renderer speaks. Keys are located
  * by scanning for a quoted token immediately followed by {@code ':'}, so a key
  * name appearing inside a string value can never be mistaken for the key.
  */
-final class Json {
+public final class Json {
 
     private Json() {
     }
 
-    static String escape(String s) {
+    public static String escape(String s) {
         if (s == null) {
             return "";
         }
@@ -37,7 +37,7 @@ final class Json {
     }
 
     /** The string value of {@code key}, unescaped; {@code ""} when absent. */
-    static String string(String json, String key) {
+    public static String string(String json, String key) {
         int i = valueStart(json, key);
         if (i < 0) {
             return "";
@@ -81,13 +81,13 @@ final class Json {
     }
 
     /** The string value of {@code key}, or {@code null} when absent or empty. */
-    static String stringOrNull(String json, String key) {
+    public static String stringOrNull(String json, String key) {
         String s = string(json, key);
         return s.isEmpty() ? null : s;
     }
 
     /** The integer value of {@code key}, or {@code fallback} when absent. */
-    static int integer(String json, String key, int fallback) {
+    public static int integer(String json, String key, int fallback) {
         int i = valueStart(json, key);
         if (i < 0) {
             return fallback;
@@ -112,7 +112,7 @@ final class Json {
     }
 
     /** The integer value of {@code key} as a long, or {@code fallback} when absent. */
-    static long longInteger(String json, String key, long fallback) {
+    public static long longInteger(String json, String key, long fallback) {
         int i = valueStart(json, key);
         if (i < 0) {
             return fallback;
@@ -137,7 +137,7 @@ final class Json {
     }
 
     /** True when {@code key} holds a non-zero integer. */
-    static boolean flag(String json, String key) {
+    public static boolean flag(String json, String key) {
         return integer(json, key, 0) != 0;
     }
 
@@ -193,7 +193,7 @@ final class Json {
     }
 
     /** {@code s} as a JSON string literal, quotes included. */
-    static String quote(String s) {
+    public static String quote(String s) {
         return "\"" + escape(s) + "\"";
     }
 
@@ -205,7 +205,7 @@ final class Json {
      *
      * @throws IllegalArgumentException when the text is not valid JSON
      */
-    static Object parse(String text) {
+    public static Object parse(String text) {
         Parser parser = new Parser(text == null ? "" : text);
         parser.skipSpace();
         Object value = parser.value(0);

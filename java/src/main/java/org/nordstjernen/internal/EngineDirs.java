@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
 
-package org.nordstjernen;
+package org.nordstjernen.internal;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -14,7 +14,7 @@ import java.util.Locale;
  * The directories the engine resolves through GLib, as a shell that does not
  * link GLib has to work them out for itself.
  */
-final class EngineDirs {
+public final class EngineDirs {
 
     private EngineDirs() {
     }
@@ -25,7 +25,7 @@ final class EngineDirs {
      * platform default. On Windows that is the Internet cache folder under
      * the local application data directory, not the directory itself.
      */
-    static List<Path> userCacheDirs() {
+    public static List<Path> userCacheDirs() {
         List<Path> dirs = new ArrayList<>();
         String xdg = System.getenv("XDG_CACHE_HOME");
         if (xdg != null && !xdg.isEmpty()) {
@@ -49,7 +49,7 @@ final class EngineDirs {
     }
 
     /** {@code <cache>/nordstjernen/<name>} for every candidate cache directory. */
-    static List<Path> cacheSubdirs(String name) {
+    public static List<Path> cacheSubdirs(String name) {
         List<Path> dirs = new ArrayList<>();
         for (Path cache : userCacheDirs()) {
             dirs.add(cache.resolve("nordstjernen").resolve(name));

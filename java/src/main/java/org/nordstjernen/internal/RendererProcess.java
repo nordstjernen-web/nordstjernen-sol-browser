@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
 
-package org.nordstjernen;
+package org.nordstjernen.internal;
+
+import org.nordstjernen.NordstjernenException;
+import org.nordstjernen.RendererTimeoutException;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -42,13 +45,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * wedged renderer can never hang its caller. Requests are serialised, so an
  * instance may be shared between threads.
  */
-final class RendererProcess implements AutoCloseable {
+public final class RendererProcess implements AutoCloseable {
 
     /** The engine protocol version this client speaks ({@code src/engine_protocol.h}). */
-    static final int PROTOCOL_VERSION = 1;
+    public static final int PROTOCOL_VERSION = 1;
 
     /** The request deadline when none is given: the {@code nordstjernen.timeout.ms} property, else two minutes. */
-    static final long DEFAULT_TIMEOUT_MS =
+    public static final long DEFAULT_TIMEOUT_MS =
         Math.max(1000L, Long.getLong("nordstjernen.timeout.ms", 120_000L));
 
     private static final long HELLO_TIMEOUT_MS = 30_000L;
@@ -72,10 +75,10 @@ final class RendererProcess implements AutoCloseable {
     }
 
     /** A parsed renderer response: status code, headers (lower-cased keys), body. */
-    static final class Response {
-        final int status;
-        final Map<String, String> headers;
-        final byte[] body;
+    public static final class Response {
+        public final int status;
+        public final Map<String, String> headers;
+        public final byte[] body;
 
         Response(int status, Map<String, String> headers, byte[] body) {
             this.status = status;
@@ -83,11 +86,11 @@ final class RendererProcess implements AutoCloseable {
             this.body = body;
         }
 
-        String header(String name) {
+        public String header(String name) {
             return headers.get(name.toLowerCase(Locale.ROOT));
         }
 
-        String text() {
+        public String text() {
             return new String(body, StandardCharsets.UTF_8);
         }
     }
@@ -101,7 +104,7 @@ final class RendererProcess implements AutoCloseable {
     private volatile boolean dead;
     private String engineVersion = "";
 
-    RendererProcess(int maxWidth, int maxHeight) {
+    public RendererProcess(int maxWidth, int maxHeight) {
         this(maxWidth, maxHeight, false);
     }
 
@@ -111,21 +114,33 @@ final class RendererProcess implements AutoCloseable {
      * @throws NordstjernenException when no renderer is found, it does not
      *                               start, or it speaks another protocol version
      */
-    RendererProcess(int maxWidth, int maxHeight, boolean privateMode) {
-        this.executable = locateRenderer();
+    public RendererProcess(int maxWidth, int maxHeight, boolean privateMode) {
+        this(null, maxWidth, maxHeight, privateMode, Map.of());
+    }
+
+    /**
+     * @param executable  the renderer to run, or null to {@linkplain #locateRenderer() look it up}
+     * @param environment variables to add to the renderer's environment, such
+     *                    as the {@code XDG_*_HOME} directories that select a profile
+     */
+    public RendererProcess(String executable, int maxWidth, int maxHeight, boolean privateMode,
+                           Map<String, String> environment) {
+        this.executable = executable == null || executable.isEmpty()
+            ? locateRenderer() : new File(executable).getAbsolutePath();
         this.maxReplyBytes = Math.min(Integer.MAX_VALUE - 8L,
             (long) maxWidth * (long) maxHeight * 4L + REPLY_SLACK_BYTES);
         List<String> argv = new ArrayList<>(List.of(
-            executable, Integer.toString(maxWidth), Integer.toString(maxHeight), "stdio"));
+            this.executable, Integer.toString(maxWidth), Integer.toString(maxHeight), "stdio"));
         if (privateMode) {
             argv.add("private");
         }
         ProcessBuilder pb = new ProcessBuilder(argv);
+        pb.environment().putAll(environment);
         pb.redirectError(ProcessBuilder.Redirect.INHERIT);
         try {
             this.process = pb.start();
         } catch (IOException e) {
-            throw new NordstjernenException("failed to start renderer: " + executable, e);
+            throw new NordstjernenException("failed to start renderer: " + this.executable, e);
         }
         LIVE.add(process);
         this.toRenderer = process.getOutputStream();
@@ -139,26 +154,26 @@ final class RendererProcess implements AutoCloseable {
     }
 
     /** The renderer executable this instance runs, as an absolute path. */
-    String executable() {
+    public String executable() {
         return executable;
     }
 
     /** The engine version the renderer reported in the handshake, e.g. {@code 1.0.45}. */
-    String engineVersion() {
+    public String engineVersion() {
         return engineVersion;
     }
 
     /** Whether the renderer is still running and has not failed a request. */
-    boolean isAlive() {
+    public boolean isAlive() {
         return !dead && process.isAlive();
     }
 
     /** The deadline of requests sent without an explicit one, in milliseconds. */
-    long timeoutMs() {
+    public long timeoutMs() {
         return timeoutMs;
     }
 
-    void setTimeoutMs(long timeoutMs) {
+    public void setTimeoutMs(long timeoutMs) {
         this.timeoutMs = Math.max(1L, timeoutMs);
     }
 
@@ -172,7 +187,7 @@ final class RendererProcess implements AutoCloseable {
      *
      * @throws NordstjernenException when there is none
      */
-    static String locateRenderer() {
+    public static String locateRenderer() {
         String configured = System.getProperty("nordstjernen.renderer",
             System.getenv("NORDSTJERNEN_RENDERER"));
         if (configured != null && !configured.isEmpty()) {
@@ -196,7 +211,7 @@ final class RendererProcess implements AutoCloseable {
      * {@code nordstjernen-audio}), or null when the renderer's directory does
      * not hold one.
      */
-    static String locateHelper(String baseName) {
+    public static String locateHelper(String baseName) {
         File dir;
         try {
             dir = new File(locateRenderer()).getParentFile();
@@ -259,12 +274,12 @@ final class RendererProcess implements AutoCloseable {
      * @throws NordstjernenException    when the renderer is gone, the reply is
      *                                  malformed, or the status is not 200
      */
-    Response request(String method, String path, String jsonBody) {
+    public Response request(String method, String path, String jsonBody) {
         return request(path, jsonBody, timeoutMs);
     }
 
     /** {@link #request(String, String, String)} with an explicit deadline in milliseconds. */
-    Response request(String path, String jsonBody, long deadlineMs) {
+    public Response request(String path, String jsonBody, long deadlineMs) {
         Response response = exchange(path, jsonBody, deadlineMs);
         if (response.status != 200) {
             throw new NordstjernenException("renderer answered " + response.status
@@ -278,7 +293,7 @@ final class RendererProcess implements AutoCloseable {
      * Send a request and return the response whatever its status, so a caller
      * can probe for a request a renderer may not know (it answers 404).
      */
-    synchronized Response exchange(String path, String jsonBody, long deadlineMs) {
+    public synchronized Response exchange(String path, String jsonBody, long deadlineMs) {
         if (dead || !process.isAlive()) {
             dead = true;
             throw new NordstjernenException("renderer " + executable + " is not running"

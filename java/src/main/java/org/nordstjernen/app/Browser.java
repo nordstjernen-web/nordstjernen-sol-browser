@@ -6,8 +6,16 @@
 package org.nordstjernen.app;
 
 import org.nordstjernen.AudioHelper;
-import org.nordstjernen.Downloads;
-import org.nordstjernen.RemoteBrowser;
+import org.nordstjernen.browser.BrowserContext;
+import org.nordstjernen.browser.CapabilityRequest;
+import org.nordstjernen.browser.ContextOptions;
+import org.nordstjernen.browser.Engine;
+import org.nordstjernen.browser.Frame;
+import org.nordstjernen.browser.Page;
+import org.nordstjernen.browser.PageEvents;
+import org.nordstjernen.browser.Response;
+import org.nordstjernen.browser.Security;
+import org.nordstjernen.swing.FrameImages;
 import org.nordstjernen.RendererTimeoutException;
 
 import javax.swing.*;
@@ -37,7 +45,7 @@ import java.util.concurrent.Executors;
 /**
  * A small, standalone Java web browser with a GTK-shell-style chrome — back,
  * forward, reload, home, a URL bar and a status bar — that drives a separate
- * {@code nordstjernen-renderer} process through {@link RemoteBrowser}. No
+ * {@code nordstjernen-renderer} process through {@link Page}. No
  * native engine is loaded into the JVM; rendering, layout and scripting all
  * run in the renderer.
  *
@@ -83,13 +91,16 @@ public final class Browser {
     private static final int CONSOLE_POLL_MS = 250;
     private static final int IDLE_REFRESH_MS = 120;
     private static final int DOWNLOAD_POLL_MS = 250;
+    private static final int FRAME_MAX_W = 6144;
+    private static final int FRAME_MAX_H = 3456;
     private static final int ANIMATION_REFRESH_MS = 33;
     private static final String SEARCH_URL = "https://duckduckgo.com/?q=";
     private static final String VERSION = resolveVersion();
     private static final String TITLE_SUFFIX = " (Java " + VERSION + ")";
 
     private final boolean privateMode;
-    private final RemoteBrowser engine;
+    private final BrowserContext ownContext;
+    private final Page page;
     private final AudioHelper audio = new AudioHelper();
     private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "ns-engine");
@@ -151,7 +162,6 @@ public final class Browser {
     private boolean pageFullscreen = false;
     private boolean closed = false;
 
-    private final Set<String> cameraAsked = new HashSet<>();
     private final Set<Long> activeDownloads = new HashSet<>();
     private final Map<String, Boolean> capabilityAnswers = new HashMap<>();
     private boolean popupPollBusy = false;
@@ -172,18 +182,37 @@ public final class Browser {
             }
             for (Browser b : open) {
                 b.audio.close();
-                b.engine.close();
+                b.page.close();
+                if (b.ownContext != null) {
+                    b.ownContext.close();
+                }
             }
         }, "ns-shutdown"));
+    }
+
+    private static Engine sharedEngine;
+
+    /**
+     * The engine every window takes its page from, sized so a maximised window
+     * on a high-density screen still renders at full resolution.
+     */
+    private static synchronized Engine engine() {
+        if (sharedEngine == null || sharedEngine.isClosed()) {
+            sharedEngine = Engine.launch(
+                Engine.Options.defaults().withFrameSize(FRAME_MAX_W, FRAME_MAX_H));
+        }
+        return sharedEngine;
     }
 
     private Browser(String startUrl, boolean privateMode, String openerToken,
                     String openerOrigin) {
         this.privateMode = privateMode;
-        this.engine = new RemoteBrowser(privateMode);
-        this.engine.setPopupsSupported(true);
+        Engine shared = engine();
+        this.ownContext = privateMode ? shared.newContext(ContextOptions.inMemory()) : null;
+        this.page = (privateMode ? ownContext : shared.userContext()).newPage();
+        this.page.setPopupsSupported(true);
         if (openerToken != null) {
-            this.engine.setOpener(openerToken, openerOrigin);
+            this.page.setOpener(openerToken, openerOrigin);
         }
         buildUi();
         navigate(startUrl, true);
@@ -241,12 +270,15 @@ public final class Browser {
             audio.close();
             for (long id : unfinished) {
                 try {
-                    engine.downloadCancel(id);
+                    page.cancelDownload(id);
                 } catch (RuntimeException ex) {
                     break;
                 }
             }
-            engine.close();
+            page.close();
+            if (ownContext != null) {
+                ownContext.close();
+            }
             if (last) {
                 System.exit(0);
             }
@@ -362,7 +394,7 @@ public final class Browser {
                 }
                 if (draggingScrollbar) {
                     draggingScrollbar = false;
-                    io.submit(engine::scrollbarRelease);
+                    io.submit(page::scrollbarRelease);
                     return;
                 }
                 onCanvasRelease(e.getX(), e.getY());
@@ -376,7 +408,7 @@ public final class Browser {
                 if (draggingScrollbar) {
                     final int dx = docX(e.getX()), dy = docY(e.getY());
                     io.submit(() -> {
-                        engine.scrollbarDrag(dx, dy);
+                        page.scrollbarDrag(dx, dy);
                         SwingUtilities.invokeLater(Browser.this::scheduleRefresh);
                     });
                     return;
@@ -433,7 +465,7 @@ public final class Browser {
                 Point p = support.getDropLocation().getDropPoint();
                 final int dx = docX(p.x), dy = docY(p.y);
                 io.submit(() -> {
-                    engine.dropFiles(dx, dy, paths);
+                    page.dropFiles(dx, dy, paths.stream().map(Path::of).toList());
                     SwingUtilities.invokeLater(Browser.this::scheduleRefresh);
                 });
                 return true;
@@ -524,8 +556,8 @@ public final class Browser {
         double raster = deviceScale();
         int w = Math.max(1, canvas.getWidth());
         int h = Math.max(1, canvas.getHeight());
-        raster = Math.min(raster, (double) RemoteBrowser.MAX_W / w);
-        raster = Math.min(raster, (double) RemoteBrowser.MAX_H / h);
+        raster = Math.min(raster, (double) FRAME_MAX_W / w);
+        raster = Math.min(raster, (double) FRAME_MAX_H / h);
         return Math.max(raster, 0.01);
     }
 
@@ -555,8 +587,8 @@ public final class Browser {
         viewportH = h;
         viewportDpr = dpr;
         io.submit(() -> {
-            engine.setDevicePixelRatio(dpr);
-            engine.setViewport(w, h);
+            page.setDevicePixelRatio(dpr);
+            page.setViewport(w, h);
             SwingUtilities.invokeLater(() -> {
                 updateScrollModel();
                 scheduleRefresh();
@@ -569,11 +601,11 @@ public final class Browser {
     }
 
     private int maxScrollY() {
-        return Math.max(0, engine.pageHeight() - (int) visH());
+        return Math.max(0, page.pageHeight() - (int) visH());
     }
 
     private int maxScrollX() {
-        return Math.max(0, engine.pageWidth() - (int) visW());
+        return Math.max(0, page.pageWidth() - (int) visW());
     }
 
     private void setScrollY(int y) {
@@ -601,10 +633,10 @@ public final class Browser {
 
     private void updateScrollModel() {
         int vH = (int) visH();
-        int maxV = Math.max(vH, engine.pageHeight());
+        int maxV = Math.max(vH, page.pageHeight());
         scrollY = Math.min(scrollY, Math.max(0, maxV - vH));
         int vW = (int) visW();
-        int maxH = Math.max(vW, engine.pageWidth());
+        int maxH = Math.max(vW, page.pageWidth());
         scrollX = Math.min(scrollX, Math.max(0, maxH - vW));
         syncingScrollbar = true;
         vScroll.setValues(scrollY, vH, 0, maxV);
@@ -702,11 +734,12 @@ public final class Browser {
         final boolean userActivated = !isRedirect;
         io.submit(() -> {
             audio.stop();
-            engine.setDevicePixelRatio(dpr);
-            boolean ok = engineNavigate(url, vw, vh, fromHistory, userActivated);
-            String finalUrl = ok ? engine.url() : url;
-            String title = ok ? engine.title() : "";
-            String redirect = ok ? engine.pendingNav() : null;
+            page.setDevicePixelRatio(dpr);
+            Response response = engineNavigate(url, vw, vh, fromHistory, userActivated);
+            final boolean ok = response != null && response.ok();
+            String finalUrl = ok ? response.url() : url;
+            String title = ok ? response.title() : "";
+            String redirect = ok ? response.redirect() : null;
             SwingUtilities.invokeLater(() -> {
                 loading = false;
                 canvas.setCursor(Cursor.getDefaultCursor());
@@ -756,28 +789,41 @@ public final class Browser {
      * Navigate, transparently respawning the renderer once if the IPC died.
      * The fresh process has no back/forward cache to restore from.
      */
-    private boolean engineNavigate(String url, int vw, int vh, boolean fromHistory,
-                                   boolean userActivated) {
+    private Response engineNavigate(String url, int vw, int vh, boolean fromHistory,
+                                    boolean userActivated) {
+        Page.Navigation how = Page.Navigation.defaults()
+            .withSettle(java.time.Duration.ofMillis(SETTLE_MS))
+            .withFromHistory(fromHistory).withUserActivated(userActivated);
         try {
-            return engine.navigate(url, vw, vh, SETTLE_MS, fromHistory, userActivated);
+            syncPageViewport(vw, vh);
+            return page.navigate(url, how);
         } catch (RendererTimeoutException ex) {
             restartQuietly();
-            return false;
+            return null;
         } catch (RuntimeException ex) {
-            if (restarts >= MAX_RESTARTS) return false;
+            if (restarts >= MAX_RESTARTS) return null;
             restarts++;
             try {
-                engine.restart();
-                return engine.navigate(url, vw, vh, SETTLE_MS, false, userActivated);
+                page.stop();
+                syncPageViewport(vw, vh);
+                return page.navigate(url, how.withFromHistory(false));
             } catch (RuntimeException ex2) {
-                return false;
+                return null;
             }
+        }
+    }
+
+    private void syncPageViewport(int vw, int vh) {
+        int w = Math.max(1, vw);
+        int h = Math.max(1, vh);
+        if (w != page.viewportWidth() || h != page.viewportHeight()) {
+            page.setViewport(w, h);
         }
     }
 
     private void restartQuietly() {
         try {
-            engine.restart();
+            page.stop();
         } catch (RuntimeException ex) {
             setStatusLater("Renderer could not be restarted: " + ex.getMessage());
         }
@@ -793,8 +839,8 @@ public final class Browser {
      * {@code about:} and local pages.
      */
     private void updateSecurityBadge() {
-        RemoteBrowser.Security sec = engine.security();
-        String ip = engine.serverIp();
+        Security sec = page.security();
+        String ip = page.serverAddress();
         String where = ip == null ? "" : " (" + ip + ")";
         switch (sec) {
             case SECURE:
@@ -860,38 +906,40 @@ public final class Browser {
         final boolean caret = caretActive;
         final String pageUrl = currentUrl();
         io.submit(() -> {
-            RemoteBrowser.Frame frm;
+            Frame frm;
             String copied = null;
             try {
-                frm = engine.render(sx, sy, vw, vh, sc, caret);
-                if (frm.clipboard) {
-                    copied = engine.clipboardText();
+                frm = page.render(sx, sy, vw, vh, sc, caret);
+                if (frm.events().clipboardWrite()) {
+                    copied = page.clipboardText();
                 }
-                if (frm.audio != null) {
-                    audio.send(frm.audio, pageUrl);
+                if (!frm.events().audio().isEmpty()) {
+                    audio.send(frm.events().audio(), pageUrl);
                 }
             } catch (RuntimeException ex) {
                 SwingUtilities.invokeLater(this::onRenderCrash);
                 return;
             }
-            final RemoteBrowser.Frame f = frm;
+            final Frame f = frm;
+            final PageEvents events = frm.events();
+            final java.awt.image.BufferedImage image = FrameImages.toImage(frm);
             final String clipboardText = copied;
             SwingUtilities.invokeLater(() -> {
                 renderBusy = false;
                 if (closed) {
                     return;
                 }
-                if (f.image != null) {
-                    canvas.setImage(f.image, raster);
+                if (image != null) {
+                    canvas.setImage(image, raster);
                 }
                 updateScrollModel();
-                if (f.requestedScrollY >= 0 && f.requestedScrollY != scrollY) {
-                    setScrollY(f.requestedScrollY);
+                if (f.requestedScrollY() >= 0 && f.requestedScrollY() != scrollY) {
+                    setScrollY(f.requestedScrollY());
                 }
-                if (f.requestedScrollX >= 0 && f.requestedScrollX != scrollX) {
-                    setScrollX(f.requestedScrollX);
+                if (f.requestedScrollX() >= 0 && f.requestedScrollX() != scrollX) {
+                    setScrollX(f.requestedScrollX());
                 }
-                if (f.unchanged && !f.animating && !f.caretBlinking) {
+                if (f.unchanged() && !f.animating() && !f.caretBlinking()) {
                     if (++stableFrames >= 3 && refreshTimer != null) {
                         refreshTimer.stop();
                     }
@@ -899,30 +947,28 @@ public final class Browser {
                     stableFrames = 0;
                 }
                 if (refreshTimer != null) {
-                    refreshTimer.setDelay(f.animating ? ANIMATION_REFRESH_MS
+                    refreshTimer.setDelay(f.animating() ? ANIMATION_REFRESH_MS
                                                       : IDLE_REFRESH_MS);
                 }
                 if (clipboardText != null) {
                     setClipboard(clipboardText);
                     setStatus("Copied to clipboard");
                 }
-                if (f.windowAction != null) {
-                    applyWindowAction(f.windowAction);
+                if (events.windowAction() != null) {
+                    applyWindowAction(events.windowAction());
                 }
-                if (f.capability != null) {
-                    promptCapabilities(f.capability);
-                } else if (f.camera != null) {
-                    promptCamera(f.camera);
+                if (!events.capabilities().isEmpty()) {
+                    promptCapabilities(events.capabilities());
                 }
-                if (f.popup) {
+                if (events.popups()) {
                     pollPopups();
                 }
-                if (f.download != null) {
-                    startDownload(f.download, f.downloadName);
+                if (events.downloadUrl() != null) {
+                    startDownload(events.downloadUrl(), events.downloadName());
                 }
-                if (f.nav != null && jsRedirects < MAX_JS_REDIRECTS) {
+                if (events.navigation() != null && jsRedirects < MAX_JS_REDIRECTS) {
                     jsRedirects++;
-                    navigate(f.nav, true, true);
+                    navigate(events.navigation(), true, true);
                 }
             });
         });
@@ -941,7 +987,7 @@ public final class Browser {
         restarts++;
         setStatus("Renderer restarted");
         io.submit(() -> {
-            try { engine.restart(); } catch (RuntimeException ignored) { }
+            try { page.stop(); } catch (RuntimeException ignored) { }
         });
         navigate(currentUrl(), false);
     }
@@ -960,14 +1006,14 @@ public final class Browser {
         io.submit(() -> {
             // A scrollbar the page painted itself takes the press before the
             // document does, so dragging it scrolls instead of selecting text.
-            if (engine.scrollbarPress(dx, dy)) {
+            if (page.scrollbarPress(dx, dy)) {
                 SwingUtilities.invokeLater(() -> {
                     draggingScrollbar = true;
                     scheduleRefresh();
                 });
                 return;
             }
-            String pressed = engine.press(dx, dy, mods);
+            String pressed = page.mouseDown(dx, dy, mods);
             if (pressed != null) {
                 SwingUtilities.invokeLater(() -> navigate(pressed, true));
             }
@@ -1009,7 +1055,7 @@ public final class Browser {
             return;
         }
         io.submit(() -> {
-            boolean consumed = engine.scrollAt(docX, docY, deltaX, deltaY);
+            boolean consumed = page.scrollAt(docX, docY, deltaX, deltaY);
             SwingUtilities.invokeLater(() -> {
                 if (consumed) {
                     scheduleRefresh();
@@ -1028,7 +1074,7 @@ public final class Browser {
         }
         final int dx = docX(cx), dy = docY(cy);
         io.submit(() -> {
-            String link = engine.linkAt(dx, dy);
+            String link = page.linkAt(dx, dy);
             if (link != null) {
                 SwingUtilities.invokeLater(() -> openWindow(link, privateMode));
             }
@@ -1042,9 +1088,9 @@ public final class Browser {
         hasSelection = true;
         io.submit(() -> {
             if (anchor) {
-                engine.select(0, pressDocX, pressDocY);
+                page.select(Page.Selection.ANCHOR, pressDocX, pressDocY);
             }
-            engine.select(1, dx, dy);
+            page.select(Page.Selection.EXTEND, dx, dy);
             SwingUtilities.invokeLater(this::scheduleRefresh);
         });
     }
@@ -1052,9 +1098,9 @@ public final class Browser {
     private void onCanvasRelease(int cx, int cy) {
         final int dx = docX(cx), dy = docY(cy);
         io.submit(() -> {
-            String href = engine.release();
-            RemoteBrowser.Media media = href == null ? engine.mediaAt(dx, dy) : null;
-            boolean editable = href == null && engine.focusedEditable();
+            String href = page.mouseUp();
+            Page.Media media = href == null ? page.mediaAt(dx, dy) : null;
+            boolean editable = href == null && page.hasFocusedEditable();
             SwingUtilities.invokeLater(() -> {
                 caretActive = editable;
                 if (href != null) {
@@ -1096,9 +1142,9 @@ public final class Browser {
         }
         hoverBusy = true;
         io.submit(() -> {
-            RemoteBrowser.Hover h;
+            Page.Hover h;
             try {
-                h = engine.hover(dx, dy);
+                h = page.hover(dx, dy);
             } catch (RuntimeException ex) {
                 SwingUtilities.invokeLater(() -> hoverBusy = false);
                 return;
@@ -1106,7 +1152,7 @@ public final class Browser {
             SwingUtilities.invokeLater(() -> {
                 hoverBusy = false;
                 applyHover(h);
-                if (h.changed) scheduleRefresh();
+                if (h.changed()) scheduleRefresh();
                 if (hoverPending) {
                     hoverPending = false;
                     requestHover(hoverPendingX, hoverPendingY);
@@ -1115,17 +1161,17 @@ public final class Browser {
         });
     }
 
-    private void applyHover(RemoteBrowser.Hover h) {
-        if (h.href != null && !h.href.isEmpty()) {
-            hoverLink = h.href;
-            setStatus(h.href);
+    private void applyHover(Page.Hover h) {
+        if (h.link() != null && !h.link().isEmpty()) {
+            hoverLink = h.link();
+            setStatus(h.link());
             canvas.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         } else {
             if (hoverLink != null) {
                 hoverLink = null;
                 setStatus("");
             }
-            canvas.setCursor(cursorFor(h.cursor));
+            canvas.setCursor(cursorFor(h.cursor()));
         }
     }
 
@@ -1169,9 +1215,9 @@ public final class Browser {
         final String s = String.valueOf(c);
         final int shift = e.isShiftDown() ? 1 : 0;
         io.submit(() -> {
-            engine.key(3, s, "", 0, shift);
-            RemoteBrowser.Key res = engine.key(2, s, "", 0, 0);
-            SwingUtilities.invokeLater(() -> afterKey(res.nav));
+            page.key(Page.KeyKind.PRESS, s, "", 0, shift);
+            Page.KeyResult res = page.key(Page.KeyKind.TEXT, s, "", 0, 0);
+            SwingUtilities.invokeLater(() -> afterKey(res.navigation()));
         });
     }
 
@@ -1223,10 +1269,10 @@ public final class Browser {
             suppressTextInsert = true;
         }
         io.submit(() -> {
-            RemoteBrowser.Key res = engine.key(0, fpk, fcode, fkc, fmods);
-            String nav = res.nav;
+            Page.KeyResult res = page.key(Page.KeyKind.DOWN, fpk, fcode, fkc, fmods);
+            String nav = res.navigation();
             if (text && nav == null) {
-                nav = engine.key(3, fpk, fcode, fkc, fmods).nav;
+                nav = page.key(Page.KeyKind.PRESS, fpk, fcode, fkc, fmods).navigation();
             }
             final String target = nav;
             SwingUtilities.invokeLater(() -> afterKey(target));
@@ -1240,9 +1286,9 @@ public final class Browser {
         }
         final int fmods = swingMods(e);
         io.submit(() -> {
-            RemoteBrowser.Key res = engine.key(1, held[0], held[1],
+            Page.KeyResult res = page.key(Page.KeyKind.UP, held[0], held[1],
                                                Integer.parseInt(held[2]), fmods);
-            SwingUtilities.invokeLater(() -> afterKey(res.nav));
+            SwingUtilities.invokeLater(() -> afterKey(res.navigation()));
         });
     }
 
@@ -1266,17 +1312,17 @@ public final class Browser {
         heldKeys.put(vk, new String[]{name, name, Integer.toString(code)});
         final boolean probe = focusMoved(name) || scrollsPage(name);
         io.submit(() -> {
-            RemoteBrowser.Key res = engine.key(0, name, name, code, mods);
-            final boolean editable = probe && res.nav == null && engine.focusedEditable();
+            Page.KeyResult res = page.key(Page.KeyKind.DOWN, name, name, code, mods);
+            final boolean editable = probe && res.navigation() == null && page.hasFocusedEditable();
             SwingUtilities.invokeLater(() -> {
                 if (focusMoved(name)) {
                     caretActive = editable;
                 }
-                if (res.nav != null) {
-                    navigate(res.nav, true);
+                if (res.navigation() != null) {
+                    navigate(res.navigation(), true);
                     return;
                 }
-                if (!res.prevented && !editable && scrollPageFor(name)) {
+                if (!res.prevented() && !editable && scrollPageFor(name)) {
                     return;
                 }
                 scheduleRefresh();
@@ -1315,12 +1361,12 @@ public final class Browser {
     private void pressSpace(int mods, boolean shift) {
         heldKeys.put(java.awt.event.KeyEvent.VK_SPACE, new String[]{" ", "Space", "32"});
         io.submit(() -> {
-            RemoteBrowser.Key down = engine.key(0, " ", "Space", 32, mods);
-            RemoteBrowser.Key press = down.nav == null
-                ? engine.key(3, " ", "Space", 32, mods) : null;
-            String nav = down.nav != null ? down.nav : press.nav;
-            boolean prevented = down.prevented || (press != null && press.prevented);
-            boolean editable = nav == null && engine.focusedEditable();
+            Page.KeyResult down = page.key(Page.KeyKind.DOWN, " ", "Space", 32, mods);
+            Page.KeyResult press = down.navigation() == null
+                ? page.key(Page.KeyKind.PRESS, " ", "Space", 32, mods) : null;
+            String nav = down.navigation() != null ? down.navigation() : press.navigation();
+            boolean prevented = down.prevented() || (press != null && press.prevented());
+            boolean editable = nav == null && page.hasFocusedEditable();
             SwingUtilities.invokeLater(() -> {
                 if (nav != null) {
                     navigate(nav, true);
@@ -1378,19 +1424,19 @@ public final class Browser {
             hasSelection = true;
         }
         io.submit(() -> {
-            boolean prevented = key != null && engine.key(0, key, code, keycode, mods).prevented;
+            boolean prevented = key != null && page.key(Page.KeyKind.DOWN, key, code, keycode, mods).prevented();
             if (prevented) {
                 SwingUtilities.invokeLater(this::scheduleRefresh);
                 return;
             }
             switch (command) {
                 case "copy": {
-                    String text = engine.select(4, 0, 0);
+                    String text = page.select(Page.Selection.COPY, 0, 0);
                     SwingUtilities.invokeLater(() -> copied(text, "Copied selection"));
                     break;
                 }
                 case "cut": {
-                    String text = engine.cutSelection();
+                    String text = page.select(Page.Selection.CUT, 0, 0);
                     SwingUtilities.invokeLater(() -> {
                         copied(text, "Cut selection");
                         scheduleRefresh();
@@ -1398,12 +1444,12 @@ public final class Browser {
                     break;
                 }
                 case "paste": {
-                    String nav = engine.paste(pasteText);
+                    String nav = page.paste(pasteText).navigation();
                     SwingUtilities.invokeLater(() -> afterKey(nav));
                     break;
                 }
                 default:
-                    engine.select(3, 0, 0);
+                    page.select(Page.Selection.ALL, 0, 0);
                     SwingUtilities.invokeLater(this::scheduleRefresh);
                     break;
             }
@@ -1608,7 +1654,7 @@ public final class Browser {
         findBar.getParent().revalidate();
         final int fromY = scrollY;
         io.submit(() -> {
-            engine.find("", false, 0, fromY);
+            page.find("", false, Page.FindDirection.FROM, fromY);
             SwingUtilities.invokeLater(this::scheduleRefresh);
         });
         canvas.requestFocusInWindow();
@@ -1619,11 +1665,11 @@ public final class Browser {
         final String q = findField.getText();
         final int fromY = scrollY;
         io.submit(() -> {
-            RemoteBrowser.Find f = engine.find(q, false, direction, fromY);
+            Page.Found f = page.find(q, false, Page.FindDirection.values()[direction], fromY);
             SwingUtilities.invokeLater(() -> {
-                if (f.total > 0) {
-                    findCount.setText(f.current + "/" + f.total);
-                    setScrollY(Math.max(0, f.scrollY - 40));
+                if (f.total() > 0) {
+                    findCount.setText(f.current() + "/" + f.total());
+                    setScrollY(Math.max(0, f.scrollY() - 40));
                 } else {
                     findCount.setText(q.isEmpty() ? " " : "No results");
                 }
@@ -1639,18 +1685,18 @@ public final class Browser {
         canvas.requestFocusInWindow();
         final int dx = docX(cx), dy = docY(cy);
         io.submit(() -> {
-            RemoteBrowser.ContextMenu target = engine.openContextMenu(dx, dy);
-            final String link = target.prevented ? null : engine.linkAt(dx, dy);
+            Page.ContextMenu target = page.contextMenu(dx, dy);
+            final String link = target.handledByPage() ? null : page.linkAt(dx, dy);
             SwingUtilities.invokeLater(() -> {
-                if (target.prevented) {
+                if (target.handledByPage()) {
                     scheduleRefresh();
                     return;
                 }
-                if (target.editable) {
+                if (target.editable()) {
                     caretActive = true;
                     scheduleRefresh();
                 }
-                buildContextMenu(cx, cy, link, target.editable);
+                buildContextMenu(cx, cy, link, target.editable());
             });
         });
     }
@@ -1843,7 +1889,7 @@ public final class Browser {
         io.submit(() -> {
             String text;
             try {
-                text = engine.dump(kind);
+                text = page.dump(Page.Dump.valueOf(kind.toUpperCase(java.util.Locale.ROOT)));
             } catch (RuntimeException ex) {
                 text = null;
             }
@@ -1877,7 +1923,14 @@ public final class Browser {
         final String dest = chooser.getSelectedFile().getAbsolutePath();
         setStatus("Saving…");
         io.submit(() -> {
-            boolean ok = engine.export(dest);
+            boolean saved;
+            try {
+                page.export(Path.of(dest));
+                saved = true;
+            } catch (RuntimeException ex) {
+                saved = false;
+            }
+            final boolean ok = saved;
             SwingUtilities.invokeLater(() ->
                 setStatus(ok ? "Saved " + dest : "Could not save page"));
         });
@@ -1892,8 +1945,8 @@ public final class Browser {
      * page's suggested name, or the last segment of the URL.
      */
     private void startDownload(String url, String suggestedName) {
-        String page = currentUrl();
-        if (url.startsWith("file:") && (page == null || !page.startsWith("file:"))) {
+        String current = currentUrl();
+        if (url.startsWith("file:") && (current == null || !current.startsWith("file:"))) {
             return;
         }
         JFileChooser chooser = new JFileChooser(downloadsDir());
@@ -1913,7 +1966,7 @@ public final class Browser {
         io.submit(() -> {
             long id;
             try {
-                id = engine.downloadStart(url);
+                id = page.startDownload(url);
             } catch (RuntimeException ex) {
                 id = 0;
             }
@@ -1931,7 +1984,7 @@ public final class Browser {
 
     /**
      * The renderer fetches a download while its event loop runs, and the loop
-     * runs only inside a request, so each poll first ticks the engine.
+     * runs only inside a request, so each poll first ticks the page.
      */
     private void pollDownloadLater(long id, Path dest, String name) {
         javax.swing.Timer timer = new javax.swing.Timer(DOWNLOAD_POLL_MS, e -> {
@@ -1939,14 +1992,14 @@ public final class Browser {
                 return;
             }
             io.submit(() -> {
-                RemoteBrowser.Download d;
+                Page.Download d;
                 try {
-                    engine.tick();
-                    d = engine.downloadPoll(id);
+                    page.tick();
+                    d = page.pollDownload(id);
                 } catch (RuntimeException ex) {
                     d = null;
                 }
-                final RemoteBrowser.Download state = d;
+                final Page.Download state = d;
                 SwingUtilities.invokeLater(() -> onDownloadPolled(id, dest, name, state));
             });
         });
@@ -1955,28 +2008,26 @@ public final class Browser {
     }
 
     private void onDownloadPolled(long id, Path dest, String name,
-                                  RemoteBrowser.Download d) {
+                                  Page.Download d) {
         if (closed) {
             return;
         }
-        if (d != null && d.state == RemoteBrowser.Download.RUNNING) {
-            setStatus("Downloading " + name + " — " + formatBytes(d.bytes)
-                + (d.total > 0 ? " / " + formatBytes(d.total) : ""));
+        if (d != null && d.state() == Page.Download.State.RUNNING) {
+            setStatus("Downloading " + name + " — " + formatBytes(d.bytes())
+                + (d.total() > 0 ? " / " + formatBytes(d.total()) : ""));
             pollDownloadLater(id, dest, name);
             return;
         }
         activeDownloads.remove(id);
-        if (d == null || d.state != RemoteBrowser.Download.DONE || d.path == null) {
+        if (d == null || d.state() != Page.Download.State.DONE || d.stagedFile() == null) {
             setStatus("Download failed: " + name
-                + (d != null && d.error != null ? " (" + d.error + ")" : ""));
+                + (d != null && d.error() != null ? " (" + d.error() + ")" : ""));
             return;
         }
-        final String staged = d.path;
-        final String origin = d.finalUrl;
         Thread mover = new Thread(() -> {
             String outcome;
             try {
-                Downloads.moveIntoPlace(Path.of(staged), dest, origin);
+                page.saveDownload(d, dest);
                 outcome = "Downloaded " + dest;
             } catch (RuntimeException ex) {
                 outcome = "Download failed: " + ex.getMessage();
@@ -2034,15 +2085,6 @@ public final class Browser {
 
     // --- Camera trust prompt -------------------------------------------------
 
-    private void promptCamera(String origin) {
-        if (!cameraAsked.add(origin)) return;
-        final boolean allow = askCamera(origin);
-        io.submit(() -> {
-            engine.resolveCamera(origin, allow);
-            SwingUtilities.invokeLater(this::scheduleRefresh);
-        });
-    }
-
     private boolean askCamera(String origin) {
         int choice = JOptionPane.showOptionDialog(frame,
             "This page wants to use your camera on\n" + origin
@@ -2059,17 +2101,17 @@ public final class Browser {
      * origin is asked about once per window; the same answer is repeated to
      * the engine when the page asks again.
      */
-    private void promptCapabilities(String capability) {
-        for (String[] request : RemoteBrowser.capabilityRequests(capability)) {
-            final String kind = request[0];
-            final String origin = request[1];
+    private void promptCapabilities(List<CapabilityRequest> requests) {
+        for (CapabilityRequest request : requests) {
+            final String kind = request.kind();
+            final String origin = request.origin();
             Boolean known = capabilityAnswers.get(kind + " " + origin);
             final boolean allow = known != null ? known
                 : kind.equals("camera") ? askCamera(origin) : askCapability(kind, origin);
             capabilityAnswers.put(kind + " " + origin, allow);
             io.submit(() -> {
                 try {
-                    engine.resolveCapability(kind, origin, allow);
+                    page.resolveCapability(request, allow);
                 } catch (RuntimeException ex) {
                     return;
                 }
@@ -2119,7 +2161,7 @@ public final class Browser {
         io.submit(() -> {
             List<Map<String, String>> ops;
             try {
-                ops = engine.popupPoll();
+                ops = page.popupOperations();
             } catch (RuntimeException ex) {
                 ops = List.of();
             }
@@ -2205,7 +2247,7 @@ public final class Browser {
         }
         io.submit(() -> {
             try {
-                engine.popupDeliver(kind, fields);
+                page.deliverPopupOperation(kind, fields);
             } catch (RuntimeException ex) {
                 return;
             }
@@ -2230,15 +2272,15 @@ public final class Browser {
 
     // --- Media ---------------------------------------------------------------
 
-    private void launchMedia(RemoteBrowser.Media media) {
+    private void launchMedia(Page.Media media) {
         String[][] players = {
-            {"mpv", media.url},
-            {"vlc", media.url},
+            {"mpv", media.url()},
+            {"vlc", media.url()},
         };
         for (String[] cmd : players) {
             try {
                 new ProcessBuilder(cmd).inheritIO().start();
-                setStatus("Opening " + (media.video ? "video" : "audio")
+                setStatus("Opening " + (media.video() ? "video" : "audio")
                     + " in external player…");
                 return;
             } catch (IOException ignored) {
@@ -2248,7 +2290,7 @@ public final class Browser {
         try {
             if (Desktop.isDesktopSupported()
                 && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-                Desktop.getDesktop().browse(URI.create(media.url));
+                Desktop.getDesktop().browse(URI.create(media.url()));
                 setStatus("Opened media in the system handler");
                 return;
             }
@@ -2294,7 +2336,7 @@ public final class Browser {
             appendConsole("> " + src + "\n");
             consoleIn.setText("");
             io.submit(() -> {
-                String res = engine.eval(src);
+                String res = page.evaluate(src);
                 SwingUtilities.invokeLater(() -> {
                     appendConsole((res == null ? "undefined" : res) + "\n");
                     scheduleRefresh();
@@ -2314,7 +2356,7 @@ public final class Browser {
     private void pollConsole() {
         if (console == null || !console.isVisible() || currentUrl() == null) return;
         io.submit(() -> {
-            String log = engine.consoleDrain();
+            String log = page.consoleOutput();
             if (log != null) {
                 SwingUtilities.invokeLater(() -> appendConsole(log));
             }
@@ -2333,7 +2375,7 @@ public final class Browser {
         io.submit(() -> {
             BufferedImage icon;
             try {
-                icon = engine.favicon();
+                icon = FrameImages.toImage(page.favicon());
             } catch (RuntimeException ex) {
                 return;
             }
@@ -2413,7 +2455,7 @@ public final class Browser {
         frame.getRootPane().revalidate();
         if (tellPage) {
             io.submit(() -> {
-                engine.eval("document.exitFullscreen()");
+                page.evaluate("document.exitFullscreen()");
                 SwingUtilities.invokeLater(this::scheduleRefresh);
             });
         }
