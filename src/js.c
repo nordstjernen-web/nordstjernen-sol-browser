@@ -56678,10 +56678,10 @@ ns_hit_layout_point(JSContext *ctx, ns_js *js, const ns_node *doc, double *x, do
 }
 
 static const ns_node *
-ns_hit_owner_node(const ns_box *hit, const ns_node *doc)
+ns_hit_owner_node(const ns_node *target, const ns_node *doc)
 {
-    const ns_node *node = hit->dom;
-    const ns_node *p = hit->dom;
+    const ns_node *node = target;
+    const ns_node *p = target;
     for (; p && p != doc; p = p->parent)
         if (p->kind == NS_NODE_DOCUMENT && p->parent)
             node = p->parent;
@@ -56700,10 +56700,11 @@ ns_document_hit_node(JSContext *ctx, JSValueConst this_val, double x, double y,
     if (!js) return NULL;
     const ns_node *doc = ns_hit_layout_point(ctx, js, ns_unwrap_element(this_val), &x, &y);
     if (!doc) return NULL;
-    const ns_box *hit = ns_box_hit_test_local(js->layout_root, x, y,
-                                              local_x, local_y);
-    if (!hit || !hit->dom) return NULL;
-    const ns_node *node = ns_hit_owner_node(hit, doc);
+    const ns_box *hit = NULL;
+    const ns_node *target = ns_box_hit_element(js->layout_root, x, y, &hit,
+                                               local_x, local_y);
+    if (!hit || !hit->dom || !target) return NULL;
+    const ns_node *node = ns_hit_owner_node(target, doc);
     if (!node) return NULL;
     *doc_out = doc;
     *box_out = node == hit->dom ? hit : NULL;

@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Fixed: a click on the right half of an inline box went to whatever came
+  after it. A text field followed by a label lost every click on its right
+  half to that label's control, and the last half-character of a link was
+  not part of the link, which left a one-character link half dead. The
+  lookup asked for the caret position nearest the point where it wanted the
+  character under it. An image or inline-block inside a link is now the
+  target of its own clicks rather than the link, and
+  `document.elementFromPoint()` uses the same lookup, so it returns a link
+  or span under the point where it used to return the enclosing block.
 * Printing: paged PDF from a program. Until now only the command line
   (`--dump=print:FILE`) could reach the paginator; the C API, the engine
   protocol and Java all wrote one page as tall as the document, laid out for

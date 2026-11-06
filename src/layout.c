@@ -22243,10 +22243,10 @@ ns_box_image_map_area(const ns_box *b, double local_x, double local_y)
 }
 
 const ns_node *
-ns_box_hit_node(const ns_box *root, double x, double y)
+ns_box_hit_element(const ns_box *root, double x, double y,
+                   const ns_box **out_box, double *local_x, double *local_y)
 {
-    double local_x = 0, local_y = 0;
-    const ns_box *hit = ns_box_hit_test_local(root, x, y, &local_x, &local_y);
+    const ns_box *hit = ns_box_hit_test_local(root, x, y, local_x, local_y);
     const ns_node *target = hit ? hit->dom : NULL;
     const ns_node *inline_target = ns_box_hit_inline_dom(root, x, y);
     if (inline_target) target = inline_target;
@@ -22256,6 +22256,17 @@ ns_box_hit_node(const ns_box *root, double x, double y)
          node_is_ancestor_of(form_target, target) ||
          node_is_ancestor_of(target, form_target)))
         target = form_target;
+    *out_box = hit;
+    return target;
+}
+
+const ns_node *
+ns_box_hit_node(const ns_box *root, double x, double y)
+{
+    double local_x = 0, local_y = 0;
+    const ns_box *hit = NULL;
+    const ns_node *target = ns_box_hit_element(root, x, y, &hit, &local_x,
+                                               &local_y);
     if (hit && target == hit->dom) {
         const ns_node *area = ns_box_image_map_area(hit, local_x, local_y);
         if (area) target = area;
@@ -22297,7 +22308,8 @@ ns_box_hit_link_range(const ns_box *root, double x, double y)
         root->links->len > 0) {
         if (inline_box_hit_contains(root, x, y)) {
             gsize byte = 0;
-            if (ns_paint_inline_xy_to_byte(root, x - root->x, y - root->y, &byte)) {
+            if (ns_paint_inline_xy_to_hit_byte(root, x - root->x,
+                                               y - root->y, &byte)) {
                 for (guint i = 0; i < root->links->len; i++) {
                     const ns_link_range *r = &g_array_index(root->links, ns_link_range, i);
                     if (byte >= r->start && byte < r->start + r->len)
@@ -22336,6 +22348,14 @@ ns_box_hit_link(const ns_box *root, double x, double y)
     return r ? r->href : NULL;
 }
 
+static gboolean
+inline_atomic_contains(const ns_box *atomic, double x, double y)
+{
+    hit_enter_box(atomic, &x, &y);
+    if (!box_hit_untransform_point(atomic, &x, &y)) return FALSE;
+    return box_border_contains(atomic, x, y);
+}
+
 const ns_node *
 ns_box_hit_inline_dom(const ns_box *root, double x, double y)
 {
@@ -22356,14 +22376,15 @@ ns_box_hit_inline_dom(const ns_box *root, double x, double y)
                                     x + root->scroll_x,
                                     y + root->scroll_y, &ax, &ay);
             const ns_node *m = ns_box_hit_inline_dom(ab, ax, ay);
-            if (m) return m;
+            if (m || inline_atomic_contains(ab, ax, ay)) return m;
         }
     if (!box_blocks_hit_testing(root) &&
         root->kind == NS_BOX_INLINE && root->attrs &&
         root->attrs->len > 0 && root->text && *root->text) {
         if (inline_box_hit_contains(root, x, y)) {
             gsize byte = 0;
-            if (ns_paint_inline_xy_to_byte(root, x - root->x, y - root->y, &byte)) {
+            if (ns_paint_inline_xy_to_hit_byte(root, x - root->x,
+                                               y - root->y, &byte)) {
                 const ns_node *best = NULL;
                 gsize best_len = 0;
                 for (guint i = 0; i < root->attrs->len; i++) {
