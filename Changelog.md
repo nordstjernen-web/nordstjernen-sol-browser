@@ -3,6 +3,19 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Java: a browser API, `org.nordstjernen.browser`. `Engine`,
+  `BrowserContext` and `Page` replace the two earlier families
+  (`RemotePage`/`RemoteBrowser` and their numbered `select(int kind, …)`
+  style). A page runs in a renderer process of its own and can be used from
+  any thread; every request has a deadline; results are records and enums;
+  `screenshot()` returns PNG bytes and `render()` raw pixels, so the API
+  needs no `java.desktop`. A context is a profile: `engine.newContext()`
+  gives one whose pages share cookies with each other and nothing else, in
+  a directory deleted on close, and there are persistent, in-memory and
+  user-profile contexts as well. The Swing browser runs on the new API,
+  `RemoteBrowser` is a deprecated shim over it, and CI now runs a page
+  through the renderer process and builds the jar with Maven as well as
+  Gradle. See `java/README.md` and `java/examples/PageExample.java`.
 * Java browser: `window.open()` opens a window, and permission requests
   are answered. The Swing shell never told the engine it could open
   popups, so a page that called `window.open()` was navigated away

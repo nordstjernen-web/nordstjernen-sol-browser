@@ -5,6 +5,7 @@
 
 package org.nordstjernen;
 
+import org.nordstjernen.internal.EngineDirs;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -13,6 +14,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.UserDefinedFileAttributeView;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -32,13 +34,21 @@ public final class Downloads {
      * download staging directory, {@code <cache>/nordstjernen/downloads}.
      */
     public static boolean isStaged(Path staged) {
+        return isStaged(staged, EngineDirs.cacheSubdirs("downloads"));
+    }
+
+    /**
+     * Whether {@code staged} is a regular file directly inside one of
+     * {@code stagingDirs}, for a renderer whose profile is not the default one.
+     */
+    public static boolean isStaged(Path staged, List<Path> stagingDirs) {
         if (staged == null || !staged.isAbsolute()
             || !Files.isRegularFile(staged, LinkOption.NOFOLLOW_LINKS)) {
             return false;
         }
         try {
             Path parent = staged.toRealPath(LinkOption.NOFOLLOW_LINKS).getParent();
-            for (Path dir : EngineDirs.cacheSubdirs("downloads")) {
+            for (Path dir : stagingDirs) {
                 if (Files.isDirectory(dir) && dir.toRealPath().equals(parent)) {
                     return true;
                 }
@@ -60,7 +70,16 @@ public final class Downloads {
      *                               download or the file cannot be moved
      */
     public static void moveIntoPlace(Path staged, Path destination, String originUrl) {
-        if (!isStaged(staged)) {
+        moveIntoPlace(staged, destination, originUrl, EngineDirs.cacheSubdirs("downloads"));
+    }
+
+    /**
+     * {@link #moveIntoPlace(Path, Path, String)} for a renderer that stages its
+     * downloads in one of {@code stagingDirs}.
+     */
+    public static void moveIntoPlace(Path staged, Path destination, String originUrl,
+                                     List<Path> stagingDirs) {
+        if (!isStaged(staged, stagingDirs)) {
             throw new NordstjernenException(
                 "the renderer reported a download outside its staging directory: " + staged);
         }

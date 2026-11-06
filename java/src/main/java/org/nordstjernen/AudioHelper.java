@@ -5,6 +5,8 @@
 
 package org.nordstjernen;
 
+import org.nordstjernen.internal.EngineDirs;
+import org.nordstjernen.internal.RendererProcess;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -41,8 +43,17 @@ public final class AudioHelper implements AutoCloseable {
      * play them.
      */
     public boolean send(String audio, String pageUrl) {
+        return send(splitCommands(audio), pageUrl);
+    }
+
+    /**
+     * Forward the media commands a page raised ({@code PageEvents.audio()})
+     * for a page at {@code pageUrl}. Returns false when there is no helper to
+     * play them.
+     */
+    public boolean send(java.util.List<String> commands, String pageUrl) {
         boolean sent = false;
-        for (String cmd : RemoteBrowser.audioCommands(audio)) {
+        for (String cmd : commands) {
             if (cmd.startsWith("video ") || !commandAllowed(cmd, pageUrl)) {
                 continue;
             }
@@ -66,6 +77,18 @@ public final class AudioHelper implements AutoCloseable {
             }
         }
         return true;
+    }
+
+    private static java.util.List<String> splitCommands(String audio) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (audio != null) {
+            for (String command : audio.split("001f")) {
+                if (!command.isEmpty()) {
+                    out.add(command);
+                }
+            }
+        }
+        return out;
     }
 
     /** Silence the page and end the helper; the next command starts a fresh one. */

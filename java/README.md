@@ -79,11 +79,69 @@ too, and text a page copies lands on the system clipboard.
 
 ## Use as a library
 
-The same jar is an embedding API. The in-process path loads the engine through
-its C embedding API (`src/libnordstjernen.h`) via a thin JNI bridge — fetch,
-parse, lay out, script and render web pages from the JVM to raw RGBA, a
-`BufferedImage`, a PNG/PDF file, or extracted text, plus the page title and
-final URL, all links, and pixel link hit-testing.
+### The browser API (`org.nordstjernen.browser`)
+
+`Engine`, `BrowserContext` and `Page` are the API to build on. No engine code
+is loaded into the JVM: every page runs in a `nordstjernen-renderer` process
+of its own, sandboxed by the renderer itself, so a page that crashes or hangs
+costs that page and nothing else.
+
+```java
+import org.nordstjernen.browser.BrowserContext;
+import org.nordstjernen.browser.Engine;
+import org.nordstjernen.browser.Page;
+import org.nordstjernen.browser.Response;
+
+try (Engine engine = Engine.launch();
+     BrowserContext context = engine.newContext();   // a profile of its own, deleted on close
+     Page page = context.newPage(1280, 800)) {
+
+    Response response = page.navigate("https://example.com");
+    response.ok();                                   // false when no document opened
+    page.title();                                    // also url(), security(), serverAddress()
+    page.text();                                     // the text as laid out
+    page.links();                                    // absolute link URLs
+    page.evaluate("document.querySelectorAll('a').length");
+
+    byte[] png = page.screenshot();                  // the whole page, encoded by the renderer
+    byte[] hi  = page.screenshot(Page.Screenshot.region(0, 0, 640, 400).withScale(2));
+
+    page.click(120, 240);                            // real pointer and click events
+    page.type("hello");                              // into the focused field
+    page.press("Enter");
+}
+```
+
+- **Any thread.** A page serves its requests one at a time, in the order they
+  arrive; nothing is tied to the thread that created it.
+- **Deadlines.** Every request has one (`Engine.Options.withTimeout`,
+  `Page.setTimeout`; two minutes by default). A renderer that does not answer
+  is stopped and the call fails with `RendererTimeoutException`. Navigating
+  the page again starts a fresh renderer.
+- **Profiles.** `engine.newContext()` gives a context whose pages share
+  cookies and storage with each other and with nothing else, in a directory
+  that is deleted when the context closes. `ContextOptions.persistent(dir)`
+  keeps a profile between runs, `ContextOptions.inMemory()` writes nothing to
+  disk, and `engine.userContext()` is this user's own Nordstjernen profile.
+- **No `java.desktop`.** `screenshot()` returns PNG bytes and `render()` raw
+  premultiplied BGRA rows. `org.nordstjernen.swing.FrameImages` turns those
+  into a `BufferedImage` for a Swing or JavaFX host.
+- **A host's side of the page.** `render()` and `tick()` report what the page
+  asked for (`PageEvents`): a navigation, a download (`startDownload`,
+  `pollDownload`, `saveDownload`), popups (`popupOperations`,
+  `deliverPopupOperation`), capability requests (`resolveCapability`), audio
+  commands for `AudioHelper`, clipboard writes and fullscreen changes.
+
+`examples/PageExample.java` is a runnable version of the snippet above.
+
+### In-process pages over JNI (`Nordstjernen`, `Page`)
+
+The older in-process path loads the engine into the JVM through its C
+embedding API (`src/libnordstjernen.h`) and a thin JNI bridge. It fetches,
+lays out, scripts and renders a page to raw pixels, a `BufferedImage`, a
+PNG/PDF file or text, but has no input or script evaluation, runs one page at
+a time on one thread, is not sandboxed, and a native crash takes the JVM with
+it.
 
 ```java
 import org.nordstjernen.Nordstjernen;
@@ -107,77 +165,17 @@ Nordstjernen.shutdown();
 ```
 
 `open(url, viewportWidthCss, settleMs)` lays out at `viewportWidthCss` CSS
-pixels (e.g. 360 for a phone, 1000 for desktop) and lets scripts/animations run
-for `settleMs` before the final layout. Render at `scale` to map CSS pixels to
-output device pixels (e.g. `2.0` for a HiDPI screenshot).
+pixels and lets scripts run for `settleMs` before the final layout. The
+one-shot helpers `Nordstjernen.screenshot`, `saveScreenshot`, `textOf` and
+`linksOf` open, do one thing and close. `Page` holds native memory, so always
+`close()` it; `Nordstjernen.shutdown()` releases process-wide engine state.
 
-### One-shot helpers
+### `RemotePage` and `RemoteBrowser`
 
-For the common "open → do one thing → close" pattern (the engine stays
-initialized; call `shutdown()` at the end):
-
-```java
-BufferedImage shot = Nordstjernen.screenshot("https://example.com", 360, 2.0);
-Nordstjernen.saveScreenshot("https://example.com", 1000, Path.of("page.pdf"));
-String text       = Nordstjernen.textOf("https://example.com", 1000);
-List<String> urls = Nordstjernen.linksOf("https://example.com", 1000);
-```
-
-These make the headline use cases — thumbnails/OG images, HTML→PDF, search/RAG
-text extraction, and link crawling — one line each.
-
-### Threading & lifecycle
-
-The engine uses a single GLib context and is **not** thread-safe; drive it from
-one thread and treat `Page` as non-thread-safe. `Page` holds native memory —
-always `close()` it (it is `AutoCloseable`). `Nordstjernen.shutdown()` releases
-process-wide engine state.
-
-### Renderer-process client (no JNI)
-
-`RemotePage` is an alternative that does **not** load the native engine into
-the JVM. Like the GTK shell — and the browser app above — it spawns a
-separate `nordstjernen-renderer` process (in its `stdio` mode) and drives it
-over the renderer's HTTP/JSON protocol, so an engine crash can't take down the
-JVM and no `libnordstjernen` needs to be on the Java library path. This is also
-the client the Android shell reuses.
-
-```java
-import org.nordstjernen.RemotePage;
-import javax.imageio.ImageIO;
-import java.io.File;
-
-try (RemotePage page = RemotePage.open("https://example.com", 1000, 700, 800)) {
-    page.title();                              // page <title>
-    page.url();                                // final URL
-    page.pageSize();                           // Size (CSS px)
-    page.renderRgba(0, 0, 1000, 700, 1.0);     // premultiplied RGBA8888 bytes
-    ImageIO.write(page.renderFullPage(1.0), "png", new File("example.png"));
-}
-```
-
-`RemoteBrowser` is the persistent counterpart for interactive shells (the one
-the browser app uses): one long-lived renderer per window, speaking the whole
-renderer control protocol —
-
-| | |
-| --- | --- |
-| Navigation | `navigate` (with back/forward-cache traversal and user-activation), `setViewport`, `url`, `title`, `pageWidth`/`pageHeight`, `pendingNav` |
-| Painting | `render` (with caret blinking), `tick`, `favicon`, `export`, `screenshotPng` (whole page or a region, as PNG bytes) |
-| Pointer | `press`, `release`, `hover`, `linkAt`, `contextMenu`, `mediaAt`, `dropFiles` |
-| Scrolling | `scrollAt` for overflow scrollers, `scrollbarPress`/`Drag`/`Release` for the scrollbars a page paints itself |
-| Text | `key`, `select`, `find`, `focusedEditable`, `focusedEditableState`, `setFocusedEditableSelection` |
-| Clipboard | `paste`, `cutSelection`, `clipboardText`, `openContextMenu` (with the field's editable flag) |
-| Scripting | `eval`, `consoleDrain`, `dump("dom" / "layout" / "text" / "links" / "network" / "performance")` |
-| Trust | `security`, `serverIp`, `resolveWebgl`, `resolveCamera` |
-| Display | `setDevicePixelRatio` (zoom × screen scale, for HiDPI rendering) |
-
-Each `render` also reports what the page asked for while it painted: a
-navigation, a download (URL and suggested file name), a WebGL or camera
-prompt, a fullscreen request, a clipboard write, audio commands, the scroll
-position it wants on both axes, and its current size. `AudioHelper` plays
-those audio commands through the `nordstjernen-audio` helper beside the
-renderer.
+These came before `org.nordstjernen.browser` and are deprecated.
+`RemoteBrowser` now only forwards to a `Page` from that package; its numbered
+`select` and `key` kinds map onto `Page.Selection` and `Page.KeyKind`.
+`RemotePage` is a one-page convenience over the same renderer process.
 
 ## Download
 
