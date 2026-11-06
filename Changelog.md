@@ -56,6 +56,17 @@ Changelog:
   timer is due. The title and address follow a script that changes them
   (`document.title`, `history.pushState`), and the context menu offers
   "Open Link in New Window".
+* Security: nested `display: inline-block` boxes no longer take exponential
+  time to lay out. Measuring an inline run that contains atomic boxes laid
+  out every atomic child for its natural width, again for its minimum
+  width and a third time for real, and the run's measurement cache was
+  switched off whenever a run held an atomic, so each nesting level tripled
+  the work: twelve levels took fifty seconds and sixteen never finished. The
+  natural and minimum widths of a run are now cached for the current layout
+  pass when its atomics are inline-blocks, inline-tables or replaced boxes
+  without percentage sizes, whose contributions do not depend on the
+  available width; forty levels lay out in a fraction of a second, and the
+  layout of the bundled render tests is unchanged.
 * Security: WebGPU no longer lets a page drive the renderer into
   wgpu-native's fatal paths. `createBuffer` with an invalid descriptor used
   to produce a buffer the browser still treated as mapped, so one

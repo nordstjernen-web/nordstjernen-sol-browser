@@ -194,9 +194,11 @@ typedef struct ns_box {
     const ns_style *inline_natural_cache_style;
     double inline_natural_cache_width;
     gboolean inline_natural_cache_valid;
+    guint inline_natural_cache_gen;
     const ns_style *inline_min_cache_style;
     double inline_min_cache_width;
     gboolean inline_min_cache_valid;
+    guint inline_min_cache_gen;
 
     void *paint_layout;
 
