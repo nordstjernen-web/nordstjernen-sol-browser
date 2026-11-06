@@ -3,6 +3,13 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Frames: `innerWidth` and `innerHeight` in a cross-origin frame are the
+  frame's size. A frame's window reads them from its frame element, but
+  the engine's own update of the window metrics assigned the top window's
+  size to whichever realm was current, and assigning to these properties
+  replaces the reading accessor with the value. A cross-origin frame has
+  a realm of its own, so its sizes froze at the top window's: a 300 x 200
+  frame in a 900 x 800 window reported 900 x 800.
 * Network: `fetch()` and XMLHttpRequest GETs say `Sec-Fetch-Mode: cors`.
   The header was derived from the method alone, so every GET that was not
   a navigation went out as `no-cors`, which describes an `<img>` or a

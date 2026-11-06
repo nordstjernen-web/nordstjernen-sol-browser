@@ -59493,8 +59493,10 @@ ns_js_sync_window_metrics(ns_js *js)
     int ow = MIN(vw + 16, sw);
     int oh = MIN(vh + 95, sh);
     JSValue global = JS_GetGlobalObject(ctx);
-    JS_SetPropertyStr(ctx, global, "innerWidth",  JS_NewInt32(ctx, vw));
-    JS_SetPropertyStr(ctx, global, "innerHeight", JS_NewInt32(ctx, vh));
+    if (!ns_js_frame_of_realm(js, ctx)) {
+        JS_SetPropertyStr(ctx, global, "innerWidth",  JS_NewInt32(ctx, vw));
+        JS_SetPropertyStr(ctx, global, "innerHeight", JS_NewInt32(ctx, vh));
+    }
     JS_SetPropertyStr(ctx, global, "outerWidth",  JS_NewInt32(ctx, ow));
     JS_SetPropertyStr(ctx, global, "outerHeight", JS_NewInt32(ctx, oh));
     JS_SetPropertyStr(ctx, global, "devicePixelRatio",
