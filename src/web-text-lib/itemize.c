@@ -31,10 +31,38 @@
 #include "pango-fontmap-private.h"
 #include "pango-script-private.h"
 #include "pango-emoji-private.h"
+#include "ns-pango-cache.h"
 #include "pango-attributes-private.h"
 #include "pango-item-private.h"
 #include "pango-utils-private.h"
 #include "ns-item-cache.h"
+
+static NsPangoEmojiFamilyFilter emoji_family_filter;
+
+void
+ns_pango_set_emoji_family_filter (NsPangoEmojiFamilyFilter filter)
+{
+  emoji_family_filter = filter;
+}
+
+static char *
+emoji_run_families (const NsPangoFontDescription *desc)
+{
+  const char *list = ns_pango_font_description_get_family (desc);
+  if (!emoji_family_filter || !list)
+    return g_strdup ("emoji");
+  GString *out = g_string_new (NULL);
+  char **families = g_strsplit (list, ",", -1);
+  for (int i = 0; families[i]; i++)
+    {
+      char *family = g_strstrip (families[i]);
+      if (*family && emoji_family_filter (family))
+        g_string_append_printf (out, "%s,", family);
+    }
+  g_strfreev (families);
+  g_string_append (out, "emoji");
+  return g_string_free (out, FALSE);
+}
 
 #include <hb-ot.h>
 
@@ -924,8 +952,10 @@ itemize_state_update_for_new_run (ItemizeState *state)
       gboolean has_vs = state->emoji_iter.has_vs;
       if (is_emoji && !state->emoji_font_desc)
         {
+          char *families = emoji_run_families (state->font_desc);
           state->emoji_font_desc = ns_pango_font_description_copy_static (state->font_desc);
-          ns_pango_font_description_set_family_static (state->emoji_font_desc, "emoji");
+          ns_pango_font_description_set_family (state->emoji_font_desc, families);
+          g_free (families);
           ns_pango_font_description_set_color (state->emoji_font_desc, has_vs ? NS_PANGO_FONT_COLOR_REQUIRED : NS_PANGO_FONT_COLOR_DONT_CARE);
         }
       if (!is_emoji && has_vs && !state->text_emoji_font_desc)
