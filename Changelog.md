@@ -3,6 +3,13 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Frames: `message`, `hashchange` and `popstate` listeners on a frame's
+  window follow the listener rules. A frame keeps these three in lists of
+  its own, and the lists held bare functions: a listener given as an
+  object with `handleEvent` was never called, one added twice ran twice,
+  `{once: true}` was ignored, and an exception a listener threw vanished.
+  They now behave as on the top window, and the exception is reported as
+  an `error` event on the frame's own window.
 * Scripts: script elements a page inserts run in the order they were
   inserted. An element inserted while a script, a timer or an event
   handler was running went on one queue, one inserted from a

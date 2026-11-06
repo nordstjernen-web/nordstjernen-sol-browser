@@ -53262,10 +53262,25 @@ ns_iframe_ensure_content_root(ns_node *iframe)
 
 #define NS_IFRAME_LOCATION_HISTORY_JS \
     "  function mk(u, b){ try { return new ownWin.URL(u, b || url); } catch(e){ return null; } }" \
+    "  function report(e){"     "    try {"     "      var E = ownWin.ErrorEvent;"     "      if (typeof E !== 'function') return;"     "      selfDispatch(new E('error', { error: e, cancelable: true,"     "        message: e && e.message !== undefined ? String(e.message) : String(e) }));"     "    } catch(x){} }" \
+    "  function listen(list, fn, o){" \
+    "    if (fn === null || (typeof fn !== 'function' && typeof fn !== 'object')) return;" \
+    "    for (var i=0;i<list.length;i++) if (list[i].fn === fn) return;" \
+    "    list.push({ fn: fn, once: !!(o && typeof o === 'object' && o.once) }); }" \
+    "  function unlisten(list, fn){" \
+    "    for (var i=0;i<list.length;i++) if (list[i].fn === fn) { list.splice(i,1); return; } }" \
     "  function fire(list, on, ev){" \
     "    var c = list.slice();" \
-    "    for (var i=0;i<c.length;i++){ try { c[i].call(win, ev); } catch(e){} }" \
-    "    if (on) { try { on.call(win, ev); } catch(e){} }" \
+    "    for (var i=0;i<c.length;i++){" \
+    "      var l = c[i], at = list.indexOf(l);" \
+    "      if (at < 0) continue;" \
+    "      if (l.once) list.splice(at, 1);" \
+    "      try {" \
+    "        if (typeof l.fn === 'function') l.fn.call(win, ev);" \
+    "        else if (typeof l.fn.handleEvent === 'function') l.fn.handleEvent(ev);" \
+    "      } catch(e){ report(e); }" \
+    "    }" \
+    "    if (typeof on === 'function') { try { on.call(win, ev); } catch(e){ report(e); } }" \
     "  }" \
     "  function evt(type, props){" \
     "    var e = null;" \
@@ -53347,6 +53362,7 @@ static const char ns_iframe_scope_bootstrap[] =
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
     "  var win, ownWin = realWin;"
+    "  function selfDispatch(ev){ return realWin.dispatchEvent(ev); }"
     NS_IFRAME_LOCATION_HISTORY_JS
     "  var ov = {"
     "    location: loc, history: hist, document: iframeDoc,"
@@ -53360,14 +53376,14 @@ static const char ns_iframe_scope_bootstrap[] =
     "    __nsDeliverMessage: function(ev){ fire(msgL, onmsg, ev); },"
     "    postMessage: realWin.__nsPostMessageThis,"
     "    addEventListener: function(type, fn, o){"
-    "      if (type==='hashchange'){ hashL.push(fn); return; }"
-    "      if (type==='popstate'){ popL.push(fn); return; }"
-    "      if (type==='message'){ msgL.push(fn); return; }"
+    "      if (type==='hashchange'){ listen(hashL, fn, o); return; }"
+    "      if (type==='popstate'){ listen(popL, fn, o); return; }"
+    "      if (type==='message'){ listen(msgL, fn, o); return; }"
     "      return realWin.addEventListener(type, fn, o); },"
     "    removeEventListener: function(type, fn, o){"
-    "      var i; if (type==='hashchange'){ i=hashL.indexOf(fn); if(i>=0) hashL.splice(i,1); return; }"
-    "      if (type==='popstate'){ i=popL.indexOf(fn); if(i>=0) popL.splice(i,1); return; }"
-    "      if (type==='message'){ i=msgL.indexOf(fn); if(i>=0) msgL.splice(i,1); return; }"
+    "      if (type==='hashchange'){ unlisten(hashL, fn); return; }"
+    "      if (type==='popstate'){ unlisten(popL, fn); return; }"
+    "      if (type==='message'){ unlisten(msgL, fn); return; }"
     "      return realWin.removeEventListener(type, fn, o); },"
     "    dispatchEvent: function(ev){"
     "      if (ev && ev.type==='hashchange'){ fire(hashL, onhash, ev); return true; }"
@@ -53563,15 +53579,16 @@ static const char ns_iframe_global_bootstrap[] =
     "  def('__nsDeliverMessage', { value: function(ev){ fire(msgL, onmsg, ev); } });"
     "  def('postMessage',  { writable: true, value: framePostMessage });"
     "  def('addEventListener', { writable: true, value: function(type, fn, o){"
-    "      if (type==='hashchange'){ hashL.push(fn); return; }"
-    "      if (type==='popstate'){ popL.push(fn); return; }"
-    "      if (type==='message'){ msgL.push(fn); return; }"
+    "      if (type==='hashchange'){ listen(hashL, fn, o); return; }"
+    "      if (type==='popstate'){ listen(popL, fn, o); return; }"
+    "      if (type==='message'){ listen(msgL, fn, o); return; }"
     "      return windowEvents.add.call(win, type, fn, o); } });"
     "  def('removeEventListener', { writable: true, value: function(type, fn, o){"
-    "      var i; if (type==='hashchange'){ i=hashL.indexOf(fn); if(i>=0) hashL.splice(i,1); return; }"
-    "      if (type==='popstate'){ i=popL.indexOf(fn); if(i>=0) popL.splice(i,1); return; }"
-    "      if (type==='message'){ i=msgL.indexOf(fn); if(i>=0) msgL.splice(i,1); return; }"
+    "      if (type==='hashchange'){ unlisten(hashL, fn); return; }"
+    "      if (type==='popstate'){ unlisten(popL, fn); return; }"
+    "      if (type==='message'){ unlisten(msgL, fn); return; }"
     "      return windowEvents.remove.call(win, type, fn, o); } });"
+    "  function selfDispatch(ev){ return windowEvents.dispatch.call(win, ev); }"
     "  def('dispatchEvent', { writable: true, value: function(ev){"
     "      if (ev && ev.type==='hashchange'){ fire(hashL, onhash, ev); return true; }"
     "      if (ev && ev.type==='popstate'){ fire(popL, onpop, ev); return true; }"
