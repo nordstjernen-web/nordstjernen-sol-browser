@@ -576,6 +576,24 @@ argd(JSContext *ctx, int argc, JSValueConst *argv, int i)
     return v;
 }
 
+static int
+arg64(JSContext *ctx, JSValueConst v, int64_t *out)
+{
+    ns_webgl *keep = wgl_active;
+    int r = JS_ToInt64(ctx, out, v);
+    if (JS_IsObject(v)) wgl_reassert(keep);
+    return r;
+}
+
+static const char *
+argstr(JSContext *ctx, JSValueConst v)
+{
+    ns_webgl *keep = wgl_active;
+    const char *str = JS_ToCString(ctx, v);
+    if (JS_IsObject(v)) wgl_reassert(keep);
+    return str;
+}
+
 static gboolean
 argbool(JSContext *ctx, int argc, JSValueConst *argv, int i)
 {
@@ -1083,6 +1101,7 @@ wgl_transfer_bytes(ns_webgl *g, int w, int h, int depth,
                    int format, int type, gboolean pack)
 {
     if (w <= 0 || h <= 0 || depth <= 0) return 0;
+    wgl_reassert(g);
     size_t pix = wgl_pixel_bytes(format, type);
     GLint align = 4, rowlen = 0, skiprows = 0, skippix = 0;
     GLint imgh = 0, skipimg = 0;
@@ -1797,12 +1816,13 @@ wgl_multi_draw(JSContext *ctx, JSValueConst gl_obj, int argc, JSValueConst *argv
     GLenum mode = (GLenum)argi(ctx, argc, argv, 0);
     GLenum type = elements ? (GLenum)argi(ctx, argc, argv, 3) : 0;
     int64_t off_a = 0, off_b = 0, off_c = 0;
-    JS_ToInt64(ctx, &off_a, argv[list_a + 1]);
-    JS_ToInt64(ctx, &off_b, argv[list_b + 1]);
-    if (instanced) JS_ToInt64(ctx, &off_c, argv[list_c + 1]);
+    arg64(ctx, argv[list_a + 1], &off_a);
+    arg64(ctx, argv[list_b + 1], &off_b);
+    if (instanced) arg64(ctx, argv[list_c + 1], &off_c);
     int32_t *a = wgl_int_list(ctx, argv[list_a], off_a, drawcount);
     int32_t *b = wgl_int_list(ctx, argv[list_b], off_b, drawcount);
     int32_t *c = instanced ? wgl_int_list(ctx, argv[list_c], off_c, drawcount) : NULL;
+    wgl_reassert(g);
     if (!a || !b || (instanced && !c)) {
         g_free(a); g_free(b); g_free(c);
         g->injected_error = GL_INVALID_OPERATION;
@@ -2143,7 +2163,7 @@ wgl_getExtension(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     if (argc < 1) return JS_NULL;
     ns_webgl *g = wgl_cur(ctx, this_val);
     if (!g) return JS_NULL;
-    const char *name = JS_ToCString(ctx, argv[0]);
+    const char *name = argstr(ctx, argv[0]);
     if (!name) return JS_NULL;
     const wgl_extension *e = NULL;
     for (size_t i = 0; i < G_N_ELEMENTS(wgl_extensions) && !e; i++)
@@ -2456,7 +2476,7 @@ static JSValue
 wgl_bindAttribLocation(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    const char *name = argc >= 3 ? JS_ToCString(ctx, argv[2]) : NULL;
+    const char *name = argc >= 3 ? argstr(ctx, argv[2]) : NULL;
     if (name) {
         glBindAttribLocation((GLuint)wgl_name(ctx, argv[0]),
                              (GLuint)argi(ctx, argc, argv, 1), name);
@@ -2469,7 +2489,7 @@ static JSValue
 wgl_getAttribLocation(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    const char *name = argc >= 2 ? JS_ToCString(ctx, argv[1]) : NULL;
+    const char *name = argc >= 2 ? argstr(ctx, argv[1]) : NULL;
     GLint loc = -1;
     if (name) {
         loc = glGetAttribLocation((GLuint)wgl_name(ctx, argv[0]), name);
@@ -2482,7 +2502,7 @@ static JSValue
 wgl_getUniformLocation(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    const char *name = argc >= 2 ? JS_ToCString(ctx, argv[1]) : NULL;
+    const char *name = argc >= 2 ? argstr(ctx, argv[1]) : NULL;
     GLint loc = -1;
     if (name) {
         loc = glGetUniformLocation((GLuint)wgl_name(ctx, argv[0]), name);
@@ -3592,7 +3612,7 @@ wgl_readPixels(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     }
     if (!JS_IsObject(argv[6])) return JS_UNDEFINED;
     int64_t dst_off = 0;
-    if (argc >= 8 && JS_ToInt64(ctx, &dst_off, argv[7]))
+    if (argc >= 8 && arg64(ctx, argv[7], &dst_off))
         return JS_EXCEPTION;
     JSValue hold;
     size_t len = 0;
@@ -4110,7 +4130,7 @@ static JSValue
 wgl_getUniformBlockIndex(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    const char *name = argc >= 2 ? JS_ToCString(ctx, argv[1]) : NULL;
+    const char *name = argc >= 2 ? argstr(ctx, argv[1]) : NULL;
     GLuint idx = GL_INVALID_INDEX;
     if (name) {
         idx = glGetUniformBlockIndex((GLuint)wgl_name(ctx, argv[0]), name);
@@ -4241,7 +4261,7 @@ static JSValue
 wgl_getFragDataLocation(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    const char *name = argc >= 2 ? JS_ToCString(ctx, argv[1]) : NULL;
+    const char *name = argc >= 2 ? argstr(ctx, argv[1]) : NULL;
     GLint loc = -1;
     if (name) {
         loc = glGetFragDataLocation((GLuint)wgl_name(ctx, argv[0]), name);
@@ -4506,6 +4526,7 @@ wgl_transformFeedbackVaryings(JSContext *ctx, JSValueConst this_val, int argc, J
         if (s) JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, e);
     }
+    wgl_reassert(g);
     glTransformFeedbackVaryings((GLuint)wgl_name(ctx, argv[0]), (GLsizei)n,
                                 (const GLchar *const *)names,
                                 (GLenum)argi(ctx, argc, argv, 2));
@@ -4532,6 +4553,7 @@ wgl_getActiveUniforms(JSContext *ctx, JSValueConst this_val, int argc, JSValueCo
         JS_FreeValue(ctx, e);
         indices[i] = (GLuint)v;
     }
+    wgl_reassert(g);
     GLint *out = g_new0(GLint, n);
     glGetActiveUniformsiv((GLuint)wgl_name(ctx, argv[0]), (GLsizei)n, indices,
                           (GLenum)argi(ctx, argc, argv, 2), out);
@@ -4764,8 +4786,8 @@ wgl_compressed_source(JSContext *ctx, int argc, JSValueConst *argv, int i,
     *hold = JS_UNDEFINED;
     if (i >= argc || !JS_IsObject(argv[i])) return NULL;
     int64_t off = 0, override = 0;
-    if (argc > i + 1 && JS_ToInt64(ctx, &off, argv[i + 1])) return NULL;
-    if (argc > i + 2 && JS_ToInt64(ctx, &override, argv[i + 2])) return NULL;
+    if (argc > i + 1 && arg64(ctx, argv[i + 1], &off)) return NULL;
+    if (argc > i + 2 && arg64(ctx, argv[i + 2], &override)) return NULL;
     size_t total = 0;
     const uint8_t *px = view_bytes(ctx, argv[i], &total, hold);
     if (!px) return NULL;
@@ -4951,6 +4973,7 @@ wgl_getUniformIndices(JSContext *ctx, JSValueConst this_val, int argc, JSValueCo
         if (str) JS_FreeCString(ctx, str);
         JS_FreeValue(ctx, e);
     }
+    wgl_reassert(g);
     GLuint *indices = g_new0(GLuint, n);
     glGetUniformIndices((GLuint)wgl_name(ctx, argv[0]), (GLsizei)n,
                         (const GLchar *const *)names, indices);

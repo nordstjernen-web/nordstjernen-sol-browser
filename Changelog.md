@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: a WebGL call keeps its own GL context while page script runs
+  inside it. Converting an argument can run page script (`valueOf`, a
+  getter, `toString`), and that script could call a second WebGL
+  context, which made the second context current for the rest of the
+  first call. `readPixels` then sized its copy by one context's rules and
+  wrote with the other's pack state, an out-of-bounds write into the
+  page's buffer with an offset the page chose; texture uploads read past
+  their source the same way, and multi-draw validated against the wrong
+  buffers. Every such conversion now restores the calling context.
 * Security: web fonts and external SVG references are fetched for the
   document, not for its `<base href>`. A page's base address only says
   how to resolve relative URLs, but the engine also gave it to the
