@@ -3,6 +3,14 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Network: the HSTS store is kept in memory and written only when it
+  changes. Every request handed libcurl the HSTS file, which libcurl read
+  at the start of the transfer, on the one thread that drives all
+  transfers, and rewrote when the transfer ended. On Windows that read
+  could wait 15 s on the antivirus scanner, and every request in flight
+  waited with it. libcurl now gets the entries through its read and write
+  callbacks; the file keeps its format and is saved when a host is added,
+  removed or changed.
 * HTTP cache: a body the page stored or read a moment ago is served from
   memory. A second request for the same URL used to read the body file
   back from disk straight after writing it; on Windows that open waits for
