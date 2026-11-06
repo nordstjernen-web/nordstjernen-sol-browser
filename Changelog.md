@@ -56,6 +56,13 @@ Changelog:
   timer is due. The title and address follow a script that changes them
   (`document.title`, `history.pushState`), and the context menu offers
   "Open Link in New Window".
+* Security: WebGL refuses `vertexAttribPointer` and `vertexAttribIPointer`
+  when no array buffer is bound, and refuses every draw call when no program
+  is in use, with `INVALID_OPERATION` as the specification requires. Both
+  were forwarded to the driver, so on Windows, where the context is a
+  compatibility profile, a page could record a client-memory pointer at an
+  address of its choosing and have a program-less fixed-function draw read
+  renderer memory from it into pixels it could then read back.
 * Java: a browser for agents, `org.nordstjernen.agent`. `AgentBrowser`
   has tabs that keep their own scroll position and history, follow the
   navigations a page asks for, open its windows as new tabs, save downloads
