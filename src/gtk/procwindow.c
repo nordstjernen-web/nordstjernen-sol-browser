@@ -1811,12 +1811,27 @@ pw_popup_tab_gone(int tab_id)
     }
 }
 
+static gboolean
+pw_popup_url_allowed(const char *url, const char *opener_url)
+{
+    if (g_ascii_strncasecmp(url, "http://", 7) == 0 ||
+        g_ascii_strncasecmp(url, "https://", 8) == 0 ||
+        g_ascii_strncasecmp(url, "data:", 5) == 0 ||
+        g_ascii_strncasecmp(url, "blob:", 5) == 0 ||
+        g_ascii_strcasecmp(url, "about:blank") == 0)
+        return TRUE;
+    if (g_ascii_strncasecmp(url, "file:", 5) == 0)
+        return opener_url && g_ascii_strncasecmp(opener_url, "file:", 5) == 0;
+    return FALSE;
+}
+
 static void
 pw_popup_open(ProcWindow *pw, NsProcView *v, const RjValue *op)
 {
     const char *url = rj_get_str(op, "url");
     const char *token = rj_get_str(op, "token");
     if (!url || !*url) return;
+    if (!pw_popup_url_allowed(url, ns_proc_view_url(v))) return;
     g_autofree char *page_origin = ns_proc_url_origin(ns_proc_view_url(v));
     ns_perm_state allowed = page_origin && *page_origin
         ? ns_perm_get(page_origin, NS_CAP_POPUPS) : NS_PERM_ALLOW;

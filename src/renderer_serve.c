@@ -849,7 +849,6 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         char *opener_origin = json_get_str(body, "opener_origin");
         ns_browser_set_opener(opener_token, opener_origin);
         free(opener_token);
-        free(opener_origin);
         int vw = css_viewport_extent(w, s->max_w);
         int vh = css_viewport_extent(h, s->max_h);
         double dpr = request_device_pixel_ratio(body);
@@ -871,6 +870,10 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             ns_browser_set_next_referrer(referrer);
         else if (referrer && !restored && url && page_initiated)
             ns_browser_set_next_initiator(referrer);
+        else if (!referrer && !restored && opener_origin && *opener_origin &&
+                 strcmp(opener_origin, "null") != 0)
+            ns_browser_set_next_initiator(opener_origin);
+        free(opener_origin);
         ns_browser_set_next_user_activated(user_activated != 0);
         ns_browser_set_next_reload(reload != 0 && url && *url);
         if (!s->session_storage) s->session_storage = ns_session_storage_new();

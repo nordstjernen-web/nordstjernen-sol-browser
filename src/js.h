@@ -53,6 +53,8 @@ typedef void (*ns_js_fragment_nav_cb)(const char *url, gpointer user_data);
 typedef void (*ns_js_form_submit_cb)(const ns_node *form, const ns_node *submitter,
                                      gpointer user_data);
 typedef void (*ns_js_soft_nav_cb)(const char *url, gboolean replace, gpointer user_data);
+typedef gboolean (*ns_js_popup_allowed_cb)(const char *url, const char *opener_url,
+                                           gpointer user_data);
 typedef void (*ns_js_repaint_cb)(gpointer user_data);
 typedef void (*ns_js_layout_flush_cb)(gpointer user_data);
 typedef void (*ns_js_viewport_scroll_cb)(double *x, double *y, gpointer user_data);
@@ -122,6 +124,8 @@ void   ns_js_set_fragment_nav_cb(ns_js *js, ns_js_fragment_nav_cb cb,
                                  gpointer user_data);
 void   ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb,
                              gpointer user_data);
+void   ns_js_set_popup_allowed_cb(ns_js *js, ns_js_popup_allowed_cb cb,
+                                  gpointer user_data);
 void   ns_js_set_window_action_cb(ns_js *js, ns_js_window_action_cb cb,
                                   gpointer user_data);
 void   ns_js_window_action_applied(ns_js *js);

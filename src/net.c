@@ -6459,13 +6459,14 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         }
     }
 
-    if (synthesize_about_response(url, top_url, method, body, body_len, resp))
+    if (synthesize_about_response(url, request_site_url, method, body,
+                                  body_len, resp))
         return resp;
     if (synthesize_view_source_response(url, top_url, cancellable, resp))
         return resp;
     if (synthesize_data_response(url, resp))
         return resp;
-    if (synthesize_file_response(url, top_url, is_navigation, resp))
+    if (synthesize_file_response(url, request_site_url, is_navigation, resp))
         return resp;
 
     char *hsts_upgraded = NULL;

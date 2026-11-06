@@ -114,6 +114,8 @@ struct ns_js {
     gpointer      form_submit_user_data;
     ns_js_soft_nav_cb soft_nav_cb;
     gpointer      soft_nav_user_data;
+    ns_js_popup_allowed_cb popup_allowed_cb;
+    gpointer      popup_allowed_user_data;
     ns_js_repaint_cb repaint_cb;
     gpointer      repaint_user_data;
     ns_js_layout_flush_cb layout_flush_cb;

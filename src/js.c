@@ -27635,6 +27635,9 @@ ns_popup_open(JSContext *ctx, ns_js *js, const char *url, int argc,
     g_autofree char *abs_url = *url ? ns_url_resolve(page, url)
                                     : g_strdup("about:blank");
     if (!abs_url) return JS_NULL;
+    if (js->popup_allowed_cb &&
+        !js->popup_allowed_cb(abs_url, page, js->popup_allowed_user_data))
+        return JS_NULL;
     gboolean noopener = ns_popup_features_noopener(ctx, argc, argv);
     g_autofree char *token = noopener ? NULL : ns_popup_new_token();
     g_autofree char *origin = ns_popup_realm_origin(js, ctx);
@@ -72414,6 +72417,15 @@ ns_js_set_fragment_nav_cb(ns_js *js, ns_js_fragment_nav_cb cb,
     if (!js) return;
     js->fragment_nav_cb = cb;
     js->fragment_nav_user_data = user_data;
+}
+
+void
+ns_js_set_popup_allowed_cb(ns_js *js, ns_js_popup_allowed_cb cb,
+                           gpointer user_data)
+{
+    if (!js) return;
+    js->popup_allowed_cb = cb;
+    js->popup_allowed_user_data = user_data;
 }
 
 void
