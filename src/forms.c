@@ -31,6 +31,18 @@ ns_form_is_submit_trigger(const ns_node *n)
 }
 
 static const ns_node *
+ns_form_scan_root(const ns_node *form, const ns_node *n)
+{
+    if (!form) return n;
+    const ns_node *root = form;
+    int depth = 0;
+    while (root->parent && root->kind != NS_NODE_DOCUMENT &&
+           depth++ < NS_FORM_MAX_DEPTH)
+        root = root->parent;
+    return root->kind == NS_NODE_DOCUMENT ? root : n;
+}
+
+static const ns_node *
 ns_form_default_button_in(const ns_node *scan, const ns_node *form,
                           const ns_node *doc, int depth)
 {
@@ -51,7 +63,8 @@ const ns_node *
 ns_form_default_button(const ns_node *form, const ns_node *doc)
 {
     if (!form) return NULL;
-    return ns_form_default_button_in(doc ? doc : form, form, doc, 0);
+    return ns_form_default_button_in(ns_form_scan_root(form, doc ? doc : form),
+                                     form, doc, 0);
 }
 
 gboolean
@@ -191,16 +204,19 @@ ns_form_collect_inputs_depth(const ns_node *form, const ns_node *n,
         }
     }
 recurse:
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_embedded_doc(c)) continue;
         ns_form_collect_inputs_depth(form, c, doc, query, first, submitter,
                                      depth + 1);
+    }
 }
 
 void
 ns_form_collect_inputs(const ns_node *form, const ns_node *n, const ns_node *doc,
                     GString *query, gboolean *first, const ns_node *submitter)
 {
-    ns_form_collect_inputs_depth(form, n, doc, query, first, submitter, 0);
+    ns_form_collect_inputs_depth(form, ns_form_scan_root(form, n), doc, query,
+                                 first, submitter, 0);
 }
 
 static gboolean
@@ -331,6 +347,7 @@ ns_form_first_invalid_depth(const ns_node *form, const ns_node *n,
         }
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_embedded_doc(c)) continue;
         const ns_node *m = ns_form_first_invalid_depth(form, c, doc, depth + 1);
         if (m) return m;
     }
@@ -340,5 +357,5 @@ ns_form_first_invalid_depth(const ns_node *form, const ns_node *n,
 const ns_node *
 ns_form_first_invalid(const ns_node *form, const ns_node *n, const ns_node *doc)
 {
-    return ns_form_first_invalid_depth(form, n, doc, 0);
+    return ns_form_first_invalid_depth(form, ns_form_scan_root(form, n), doc, 0);
 }
