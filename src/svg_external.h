@@ -13,7 +13,8 @@
 G_BEGIN_DECLS
 
 void           ns_svg_external_note_base(const ns_node *doc,
-                                         const char *base_url);
+                                         const char *base_url,
+                                         const char *document_url);
 const ns_node *ns_svg_external_target(const ns_node *referrer,
                                       const char *href);
 guint          ns_svg_external_pending(void);

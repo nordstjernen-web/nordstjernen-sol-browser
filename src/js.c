@@ -11596,7 +11596,8 @@ ns_fontface_load(JSContext *ctx, JSValueConst this_val,
         return loaded;
     }
     g_autofree char *base = ns_js_doc_base_url(js);
-    ns_font_request(family, url, base, ns_fontface_descriptors(ctx, this_val));
+    ns_font_request(family, url, base, ns_js_realm_url_or_current(js, ctx),
+                    ns_fontface_descriptors(ctx, this_val));
     JSValue data[1] = { (JSValue)this_val };
     JSValue idle = JS_NewCFunctionData(ctx, ns_fontface_fonts_idle, 1, 0, 1,
                                        data);

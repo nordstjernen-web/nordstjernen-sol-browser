@@ -28,6 +28,7 @@ typedef struct ns_render_ctx {
     double                          zoom;
     struct ns_image_cache          *images;
     const char                     *base_url;
+    const char                     *document_url;
     ns_anim                        *anim;
     ns_js                          *js;
     const ns_node                  *focused_input;

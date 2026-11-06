@@ -37,7 +37,7 @@ typedef struct ns_font_descriptors {
 } ns_font_descriptors;
 
 void     ns_font_request(const char *family, const char *src_url,
-                         const char *base_url,
+                         const char *base_url, const char *document_url,
                          ns_font_descriptors descriptors);
 
 gboolean ns_font_install_bytes(const char *family, const guint8 *data,

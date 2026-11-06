@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: web fonts and external SVG references are fetched for the
+  document, not for its `<base href>`. A page's base address only says
+  how to resolve relative URLs, but the engine also gave it to the
+  network layer as the page making the request. With
+  `<base href="https://bank.example/">` a page's `@font-face` or
+  `FontFace` load became a first-party request to the bank, with its
+  `SameSite=Strict` cookies, and slipped past the page's own CSP
+  `font-src`; an external `<use>` reference was judged same-origin
+  against the base address too. Both now use the document's address.
 * Security: a form only collects the fields of its own document. A
   frame's document hangs under the `<iframe>` element, and finding a
   field's form walked straight through it, as did a `form="id"` lookup,
