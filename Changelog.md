@@ -14,6 +14,10 @@ Changelog:
   frame calling `scrollTo(0, 0)` repainted the top page at its start
   while the page itself stayed scrolled, so a scrolled news page showed
   its header and first stories instead of the content at that position.
+* Layout: auto horizontal margins on a float compute to zero. A
+  `float: right` box with `margin-right: auto` and a set width took the
+  free space as margin and ended up at the left edge, with the text that
+  should wrap beside it pushed below it.
 * Text: a web font that has a glyph for an emoji code point is used for
   it. Emoji-presentation characters were always shaped with the system
   colour emoji font, whatever `font-family` said, so icon fonts that map
