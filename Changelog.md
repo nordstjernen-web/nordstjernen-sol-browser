@@ -3,6 +3,21 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Java: `org.nordstjernen.swing.BrowserView`, a Swing component that shows
+  a page and lets the user work it: painting, scrollbars, wheel and keyboard
+  scrolling, zoom, text selection and the clipboard, dropped files, back
+  and forward, find, and following the navigations a page asks for. What
+  the surrounding application decides (title and address to show,
+  downloads, permission prompts, context menus, new windows) comes to a
+  listener. The Java browser is now that component plus its chrome, about
+  half the size it was.
+* Java browser: a page's timers keep running while nothing moves. The
+  window stopped asking the renderer for anything once three frames came
+  back unchanged, so a `setTimeout` or a late response did nothing until
+  the mouse moved. It now ticks the page when the renderer says its next
+  timer is due. The title and address follow a script that changes them
+  (`document.title`, `history.pushState`), and the context menu offers
+  "Open Link in New Window".
 * Java: a browser for agents, `org.nordstjernen.agent`. `AgentBrowser`
   has tabs that keep their own scroll position and history, follow the
   navigations a page asks for, open its windows as new tabs, save downloads
