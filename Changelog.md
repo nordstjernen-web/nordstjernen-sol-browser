@@ -3,6 +3,13 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Text: a web font that has a glyph for an emoji code point is used for
+  it. Emoji-presentation characters were always shaped with the system
+  colour emoji font, whatever `font-family` said, so icon fonts that map
+  such code points (fontello, for instance) showed a colour emoji instead
+  of their icon: linux.org.ru's tag icon was a red bookmark. Loaded web
+  fonts in the family list are now tried before the emoji font; system
+  fonts are not, so ordinary emoji stay in colour.
 * Layout: an image whose width comes from its height and aspect ratio
   contributes its real width to a flex container's size. The max-content
   measure of a replaced element that had not been laid out yet fell back

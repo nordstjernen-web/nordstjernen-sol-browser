@@ -58,6 +58,15 @@ void ns_pango_item_cache_stats  (guint64 *hits,
                                  guint64 *skipped,
                                  guint64 *entries);
 
+/* Emoji runs are shaped with the family "emoji". A family this returns TRUE
+ * for, from the run's own family list, is tried first, so a web font that
+ * maps an emoji code point to its own glyph keeps it.
+ */
+typedef gboolean (*NsPangoEmojiFamilyFilter) (const char *family);
+
+NS_PANGO_AVAILABLE_IN_ALL
+void ns_pango_set_emoji_family_filter (NsPangoEmojiFamilyFilter filter);
+
 G_END_DECLS
 
 #endif /* __NS_PANGO_CACHE_H__ */

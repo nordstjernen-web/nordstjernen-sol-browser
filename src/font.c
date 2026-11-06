@@ -7,6 +7,9 @@
 
 #include <gio/gio.h>
 #include "ns_pango.h"
+#ifdef NS_USE_WEB_TEXT_LIB
+#include <web-text-lib/ns-pango-cache.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 
@@ -141,6 +144,9 @@ void
 ns_font_init(void)
 {
     if (g_entries) return;
+#ifdef NS_USE_WEB_TEXT_LIB
+    ns_pango_set_emoji_family_filter(ns_font_family_loaded);
+#endif
     g_entries = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     g_pending_by_url = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, ns_font_pending_free);
