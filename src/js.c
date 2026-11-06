@@ -66196,6 +66196,8 @@ ns_js_reset_runtime_state(ns_js *js)
     }
     if (js->async_script_roots)
         g_ptr_array_set_size(js->async_script_roots, 0);
+    if (js->script_root_order)
+        g_ptr_array_set_size(js->script_root_order, 0);
 
     ns_attr_detach_all(js);
     ns_attribute_maps_release_all(js);
@@ -67086,6 +67088,7 @@ ns_js_free(ns_js *js)
         g_ptr_array_free(js->async_script_roots, TRUE);
         js->async_script_roots = NULL;
     }
+    g_clear_pointer(&js->script_root_order, g_ptr_array_unref);
     if (js->pending_iframe_loads) {
         g_ptr_array_free(js->pending_iframe_loads, TRUE);
         js->pending_iframe_loads = NULL;
@@ -70161,6 +70164,55 @@ ns_js_tasks_have_schedule(GArray *tasks, ns_script_schedule schedule)
     return FALSE;
 }
 
+static void
+ns_js_note_script_root_order(ns_js *js, ns_node *root)
+{
+    if (!js->script_root_order)
+        js->script_root_order = g_ptr_array_new();
+    if (!g_ptr_array_find(js->script_root_order, root, NULL))
+        g_ptr_array_add(js->script_root_order, root);
+}
+
+static gboolean
+ns_js_script_root_queued(const ns_js *js, gconstpointer root)
+{
+    return (js->deferred_script_roots &&
+            g_ptr_array_find(js->deferred_script_roots, root, NULL)) ||
+           (js->async_script_roots &&
+            g_ptr_array_find(js->async_script_roots, root, NULL));
+}
+
+static gboolean
+ns_js_async_script_root_is_next(ns_js *js)
+{
+    GPtrArray *order = js->script_root_order;
+    for (guint i = 0; order && i < order->len; ) {
+        if (ns_js_script_root_queued(js, g_ptr_array_index(order, i))) i++;
+        else g_ptr_array_remove_index(order, i);
+    }
+    if (!js->async_script_roots || js->async_script_roots->len == 0)
+        return FALSE;
+    if (!js->deferred_script_roots || js->deferred_script_roots->len == 0)
+        return TRUE;
+    for (guint i = 0; order && i < order->len; i++) {
+        gconstpointer root = g_ptr_array_index(order, i);
+        if (root == g_ptr_array_index(js->deferred_script_roots, 0))
+            return FALSE;
+        if (root == g_ptr_array_index(js->async_script_roots, 0))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+ns_js_drain_next_script_root(ns_js *js)
+{
+    if (ns_js_async_script_root_is_next(js))
+        ns_js_drain_async_script_roots(js);
+    else
+        ns_js_drain_deferred_scripts(js);
+}
+
 static gboolean
 ns_js_async_script_timer(gpointer data)
 {
@@ -70171,8 +70223,7 @@ ns_js_async_script_timer(gpointer data)
         ns_js_schedule_pending_script_drain(js);
         return G_SOURCE_REMOVE;
     }
-    ns_js_drain_deferred_scripts(js);
-    ns_js_drain_async_script_roots(js);
+    ns_js_drain_next_script_root(js);
     ns_js_schedule_pending_script_drain(js);
     return G_SOURCE_REMOVE;
 }
@@ -70201,6 +70252,7 @@ ns_js_schedule_deferred_script_root(ns_js *js, ns_node *root)
             return;
         }
     g_ptr_array_add(js->deferred_script_roots, root);
+    ns_js_note_script_root_order(js, root);
     ns_js_schedule_pending_script_drain(js);
 }
 
@@ -70213,6 +70265,7 @@ ns_js_schedule_async_script_root(ns_js *js, ns_node *root)
     for (guint i = 0; i < js->async_script_roots->len; i++)
         if (g_ptr_array_index(js->async_script_roots, i) == root) return;
     g_ptr_array_add(js->async_script_roots, root);
+    ns_js_note_script_root_order(js, root);
     ns_js_schedule_pending_script_drain(js);
 }
 
@@ -70376,8 +70429,7 @@ static void
 ns_js_drain_load_event_scripts(ns_js *js)
 {
     if (js && !js->halted && ns_js_has_pending_script_roots(js)) {
-        ns_js_drain_deferred_scripts(js);
-        ns_js_drain_async_script_roots(js);
+        ns_js_drain_next_script_root(js);
         ns_drain_microtasks(js);
     }
     if (js && !ns_js_has_pending_script_roots(js) &&
@@ -70593,6 +70645,7 @@ ns_js_purge_subtree_script_refs(ns_js *js, ns_node *root)
     GPtrArray *queues[] = {
         js->deferred_script_roots,
         js->async_script_roots,
+        js->script_root_order,
     };
     for (guint q = 0; q < G_N_ELEMENTS(queues); q++) {
         if (!queues[q]) continue;

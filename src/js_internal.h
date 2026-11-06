@@ -283,6 +283,7 @@ struct ns_js {
     guint         document_write_body_count;
     GPtrArray    *deferred_script_roots;
     GPtrArray    *async_script_roots;
+    GPtrArray    *script_root_order;
     guint         async_script_source;
     GPtrArray    *pending_iframe_loads;
     GPtrArray    *deferred_iframe_loads;

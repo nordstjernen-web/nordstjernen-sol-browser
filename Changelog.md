@@ -3,6 +3,16 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Scripts: script elements a page inserts run in the order they were
+  inserted. An element inserted while a script, a timer or an event
+  handler was running went on one queue, one inserted from a
+  MessageChannel or `message` handler on another, and each pass ran the
+  head of both, so of three chunks inserted A, B, C the third could run
+  before the second. Code loaders that fetch chunks in parallel with
+  `async = false` and schedule through a MessageChannel rely on the order;
+  Gmail's widget frames ran a chunk before the one defining its helpers
+  and reported "not a function". The queues are now drained one root at a
+  time, oldest insertion first.
 * Frames: a frame reaches a same-origin sibling through its cross-origin
   parent. `parent[name]`, `parent.frames[name]` and `parent[index]` gave
   an opaque proxy for every child of a cross-origin parent, also for a
