@@ -3,6 +3,14 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: a framed document can no longer climb out of its frame. A
+  frame's document hangs under the `<iframe>` element of the page that
+  embeds it, and `getRootNode()`, `previousSibling`/`nextSibling` of the
+  document, and the TreeWalker and NodeIterator parent steps followed
+  that link into the embedding page. Script in a cross-origin frame (an
+  advertisement, say) got the parent's `document`, could read and change
+  its DOM and run script as the parent through an inserted inline
+  handler. A document is now the root of every one of those walks.
 * Navigation: a form, a link or `window.open()` that names a frame loads
   that frame. `target="name"`, `formtarget` and the second argument of
   `window.open` were only understood as `_blank`, `_top` and friends; any
