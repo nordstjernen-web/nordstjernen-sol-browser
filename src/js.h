@@ -160,6 +160,10 @@ gboolean ns_js_sandbox_allows_form_navigation(ns_js *js, const ns_node *form,
                                               const char *target,
                                               gboolean user_activated);
 gboolean ns_js_navigate_form_frame(ns_js *js, const ns_node *form, const char *url);
+ns_node *ns_js_named_frame(ns_js *js, const ns_node *from, const char *name);
+gboolean ns_js_navigate_frame(ns_js *js, ns_node *frame, const char *url);
+gboolean ns_js_post_frame(ns_js *js, ns_node *frame, const char *url,
+                          char *body, gsize body_len, const char *content_type);
 gboolean ns_js_post_form_frame(ns_js *js, const ns_node *form, const char *url,
                                char *body, gsize body_len, const char *content_type);
 char    *ns_js_base_url_for_document(ns_js *js, const ns_node *doc,

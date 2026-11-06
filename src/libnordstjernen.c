@@ -4170,7 +4170,9 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
                                                        user_activated))
         return;
     const char *frame_url = b->js ? ns_js_node_frame_url(b->js, form) : NULL;
-    gboolean in_frame = frame_url && !browser_form_target_leaves_frame(target);
+    ns_node *named = b->js ? ns_js_named_frame(b->js, form, target) : NULL;
+    gboolean in_frame = named ||
+        (frame_url && !browser_form_target_leaves_frame(target));
     g_autofree char *base = frame_url ? NULL : browser_document_base(b);
     const char *doc_url = frame_url ? frame_url : b->base_url;
     char *abs_action = (action && *action)
@@ -4198,9 +4200,13 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
         ns_form_set_submission_charset(NULL);
         if (in_frame) {
             gsize body_len = body->len;
-            ns_js_post_form_frame(b->js, form, abs_action,
-                                  g_string_free(body, FALSE), body_len,
-                                  "application/x-www-form-urlencoded");
+            char *bytes = g_string_free(body, FALSE);
+            const char *type = "application/x-www-form-urlencoded";
+            if (named)
+                ns_js_post_frame(b->js, named, abs_action, bytes, body_len, type);
+            else
+                ns_js_post_form_frame(b->js, form, abs_action, bytes, body_len,
+                                      type);
             g_free(abs_action);
             b->dirty = TRUE;
             return;
@@ -4233,7 +4239,8 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
     g_string_free(query, TRUE);
     g_free(abs_action);
     if (in_frame) {
-        ns_js_navigate_form_frame(b->js, form, full);
+        if (named) ns_js_navigate_frame(b->js, named, full);
+        else       ns_js_navigate_form_frame(b->js, form, full);
         g_free(full);
         b->dirty = TRUE;
         return;

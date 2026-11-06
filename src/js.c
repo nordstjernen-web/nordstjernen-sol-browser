@@ -20343,6 +20343,25 @@ ns_js_url_parses(ns_js *js, const char *url)
     return resolved != NULL;
 }
 
+static JSValue ns_element_get_contentWindow(JSContext *ctx,
+                                            JSValueConst this_val);
+
+static ns_node *
+ns_window_open_named_frame(JSContext *ctx, ns_js *js, int argc,
+                           JSValueConst *argv)
+{
+    if (argc < 2 || !JS_IsString(argv[1])) return NULL;
+    const char *name = JS_ToCString(ctx, argv[1]);
+    if (!name) return NULL;
+    ns_node *opener_frame = ns_js_frame_of_realm(js, ctx);
+    const ns_node *from = opener_frame
+        ? ns_iframe_document_node(opener_frame)
+        : (js->ce_main_doc ? js->ce_main_doc : js->current_doc);
+    ns_node *named = ns_js_named_frame(js, from, name);
+    JS_FreeCString(ctx, name);
+    return named;
+}
+
 static JSValue
 ns_window_open_method(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
@@ -20356,6 +20375,18 @@ ns_window_open_method(JSContext *ctx, JSValueConst this_val,
             JS_FreeCString(ctx, url);
             return ns_throw_dom_exception(ctx, "SyntaxError", 12,
                                           "window.open: invalid URL");
+        }
+        ns_node *named = ns_window_open_named_frame(ctx, js, argc, argv);
+        if (named) {
+            g_autofree char *abs_url = *url
+                ? ns_url_resolve(ns_js_realm_url_or_current(js, ctx), url)
+                : NULL;
+            JS_FreeCString(ctx, url);
+            if (abs_url) ns_js_navigate_frame(js, named, abs_url);
+            JSValue element = ns_make_element(ctx, named);
+            JSValue window = ns_element_get_contentWindow(ctx, element);
+            JS_FreeValue(ctx, element);
+            return window;
         }
         if (!ns_js_has_transient_activation(js)) {
             if (js->log_cb) {
@@ -50093,6 +50124,14 @@ ns_element_activation_behavior(JSContext *ctx, const ns_node *act,
             ns_js_run_javascript_url(js, act, js_body);
             return JS_UNDEFINED;
         }
+        ns_node *named = href && *href
+            ? ns_js_named_frame(js, act, ns_element_get_attr(act, "target"))
+            : NULL;
+        if (named) {
+            g_autofree char *abs_url = ns_element_anchor_resolved_href(act, js);
+            if (abs_url) ns_js_navigate_frame(js, named, abs_url);
+            return JS_UNDEFINED;
+        }
         if (ns_iframe_follow_href(ctx, act, href))
             return JS_UNDEFINED;
         if (href && *href && ns_element_get_attr(act, "download") && js->download_cb) {
@@ -73100,11 +73139,62 @@ ns_js_csp_form_action_allowed(const ns_js *js, const ns_node *form,
                          self_url ? self_url : js->current_url);
 }
 
-gboolean
-ns_js_post_form_frame(ns_js *js, const ns_node *form, const char *url,
-                      char *body, gsize body_len, const char *content_type)
+static const ns_node *
+ns_find_named_frame(const ns_node *n, const char *name, int depth)
 {
-    ns_node *frame = form ? ns_js_node_frame(form->parent) : NULL;
+    if (!n || depth >= 256) return NULL;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "iframe") ||
+            ns_node_is_element_named(c, "frame")) {
+            const char *frame_name = ns_element_get_attr(c, "name");
+            if (frame_name && strcmp(frame_name, name) == 0) return c;
+        }
+        const ns_node *hit = ns_find_named_frame(c, name, depth + 1);
+        if (hit) return hit;
+    }
+    return NULL;
+}
+
+static char *
+ns_js_holder_origin(ns_js *js, const ns_node *node)
+{
+    const ns_node *frame = node ? ns_js_node_frame(node->parent) : NULL;
+    if (frame) return ns_iframe_document_origin(js, frame);
+    return g_strdup(js->document_origin ? js->document_origin : "null");
+}
+
+ns_node *
+ns_js_named_frame(ns_js *js, const ns_node *from, const char *name)
+{
+    if (!js || !from || !name || !*name || name[0] == '_') return NULL;
+    const ns_node *own = from;
+    while (own->parent && own->kind != NS_NODE_DOCUMENT) own = own->parent;
+    const ns_node *top = own;
+    while (top->parent) top = top->parent;
+    const ns_node *hit = ns_find_named_frame(own, name, 0);
+    if (hit || own == top) return (ns_node *)hit;
+    hit = ns_find_named_frame(top, name, 0);
+    if (!hit) return NULL;
+    g_autofree char *mine = ns_js_holder_origin(js, from);
+    g_autofree char *theirs = ns_js_holder_origin(js, hit);
+    if (strcmp(mine, "null") == 0 || strcmp(mine, theirs) != 0) return NULL;
+    return (ns_node *)hit;
+}
+
+gboolean
+ns_js_navigate_frame(ns_js *js, ns_node *frame, const char *url)
+{
+    if (!js || !frame || !url || !*url) return FALSE;
+    gboolean is_object = ns_node_is_element_named(frame, "object");
+    ns_js_set_attr_recorded(js, frame, is_object ? "data" : "src", url);
+    ns_js_schedule_iframe_load_full(js, frame, TRUE);
+    return TRUE;
+}
+
+gboolean
+ns_js_post_frame(ns_js *js, ns_node *frame, const char *url,
+                 char *body, gsize body_len, const char *content_type)
+{
     if (!js || !frame || !url || !*url || !js->frame_posts) {
         g_free(body);
         return FALSE;
@@ -73115,18 +73205,22 @@ ns_js_post_form_frame(ns_js *js, const ns_node *form, const char *url,
     post->body_len = body_len;
     post->content_type = g_strdup(content_type);
     g_hash_table_replace(js->frame_posts, frame, post);
-    return ns_js_navigate_form_frame(js, form, url);
+    return ns_js_navigate_frame(js, frame, url);
+}
+
+gboolean
+ns_js_post_form_frame(ns_js *js, const ns_node *form, const char *url,
+                      char *body, gsize body_len, const char *content_type)
+{
+    return ns_js_post_frame(js, form ? ns_js_node_frame(form->parent) : NULL,
+                            url, body, body_len, content_type);
 }
 
 gboolean
 ns_js_navigate_form_frame(ns_js *js, const ns_node *form, const char *url)
 {
-    ns_node *frame = form ? ns_js_node_frame(form->parent) : NULL;
-    if (!js || !frame || !url || !*url) return FALSE;
-    gboolean is_object = ns_node_is_element_named(frame, "object");
-    ns_js_set_attr_recorded(js, frame, is_object ? "data" : "src", url);
-    ns_js_schedule_iframe_load_full(js, frame, TRUE);
-    return TRUE;
+    return ns_js_navigate_frame(js, form ? ns_js_node_frame(form->parent)
+                                         : NULL, url);
 }
 
 void
