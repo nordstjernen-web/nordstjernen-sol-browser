@@ -934,10 +934,9 @@ browser_url_continues_interstitial(const char *url, const char *from)
 }
 
 static gboolean
-browser_allows_navigation_url(ns_browser *b, const char *url)
+browser_allows_navigation_from(const char *from, const char *url)
 {
     if (!url) return TRUE;
-    const char *from = b ? b->base_url : NULL;
     if (g_ascii_strncasecmp(url, "file:", 5) == 0)
         return from && g_ascii_strncasecmp(from, "file:", 5) == 0;
     if (browser_url_is_privileged_page(url))
@@ -945,6 +944,20 @@ browser_allows_navigation_url(ns_browser *b, const char *url)
     if (g_str_has_prefix(url, NS_UNSAFE_CONTINUE_SCHEME))
         return browser_url_continues_interstitial(url, from);
     return TRUE;
+}
+
+static gboolean
+browser_allows_navigation_url(ns_browser *b, const char *url)
+{
+    return browser_allows_navigation_from(b ? b->base_url : NULL, url);
+}
+
+static gboolean
+browser_js_popup_allowed(const char *url, const char *opener_url, gpointer ud)
+{
+    ns_browser *b = ud;
+    const char *from = opener_url ? opener_url : (b ? b->base_url : NULL);
+    return browser_allows_navigation_from(from, url);
 }
 
 static char *
@@ -1505,6 +1518,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_scroll_to_cb(b->js, browser_js_scroll_to, b);
         ns_js_set_fragment_nav_cb(b->js, browser_js_fragment_navigate, b);
         ns_js_set_soft_nav_cb(b->js, browser_js_soft_navigate, b);
+        ns_js_set_popup_allowed_cb(b->js, browser_js_popup_allowed, b);
         ns_js_set_download_cb(b->js, browser_js_download, b);
         ns_js_set_clipboard_write_cb(b->js, browser_js_clipboard_write, b);
         ns_js_set_selection_cmd_cb(b->js, browser_js_selection_cmd, b);

@@ -714,6 +714,15 @@ ns_canvas_state_for(ns_js *js, const ns_node *el)
     return st;
 }
 
+void
+ns_canvas_state_forget_node(ns_js *js, const ns_node *n)
+{
+    if (!js || !js->canvas_states || !n) return;
+    ns_canvas_state *st = g_hash_table_lookup(js->canvas_states, n);
+    if (!st || st->owned_node == n) return;
+    g_hash_table_remove(js->canvas_states, n);
+}
+
 cairo_surface_t *
 ns_js_canvas_surface(ns_js *js, const ns_node *n)
 {
@@ -3346,7 +3355,7 @@ ns_canvas_get_2d(JSContext *ctx, ns_js *js, ns_canvas_state *st, const ns_node *
     JSValue obj = ns_ctx2d_new(ctx, el, canvas_obj, offscreen, attrs);
     if (JS_IsException(obj)) return obj;
     st->ctx2d = JS_DupValue(ctx, obj);
-    st->jsctx = js->ctx;
+    st->jsctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
     st->rt = JS_GetRuntime(ctx);
     st->context_kind = 1;
     return obj;

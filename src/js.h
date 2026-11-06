@@ -18,6 +18,7 @@ G_BEGIN_DECLS
 #define NS_JS_EVAL_BUDGET_MAX_MS 60000
 
 typedef struct ns_js ns_js;
+struct JSContext;
 typedef struct ns_js_drag_session ns_js_drag_session;
 
 typedef void (*ns_js_log_cb)(const char *line, gpointer user_data);
@@ -53,6 +54,8 @@ typedef void (*ns_js_fragment_nav_cb)(const char *url, gpointer user_data);
 typedef void (*ns_js_form_submit_cb)(const ns_node *form, const ns_node *submitter,
                                      gpointer user_data);
 typedef void (*ns_js_soft_nav_cb)(const char *url, gboolean replace, gpointer user_data);
+typedef gboolean (*ns_js_popup_allowed_cb)(const char *url, const char *opener_url,
+                                           gpointer user_data);
 typedef void (*ns_js_repaint_cb)(gpointer user_data);
 typedef void (*ns_js_layout_flush_cb)(gpointer user_data);
 typedef void (*ns_js_viewport_scroll_cb)(double *x, double *y, gpointer user_data);
@@ -122,6 +125,8 @@ void   ns_js_set_fragment_nav_cb(ns_js *js, ns_js_fragment_nav_cb cb,
                                  gpointer user_data);
 void   ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb,
                              gpointer user_data);
+void   ns_js_set_popup_allowed_cb(ns_js *js, ns_js_popup_allowed_cb cb,
+                                  gpointer user_data);
 void   ns_js_set_window_action_cb(ns_js *js, ns_js_window_action_cb cb,
                                   gpointer user_data);
 void   ns_js_window_action_applied(ns_js *js);
@@ -161,6 +166,7 @@ char    *ns_js_base_url_for_document(ns_js *js, const ns_node *doc,
                                      const char *document_url);
 const char *ns_js_current_url(const ns_js *js);
 const char *ns_js_storage_partition(const ns_js *js);
+const char *ns_js_realm_storage_partition(const ns_js *js, struct JSContext *realm);
 void   ns_js_dispatch_hashchange(ns_js *js,
                                  const char *old_url, const char *new_url);
 void   ns_js_free(ns_js *js);

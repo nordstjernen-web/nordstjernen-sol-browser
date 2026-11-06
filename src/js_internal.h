@@ -114,6 +114,8 @@ struct ns_js {
     gpointer      form_submit_user_data;
     ns_js_soft_nav_cb soft_nav_cb;
     gpointer      soft_nav_user_data;
+    ns_js_popup_allowed_cb popup_allowed_cb;
+    gpointer      popup_allowed_user_data;
     ns_js_repaint_cb repaint_cb;
     gpointer      repaint_user_data;
     ns_js_layout_flush_cb layout_flush_cb;
@@ -492,6 +494,7 @@ ns_canvas_parse_color(const char *s, double *r, double *g, double *b, double *a)
 gboolean ns_canvas_color_is_literal(const char *s);
 ns_canvas_state *
 ns_canvas_state_for(ns_js *js, const ns_node *el);
+void ns_canvas_state_forget_node(ns_js *js, const ns_node *n);
 ns_canvas_state *
 ns_ctx_state(JSContext *ctx, JSValueConst this_val);
 cairo_pattern_t *
