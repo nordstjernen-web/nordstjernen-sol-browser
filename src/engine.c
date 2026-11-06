@@ -2424,25 +2424,38 @@ pdf_bytes_append(void *closure, const unsigned char *data, unsigned int length)
 }
 
 static gboolean
+pdf_range_parse(const char **cursor, guint64 *from, guint64 *to)
+{
+    const char *p = *cursor;
+    char *end = NULL;
+    *from = 1;
+    if (*p != '-') {
+        *from = g_ascii_strtoull(p, &end, 10);
+        if (end == p) return FALSE;
+        p = end;
+    }
+    *to = *from;
+    if (*p == '-') {
+        p++;
+        *to = g_ascii_strtoull(p, &end, 10);
+        if (end == p) *to = G_MAXUINT;
+        p = end;
+    }
+    while (*p && *p != ',') p++;
+    *cursor = p;
+    return TRUE;
+}
+
+static gboolean
 pdf_page_selected(const char *ranges, guint page)
 {
     if (!ranges || !*ranges) return TRUE;
     for (const char *p = ranges; *p;) {
         while (*p == ' ' || *p == ',') p++;
         if (!*p) break;
-        char *end = NULL;
-        guint64 from = *p == '-' ? 1 : g_ascii_strtoull(p, &end, 10);
-        if (*p != '-' && end == p) return FALSE;
-        if (end) p = end;
-        guint64 to = from;
-        if (*p == '-') {
-            p++;
-            to = g_ascii_strtoull(p, &end, 10);
-            if (end == p) to = G_MAXUINT;
-            p = end;
-        }
+        guint64 from = 0, to = 0;
+        if (!pdf_range_parse(&p, &from, &to)) return FALSE;
         if (page >= from && page <= to) return TRUE;
-        while (*p && *p != ',') p++;
     }
     return FALSE;
 }
@@ -2557,6 +2570,51 @@ pdf_add_outline(cairo_surface_t *surf, const GArray *headings,
     }
 }
 
+static void
+pdf_set_job_metadata(cairo_surface_t *surf, const ns_engine_pdf *job)
+{
+    pdf_set_metadata(surf);
+    if (job->title && *job->title)
+        cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_TITLE,
+                                       job->title);
+    if (job->author && *job->author)
+        cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_AUTHOR,
+                                       job->author);
+    if (job->creation_date && *job->creation_date)
+        cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_CREATE_DATE,
+                                       job->creation_date);
+}
+
+static void
+pdf_job_date(const ns_engine_pdf *job, char *date, size_t size)
+{
+    if (job->creation_date && strlen(job->creation_date) >= 10) {
+        g_strlcpy(date, job->creation_date, MIN(size, 11));
+        return;
+    }
+    time_t now = time(NULL);
+    struct tm *local = localtime(&now);
+    if (local)
+        strftime(date, size, "%Y-%m-%d", local);
+}
+
+static void
+pdf_draw_margin_texts(cairo_t *cr, const ns_print_setup *setup,
+                      const ns_engine_pdf *job, guint page, guint pages,
+                      const char *date)
+{
+    for (int slot = 0; slot < 3; slot++) {
+        for (int footer = 0; footer < 2; footer++) {
+            const char *tpl = footer ? job->footer[slot] : job->header[slot];
+            if (!tpl || !*tpl) continue;
+            char *text = pdf_expand_template(tpl, page, pages, job, date);
+            ns_print_draw_margin_text(cr, setup, NS_PRINT_PT_PER_PX, text,
+                                      slot, footer);
+            g_free(text);
+        }
+    }
+}
+
 GByteArray *
 ns_engine_pdf_bytes(const ns_box *root, const ns_print_setup *setup,
                     const ns_engine_pdf *job, int *out_pages)
@@ -2577,23 +2635,9 @@ ns_engine_pdf_bytes(const ns_box *root, const ns_print_setup *setup,
         g_byte_array_free(pdf, TRUE);
         return NULL;
     }
-    pdf_set_metadata(surf);
-    if (job->title && *job->title)
-        cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_TITLE,
-                                       job->title);
-    if (job->author && *job->author)
-        cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_AUTHOR,
-                                       job->author);
-    if (job->creation_date && *job->creation_date)
-        cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_CREATE_DATE,
-                                       job->creation_date);
+    pdf_set_job_metadata(surf, job);
     char date[16] = "";
-    time_t now = time(NULL);
-    struct tm *local = localtime(&now);
-    if (job->creation_date && strlen(job->creation_date) >= 10)
-        g_strlcpy(date, job->creation_date, 11);
-    else if (local)
-        strftime(date, sizeof date, "%Y-%m-%d", local);
+    pdf_job_date(job, date, sizeof date);
 
     GArray *offsets = ns_print_page_offsets(root, page_h);
     GArray *links = ns_print_links(root);
@@ -2610,16 +2654,7 @@ ns_engine_pdf_bytes(const ns_box *root, const ns_print_setup *setup,
         double bottom = ns_print_page_bottom(offsets, i, page_h);
         ns_print_draw_page_scaled(cr, root, setup, NS_PRINT_PT_PER_PX, scale,
                                   top, bottom);
-        for (int slot = 0; slot < 3; slot++) {
-            for (int footer = 0; footer < 2; footer++) {
-                const char *tpl = footer ? job->footer[slot] : job->header[slot];
-                if (!tpl || !*tpl) continue;
-                char *text = pdf_expand_template(tpl, i + 1, total, job, date);
-                ns_print_draw_margin_text(cr, setup, NS_PRINT_PT_PER_PX, text,
-                                          slot, footer);
-                g_free(text);
-            }
-        }
+        pdf_draw_margin_texts(cr, setup, job, i + 1, total, date);
         cairo_save(cr);
         cairo_scale(cr, NS_PRINT_PT_PER_PX, NS_PRINT_PT_PER_PX);
         pdf_tag_links(cr, links, setup, scale, top, bottom);

@@ -183,33 +183,42 @@ keep_together(const ns_box *prev, const ns_box *next, ns_print_scan *scan)
     add_span(scan->spans, from, to, scan->page_h);
 }
 
+static gboolean
+collect_own_breaks(const ns_box *b, ns_print_scan *scan, double top,
+                   double bottom)
+{
+    if (!b->parent) return FALSE;
+    if (forces_page_break(break_keyword(b, NS_CSS_BREAK_BEFORE)))
+        g_array_append_val(scan->forced, top);
+    if (forces_page_break(break_keyword(b, NS_CSS_BREAK_AFTER)))
+        g_array_append_val(scan->forced, bottom);
+    gboolean whole = b->kind == NS_BOX_TABLE_ROW ||
+        avoids_page_break(break_keyword(b, NS_CSS_BREAK_INSIDE));
+    if (!whole || bottom - top > scan->page_h) return FALSE;
+    add_span(scan->spans, top, bottom, scan->page_h);
+    add_content(scan->content, top, bottom);
+    return TRUE;
+}
+
+static void
+collect_leaf(const ns_box *b, ns_print_scan *scan, double top, double bottom)
+{
+    if (b->kind == NS_BOX_INLINE && b->text && *b->text)
+        add_text_line_spans(scan->spans, b, top, bottom, scan->page_h);
+    else
+        add_span(scan->spans, top, bottom, scan->page_h);
+    add_content(scan->content, top, bottom);
+}
+
 static void
 collect_breaks(const ns_box *b, ns_print_scan *scan)
 {
     if (!b) return;
     double top, bottom;
     box_page_extent(b, &top, &bottom);
-
-    if (b->parent) {
-        if (forces_page_break(break_keyword(b, NS_CSS_BREAK_BEFORE)))
-            g_array_append_val(scan->forced, top);
-        if (forces_page_break(break_keyword(b, NS_CSS_BREAK_AFTER)))
-            g_array_append_val(scan->forced, bottom);
-        gboolean whole = b->kind == NS_BOX_TABLE_ROW ||
-            avoids_page_break(break_keyword(b, NS_CSS_BREAK_INSIDE));
-        if (whole && bottom - top <= scan->page_h) {
-            add_span(scan->spans, top, bottom, scan->page_h);
-            add_content(scan->content, top, bottom);
-            return;
-        }
-    }
-
+    if (collect_own_breaks(b, scan, top, bottom)) return;
     if (!b->first_child) {
-        if (b->kind == NS_BOX_INLINE && b->text && *b->text)
-            add_text_line_spans(scan->spans, b, top, bottom, scan->page_h);
-        else
-            add_span(scan->spans, top, bottom, scan->page_h);
-        add_content(scan->content, top, bottom);
+        collect_leaf(b, scan, top, bottom);
         return;
     }
     const ns_box *prev = NULL;
@@ -358,33 +367,46 @@ ns_print_draw_page_scaled(cairo_t *cr, const ns_box *root,
 }
 
 static void
+add_link_rects(const ns_box *b, const ns_link_range *r, GArray *rects,
+               GArray *out)
+{
+    g_array_set_size(rects, 0);
+    if (!ns_paint_inline_range_rects(b, r->start, r->len, NULL, rects))
+        return;
+    for (guint k = 0; k + 3 < rects->len; k += 4) {
+        ns_print_link link = {
+            .x = g_array_index(rects, double, k) + b->x,
+            .y = g_array_index(rects, double, k + 1) + b->y,
+            .w = g_array_index(rects, double, k + 2),
+            .h = g_array_index(rects, double, k + 3),
+            .uri = g_strdup(r->href),
+        };
+        if (link.w > 0 && link.h > 0 && out->len < NS_PRINT_MAX_SPANS)
+            g_array_append_val(out, link);
+        else
+            g_free(link.uri);
+    }
+}
+
+static void
+collect_text_links(const ns_box *b, GArray *out)
+{
+    if (b->kind != NS_BOX_INLINE || !b->links || !b->text || b->vertical_wm)
+        return;
+    GArray *rects = g_array_new(FALSE, FALSE, sizeof(double));
+    for (guint i = 0; i < b->links->len; i++) {
+        const ns_link_range *r = &g_array_index(b->links, ns_link_range, i);
+        if (r->href && *r->href && r->len > 0)
+            add_link_rects(b, r, rects, out);
+    }
+    g_array_free(rects, TRUE);
+}
+
+static void
 collect_links(const ns_box *b, GArray *out)
 {
     if (!b) return;
-    if (b->kind == NS_BOX_INLINE && b->links && b->text && !b->vertical_wm) {
-        GArray *rects = g_array_new(FALSE, FALSE, sizeof(double));
-        for (guint i = 0; i < b->links->len; i++) {
-            const ns_link_range *r = &g_array_index(b->links, ns_link_range, i);
-            if (!r->href || !*r->href || r->len == 0) continue;
-            g_array_set_size(rects, 0);
-            if (!ns_paint_inline_range_rects(b, r->start, r->len, NULL, rects))
-                continue;
-            for (guint k = 0; k + 3 < rects->len; k += 4) {
-                ns_print_link link = {
-                    .x = g_array_index(rects, double, k) + b->x,
-                    .y = g_array_index(rects, double, k + 1) + b->y,
-                    .w = g_array_index(rects, double, k + 2),
-                    .h = g_array_index(rects, double, k + 3),
-                    .uri = g_strdup(r->href),
-                };
-                if (link.w > 0 && link.h > 0 && out->len < NS_PRINT_MAX_SPANS)
-                    g_array_append_val(out, link);
-                else
-                    g_free(link.uri);
-            }
-        }
-        g_array_free(rects, TRUE);
-    }
+    collect_text_links(b, out);
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         collect_links(c, out);
     if (b->inline_atomics)

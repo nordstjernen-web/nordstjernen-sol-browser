@@ -2192,6 +2192,36 @@ browser_pdf_layout(ns_browser *browser, const ns_print_setup *setup,
     return changed;
 }
 
+static void
+browser_pdf_lay_out(ns_browser *browser, const ns_pdf_options *o,
+                    ns_print_setup *setup, double scale)
+{
+    if (!o->screen_media) ns_css_set_print_media(TRUE);
+    browser_pdf_layout(browser, setup, scale);
+    browser_relayout(browser);
+    const ns_css_page_rule *rule =
+        o->ignore_css_page_size ? NULL : ns_render_page_rule();
+    if (rule) {
+        ns_print_setup_apply_page_rule(setup, rule);
+        if (browser_pdf_layout(browser, setup, scale))
+            browser_relayout(browser);
+    }
+    browser_wait_images(browser);
+}
+
+static unsigned char *
+browser_take_bytes(GByteArray *bytes, size_t *out_len)
+{
+    if (!bytes) return NULL;
+    unsigned char *out = malloc(bytes->len ? bytes->len : 1);
+    if (out) {
+        memcpy(out, bytes->data, bytes->len);
+        *out_len = bytes->len;
+    }
+    g_byte_array_free(bytes, TRUE);
+    return out;
+}
+
 unsigned char *
 ns_browser_render_pdf(ns_browser *browser, const ns_pdf_options *options,
                       size_t *out_len, int *out_pages)
@@ -2212,17 +2242,7 @@ ns_browser_render_pdf(ns_browser *browser, const ns_pdf_options *options,
     int saved_vw = browser->vw;
     double saved_vh = browser->vh;
 
-    if (!o->screen_media) ns_css_set_print_media(TRUE);
-    browser_pdf_layout(browser, &setup, scale);
-    browser_relayout(browser);
-    const ns_css_page_rule *rule =
-        o->ignore_css_page_size ? NULL : ns_render_page_rule();
-    if (rule) {
-        ns_print_setup_apply_page_rule(&setup, rule);
-        if (browser_pdf_layout(browser, &setup, scale))
-            browser_relayout(browser);
-    }
-    browser_wait_images(browser);
+    browser_pdf_lay_out(browser, o, &setup, scale);
 
     char *title = o->title ? NULL : ns_browser_title(browser);
     char *url = ns_browser_url(browser);
@@ -2253,14 +2273,7 @@ ns_browser_render_pdf(ns_browser *browser, const ns_pdf_options *options,
     browser_relayout(browser);
     free(ns_browser_eval(browser, "window.dispatchEvent(new Event('afterprint'))"));
 
-    if (!pdf) return NULL;
-    unsigned char *out = malloc(pdf->len ? pdf->len : 1);
-    if (out) {
-        memcpy(out, pdf->data, pdf->len);
-        *out_len = pdf->len;
-    }
-    g_byte_array_free(pdf, TRUE);
-    return out;
+    return browser_take_bytes(pdf, out_len);
 }
 
 GPtrArray *
