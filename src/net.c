@@ -6735,10 +6735,13 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         g_strdup_printf("Accept-Language: %s", request_language);
     g_autofree char *vary_agent =
         g_strdup_printf("User-Agent: %s", effective_ua);
+    gboolean frame_navigation = !is_navigation &&
+        ns_net_dest_is_nested_navigation(ns_net_fetch_destination(extra_headers));
     const char *request_origin = initiator
         ? (is_simple_get(method) ? ""
                                  : ns_net_request_origin(url, initiator,
                                                          initiator, method))
+        : frame_navigation && is_simple_get(method) ? ""
         : ns_net_request_origin(url, top_url, top_origin, method);
     g_autofree char *vary_origin =
         g_strdup_printf("Origin: %s", request_origin);
@@ -6912,9 +6915,11 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             fetch_mode = "navigate";
         } else if (ns_net_dest_is_worker(fetch_dest)) {
             fetch_mode = "same-origin";
-        } else if (method && *method &&
-                   g_ascii_strcasecmp(method, "GET") != 0 &&
-                   g_ascii_strcasecmp(method, "HEAD") != 0) {
+        } else if (ns_fetch_wants_cors(extra_headers) ||
+                   strcmp(fetch_dest, "font") == 0 ||
+                   (method && *method &&
+                    g_ascii_strcasecmp(method, "GET") != 0 &&
+                    g_ascii_strcasecmp(method, "HEAD") != 0)) {
             fetch_mode = "cors";
         } else {
             fetch_mode = "no-cors";

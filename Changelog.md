@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Network: `fetch()` and XMLHttpRequest GETs say `Sec-Fetch-Mode: cors`.
+  The header was derived from the method alone, so every GET that was not
+  a navigation went out as `no-cors`, which describes an `<img>` or a
+  `<script>`, not a script-made request; servers that screen requests by
+  their fetch metadata refused them. Requests the engine already knows to
+  be CORS requests (fetch, XHR, sendBeacon) and font loads now say
+  `cors`. A frame navigation with GET no longer carries an `Origin`
+  header. Reddit's front page stopped after its first 8 posts and now
+  continues to 66.
 * Layout: an `<iframe>` styled `display: flex`, `grid`, `inline-flex` or
   `table` shows its document. The frame's box became a flex or grid
   container and its document, which is not an element, was not laid out
