@@ -3,6 +3,12 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: closing a page used a freed table. Tearing a page down
+  destroyed its canvas-state table and left the pointer in place, then
+  freed the DOM nodes that scripts had detached; freeing a node looks its
+  canvas state up, in the table that was already gone. Leaving a YouTube
+  watch page for another site hung the renderer in that lookup about two
+  times in three. The pointer is cleared with the table.
 * Network: the HSTS store is kept in memory and written only when it
   changes. Every request handed libcurl the HSTS file, which libcurl read
   at the start of the transfer, on the one thread that drives all
