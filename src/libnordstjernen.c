@@ -1971,6 +1971,29 @@ ns_browser_open_post_viewport(const char *url, int viewport_width,
                                body, body_len, content_type);
 }
 
+ns_browser *
+ns_browser_open_html(const char *html, const char *base_url,
+                     int viewport_width, double viewport_height,
+                     int settle_ms)
+{
+    if (!html) return NULL;
+    g_clear_pointer(&g_pending_referrer, g_free);
+    g_clear_pointer(&g_pending_initiator, g_free);
+    g_pending_user_activated = -1;
+    g_pending_reload = FALSE;
+    const char *url = base_url && *base_url ? base_url : "about:blank";
+    g_autofree char *valid = g_utf8_validate(html, -1, NULL)
+        ? NULL : g_utf8_make_valid(html, -1);
+    const char *text = valid ? valid : html;
+    const ns_config *cfg = ns_config_get();
+    ns_node *doc = ns_html_parse_with_scripting(
+        text, (gssize)strlen(text), !cfg || cfg->javascript_enabled);
+    return browser_build_from_doc(doc, g_strdup(url), viewport_width,
+                                  viewport_height, settle_ms, FALSE,
+                                  NULL, NULL, NULL, g_strdup("UTF-8"),
+                                  url, NULL);
+}
+
 char *
 ns_browser_render_text(ns_browser *browser)
 {

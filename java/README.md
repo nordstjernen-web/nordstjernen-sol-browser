@@ -125,6 +125,30 @@ try (Engine engine = Engine.launch();
   that is deleted when the context closes. `ContextOptions.persistent(dir)`
   keeps a profile between runs, `ContextOptions.inMemory()` writes nothing to
   disk, and `engine.userContext()` is this user's own Nordstjernen profile.
+- **HTML from a string.** `page.setContent(html, baseUrl)` shows markup you
+  already hold; the base URL resolves its relative links and decides its
+  origin, and may be a `file:` directory. `HtmlRenderer` wraps the common
+  case in one call:
+
+  ```java
+  try (HtmlRenderer renderer = HtmlRenderer.create()) {   // loads nothing from outside the document
+      byte[] pdf = renderer.pdf("<h1>Invoice 42</h1>");
+      byte[] png = renderer.png("<h1>Invoice 42</h1>", 800);
+  }
+  ```
+- **What a page may load.** A `ResourcePolicy` covers every request a page
+  causes, redirects, `fetch`, WebSocket and EventSource included:
+  `ResourcePolicy.none()` (no network, no files), `publicWeb()` (no local
+  files and no private or loopback address, also when a public name resolves
+  to one), or `allowAll()` narrowed with `allowHosts("example.com",
+  "*.example.com")`, `denyHosts(...)`, `files(false)` and
+  `privateNetwork(false)`. Set it for a context with
+  `ContextOptions.withResourcePolicy` or for one page with
+  `page.setResourcePolicy`. Use `publicWeb()` or stricter for HTML and URLs
+  you do not trust when the JVM can reach internal services.
+- **How pages present themselves.** `ContextOptions` also takes
+  `withUserAgent`, `withAcceptLanguage`, `withProxy` / `withProxyBypass`,
+  `withJavaScript(false)`, `withImages(false)` and `withColorScheme`.
 - **PDF.** `pdf()` lays the page out again for the sheet with its print styles
   and cuts it into pages between lines, table rows and boxes that ask to stay
   whole. `PdfOptions` sets the sheet, margins, scale, page ranges, metadata

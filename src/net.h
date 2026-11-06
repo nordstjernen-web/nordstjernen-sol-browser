@@ -293,6 +293,8 @@ typedef enum {
 typedef struct ns_net_address_guard {
     ns_address_space document_space;
     gboolean         blocked;
+    gboolean         by_policy;
+    gboolean         proxied;
 } ns_net_address_guard;
 
 void  ns_net_address_guard_init(ns_net_address_guard *guard,
@@ -300,7 +302,12 @@ void  ns_net_address_guard_init(ns_net_address_guard *guard,
                                 const char *request_url);
 void  ns_net_apply_curl_address_guard(void *curl_handle,
                                       ns_net_address_guard *guard);
-const char *ns_net_address_guard_message(void);
+const char *ns_net_address_guard_message(const ns_net_address_guard *guard);
+void  ns_net_policy_set(gboolean offline, gboolean block_file,
+                        gboolean block_private, const char *allow_hosts,
+                        const char *deny_hosts);
+gboolean ns_net_policy_allows(const char *url);
+const char *ns_net_policy_message(void);
 const char *ns_net_proxy_override(void);
 const char *ns_net_http_proxy(void);
 const char *ns_net_https_proxy(void);

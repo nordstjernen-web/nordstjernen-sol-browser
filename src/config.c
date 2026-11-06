@@ -268,6 +268,7 @@ static const struct { const char *env; const char *key; } env_disable[] = {
 static const struct { const char *env; const char *key; } env_value[] = {
     { "NS_HOME_URL",    "home_url"    },
     { "NS_USER_AGENT",  "user_agent"  },
+    { "NS_ACCEPT_LANGUAGE", "accept_language" },
     { "NS_COMPAT_MODE", "compat_mode" },
     { "NS_HTTP_PROXY",  "http_proxy"  },
     { "NS_HTTPS_PROXY", "https_proxy" },

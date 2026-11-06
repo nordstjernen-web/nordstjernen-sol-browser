@@ -360,6 +360,10 @@ ns_es_connect_once(ns_es *es, const char *url, gboolean *opened_out,
                    char **location_out)
 {
     *location_out = NULL;
+    if (!ns_net_policy_allows(url)) {
+        *opened_out = FALSE;
+        return FALSE;
+    }
     CURL *curl = curl_easy_init();
     if (!curl) return FALSE;
 

@@ -430,6 +430,12 @@ static gpointer
 ns_ws_worker_curl(gpointer data)
 {
     ns_ws *ws = data;
+    if (!ns_net_policy_allows(ws->url)) {
+        ns_ws_dispatch_error(ws, ns_net_policy_message());
+        ns_ws_dispatch_close(ws, 1006, ns_net_policy_message(), FALSE);
+        ns_ws_unref(ws);
+        return NULL;
+    }
     CURL *curl = curl_easy_init();
     if (!curl) {
         ns_ws_dispatch_error(ws, "curl init failed");
@@ -481,7 +487,7 @@ ns_ws_worker_curl(gpointer data)
 
     if (rc != CURLE_OK || g_atomic_int_get(&ws->exit_requested)) {
         const char *msg = address_guard.blocked
-            ? ns_net_address_guard_message()
+            ? ns_net_address_guard_message(&address_guard)
             : rc != CURLE_OK
             ? (errbuf[0] ? errbuf : curl_easy_strerror(rc))
             : "aborted";
