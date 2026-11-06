@@ -8,6 +8,12 @@ Changelog:
   of the item no longer adds to it. List text started about 10 px further
   left than in other browsers and wrapped at different words; the Top 10
   list on linux.org.ru now breaks its lines where Chrome does.
+* Layout: an image whose width comes from its height and aspect ratio
+  contributes its real width to a flex container's size. The max-content
+  measure of a replaced element that had not been laid out yet fell back
+  to a fixed 200 px, so a `display:flex` link holding a 93 px logo
+  (`<img height=30>`) took 200 px of the row. On mail.ru that pushed the
+  project links right and the page's overflow logic hid two of them.
 * Fetch: a `Request` has a `signal`, and its attributes live on
   `Request.prototype` as in other browsers. The attributes were own data
   properties of each object and `signal` did not exist, so

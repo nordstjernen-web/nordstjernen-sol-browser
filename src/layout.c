@@ -10564,6 +10564,14 @@ replaced_auto_width(const ns_box *box)
     return box->media && box->media->placeholder_image_size ? 200 : 0;
 }
 
+static double
+replaced_measured_width(const ns_box *box)
+{
+    if (box->content_width > 0) return box->content_width;
+    double w = replaced_auto_width(box);
+    return w > 0 ? w : 200;
+}
+
 static gboolean
 replaced_width_is_cyclic(const ns_box *box)
 {
@@ -11014,8 +11022,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
             double styled = length_resolve(wv, inline_atomic_measure_basis(box), -1);
             if (styled >= 0) return replaced_contribution_limits(box, styled);
         }
-        return replaced_contribution_limits(
-            box, box->content_width > 0 ? box->content_width : 200);
+        return replaced_contribution_limits(box, replaced_measured_width(box));
     }
     if (box->kind == NS_BOX_TEXT) {
         return box->content_width > 0 ? box->content_width : 0;
@@ -11312,8 +11319,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
             double styled = length_resolve(wv, inline_atomic_measure_basis(box), -1);
             if (styled >= 0) return replaced_contribution_limits(box, styled);
         }
-        return replaced_contribution_limits(
-            box, box->content_width > 0 ? box->content_width : 200);
+        return replaced_contribution_limits(box, replaced_measured_width(box));
     }
     if (box->kind == NS_BOX_TEXT)
         return box->content_width > 0 ? box->content_width : 0;
