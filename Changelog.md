@@ -77,6 +77,14 @@ Changelog:
   embedding page's databases, in private mode as well. A cross-origin frame
   could not reach the backend in practice (its `indexedDB` getter is denied
   before the polyfill runs), but the partition no longer relies on that.
+* Security: canvas 2D state no longer outlives the document that drew it.
+  The table of canvas surfaces was keyed by the node's address and cleared
+  only at renderer exit, so after a navigation a new page whose `<canvas>`
+  landed at a recycled address could receive the previous page's drawing
+  context and pixels, and a resize could re-initialise that context through
+  a frame's already freed JavaScript context. The table is now dropped on
+  every navigation, an entry goes away with its node, and state is
+  re-initialised through the main realm's context.
 * Printing: paged PDF from a program. Until now only the command line
   (`--dump=print:FILE`) could reach the paginator; the C API, the engine
   protocol and Java all wrote one page as tall as the document, laid out for

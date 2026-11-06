@@ -4901,6 +4901,7 @@ ns_invalidate_wrapper(ns_node *n)
         g_hash_table_remove(js->orphan_nodes, n);
     if (js && js->js_image_loads)
         g_hash_table_remove(js->js_image_loads, n);
+    ns_canvas_state_forget_node(js, n);
     if (js && js->focus_nav_start == n) js->focus_nav_start = NULL;
     if (js && js->focused_node == n) js->focused_node = NULL;
     if (js && js->change_pending == n) ns_js_forget_pending_change(js);
@@ -65967,6 +65968,7 @@ static void
 ns_js_reset_runtime_state(ns_js *js)
 {
     if (!js) return;
+    g_clear_pointer(&js->canvas_states, g_hash_table_destroy);
     ns_js_webauthn_reset(js);
     ns_popover_state_clear(js);
     js->focused_node = NULL;
