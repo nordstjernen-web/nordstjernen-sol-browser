@@ -483,8 +483,8 @@ static void ns_js_link_interfaces(JSContext *ctx);
 static void ns_js_setup_window_globals(ns_js *js, JSContext *ctx);
 static void ns_js_setup_document_interfaces(ns_js *js, JSContext *ctx,
                                             JSValueConst global);
-static void ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx,
-                                      gboolean main_realm);
+static void ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx);
+static void ns_document_protos_install_api(JSContext *ctx, JSValueConst global);
 
 typedef struct {
     GMutex        lock;
@@ -15479,6 +15479,22 @@ ns_message_event_source(JSContext *ctx, ns_js *js, JSValueConst receiver,
     }
     JS_FreeValue(ctx, real);
     return source;
+}
+
+static JSValue
+ns_iframe_same_origin_window(JSContext *ctx, JSValueConst this_val, int argc,
+                             JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || argc < 1 || !JS_IsObject(argv[0])) return JS_NULL;
+    JSValue forwarded = ns_window_forward_of(js, argv[0]);
+    JSValue window = JS_IsObject(forwarded) ? forwarded
+                                            : JS_DupValue(ctx, argv[0]);
+    if (ns_realms_same_origin(js, ctx, ns_window_owning_realm(js, window)))
+        return window;
+    JS_FreeValue(ctx, window);
+    return JS_NULL;
 }
 
 static void
@@ -53476,7 +53492,7 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents, nativeFetch, frameStorage, nativeRealm, frameNavigate){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents, nativeFetch, frameStorage, nativeRealm, frameNavigate, sameOriginWindow){"
     "  var url = initialURL || 'about:blank';"
     "  var shown = docURL || '';"
     "  function vis(){ return shown || url; }"
@@ -53500,7 +53516,10 @@ static const char ns_iframe_global_bootstrap[] =
     "      if (typeof p !== 'string' || typeof childFrameOf !== 'function') return undefined;"
     "      var child;"
     "      try { child = childFrameOf(target, p); } catch (e) { return undefined; }"
-    "      return child && typeof child === 'object' ? crossWindow(child, proxy) : undefined; }"
+    "      if (!child || typeof child !== 'object') return undefined;"
+    "      var own = sameOriginWindow(child);"
+    "      if (own === G) return win;"
+    "      return own || crossWindow(child, proxy); }"
     "    loc = crossLocation(target, denied);"
     "    proxy = new Proxy({}, {"
     "      get:function(t,p){"
@@ -54841,6 +54860,7 @@ ns_iframe_build_native_globals(ns_js *js, JSContext *fctx)
     ns_realm_state_swap(js, &frame);
     ns_js_setup_window_globals(js, fctx);
     JSValue global = JS_GetGlobalObject(fctx);
+    ns_document_protos_install_api(fctx, global);
     ns_js_setup_document_interfaces(js, fctx, global);
     JS_FreeValue(fctx, global);
     ns_realm_state_swap(js, &frame);
@@ -54880,7 +54900,7 @@ ns_iframe_run_native_scripts(ns_js *js, JSContext *fctx)
     frame.dom_protos_set = js->dom_protos_set;
     frame.live_protos_set = js->live_protos_set;
     ns_realm_state_swap(js, &frame);
-    ns_js_setup_realm_scripts(js, fctx, FALSE);
+    ns_js_setup_realm_scripts(js, fctx);
     ns_realm_state_swap(js, &frame);
     ns_realm_state_clear(fctx, &frame);
 }
@@ -54996,13 +55016,16 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         JSValue frame_navigate = iframe
             ? JS_NewCFunctionData(fctx, ns_frame_scope_navigate, 1, 0, 1, &frame_el)
             : JS_UNDEFINED;
-        JSValueConst args[17] = { fg, parent_global, iframe_doc, urlv, sbv,
+        JSValue same_origin_window = JS_NewCFunction(fctx,
+            ns_iframe_same_origin_window, "sameOriginWindow", 1);
+        JSValueConst args[18] = { fg, parent_global, iframe_doc, urlv, sbv,
                                   platform, frame_el, frame_name_v,
                                   child_frame_of, post_message, docv,
                                   realm_clone, window_events, native_fetch,
                                   frame_storage, JS_NewBool(fctx, native),
-                                  frame_navigate };
-        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 17, args);
+                                  frame_navigate, same_origin_window };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 18, args);
+        JS_FreeValue(fctx, same_origin_window);
         JS_FreeValue(fctx, frame_navigate);
         JS_FreeValue(fctx, frame_storage);
         JS_FreeValue(fctx, native_fetch);
@@ -66610,7 +66633,7 @@ ns_js_eval_engine_bundle(ns_js *js, ns_engine_bundle *bundle,
 }
 
 static void
-ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx, gboolean main_realm)
+ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx)
 {
     ns_js_eval_engine_bundle(js, &ns_polyfills_bundle, "<polyfills>");
     ns_js_eval_engine_bundle(js, &ns_streaming_bundle, "<streaming>");
@@ -66628,10 +66651,11 @@ ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx, gboolean main_realm)
     ns_js_link_interface_ctors(ctx);
     ns_js_lock_global_prototypes(ctx);
     ns_realm_protos_capture(ctx);
-    if (main_realm) {
+    {
         JSValue g = JS_GetGlobalObject(ctx);
         JSValue doc_val = JS_GetPropertyStr(ctx, g, "document");
-        ns_document_lift_methods_to_proto(ctx, doc_val);
+        if (JS_IsObject(doc_val))
+            ns_document_lift_methods_to_proto(ctx, doc_val);
         JS_FreeValue(ctx, doc_val);
         JS_FreeValue(ctx, g);
     }
@@ -66639,6 +66663,36 @@ ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx, gboolean main_realm)
     ns_install_element_shapes(ctx);
     ns_js_brand_node_interfaces(ctx, ns_element_class_id, ns_attr_class_id);
     ns_js_shape_interface_objects(ctx);
+}
+
+static void
+ns_document_protos_install_api(JSContext *ctx, JSValueConst global)
+{
+    static const char *const doc_proto_ctors[] = {
+        "Document", "HTMLDocument", NULL
+    };
+    for (int i = 0; doc_proto_ctors[i]; i++) {
+        JSValue proto = ns_proto_of(ctx, global, doc_proto_ctors[i]);
+        if (JS_IsObject(proto)) {
+            JS_SetPropertyFunctionList(ctx, proto, ns_document_proto_methods,
+                                       G_N_ELEMENTS(ns_document_proto_methods));
+            JS_SetPropertyFunctionList(ctx, proto, ns_document_proto_accessors,
+                                       G_N_ELEMENTS(ns_document_proto_accessors));
+            JS_DefinePropertyValueStr(ctx, proto, "open",
+                JS_NewCFunction(ctx, ns_document_open, "open", 0),
+                JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+            JS_DefinePropertyValueStr(ctx, proto, "close",
+                JS_NewCFunction(ctx, ns_document_close, "close", 0),
+                JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+            JS_DefinePropertyValueStr(ctx, proto, "write",
+                JS_NewCFunction(ctx, ns_document_write, "write", 1),
+                JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+            JS_DefinePropertyValueStr(ctx, proto, "writeln",
+                JS_NewCFunction(ctx, ns_document_writeln, "writeln", 1),
+                JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        }
+        JS_FreeValue(ctx, proto);
+    }
 }
 
 static void
@@ -66729,33 +66783,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         }
         JS_FreeValue(ctx, doc_ctor);
     }
-    {
-        static const char *const doc_proto_ctors[] = {
-            "Document", "HTMLDocument", NULL
-        };
-        for (int i = 0; doc_proto_ctors[i]; i++) {
-            JSValue proto = ns_proto_of(ctx, global, doc_proto_ctors[i]);
-            if (JS_IsObject(proto)) {
-                JS_SetPropertyFunctionList(ctx, proto, ns_document_proto_methods,
-                                           G_N_ELEMENTS(ns_document_proto_methods));
-                JS_SetPropertyFunctionList(ctx, proto, ns_document_proto_accessors,
-                                           G_N_ELEMENTS(ns_document_proto_accessors));
-                JS_DefinePropertyValueStr(ctx, proto, "open",
-                    JS_NewCFunction(ctx, ns_document_open, "open", 0),
-                    JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-                JS_DefinePropertyValueStr(ctx, proto, "close",
-                    JS_NewCFunction(ctx, ns_document_close, "close", 0),
-                    JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-                JS_DefinePropertyValueStr(ctx, proto, "write",
-                    JS_NewCFunction(ctx, ns_document_write, "write", 1),
-                    JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-                JS_DefinePropertyValueStr(ctx, proto, "writeln",
-                    JS_NewCFunction(ctx, ns_document_writeln, "writeln", 1),
-                    JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-            }
-            JS_FreeValue(ctx, proto);
-        }
-    }
+    ns_document_protos_install_api(ctx, global);
     ns_document_expose_legacy_named(js, js->current_doc, document);
     JS_SetPropertyStr(ctx, global, "document", document);
 
@@ -66795,7 +66823,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
 
     JS_FreeValue(ctx, global);
 
-    ns_js_setup_realm_scripts(js, ctx, TRUE);
+    ns_js_setup_realm_scripts(js, ctx);
 }
 
 void
@@ -66948,7 +66976,7 @@ ns_js_free(ns_js *js)
         }
         g_array_free(js->raf_pending, TRUE);
     }
-    if (js->canvas_states) g_hash_table_destroy(js->canvas_states);
+    g_clear_pointer(&js->canvas_states, g_hash_table_destroy);
     if (js->js_image_loads) {
         g_hash_table_destroy(js->js_image_loads);
         js->js_image_loads = NULL;

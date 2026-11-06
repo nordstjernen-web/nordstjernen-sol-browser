@@ -11,6 +11,31 @@ Changelog:
   that host as its `Origin`; an application frame whose bundle comes from
   a CDN sent its start-up requests to the CDN. Gmail's widget frames
   posted their error reports to `www.gstatic.com` this way.
+* Frames: `Document.prototype` in a cross-origin frame carries the
+  document's members. A frame's realm got its document with every method
+  as an own property and a bare `Document.prototype`, so
+  `Document.prototype.createElement.call(document, 'div')` and
+  `Object.getOwnPropertyDescriptor(Document.prototype, 'cookie')` failed
+  with "Cannot read properties of undefined", reading
+  `Document.prototype.write` threw, and a script that replaced
+  `Document.prototype.createElement` saw none of the calls. The frame's
+  prototypes now get the members the top document's do and the frame
+  document's own methods move onto its prototype.
+* Frames: a frame reaches a same-origin sibling through its cross-origin
+  parent. `parent[name]`, `parent.frames[name]` and `parent[index]` gave
+  an opaque proxy for every child of a cross-origin parent, also for a
+  child with the reader's own origin, so a callback path such as
+  `parent['brain']._frameReady` threw SecurityError. The frame now gets
+  the sibling's real window when the origins recorded for the two realms
+  match, its own window for its own name, and the proxy otherwise. Gmail's
+  Chat frames start this way: the Chat view's navigation was empty with
+  five SecurityErrors in the console and now lists the conversations.
+* Security: closing a page used a freed table. Tearing a page down
+  destroyed its canvas-state table and left the pointer in place, then
+  freed the DOM nodes that scripts had detached; freeing a node looks its
+  canvas state up, in the table that was already gone. Leaving a YouTube
+  watch page for another site hung the renderer in that lookup about two
+  times in three. The pointer is cleared with the table.
 * Security: a cross-origin frame could reach the real window of its
   parent, of a sibling frame or of the top page, and with it their
   documents. The proxy a frame holds for a foreign window kept its cache
