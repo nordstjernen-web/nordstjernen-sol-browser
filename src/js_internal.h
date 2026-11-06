@@ -494,6 +494,7 @@ ns_canvas_parse_color(const char *s, double *r, double *g, double *b, double *a)
 gboolean ns_canvas_color_is_literal(const char *s);
 ns_canvas_state *
 ns_canvas_state_for(ns_js *js, const ns_node *el);
+void ns_canvas_state_forget_node(ns_js *js, const ns_node *n);
 ns_canvas_state *
 ns_ctx_state(JSContext *ctx, JSValueConst this_val);
 cairo_pattern_t *
