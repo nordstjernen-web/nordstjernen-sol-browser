@@ -134,6 +134,7 @@ struct ns_browser {
     GString        *console_buf;
     guint64         layout_sig[2];
     int             layout_osc;
+    gboolean        relayout_unforced;
     gint64          last_layout_us;
     gint64          damp_until_us;
     gboolean        damp_logged;
@@ -308,7 +309,8 @@ browser_relayout(ns_browser *b)
     b->last_layout_us = now;
     guint64 sig = layout_signature(b->layout);
     if (sig == b->layout_sig[0] || sig == b->layout_sig[1]) {
-        if (rapid && b->layout_osc < G_MAXINT) b->layout_osc++;
+        if (rapid && b->relayout_unforced && b->layout_osc < G_MAXINT)
+            b->layout_osc++;
     } else {
         browser_damp_reset(b);
     }
@@ -384,7 +386,9 @@ browser_relayout_from_mutation(ns_browser *b)
                       "(script reflow loop with no user input)");
         }
     }
+    b->relayout_unforced = TRUE;
     browser_relayout(b);
+    b->relayout_unforced = FALSE;
     return TRUE;
 }
 
