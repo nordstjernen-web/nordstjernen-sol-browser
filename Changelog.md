@@ -9,6 +9,19 @@ Changelog:
   canvas state up, in the table that was already gone. Leaving a YouTube
   watch page for another site hung the renderer in that lookup about two
   times in three. The pointer is cleared with the table.
+* Security: a cross-origin frame could reach the real window of its
+  parent, of a sibling frame or of the top page, and with it their
+  documents. The proxy a frame holds for a foreign window kept its cache
+  in a WeakMap and built `postMessage` arguments with `concat`, both
+  through prototypes the frame's own page can replace, so an overridden
+  `WeakMap.prototype.has` or `Array.prototype.concat` was handed the
+  window behind the proxy. A message from one frame to another carried a
+  `source` proxy made for the top page, whose `parent` and `top` are the
+  top page's window. The proxy now calls the built-ins it captured before
+  any page script ran, the `source` of a message is chosen by the engine
+  for the realm that receives it, and whether two windows share an origin
+  is read from the origin recorded when each frame's realm was created,
+  never from `origin` or `location`, which a page can redefine.
 * Network: the HSTS store is kept in memory and written only when it
   changes. Every request handed libcurl the HSTS file, which libcurl read
   at the start of the transfer, on the one thread that drives all
@@ -62,6 +75,34 @@ Changelog:
   timer is due. The title and address follow a script that changes them
   (`document.title`, `history.pushState`), and the context menu offers
   "Open Link in New Window".
+* Security: nested `display: inline-block` boxes no longer take exponential
+  time to lay out. Measuring an inline run that contains atomic boxes laid
+  out every atomic child for its natural width, again for its minimum
+  width and a third time for real, and the run's measurement cache was
+  switched off whenever a run held an atomic, so each nesting level tripled
+  the work: twelve levels took fifty seconds and sixteen never finished. The
+  natural and minimum widths of a run are now cached for the current layout
+  pass when its atomics are inline-blocks, inline-tables or replaced boxes
+  without percentage sizes, whose contributions do not depend on the
+  available width; forty levels lay out in a fraction of a second, and the
+  layout of the bundled render tests is unchanged.
+* Security: WebGPU no longer lets a page drive the renderer into
+  wgpu-native's fatal paths. `createBuffer` with an invalid descriptor used
+  to produce a buffer the browser still treated as mapped, so one
+  `getMappedRange()` call aborted the process; and the canvas readback the
+  compositor performs each frame submitted its copy command without
+  validation, so a destroyed current texture, an unusable `configure()`
+  format or usage, a tiny `maxBufferSize` limit or a destroyed device
+  aborted the renderer on the next paint. Buffer, target-texture and
+  readback creation and the readback copy now run inside a validation
+  error scope, and a failed step is dropped instead of submitted.
+* Security: WebGL refuses `vertexAttribPointer` and `vertexAttribIPointer`
+  when no array buffer is bound, and refuses every draw call when no program
+  is in use, with `INVALID_OPERATION` as the specification requires. Both
+  were forwarded to the driver, so on Windows, where the context is a
+  compatibility profile, a page could record a client-memory pointer at an
+  address of its choosing and have a program-less fixed-function draw read
+  renderer memory from it into pixels it could then read back.
 * Java: a browser for agents, `org.nordstjernen.agent`. `AgentBrowser`
   has tabs that keep their own scroll position and history, follow the
   navigations a page asks for, open its windows as new tabs, save downloads

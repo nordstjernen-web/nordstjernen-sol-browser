@@ -925,6 +925,12 @@ static gboolean
 wgl_attribs_cover(ns_webgl *g, int64_t vertex_last, int64_t instances)
 {
     if (!g || vertex_last < 0) return TRUE;
+    GLint prog = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
+    if (prog <= 0) {
+        g->injected_error = GL_INVALID_OPERATION;
+        return FALSE;
+    }
     uint64_t used = wgl_program_attrib_mask(g);
     for (int i = 0; i < 64; i++) {
         if (!(used & ((uint64_t)1 << i))) continue;
@@ -2701,6 +2707,10 @@ wgl_vertexAttribPointer(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     GLsizei stride = argi(ctx, argc, argv, 4);
     GLintptr offset = (GLintptr)argi(ctx, argc, argv, 5);
     if (size < 0 || stride < 0 || offset < 0) return JS_UNDEFINED;
+    if (!wgl_bound_buffer(g, GL_ARRAY_BUFFER)) {
+        g->injected_error = GL_INVALID_OPERATION;
+        return JS_UNDEFINED;
+    }
     glVertexAttribPointer(index, size, type, norm, stride,
                           (const void *)offset);
     return JS_UNDEFINED;
@@ -3825,6 +3835,10 @@ wgl_vertexAttribIPointer(JSContext *ctx, JSValueConst this_val, int argc, JSValu
     GLsizei stride = argi(ctx, argc, argv, 3);
     GLintptr offset = (GLintptr)argi(ctx, argc, argv, 4);
     if (size < 0 || stride < 0 || offset < 0) return JS_UNDEFINED;
+    if (!wgl_bound_buffer(g, GL_ARRAY_BUFFER)) {
+        g->injected_error = GL_INVALID_OPERATION;
+        return JS_UNDEFINED;
+    }
     glVertexAttribIPointer((GLuint)argi(ctx, argc, argv, 0), size,
                            (GLenum)argi(ctx, argc, argv, 2), stride,
                            (const void *)offset);
