@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Frames: a frame reaches a same-origin sibling through its cross-origin
+  parent. `parent[name]`, `parent.frames[name]` and `parent[index]` gave
+  an opaque proxy for every child of a cross-origin parent, also for a
+  child with the reader's own origin, so a callback path such as
+  `parent['brain']._frameReady` threw SecurityError. The frame now gets
+  the sibling's real window when the origins recorded for the two realms
+  match, its own window for its own name, and the proxy otherwise. Gmail's
+  Chat frames start this way: the Chat view's navigation was empty with
+  five SecurityErrors in the console and now lists the conversations.
 * Security: a cross-origin frame could reach the real window of its
   parent, of a sibling frame or of the top page, and with it their
   documents. The proxy a frame holds for a foreign window kept its cache
