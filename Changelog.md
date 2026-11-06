@@ -3,6 +3,14 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Network: the HSTS store is kept in memory and written only when it
+  changes. Every request handed libcurl the HSTS file, which libcurl read
+  at the start of the transfer, on the one thread that drives all
+  transfers, and rewrote when the transfer ended. On Windows that read
+  could wait 15 s on the antivirus scanner, and every request in flight
+  waited with it. libcurl now gets the entries through its read and write
+  callbacks; the file keeps its format and is saved when a host is added,
+  removed or changed.
 * Performance: changing a DOM tree that is not in the document no longer
   forces a layout of the document. `append`, `prepend`, `replaceChildren`,
   `removeChild`, `remove`, `replaceChild`, `before`, `after`, `replaceWith`,
