@@ -2148,6 +2148,134 @@ ns_browser_render_png(ns_browser *browser, double x, double y, double width,
     return out;
 }
 
+void
+ns_pdf_options_init(ns_pdf_options *options)
+{
+    if (!options) return;
+    memset(options, 0, sizeof *options);
+    options->margin_top = -1;
+    options->margin_right = -1;
+    options->margin_bottom = -1;
+    options->margin_left = -1;
+    options->scale = 1.0;
+}
+
+static void
+browser_pdf_setup(const ns_pdf_options *o, ns_print_setup *setup)
+{
+    ns_print_setup_default(setup);
+    if (o->width > 1 && o->height > 1) {
+        setup->width = o->width;
+        setup->height = o->height;
+    }
+    if (o->landscape && setup->height > setup->width) {
+        double w = setup->width;
+        setup->width = setup->height;
+        setup->height = w;
+    }
+    if (o->margin_top >= 0) setup->margin_top = o->margin_top;
+    if (o->margin_right >= 0) setup->margin_right = o->margin_right;
+    if (o->margin_bottom >= 0) setup->margin_bottom = o->margin_bottom;
+    if (o->margin_left >= 0) setup->margin_left = o->margin_left;
+}
+
+static gboolean
+browser_pdf_layout(ns_browser *browser, const ns_print_setup *setup,
+                   double scale)
+{
+    double w = (setup->width - setup->margin_left - setup->margin_right) / scale;
+    double h = (setup->height - setup->margin_top - setup->margin_bottom) / scale;
+    if (!(w >= 1) || !(h >= 1)) return FALSE;
+    gboolean changed = (int)w != browser->vw || h != browser->vh;
+    browser->vw = (int)w;
+    browser->vh = h;
+    return changed;
+}
+
+static void
+browser_pdf_lay_out(ns_browser *browser, const ns_pdf_options *o,
+                    ns_print_setup *setup, double scale)
+{
+    if (!o->screen_media) ns_css_set_print_media(TRUE);
+    browser_pdf_layout(browser, setup, scale);
+    browser_relayout(browser);
+    const ns_css_page_rule *rule =
+        o->ignore_css_page_size ? NULL : ns_render_page_rule();
+    if (rule) {
+        ns_print_setup_apply_page_rule(setup, rule);
+        if (browser_pdf_layout(browser, setup, scale))
+            browser_relayout(browser);
+    }
+    browser_wait_images(browser);
+}
+
+static unsigned char *
+browser_take_bytes(GByteArray *bytes, size_t *out_len)
+{
+    if (!bytes) return NULL;
+    unsigned char *out = malloc(bytes->len ? bytes->len : 1);
+    if (out) {
+        memcpy(out, bytes->data, bytes->len);
+        *out_len = bytes->len;
+    }
+    g_byte_array_free(bytes, TRUE);
+    return out;
+}
+
+unsigned char *
+ns_browser_render_pdf(ns_browser *browser, const ns_pdf_options *options,
+                      size_t *out_len, int *out_pages)
+{
+    if (out_len) *out_len = 0;
+    if (out_pages) *out_pages = 0;
+    if (!browser || !browser->doc || !out_len) return NULL;
+    ns_pdf_options defaults;
+    ns_pdf_options_init(&defaults);
+    const ns_pdf_options *o = options ? options : &defaults;
+    double scale = o->scale >= 0.1 && o->scale <= 10 ? o->scale : 1.0;
+
+    free(ns_browser_eval(browser, "window.dispatchEvent(new Event('beforeprint'))"));
+    browser_wait_images(browser);
+
+    ns_print_setup setup;
+    browser_pdf_setup(o, &setup);
+    int saved_vw = browser->vw;
+    double saved_vh = browser->vh;
+
+    browser_pdf_lay_out(browser, o, &setup, scale);
+
+    char *title = o->title ? NULL : ns_browser_title(browser);
+    char *url = ns_browser_url(browser);
+    ns_engine_pdf job = {
+        .content_scale = scale,
+        .title = o->title ? o->title : title,
+        .author = o->author,
+        .creation_date = o->creation_date,
+        .url = url,
+        .page_ranges = o->page_ranges,
+        .header = { o->header_left, o->header_center, o->header_right },
+        .footer = { o->footer_left, o->footer_center, o->footer_right },
+    };
+    GByteArray *pdf = NULL;
+    if (browser->layout) {
+        ns_paint_set_js(browser->js);
+        ns_paint_set_anim(browser->anim);
+        pdf = ns_engine_pdf_bytes(browser->layout, &setup, &job, out_pages);
+        ns_paint_set_anim(NULL);
+        ns_paint_set_js(NULL);
+    }
+    free(title);
+    free(url);
+
+    ns_css_set_print_media(FALSE);
+    browser->vw = saved_vw;
+    browser->vh = saved_vh;
+    browser_relayout(browser);
+    free(ns_browser_eval(browser, "window.dispatchEvent(new Event('afterprint'))"));
+
+    return browser_take_bytes(pdf, out_len);
+}
+
 GPtrArray *
 ns_browser_print_pages(ns_browser *browser, ns_print_setup *out_setup)
 {

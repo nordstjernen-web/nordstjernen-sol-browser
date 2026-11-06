@@ -42,6 +42,34 @@ unsigned char *ns_browser_render_png(ns_browser *browser, double x, double y,
                                      double scale, size_t *out_len,
                                      int *out_width, int *out_height);
 
+typedef struct ns_pdf_options {
+    double width;
+    double height;
+    double margin_top;
+    double margin_right;
+    double margin_bottom;
+    double margin_left;
+    double scale;
+    int landscape;
+    int ignore_css_page_size;
+    int screen_media;
+    const char *title;
+    const char *author;
+    const char *creation_date;
+    const char *page_ranges;
+    const char *header_left;
+    const char *header_center;
+    const char *header_right;
+    const char *footer_left;
+    const char *footer_center;
+    const char *footer_right;
+} ns_pdf_options;
+
+void ns_pdf_options_init(ns_pdf_options *options);
+unsigned char *ns_browser_render_pdf(ns_browser *browser,
+                                     const ns_pdf_options *options,
+                                     size_t *out_len, int *out_pages);
+
 int ns_browser_page_size(ns_browser *browser, int *out_width, int *out_height);
 
 int ns_browser_snap_document(ns_browser *browser, double viewport_w,

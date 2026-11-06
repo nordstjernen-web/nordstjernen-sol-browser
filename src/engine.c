@@ -2416,6 +2416,270 @@ ns_engine_write_pdf_paged(const ns_box *root, const char *path,
     return 0;
 }
 
+static cairo_status_t
+pdf_bytes_append(void *closure, const unsigned char *data, unsigned int length)
+{
+    g_byte_array_append(closure, data, length);
+    return CAIRO_STATUS_SUCCESS;
+}
+
+static gboolean
+pdf_range_parse(const char **cursor, guint64 *from, guint64 *to)
+{
+    const char *p = *cursor;
+    char *end = NULL;
+    *from = 1;
+    if (*p != '-') {
+        *from = g_ascii_strtoull(p, &end, 10);
+        if (end == p) return FALSE;
+        p = end;
+    }
+    *to = *from;
+    if (*p == '-') {
+        p++;
+        *to = g_ascii_strtoull(p, &end, 10);
+        if (end == p) *to = G_MAXUINT;
+        p = end;
+    }
+    while (*p && *p != ',') p++;
+    *cursor = p;
+    return TRUE;
+}
+
+static gboolean
+pdf_page_selected(const char *ranges, guint page)
+{
+    if (!ranges || !*ranges) return TRUE;
+    for (const char *p = ranges; *p;) {
+        while (*p == ' ' || *p == ',') p++;
+        if (!*p) break;
+        guint64 from = 0, to = 0;
+        if (!pdf_range_parse(&p, &from, &to)) return FALSE;
+        if (page >= from && page <= to) return TRUE;
+    }
+    return FALSE;
+}
+
+static char *
+pdf_expand_template(const char *tpl, guint page, guint pages,
+                    const ns_engine_pdf *job, const char *date)
+{
+    GString *out = g_string_new(NULL);
+    for (const char *p = tpl; *p;) {
+        if (g_str_has_prefix(p, "{page}")) {
+            g_string_append_printf(out, "%u", page);
+            p += 6;
+        } else if (g_str_has_prefix(p, "{pages}")) {
+            g_string_append_printf(out, "%u", pages);
+            p += 7;
+        } else if (g_str_has_prefix(p, "{title}")) {
+            g_string_append(out, job->title ? job->title : "");
+            p += 7;
+        } else if (g_str_has_prefix(p, "{url}")) {
+            g_string_append(out, job->url ? job->url : "");
+            p += 5;
+        } else if (g_str_has_prefix(p, "{date}")) {
+            g_string_append(out, date);
+            p += 6;
+        } else {
+            g_string_append_c(out, *p++);
+        }
+    }
+    return g_string_free(out, FALSE);
+}
+
+static void
+pdf_append_number(GString *out, double v)
+{
+    char buf[G_ASCII_DTOSTR_BUF_SIZE];
+    g_string_append(out, g_ascii_formatd(buf, sizeof buf, "%.2f", v));
+}
+
+static gboolean
+pdf_link_is_external(const char *uri)
+{
+    return g_str_has_prefix(uri, "http://") || g_str_has_prefix(uri, "https://") ||
+           g_str_has_prefix(uri, "mailto:") || g_str_has_prefix(uri, "tel:");
+}
+
+static void
+pdf_tag_links(cairo_t *cr, const GArray *links, const ns_print_setup *setup,
+              double scale, double page_top, double page_bottom)
+{
+    for (guint i = 0; i < links->len; i++) {
+        const ns_print_link *l = &g_array_index(links, ns_print_link, i);
+        double mid = l->y + l->h / 2.0;
+        if (mid < page_top || mid >= page_bottom || !pdf_link_is_external(l->uri))
+            continue;
+        GString *attr = g_string_new("rect=[");
+        pdf_append_number(attr, setup->margin_left + l->x * scale);
+        g_string_append_c(attr, ' ');
+        pdf_append_number(attr, setup->margin_top + (l->y - page_top) * scale);
+        g_string_append_c(attr, ' ');
+        pdf_append_number(attr, l->w * scale);
+        g_string_append_c(attr, ' ');
+        pdf_append_number(attr, l->h * scale);
+        g_string_append(attr, "] uri='");
+        for (const char *p = l->uri; *p; p++) {
+            if (*p == '\'' || *p == '\\') g_string_append_c(attr, '\\');
+            if ((unsigned char)*p >= 0x20) g_string_append_c(attr, *p);
+        }
+        g_string_append_c(attr, '\'');
+        cairo_tag_begin(cr, CAIRO_TAG_LINK, attr->str);
+        cairo_tag_end(cr, CAIRO_TAG_LINK);
+        g_string_free(attr, TRUE);
+    }
+}
+
+static void
+pdf_add_outline(cairo_surface_t *surf, const GArray *headings,
+                const GArray *offsets, const GArray *sheet_of_page,
+                const ns_print_setup *setup, double scale)
+{
+    int parents[7] = { CAIRO_PDF_OUTLINE_ROOT, 0, 0, 0, 0, 0, 0 };
+    int depth_of[7] = { 0 };
+    for (guint i = 0; i < headings->len; i++) {
+        const ns_print_heading *h = &g_array_index(headings, ns_print_heading, i);
+        guint page = 0;
+        while (page + 1 < offsets->len &&
+               g_array_index(offsets, double, page + 1) <= h->y + 0.5)
+            page++;
+        int sheet = g_array_index(sheet_of_page, int, page);
+        if (sheet <= 0) continue;
+        double y = setup->margin_top +
+            (h->y - g_array_index(offsets, double, page)) * scale;
+        GString *dest = g_string_new(NULL);
+        g_string_append_printf(dest, "page=%d pos=[", sheet);
+        pdf_append_number(dest, setup->margin_left * NS_PRINT_PT_PER_PX);
+        g_string_append_c(dest, ' ');
+        pdf_append_number(dest, y * NS_PRINT_PT_PER_PX);
+        g_string_append_c(dest, ']');
+        int parent = CAIRO_PDF_OUTLINE_ROOT;
+        for (int level = h->level - 1; level >= 1; level--)
+            if (depth_of[level]) {
+                parent = parents[level];
+                break;
+            }
+        int id = cairo_pdf_surface_add_outline(surf, parent, h->text, dest->str,
+                                               CAIRO_PDF_OUTLINE_FLAG_OPEN);
+        parents[h->level] = id;
+        depth_of[h->level] = 1;
+        for (int level = h->level + 1; level <= 6; level++)
+            depth_of[level] = 0;
+        g_string_free(dest, TRUE);
+    }
+}
+
+static void
+pdf_set_job_metadata(cairo_surface_t *surf, const ns_engine_pdf *job)
+{
+    pdf_set_metadata(surf);
+    if (job->title && *job->title)
+        cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_TITLE,
+                                       job->title);
+    if (job->author && *job->author)
+        cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_AUTHOR,
+                                       job->author);
+    if (job->creation_date && *job->creation_date)
+        cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_CREATE_DATE,
+                                       job->creation_date);
+}
+
+static void
+pdf_job_date(const ns_engine_pdf *job, char *date, size_t size)
+{
+    if (job->creation_date && strlen(job->creation_date) >= 10) {
+        g_strlcpy(date, job->creation_date, MIN(size, 11));
+        return;
+    }
+    time_t now = time(NULL);
+    struct tm *local = localtime(&now);
+    if (local)
+        strftime(date, size, "%Y-%m-%d", local);
+}
+
+static void
+pdf_draw_margin_texts(cairo_t *cr, const ns_print_setup *setup,
+                      const ns_engine_pdf *job, guint page, guint pages,
+                      const char *date)
+{
+    for (int slot = 0; slot < 3; slot++) {
+        for (int footer = 0; footer < 2; footer++) {
+            const char *tpl = footer ? job->footer[slot] : job->header[slot];
+            if (!tpl || !*tpl) continue;
+            char *text = pdf_expand_template(tpl, page, pages, job, date);
+            ns_print_draw_margin_text(cr, setup, NS_PRINT_PT_PER_PX, text,
+                                      slot, footer);
+            g_free(text);
+        }
+    }
+}
+
+GByteArray *
+ns_engine_pdf_bytes(const ns_box *root, const ns_print_setup *setup,
+                    const ns_engine_pdf *job, int *out_pages)
+{
+    if (out_pages) *out_pages = 0;
+    if (!root || !setup || !job) return NULL;
+    double scale = job->content_scale > 0 ? job->content_scale : 1.0;
+    double page_h =
+        (setup->height - setup->margin_top - setup->margin_bottom) / scale;
+    if (!(page_h > 1)) return NULL;
+
+    GByteArray *pdf = g_byte_array_new();
+    cairo_surface_t *surf = cairo_pdf_surface_create_for_stream(
+        pdf_bytes_append, pdf, setup->width * NS_PRINT_PT_PER_PX,
+        setup->height * NS_PRINT_PT_PER_PX);
+    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surf);
+        g_byte_array_free(pdf, TRUE);
+        return NULL;
+    }
+    pdf_set_job_metadata(surf, job);
+    char date[16] = "";
+    pdf_job_date(job, date, sizeof date);
+
+    GArray *offsets = ns_print_page_offsets(root, page_h);
+    GArray *links = ns_print_links(root);
+    GArray *headings = ns_print_headings(root);
+    GArray *sheet_of_page = g_array_new(FALSE, TRUE, sizeof(int));
+    g_array_set_size(sheet_of_page, offsets->len);
+    guint total = offsets->len;
+    int sheets = 0;
+
+    cairo_t *cr = cairo_create(surf);
+    for (guint i = 0; i < total; i++) {
+        if (!pdf_page_selected(job->page_ranges, i + 1)) continue;
+        double top = g_array_index(offsets, double, i);
+        double bottom = ns_print_page_bottom(offsets, i, page_h);
+        ns_print_draw_page_scaled(cr, root, setup, NS_PRINT_PT_PER_PX, scale,
+                                  top, bottom);
+        pdf_draw_margin_texts(cr, setup, job, i + 1, total, date);
+        cairo_save(cr);
+        cairo_scale(cr, NS_PRINT_PT_PER_PX, NS_PRINT_PT_PER_PX);
+        pdf_tag_links(cr, links, setup, scale, top, bottom);
+        cairo_restore(cr);
+        cairo_show_page(cr);
+        g_array_index(sheet_of_page, int, i) = ++sheets;
+    }
+    pdf_add_outline(surf, headings, offsets, sheet_of_page, setup, scale);
+    cairo_destroy(cr);
+    cairo_surface_finish(surf);
+    cairo_status_t status = cairo_surface_status(surf);
+    cairo_surface_destroy(surf);
+
+    g_array_free(offsets, TRUE);
+    g_array_free(sheet_of_page, TRUE);
+    ns_print_links_free(links);
+    ns_print_headings_free(headings);
+    if (status != CAIRO_STATUS_SUCCESS || sheets == 0) {
+        g_byte_array_free(pdf, TRUE);
+        return NULL;
+    }
+    if (out_pages) *out_pages = sheets;
+    return pdf;
+}
+
 GPtrArray *
 ns_engine_print_recordings(const ns_box *root, const ns_print_setup *setup)
 {

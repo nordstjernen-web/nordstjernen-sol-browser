@@ -1521,6 +1521,54 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/pdf") == 0) {
+        ns_pdf_options o;
+        ns_pdf_options_init(&o);
+        long flag = 0;
+        json_get_double(body, "width", &o.width);
+        json_get_double(body, "height", &o.height);
+        json_get_double(body, "margin_top", &o.margin_top);
+        json_get_double(body, "margin_right", &o.margin_right);
+        json_get_double(body, "margin_bottom", &o.margin_bottom);
+        json_get_double(body, "margin_left", &o.margin_left);
+        json_get_double(body, "scale", &o.scale);
+        if (json_get_long(body, "landscape", &flag) == 0) o.landscape = flag != 0;
+        if (json_get_long(body, "ignore_css_page_size", &flag) == 0)
+            o.ignore_css_page_size = flag != 0;
+        if (json_get_long(body, "screen_media", &flag) == 0)
+            o.screen_media = flag != 0;
+        char *text[10] = {
+            json_get_str(body, "title"), json_get_str(body, "author"),
+            json_get_str(body, "creation_date"), json_get_str(body, "page_ranges"),
+            json_get_str(body, "header_left"), json_get_str(body, "header_center"),
+            json_get_str(body, "header_right"), json_get_str(body, "footer_left"),
+            json_get_str(body, "footer_center"), json_get_str(body, "footer_right"),
+        };
+        o.title = text[0];
+        o.author = text[1];
+        o.creation_date = text[2];
+        o.page_ranges = text[3];
+        o.header_left = text[4];
+        o.header_center = text[5];
+        o.header_right = text[6];
+        o.footer_left = text[7];
+        o.footer_center = text[8];
+        o.footer_right = text[9];
+        size_t len = 0;
+        int pages = 0;
+        s->frame_valid = 0;
+        unsigned char *pdf = s->cur
+            ? ns_browser_render_pdf(s->cur, &o, &len, &pages) : NULL;
+        char hdrs[48];
+        int hn = snprintf(hdrs, sizeof hdrs, "X-Pages: %d\r\n", pdf ? pages : 0);
+        http_write_response(ctrl_w, 200, "application/pdf",
+                            hn > 0 ? hdrs : NULL, pdf, pdf ? len : 0);
+        free(pdf);
+        for (size_t i = 0; i < 10; i++)
+            free(text[i]);
+        return 0;
+    }
+
     if (strcmp(head->path, "/screenshot") == 0) {
         double x = 0, y = 0, width = 0, height = 0, scale = 1.0;
         json_get_double(body, "x", &x);

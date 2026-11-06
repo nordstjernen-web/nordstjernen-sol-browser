@@ -5,11 +5,14 @@
 
 #include "print.h"
 
+#include <stdlib.h>
 #include <string.h>
 
+#include "dom.h"
 #include "paint.h"
 
 #define NS_PRINT_MAX_SPANS (1u << 20)
+#define NS_PRINT_KEEP_PX   48.0
 
 typedef struct { double top, bottom; } ns_print_span;
 
@@ -72,41 +75,75 @@ add_span(GArray *spans, double top, double bottom, double page_h)
     g_array_append_val(spans, s);
 }
 
+static int
+style_count(const ns_box *b, ns_css_prop prop, int fallback)
+{
+    const char *kw = break_keyword(b, prop);
+    if (!kw || *kw < '0' || *kw > '9') return fallback;
+    int n = atoi(kw);
+    return n < 1 ? 1 : (n > 64 ? 64 : n);
+}
+
+static void
+add_line_spans(GArray *spans, const ns_box *b, const GArray *lines,
+               double page_h)
+{
+    guint n = lines->len / 2;
+    guint orphans = (guint)style_count(b, NS_CSS_ORPHANS, 2);
+    guint widows = (guint)style_count(b, NS_CSS_WIDOWS, 2);
+    const double *y = &g_array_index(lines, double, 0);
+    if (n < orphans + widows) {
+        add_span(spans, y[0], y[2 * n - 1], page_h);
+        return;
+    }
+    guint first = orphans > 1 ? orphans : 0;
+    guint last = widows > 1 ? n - widows : n;
+    if (first)
+        add_span(spans, y[0], y[2 * first - 1], page_h);
+    for (guint i = first; i < last && spans->len < NS_PRINT_MAX_SPANS; i++)
+        add_span(spans, y[2 * i], y[2 * i + 1], page_h);
+    if (last < n)
+        add_span(spans, y[2 * last], y[2 * n - 1], page_h);
+}
+
 static void
 add_text_line_spans(GArray *spans, const ns_box *b, double top, double bottom,
                     double page_h)
 {
     NsPangoLayout *layout =
         b->vertical_wm ? NULL : ns_paint_build_inline_layout(NULL, b);
-    int lines = layout ? ns_pango_layout_get_line_count(layout) : 0;
-    if (lines < 2) {
+    int count = layout ? ns_pango_layout_get_line_count(layout) : 0;
+    if (count < 2) {
         g_clear_object(&layout);
         add_span(spans, top, bottom, page_h);
         return;
     }
+    GArray *lines = g_array_new(FALSE, FALSE, sizeof(double));
     const GArray *heights = b->atomic_line_heights;
-    if (heights && heights->len == (guint)lines) {
+    if (heights && heights->len == (guint)count) {
         double line_top = b->y;
-        for (guint i = 0; i < heights->len && spans->len < NS_PRINT_MAX_SPANS;
-             i++) {
-            double line_h = g_array_index(heights, double, i);
-            add_span(spans, line_top, line_top + line_h, page_h);
-            line_top += line_h;
+        for (guint i = 0; i < heights->len; i++) {
+            double line_bottom = line_top + g_array_index(heights, double, i);
+            g_array_append_val(lines, line_top);
+            g_array_append_val(lines, line_bottom);
+            line_top = line_bottom;
         }
-        g_object_unref(layout);
-        return;
+    } else {
+        double y_origin = b->y + ns_paint_inline_y_offset_for_layout(b, layout);
+        NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
+        do {
+            NsPangoRectangle line;
+            ns_pango_layout_iter_get_line_extents(it, NULL, &line);
+            double line_top = y_origin + (double)line.y / NS_PANGO_SCALE;
+            double line_bottom =
+                y_origin + (double)(line.y + line.height) / NS_PANGO_SCALE;
+            g_array_append_val(lines, line_top);
+            g_array_append_val(lines, line_bottom);
+        } while (ns_pango_layout_iter_next_line(it));
+        ns_pango_layout_iter_free(it);
     }
-    double y_origin = b->y + ns_paint_inline_y_offset_for_layout(b, layout);
-    NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout);
-    do {
-        NsPangoRectangle line;
-        ns_pango_layout_iter_get_line_extents(it, NULL, &line);
-        add_span(spans, y_origin + (double)line.y / NS_PANGO_SCALE,
-                 y_origin + (double)(line.y + line.height) / NS_PANGO_SCALE,
-                 page_h);
-    } while (spans->len < NS_PRINT_MAX_SPANS &&
-             ns_pango_layout_iter_next_line(it));
-    ns_pango_layout_iter_free(it);
+    add_line_spans(spans, b, lines, page_h);
+    g_array_free(lines, TRUE);
     g_object_unref(layout);
 }
 
@@ -118,35 +155,80 @@ add_content(GArray *content, double top, double bottom)
     g_array_append_val(content, s);
 }
 
+static int
+heading_level(const ns_node *n)
+{
+    if (!n || !n->name || (n->name[0] != 'h' && n->name[0] != 'H')) return 0;
+    if (n->name[1] < '1' || n->name[1] > '6' || n->name[2] != '\0') return 0;
+    return n->name[1] - '0';
+}
+
+static gboolean
+stays_with_next(const ns_box *b)
+{
+    return avoids_page_break(break_keyword(b, NS_CSS_BREAK_AFTER)) ||
+           (b->kind != NS_BOX_INLINE && heading_level(b->dom) > 0);
+}
+
+static void
+keep_together(const ns_box *prev, const ns_box *next, ns_print_scan *scan)
+{
+    double prev_top, prev_bottom, next_top, next_bottom;
+    box_page_extent(prev, &prev_top, &prev_bottom);
+    box_page_extent(next, &next_top, &next_bottom);
+    if (!(next_bottom > next_top) || !(prev_bottom > prev_top)) return;
+    double from = prev_bottom - prev_top <= scan->page_h / 4
+        ? prev_top : prev_bottom - NS_PRINT_KEEP_PX;
+    double to = MIN(next_bottom, next_top + NS_PRINT_KEEP_PX);
+    add_span(scan->spans, from, to, scan->page_h);
+}
+
+static gboolean
+collect_own_breaks(const ns_box *b, ns_print_scan *scan, double top,
+                   double bottom)
+{
+    if (!b->parent) return FALSE;
+    if (forces_page_break(break_keyword(b, NS_CSS_BREAK_BEFORE)))
+        g_array_append_val(scan->forced, top);
+    if (forces_page_break(break_keyword(b, NS_CSS_BREAK_AFTER)))
+        g_array_append_val(scan->forced, bottom);
+    gboolean whole = b->kind == NS_BOX_TABLE_ROW ||
+        avoids_page_break(break_keyword(b, NS_CSS_BREAK_INSIDE));
+    if (!whole || bottom - top > scan->page_h) return FALSE;
+    add_span(scan->spans, top, bottom, scan->page_h);
+    add_content(scan->content, top, bottom);
+    return TRUE;
+}
+
+static void
+collect_leaf(const ns_box *b, ns_print_scan *scan, double top, double bottom)
+{
+    if (b->kind == NS_BOX_INLINE && b->text && *b->text)
+        add_text_line_spans(scan->spans, b, top, bottom, scan->page_h);
+    else
+        add_span(scan->spans, top, bottom, scan->page_h);
+    add_content(scan->content, top, bottom);
+}
+
 static void
 collect_breaks(const ns_box *b, ns_print_scan *scan)
 {
     if (!b) return;
     double top, bottom;
     box_page_extent(b, &top, &bottom);
-
-    if (b->parent) {
-        if (forces_page_break(break_keyword(b, NS_CSS_BREAK_BEFORE)))
-            g_array_append_val(scan->forced, top);
-        if (forces_page_break(break_keyword(b, NS_CSS_BREAK_AFTER)))
-            g_array_append_val(scan->forced, bottom);
-        if (avoids_page_break(break_keyword(b, NS_CSS_BREAK_INSIDE))) {
-            add_span(scan->spans, top, bottom, scan->page_h);
-            add_content(scan->content, top, bottom);
-            return;
-        }
-    }
-
+    if (collect_own_breaks(b, scan, top, bottom)) return;
     if (!b->first_child) {
-        if (b->kind == NS_BOX_INLINE && b->text && *b->text)
-            add_text_line_spans(scan->spans, b, top, bottom, scan->page_h);
-        else
-            add_span(scan->spans, top, bottom, scan->page_h);
-        add_content(scan->content, top, bottom);
+        collect_leaf(b, scan, top, bottom);
         return;
     }
-    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+    const ns_box *prev = NULL;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        if (prev && (stays_with_next(prev) ||
+                     avoids_page_break(break_keyword(c, NS_CSS_BREAK_BEFORE))))
+            keep_together(prev, c, scan);
         collect_breaks(c, scan);
+        prev = c;
+    }
 }
 
 static int
@@ -259,5 +341,163 @@ ns_print_draw_page(cairo_t *cr, const ns_box *root,
     cairo_clip(cr);
     cairo_translate(cr, 0, -page_top);
     ns_paint(cr, root, NULL);
+    cairo_restore(cr);
+}
+
+void
+ns_print_draw_page_scaled(cairo_t *cr, const ns_box *root,
+                          const ns_print_setup *setup, double unit,
+                          double content_scale, double page_top,
+                          double page_bottom)
+{
+    if (!cr || !root || !setup) return;
+    if (!(content_scale > 0)) content_scale = 1.0;
+    double content_w = setup->width - setup->margin_left - setup->margin_right;
+    double content_h = (page_bottom - page_top) * content_scale;
+    if (!(content_w > 0) || !(content_h > 0)) return;
+    cairo_save(cr);
+    cairo_scale(cr, unit, unit);
+    cairo_translate(cr, setup->margin_left, setup->margin_top);
+    cairo_rectangle(cr, 0, 0, content_w, content_h);
+    cairo_clip(cr);
+    cairo_scale(cr, content_scale, content_scale);
+    cairo_translate(cr, 0, -page_top);
+    ns_paint(cr, root, NULL);
+    cairo_restore(cr);
+}
+
+static void
+add_link_rects(const ns_box *b, const ns_link_range *r, GArray *rects,
+               GArray *out)
+{
+    g_array_set_size(rects, 0);
+    if (!ns_paint_inline_range_rects(b, r->start, r->len, NULL, rects))
+        return;
+    for (guint k = 0; k + 3 < rects->len; k += 4) {
+        ns_print_link link = {
+            .x = g_array_index(rects, double, k) + b->x,
+            .y = g_array_index(rects, double, k + 1) + b->y,
+            .w = g_array_index(rects, double, k + 2),
+            .h = g_array_index(rects, double, k + 3),
+            .uri = g_strdup(r->href),
+        };
+        if (link.w > 0 && link.h > 0 && out->len < NS_PRINT_MAX_SPANS)
+            g_array_append_val(out, link);
+        else
+            g_free(link.uri);
+    }
+}
+
+static void
+collect_text_links(const ns_box *b, GArray *out)
+{
+    if (b->kind != NS_BOX_INLINE || !b->links || !b->text || b->vertical_wm)
+        return;
+    GArray *rects = g_array_new(FALSE, FALSE, sizeof(double));
+    for (guint i = 0; i < b->links->len; i++) {
+        const ns_link_range *r = &g_array_index(b->links, ns_link_range, i);
+        if (r->href && *r->href && r->len > 0)
+            add_link_rects(b, r, rects, out);
+    }
+    g_array_free(rects, TRUE);
+}
+
+static void
+collect_links(const ns_box *b, GArray *out)
+{
+    if (!b) return;
+    collect_text_links(b, out);
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        collect_links(c, out);
+    if (b->inline_atomics)
+        for (guint i = 0; i < b->inline_atomics->len; i++)
+            collect_links(g_array_index(b->inline_atomics, ns_inline_atomic,
+                                        i).box, out);
+}
+
+GArray *
+ns_print_links(const ns_box *root)
+{
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(ns_print_link));
+    collect_links(root, out);
+    return out;
+}
+
+void
+ns_print_links_free(GArray *links)
+{
+    if (!links) return;
+    for (guint i = 0; i < links->len; i++)
+        g_free(g_array_index(links, ns_print_link, i).uri);
+    g_array_free(links, TRUE);
+}
+
+static void
+collect_headings(const ns_box *b, GArray *out)
+{
+    if (!b) return;
+    int level = heading_level(b->dom);
+    if (level && b->kind != NS_BOX_INLINE && out->len < NS_PRINT_MAX_SPANS) {
+        char *text = ns_node_collect_text(b->dom);
+        char *title = text ? g_strstrip(g_strdup(text)) : NULL;
+        g_free(text);
+        if (title && *title) {
+            for (char *p = title; *p; p++)
+                if (*p == '\n' || *p == '\r' || *p == '\t') *p = ' ';
+            ns_print_heading h = { level, b->y + b->margin.top, title };
+            g_array_append_val(out, h);
+        } else {
+            g_free(title);
+        }
+        return;
+    }
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        collect_headings(c, out);
+}
+
+GArray *
+ns_print_headings(const ns_box *root)
+{
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(ns_print_heading));
+    collect_headings(root, out);
+    return out;
+}
+
+void
+ns_print_headings_free(GArray *headings)
+{
+    if (!headings) return;
+    for (guint i = 0; i < headings->len; i++)
+        g_free(g_array_index(headings, ns_print_heading, i).text);
+    g_array_free(headings, TRUE);
+}
+
+void
+ns_print_draw_margin_text(cairo_t *cr, const ns_print_setup *setup, double unit,
+                          const char *text, int slot, gboolean footer)
+{
+    if (!cr || !setup || !text || !*text) return;
+    cairo_save(cr);
+    cairo_scale(cr, unit, unit);
+    NsPangoLayout *layout = ns_pango_cairo_create_layout(cr);
+    NsPangoFontDescription *font =
+        ns_pango_font_description_from_string("Sans 8");
+    ns_pango_layout_set_font_description(layout, font);
+    ns_pango_font_description_free(font);
+    ns_pango_layout_set_text(layout, text, -1);
+    int tw = 0, th = 0;
+    ns_pango_layout_get_pixel_size(layout, &tw, &th);
+    double x = slot == 0 ? setup->margin_left
+             : slot == 1 ? (setup->width - tw) / 2.0
+                         : setup->width - setup->margin_right - tw;
+    double band = footer ? setup->margin_bottom : setup->margin_top;
+    double y = footer ? setup->height - band + (band - th) / 2.0
+                      : (band - th) / 2.0;
+    if (band > th) {
+        cairo_set_source_rgb(cr, 0.27, 0.27, 0.27);
+        cairo_move_to(cr, x, y);
+        ns_pango_cairo_show_layout(cr, layout);
+    }
+    g_object_unref(layout);
     cairo_restore(cr);
 }

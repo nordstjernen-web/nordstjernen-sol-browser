@@ -429,6 +429,31 @@ public final class Page implements AutoCloseable {
         return resp.body;
     }
 
+    /** The page printed to A4 sheets with half-inch margins; see {@link #pdf(PdfOptions)}. */
+    public byte[] pdf() {
+        return pdf(PdfOptions.a4());
+    }
+
+    /**
+     * The page as a paged PDF document. It is laid out again for the sheet,
+     * with its {@code @media print} styles, and cut into pages between lines,
+     * table rows and boxes marked {@code break-inside: avoid}; forced breaks
+     * are honoured and a heading stays with what follows it. Text is real,
+     * selectable text with embedded fonts, links stay clickable, headings
+     * become the document outline, and the page sees {@code beforeprint} and
+     * {@code afterprint}. The screen layout is restored afterwards.
+     *
+     * @throws NordstjernenException when the renderer cannot produce the
+     *                               document, or predates the request
+     */
+    public byte[] pdf(PdfOptions options) {
+        RendererProcess.Response resp = call("/pdf", options.toJson());
+        if (resp.body.length == 0) {
+            throw new NordstjernenException("the renderer could not print the page");
+        }
+        return resp.body;
+    }
+
     /**
      * Write the whole page to {@code file}: a PDF when the name ends in
      * {@code .pdf}, otherwise a PNG. The renderer writes the file itself, so
