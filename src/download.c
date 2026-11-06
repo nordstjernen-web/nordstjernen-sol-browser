@@ -83,9 +83,10 @@ header_content_length(const char *raw_headers)
 }
 
 static void
-download_chunk(gpointer user_data, long status, const char *raw_headers,
-               const guint8 *data, gsize len)
+download_chunk(gpointer user_data, const char *url, long status,
+               const char *raw_headers, const guint8 *data, gsize len)
 {
+    (void)url;
     ns_download *d = user_data;
     (void)status;
     if (d->state != NS_DOWNLOAD_RUNNING || !d->file) return;
@@ -111,8 +112,8 @@ download_finished(GObject *source, GAsyncResult *result, gpointer user_data)
     ns_response *resp = ns_net_fetch_finish(result, &err);
     if (d->state == NS_DOWNLOAD_RUNNING && d->bytes == 0 && resp &&
         !resp->error && resp->body && resp->body->len > 0)
-        download_chunk(d, resp->status, resp->raw_headers, resp->body->data,
-                       resp->body->len);
+        download_chunk(d, resp->final_url, resp->status, resp->raw_headers,
+                       resp->body->data, resp->body->len);
     if (d->state == NS_DOWNLOAD_RUNNING) {
         gboolean flushed = d->file && fflush(d->file) == 0;
         if (d->file) {

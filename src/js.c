@@ -22062,12 +22062,13 @@ ns_xhr_response_type_is_text(JSContext *ctx, JSValueConst obj)
 }
 
 static void
-ns_xhr_on_chunk(gpointer user_data, long status, const char *raw_headers,
-                const guint8 *data, gsize len)
+ns_xhr_on_chunk(gpointer user_data, const char *hop_url, long status,
+                const char *raw_headers, const guint8 *data, gsize len)
 {
     ns_xhr_state *st = user_data;
     if (!st->ctx || !st->js) return;
     JSContext *ctx = st->ctx;
+    if (!hop_url || !*hop_url) hop_url = st->url;
     if (ns_xhr_gen(ctx, st->obj) != st->gen) return;
     if (!st->partial) st->partial = g_byte_array_new();
     g_byte_array_append(st->partial, data, (guint)len);
@@ -22078,11 +22079,11 @@ ns_xhr_on_chunk(gpointer user_data, long status, const char *raw_headers,
         return;
     char *allow_origin = ns_xhr_raw_header_value(raw_headers,
                                                  "access-control-allow-origin");
-    gboolean allowed = cors_allows_credentialed(st->origin_url, st->url,
+    gboolean allowed = cors_allows_credentialed(st->origin_url, hop_url,
                                                 allow_origin, raw_headers,
                                                 ns_xhr_with_credentials(ctx, st->obj));
     g_free(allow_origin);
-    if (!allowed) return;
+    if (!allowed || ns_final_url_connect_blocked(st->js, ctx, hop_url)) return;
     st->last_signal_us = now;
     st->in_chunk = TRUE;
     ns_budget_guard bg = {0};
@@ -22094,8 +22095,8 @@ ns_xhr_on_chunk(gpointer user_data, long status, const char *raw_headers,
         JS_SetPropertyStr(ctx, st->obj, "statusText",
                           JS_NewString(ctx, ns_http_status_text(code)));
         JS_SetPropertyStr(ctx, st->obj, "responseURL",
-                          JS_NewString(ctx, st->url));
-        if (ns_url_same_origin(st->origin_url, st->url))
+                          JS_NewString(ctx, hop_url));
+        if (ns_url_same_origin(st->origin_url, hop_url))
             JS_SetPropertyStr(ctx, st->obj, "_responseHeaders",
                               JS_NewString(ctx, raw_headers));
         JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 2));
