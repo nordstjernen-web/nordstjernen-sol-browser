@@ -626,6 +626,8 @@ public final class Page implements AutoCloseable {
 
     /**
      * Press the primary button at a point. Follow with {@link #mouseUp()}.
+     * Here and in the other pointer methods a point is in CSS pixels from the
+     * top left of the document, not of the viewport: add the scroll offset.
      *
      * @param modifiers shift 1, control 2, alt 4, meta 8
      * @return the link under the point, or null

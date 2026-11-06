@@ -13,6 +13,32 @@ Changelog:
   (YouTube's player does) paid for a full layout at every read. On a
   1,500-row page, building 100 detached nodes that way went from 1.5 s to
   under a millisecond.
+* Java: `org.nordstjernen.swing.BrowserView`, a Swing component that shows
+  a page and lets the user work it: painting, scrollbars, wheel and keyboard
+  scrolling, zoom, text selection and the clipboard, dropped files, back
+  and forward, find, and following the navigations a page asks for. What
+  the surrounding application decides (title and address to show,
+  downloads, permission prompts, context menus, new windows) comes to a
+  listener. The Java browser is now that component plus its chrome, about
+  half the size it was.
+* Java browser: a page's timers keep running while nothing moves. The
+  window stopped asking the renderer for anything once three frames came
+  back unchanged, so a `setTimeout` or a late response did nothing until
+  the mouse moved. It now ticks the page when the renderer says its next
+  timer is due. The title and address follow a script that changes them
+  (`document.title`, `history.pushState`), and the context menu offers
+  "Open Link in New Window".
+* Java: a browser for agents, `org.nordstjernen.agent`. `AgentBrowser`
+  has tabs that keep their own scroll position and history, follow the
+  navigations a page asks for, open its windows as new tabs, save downloads
+  and settle after each action; a page is read as an outline of roles and
+  names with element references (`ref_12`) to click, type into, hover,
+  scroll to or set. `BrowserTools` offers those actions as named tools with
+  JSON Schemas for any tool-calling framework, and `McpServer` serves them
+  over the Model Context Protocol on stdio
+  (`java -cp nordstjernen-java.jar org.nordstjernen.agent.McpServer`), with
+  the same tool names as the desktop browser's `--mcp`. It is headless,
+  needs no display and adds no dependency.
 * HTML from a string. `ns_browser_open_html`, an `html` field on the
   protocol's `/open`, and `Page.setContent(html, baseUrl)` in Java show
   markup the caller already holds; the base URL resolves relative links and
