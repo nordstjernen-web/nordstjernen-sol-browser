@@ -2550,7 +2550,7 @@ ns_form_owner(const ns_node *control, const ns_node *doc)
     if (form_id) {
         if (*form_id) {
             const ns_node *tree_root = control;
-            while (tree_root->parent &&
+            while (tree_root->parent && tree_root->kind != NS_NODE_DOCUMENT &&
                    !(tree_root->kind == NS_NODE_ELEMENT &&
                      ns_element_get_attr(tree_root, "data-nd-shadow-root") != NULL)) {
                 tree_root = tree_root->parent;
@@ -2562,6 +2562,7 @@ ns_form_owner(const ns_node *control, const ns_node *doc)
     }
     int depth = 0;
     for (const ns_node *p = control->parent; p && depth++ < NS_DOM_MAX_DEPTH; p = p->parent) {
+        if (p->kind == NS_NODE_DOCUMENT) break;
         if (p->kind == NS_NODE_ELEMENT &&
             ns_element_get_attr(p, "data-nd-shadow-root") != NULL)
             break;

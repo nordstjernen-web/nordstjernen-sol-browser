@@ -3,6 +3,14 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: a form only collects the fields of its own document. A
+  frame's document hangs under the `<iframe>` element, and finding a
+  field's form walked straight through it, as did a `form="id"` lookup,
+  so a page that put a cross-origin frame inside its own `<form>` (a
+  bank's login frame, say) submitted the frame's fields, the password
+  typed into it included, to an address of its choosing. Form owners,
+  form scans and validation now stop at a document, and a form inside a
+  frame is scanned from the frame's own document.
 * Security: a form submitted with the keyboard is a page navigation. The
   renderer remembers the address a page asked to open so the shell can
   tell a page's navigation from one the user typed, but the key release
