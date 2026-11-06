@@ -89,6 +89,90 @@ static void cache_rmrf(const char *path);
 static void evict_aged_out(void);
 static void evict_to_cap(void);
 
+#define NS_CACHE_RECENT_BUDGET_BYTES (16 * 1024 * 1024)
+#define NS_CACHE_RECENT_BODY_BYTES   (2 * 1024 * 1024)
+
+typedef struct {
+    GBytes *body;
+    gint64  fetched_at;
+} ns_recent_body;
+
+static GHashTable *g_recent_bodies;
+static GQueue      g_recent_order = G_QUEUE_INIT;
+static gsize       g_recent_bytes;
+
+static void
+recent_body_free(gpointer p)
+{
+    ns_recent_body *r = p;
+    g_recent_bytes -= g_bytes_get_size(r->body);
+    g_bytes_unref(r->body);
+    g_free(r);
+}
+
+static void
+recent_drop(const char *key)
+{
+    if (!g_recent_bodies || !g_hash_table_contains(g_recent_bodies, key))
+        return;
+    GList *link = g_queue_find_custom(&g_recent_order, key,
+                                      (GCompareFunc)strcmp);
+    if (link) {
+        g_free(link->data);
+        g_queue_delete_link(&g_recent_order, link);
+    }
+    g_hash_table_remove(g_recent_bodies, key);
+}
+
+static void
+recent_clear(void)
+{
+    g_clear_pointer(&g_recent_bodies, g_hash_table_destroy);
+    g_queue_clear_full(&g_recent_order, g_free);
+    g_recent_bytes = 0;
+}
+
+static void
+recent_put(const char *key, const void *body, gsize len, gint64 fetched_at)
+{
+    recent_drop(key);
+    if (len > NS_CACHE_RECENT_BODY_BYTES) return;
+    if (!g_recent_bodies)
+        g_recent_bodies = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                g_free, recent_body_free);
+    ns_recent_body *r = g_new0(ns_recent_body, 1);
+    r->body = g_bytes_new(body, len);
+    r->fetched_at = fetched_at;
+    g_recent_bytes += len;
+    g_hash_table_insert(g_recent_bodies, g_strdup(key), r);
+    g_queue_push_tail(&g_recent_order, g_strdup(key));
+    while (g_recent_bytes > NS_CACHE_RECENT_BUDGET_BYTES) {
+        char *oldest = g_queue_pop_head(&g_recent_order);
+        if (!oldest) break;
+        g_hash_table_remove(g_recent_bodies, oldest);
+        g_free(oldest);
+    }
+}
+
+static GBytes *
+recent_get(const char *key, gint64 fetched_at, gint64 body_size)
+{
+    ns_recent_body *r = g_recent_bodies
+        ? g_hash_table_lookup(g_recent_bodies, key) : NULL;
+    if (!r || r->fetched_at != fetched_at ||
+        (gint64)g_bytes_get_size(r->body) != body_size)
+        return NULL;
+    return r->body;
+}
+
+static void
+recent_restamp(const char *key, gint64 fetched_at)
+{
+    ns_recent_body *r = g_recent_bodies
+        ? g_hash_table_lookup(g_recent_bodies, key) : NULL;
+    if (r) r->fetched_at = fetched_at;
+}
+
 static guint64
 cache_cap_bytes(void)
 {
@@ -332,6 +416,7 @@ ns_cache_shutdown(void)
         g_cache_db = NULL;
     }
     g_clear_pointer(&g_cache_dir, g_free);
+    recent_clear();
 }
 
 static void
@@ -359,6 +444,7 @@ ns_cache_clear(void)
 {
     G_GNUC_UNUSED g_autoptr(GMutexLocker) locker =
         g_mutex_locker_new(&g_cache_mutex);
+    recent_clear();
     if (g_cache_db)
         cache_exec("DELETE FROM entries");
     if (g_cache_dir) {
@@ -559,6 +645,7 @@ column_dup(sqlite3_stmt *st, int col)
 static void
 delete_key(const char *key)
 {
+    recent_drop(key);
     char *bp = body_path_for_key(key, FALSE);
     if (bp) g_unlink(bp);
     g_free(bp);
@@ -635,6 +722,16 @@ ns_cache_get(const char *url, const char *partition,
     if (!e->final_url) e->final_url = g_strdup(url);
     sqlite3_finalize(st);
 
+    GBytes *recent = recent_get(key, e->fetched_at, body_size);
+    if (recent) {
+        gsize rlen = 0;
+        const guint8 *rdata = g_bytes_get_data(recent, &rlen);
+        e->body = g_byte_array_new();
+        if (rlen > 0) g_byte_array_append(e->body, rdata, (guint)rlen);
+        touch_key(key);
+        return e;
+    }
+
     g_autofree char *bp = body_path_for_key(key, FALSE);
     char *data = NULL;
     gsize dlen = 0;
@@ -659,6 +756,7 @@ ns_cache_get(const char *url, const char *partition,
     e->body = g_byte_array_new();
     if (dlen > 0)
         g_byte_array_append(e->body, (const guint8 *)data, (guint)dlen);
+    recent_put(key, data, dlen, e->fetched_at);
     g_free(data);
 
     touch_key(key);
@@ -771,6 +869,7 @@ ns_cache_put(const char *url,
         delete_key(key);
         return;
     }
+    recent_put(key, body ? body : "", body_len, now);
     evict_to_cap();
 }
 
@@ -827,7 +926,8 @@ ns_cache_promote_304(const char *url,
     sqlite3_bind_int64(st, 4, now);
     sqlite3_bind_text (st, 5, last_modified, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text (st, 6, key, -1, SQLITE_TRANSIENT);
-    sqlite3_step(st);
+    if (sqlite3_step(st) == SQLITE_DONE)
+        recent_restamp(key, now);
     sqlite3_finalize(st);
 }
 
