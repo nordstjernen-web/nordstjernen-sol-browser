@@ -49701,7 +49701,7 @@ ns_maybe_close_dialog_form(JSContext *ctx, const ns_node *form,
     const ns_node *dialog = form;
     while (dialog && !ns_node_is_element_named(dialog, "dialog"))
         dialog = dialog->parent;
-    if (!dialog) return FALSE;
+    if (!dialog) return TRUE;
     const char *rv = (submitter && ns_node_is_submit_trigger(submitter))
         ? ns_element_get_attr(submitter, "value") : NULL;
     ns_js_dialog_close(js_from_ctx(ctx), (ns_node *)dialog, rv);
@@ -49728,6 +49728,14 @@ ns_node_is_submit_trigger(const ns_node *el)
                      g_ascii_strcasecmp(t, "image") == 0);
     }
     return FALSE;
+}
+
+gboolean
+ns_js_form_dialog_submit(ns_js *js, const ns_node *form,
+                         const ns_node *submitter)
+{
+    if (!js || !js->ctx) return FALSE;
+    return ns_maybe_close_dialog_form(js->ctx, form, submitter);
 }
 
 static gboolean

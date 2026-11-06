@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Forms: pressing Enter in a field submits with the form's default
+  button, and a `method="dialog"` form never navigates. Enter submitted
+  with the text field itself, so a login form whose button said
+  `formmethod="post"` went out as a GET and the password landed in the
+  address bar, history and server logs. A dialog-method form submitted
+  by a click or Enter also navigated with every field in the query
+  string; it now closes its `<dialog>`, or does nothing outside one, as
+  the standard says. The headless mode had the same faults and now also
+  honours `formmethod` and `formaction`.
 * Security: a navigation started by a `data:` document is cross-site. The
   engine names the page that starts a navigation by its origin and
   dropped the name when the page had none, so the request looked as if

@@ -4156,6 +4156,11 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
     const char *formmethod = (clicked && !from_text)
                              ? ns_element_get_attr(clicked, "formmethod") : NULL;
     if (formmethod && *formmethod) method = formmethod;
+    if (method && g_ascii_strcasecmp(method, "dialog") == 0) {
+        if (b->js && ns_js_form_dialog_submit(b->js, form, clicked))
+            b->dirty = TRUE;
+        return;
+    }
     gboolean is_post = method && g_ascii_strcasecmp(method, "post") == 0;
 
     const char *action = ns_element_get_attr(form, "action");
@@ -4269,6 +4274,13 @@ browser_submit_form(ns_browser *b, const ns_node *clicked)
         return;
     const ns_node *form = from_form ? clicked : ns_form_owner(clicked, b->doc);
     if (!form) return;
+    if (from_text) {
+        const ns_node *def = ns_form_default_button(form, b->doc);
+        if (def) {
+            if (ns_element_effectively_disabled(def)) return;
+            clicked = def;
+        }
+    }
 
     if (!ns_element_get_attr(form, "novalidate") &&
         !ns_element_get_attr(clicked, "formnovalidate")) {
