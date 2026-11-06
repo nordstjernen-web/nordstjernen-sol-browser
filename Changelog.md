@@ -3,6 +3,13 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Fixed: the first change after a burst of script layout reads could take
+  0.7 s to show. The layout dampener, which rations relayouts for a page
+  that keeps mutating itself with nobody at the keyboard, also counted the
+  layouts a script forces by reading sizes, which it can neither skip nor
+  ration. A page that measured a few elements while starting up (YouTube's
+  player) tripped it, and the next real update waited out the ration. Only
+  the relayouts the dampener can hold back are counted now.
 * Performance: changing a DOM tree that is not in the document no longer
   forces a layout of the document. `append`, `prepend`, `replaceChildren`,
   `removeChild`, `remove`, `replaceChild`, `before`, `after`, `replaceWith`,
