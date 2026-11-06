@@ -18,6 +18,11 @@ Changelog:
   `float: right` box with `margin-right: auto` and a set width took the
   free space as margin and ended up at the left edge, with the text that
   should wrap beside it pushed below it.
+* CSS: `vw`, `vh`, `vmin` and `vmax` lengths resolved by the shared
+  dimension helper (the `<img sizes>` attribute, font sizes and a few
+  paint paths) came out as the bare number, so `sizes="40vw"` meant 40px
+  and responsive images picked the smallest candidate and were drawn at
+  a few dozen pixels wide.
 * Text: a web font that has a glyph for an emoji code point is used for
   it. Emoji-presentation characters were always shaped with the system
   colour emoji font, whatever `font-family` said, so icon fonts that map
