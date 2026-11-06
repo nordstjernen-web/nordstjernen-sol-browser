@@ -93,6 +93,14 @@ Changelog:
   streaming callback and free the state it was still using. Only the
   blocking request itself is delivered during the pump, and a request's
   completion is deferred while one of its chunk handlers is on the stack.
+* Security: a streaming `XMLHttpRequest` checks CORS against the URL that
+  is actually answering, not the one script asked for. A same-origin
+  endpoint that redirected to a cross-origin resource without CORS headers
+  let the page read that resource's status, headers and body at readyState
+  2 and 3, before the final delivery check refused it. Each streamed chunk
+  now carries the URL of the hop it came from; the handler validates CORS,
+  connect-src and mixed content against it, exposes headers only when it is
+  same-origin, and reports it as `responseURL`.
 * Printing: paged PDF from a program. Until now only the command line
   (`--dump=print:FILE`) could reach the paginator; the C API, the engine
   protocol and Java all wrote one page as tall as the document, laid out for

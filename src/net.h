@@ -148,8 +148,8 @@ void ns_net_request_async(const char         *url,
                           GAsyncReadyCallback callback,
                           gpointer            user_data);
 
-typedef void (*ns_net_chunk_fn)(gpointer user_data, long status,
-                                const char *raw_headers,
+typedef void (*ns_net_chunk_fn)(gpointer user_data, const char *url,
+                                long status, const char *raw_headers,
                                 const guint8 *data, gsize len);
 
 void ns_net_request_async_streaming(const char         *url,

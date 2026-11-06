@@ -67,6 +67,7 @@ typedef struct ns_write_ctx {
     gboolean    exceeded;
     const struct ns_net_stream *stream;
     const struct ns_header_ctx *stream_headers;
+    const char *stream_url;
     ns_content_decoder *decoder;
     guint       decoder_seq;
     gboolean    decode_failed;
@@ -2700,6 +2701,7 @@ struct ns_net_stream {
 
 typedef struct {
     const struct ns_net_stream *stream;
+    char   *url;
     long    status;
     char   *raw_headers;
     GBytes *data;
@@ -2713,7 +2715,8 @@ ns_net_stream_chunk_dispatch(gpointer user_data)
     ns_net_stream_chunk *c = user_data;
     gsize len = 0;
     const guint8 *data = g_bytes_get_data(c->data, &len);
-    c->stream->fn(c->stream->user_data, c->status, c->raw_headers, data, len);
+    c->stream->fn(c->stream->user_data, c->url, c->status, c->raw_headers,
+                  data, len);
     return G_SOURCE_REMOVE;
 }
 
@@ -2721,6 +2724,7 @@ static void
 ns_net_stream_chunk_free(gpointer user_data)
 {
     ns_net_stream_chunk *c = user_data;
+    g_free(c->url);
     g_free(c->raw_headers);
     g_bytes_unref(c->data);
     g_free(c);
@@ -2734,6 +2738,7 @@ ns_net_stream_emit(const ns_write_ctx *ctx, const guint8 *data, gsize len)
     if (status < 200 || status >= 300) return;
     ns_net_stream_chunk *c = g_new0(ns_net_stream_chunk, 1);
     c->stream = ctx->stream;
+    c->url = g_strdup(ctx->stream_url ? ctx->stream_url : "");
     c->status = status;
     c->raw_headers = g_strdup(hc->raw ? hc->raw->str : "");
     c->data = g_bytes_new(data, len);
@@ -6806,6 +6811,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
 
     ns_header_ctx header_ctx = {0};
     write_ctx.stream = g_hop_stream;
+    write_ctx.stream_url = url;
     write_ctx.stream_headers = &header_ctx;
     header_ctx.content_type_out = &resp->content_type;
     header_ctx.content_disposition_out = &resp->content_disposition;
