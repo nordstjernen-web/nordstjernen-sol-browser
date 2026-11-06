@@ -8,6 +8,12 @@ Changelog:
   that row-placed items span. An item pinned to a full column was pushed
   into a new column, so a two-column story grid grew to 24 columns with
   the lead story collapsed and the headlines drawn over each other.
+* Frames: `scrollTo`, `scrollBy` and the root element's `scrollTop` /
+  `scrollLeft` inside an iframe no longer scroll the top-level page, and
+  `scrollIntoView` from a cross-origin frame no longer moves it. An ad
+  frame calling `scrollTo(0, 0)` repainted the top page at its start
+  while the page itself stayed scrolled, so a scrolled news page showed
+  its header and first stories instead of the content at that position.
 * Text: a web font that has a glyph for an emoji code point is used for
   it. Emoji-presentation characters were always shaped with the system
   colour emoji font, whatever `font-family` said, so icon fonts that map

@@ -233,7 +233,7 @@ static void ns_qcache_invalidate(ns_js *js);
 static void ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
                                const char *old_value, const char *new_value);
 static void ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root);
-static void ns_js_scroll_viewport(ns_js *js, double x, double y);
+static void ns_js_scroll_viewport(JSContext *ctx, double x, double y);
 static void ns_ce_upgrade_subtree_detached(ns_js *js, ns_node *root);
 static void ns_ce_disconnect_subtree(ns_js *js, ns_node *root);
 static gboolean ns_ce_constructor_registered(ns_js *js, JSValueConst ctor);
@@ -44854,7 +44854,7 @@ ns_element_set_scrollTop(JSContext *ctx, JSValueConst this_val, JSValueConst val
     double v;
     if (JS_ToFloat64(ctx, &v, val) != 0) return JS_UNDEFINED;
     if (ns_element_is_scrolling_root(ctx, this_val)) {
-        ns_js_scroll_viewport(js_from_ctx(ctx),
+        ns_js_scroll_viewport(ctx,
                               ns_window_scroll_prop(ctx, "scrollX"), v);
         return JS_UNDEFINED;
     }
@@ -44876,7 +44876,7 @@ ns_element_set_scrollLeft(JSContext *ctx, JSValueConst this_val, JSValueConst va
     double v;
     if (JS_ToFloat64(ctx, &v, val) != 0) return JS_UNDEFINED;
     if (ns_element_is_scrolling_root(ctx, this_val)) {
-        ns_js_scroll_viewport(js_from_ctx(ctx), v,
+        ns_js_scroll_viewport(ctx, v,
                               ns_window_scroll_prop(ctx, "scrollY"));
         return JS_UNDEFINED;
     }
@@ -47734,13 +47734,14 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
     }
     g_ptr_array_free(scrolled, TRUE);
 
-    if (!fixed) {
+    JSContext *top_ctx = ns_js_main_realm(js);
+    if (!fixed && (ctx == top_ctx || ns_realms_same_origin(js, ctx, top_ctx))) {
         double x = view_x;
         double y = view_y;
         double vw = ns_css_viewport_w();
         double vh = ns_css_viewport_h();
-        double sx = ns_window_scroll_prop(ctx, "scrollX");
-        double sy = ns_window_scroll_prop(ctx, "scrollY");
+        double sx = ns_window_scroll_prop(top_ctx, "scrollX");
+        double sy = ns_window_scroll_prop(top_ctx, "scrollY");
         double next_x = sx;
         double next_y = sy;
         if (strcmp(inline_mode, "start") == 0)
@@ -53218,9 +53219,10 @@ ns_read_scroll_xy(JSContext *ctx, int argc, JSValueConst *argv,
 }
 
 static void
-ns_js_scroll_viewport(ns_js *js, double x, double y)
+ns_js_scroll_viewport(JSContext *ctx, double x, double y)
 {
-    if (!js) return;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || ctx != ns_js_main_realm(js)) return;
     if (!isfinite(x) || x < 0) x = 0;
     if (!isfinite(y) || y < 0) y = 0;
     if (js->viewport_scroll_cb)
@@ -53235,7 +53237,7 @@ ns_window_scroll_to(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     double x = 0, y = 0;
     ns_read_scroll_xy(ctx, argc, argv, &x, &y);
-    ns_js_scroll_viewport(js_from_ctx(ctx), x, y);
+    ns_js_scroll_viewport(ctx, x, y);
     return JS_UNDEFINED;
 }
 
@@ -53246,7 +53248,7 @@ ns_window_scroll_by(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     double dx = 0, dy = 0;
     ns_read_scroll_xy(ctx, argc, argv, &dx, &dy);
-    ns_js_scroll_viewport(js_from_ctx(ctx),
+    ns_js_scroll_viewport(ctx,
                           ns_window_scroll_prop(ctx, "scrollX") + dx,
                           ns_window_scroll_prop(ctx, "scrollY") + dy);
     return JS_UNDEFINED;
