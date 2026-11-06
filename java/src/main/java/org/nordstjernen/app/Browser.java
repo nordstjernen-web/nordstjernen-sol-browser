@@ -13,6 +13,7 @@ import org.nordstjernen.browser.Engine;
 import org.nordstjernen.browser.Frame;
 import org.nordstjernen.browser.Page;
 import org.nordstjernen.browser.PageEvents;
+import org.nordstjernen.browser.PdfOptions;
 import org.nordstjernen.browser.Response;
 import org.nordstjernen.browser.Security;
 import org.nordstjernen.swing.FrameImages;
@@ -1925,9 +1926,9 @@ public final class Browser {
         io.submit(() -> {
             boolean saved;
             try {
-                page.export(Path.of(dest));
+                Files.write(Path.of(dest), pdf ? page.pdf(PdfOptions.a4()) : page.screenshot());
                 saved = true;
-            } catch (RuntimeException ex) {
+            } catch (RuntimeException | IOException ex) {
                 saved = false;
             }
             final boolean ok = saved;

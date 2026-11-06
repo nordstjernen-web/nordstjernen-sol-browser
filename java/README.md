@@ -105,6 +105,8 @@ try (Engine engine = Engine.launch();
 
     byte[] png = page.screenshot();                  // the whole page, encoded by the renderer
     byte[] hi  = page.screenshot(Page.Screenshot.region(0, 0, 640, 400).withScale(2));
+    byte[] pdf = page.pdf(PdfOptions.a4().margins(15)        // paged, with real text and links
+        .footer(null, "Page {page} of {pages}", null));
 
     page.click(120, 240);                            // real pointer and click events
     page.type("hello");                              // into the focused field
@@ -123,6 +125,10 @@ try (Engine engine = Engine.launch();
   that is deleted when the context closes. `ContextOptions.persistent(dir)`
   keeps a profile between runs, `ContextOptions.inMemory()` writes nothing to
   disk, and `engine.userContext()` is this user's own Nordstjernen profile.
+- **PDF.** `pdf()` lays the page out again for the sheet with its print styles
+  and cuts it into pages between lines, table rows and boxes that ask to stay
+  whole. `PdfOptions` sets the sheet, margins, scale, page ranges, metadata
+  and header and footer texts; see `docs/printing.md`.
 - **No `java.desktop`.** `screenshot()` returns PNG bytes and `render()` raw
   premultiplied BGRA rows. `org.nordstjernen.swing.FrameImages` turns those
   into a `BufferedImage` for a Swing or JavaFX host.
