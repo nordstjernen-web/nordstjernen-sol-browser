@@ -3,6 +3,12 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Layout: an image whose width comes from its height and aspect ratio
+  contributes its real width to a flex container's size. The max-content
+  measure of a replaced element that had not been laid out yet fell back
+  to a fixed 200 px, so a `display:flex` link holding a 93 px logo
+  (`<img height=30>`) took 200 px of the row. On mail.ru that pushed the
+  project links right and the page's overflow logic hid two of them.
 * Docs: `docs/security-review-2026-11.md` reports a security review of
   the engine: the Critical and High findings fixed in this release, the
   Medium and Low findings still open, and what LWN's article on the
