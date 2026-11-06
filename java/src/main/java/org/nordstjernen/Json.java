@@ -191,4 +191,193 @@ final class Json {
         }
         return json.regionMatches(from, key, 0, key.length());
     }
+
+    /** {@code s} as a JSON string literal, quotes included. */
+    static String quote(String s) {
+        return "\"" + escape(s) + "\"";
+    }
+
+    /**
+     * Parse a whole JSON text. Objects become {@code Map<String, Object>} in
+     * document order, arrays {@code List<Object>}, strings {@code String},
+     * numbers {@code Long} when integral and {@code Double} otherwise,
+     * {@code true}/{@code false} {@code Boolean}, and {@code null} null.
+     *
+     * @throws IllegalArgumentException when the text is not valid JSON
+     */
+    static Object parse(String text) {
+        Parser parser = new Parser(text == null ? "" : text);
+        parser.skipSpace();
+        Object value = parser.value(0);
+        parser.skipSpace();
+        if (parser.at < parser.text.length()) {
+            throw parser.error("unexpected text after the value");
+        }
+        return value;
+    }
+
+    private static final class Parser {
+        private static final int MAX_DEPTH = 256;
+
+        final String text;
+        int at;
+
+        Parser(String text) {
+            this.text = text;
+        }
+
+        IllegalArgumentException error(String what) {
+            return new IllegalArgumentException("JSON: " + what + " at offset " + at);
+        }
+
+        void skipSpace() {
+            while (at < text.length() && " \t\r\n".indexOf(text.charAt(at)) >= 0) {
+                at++;
+            }
+        }
+
+        Object value(int depth) {
+            if (depth > MAX_DEPTH) {
+                throw error("nesting too deep");
+            }
+            if (at >= text.length()) {
+                throw error("unexpected end");
+            }
+            char c = text.charAt(at);
+            switch (c) {
+                case '{': return object(depth);
+                case '[': return array(depth);
+                case '"': return string();
+                case 't': return literal("true", Boolean.TRUE);
+                case 'f': return literal("false", Boolean.FALSE);
+                case 'n': return literal("null", null);
+                default: return number();
+            }
+        }
+
+        private Object literal(String word, Object value) {
+            if (!text.startsWith(word, at)) {
+                throw error("unexpected token");
+            }
+            at += word.length();
+            return value;
+        }
+
+        private java.util.Map<String, Object> object(int depth) {
+            java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+            at++;
+            skipSpace();
+            if (at < text.length() && text.charAt(at) == '}') {
+                at++;
+                return out;
+            }
+            while (true) {
+                skipSpace();
+                if (at >= text.length() || text.charAt(at) != '"') {
+                    throw error("expected a key");
+                }
+                String key = string();
+                skipSpace();
+                if (at >= text.length() || text.charAt(at) != ':') {
+                    throw error("expected ':'");
+                }
+                at++;
+                skipSpace();
+                out.put(key, value(depth + 1));
+                skipSpace();
+                if (at < text.length() && text.charAt(at) == ',') {
+                    at++;
+                    continue;
+                }
+                if (at < text.length() && text.charAt(at) == '}') {
+                    at++;
+                    return out;
+                }
+                throw error("expected ',' or '}'");
+            }
+        }
+
+        private java.util.List<Object> array(int depth) {
+            java.util.List<Object> out = new java.util.ArrayList<>();
+            at++;
+            skipSpace();
+            if (at < text.length() && text.charAt(at) == ']') {
+                at++;
+                return out;
+            }
+            while (true) {
+                skipSpace();
+                out.add(value(depth + 1));
+                skipSpace();
+                if (at < text.length() && text.charAt(at) == ',') {
+                    at++;
+                    continue;
+                }
+                if (at < text.length() && text.charAt(at) == ']') {
+                    at++;
+                    return out;
+                }
+                throw error("expected ',' or ']'");
+            }
+        }
+
+        private String string() {
+            StringBuilder sb = new StringBuilder();
+            at++;
+            while (at < text.length()) {
+                char c = text.charAt(at++);
+                if (c == '"') {
+                    return sb.toString();
+                }
+                if (c != '\\') {
+                    sb.append(c);
+                    continue;
+                }
+                if (at >= text.length()) {
+                    break;
+                }
+                char escaped = text.charAt(at++);
+                switch (escaped) {
+                    case 'n': sb.append('\n'); break;
+                    case 'r': sb.append('\r'); break;
+                    case 't': sb.append('\t'); break;
+                    case 'b': sb.append('\b'); break;
+                    case 'f': sb.append('\f'); break;
+                    case 'u':
+                        if (at + 4 > text.length()) {
+                            throw error("short \\u escape");
+                        }
+                        try {
+                            sb.append((char) Integer.parseInt(text.substring(at, at + 4), 16));
+                        } catch (NumberFormatException e) {
+                            throw error("bad \\u escape");
+                        }
+                        at += 4;
+                        break;
+                    default: sb.append(escaped);
+                }
+            }
+            throw error("unterminated string");
+        }
+
+        private Object number() {
+            int start = at;
+            while (at < text.length() && "+-0123456789.eE".indexOf(text.charAt(at)) >= 0) {
+                at++;
+            }
+            String token = text.substring(start, at);
+            if (token.isEmpty()) {
+                throw error("unexpected character");
+            }
+            try {
+                if (token.indexOf('.') < 0 && token.indexOf('e') < 0 && token.indexOf('E') < 0) {
+                    return Long.parseLong(token);
+                }
+                return Double.parseDouble(token);
+            } catch (NumberFormatException e) {
+                at = start;
+                throw error("bad number");
+            }
+        }
+    }
 }
