@@ -62,6 +62,15 @@ Changelog:
   target of its own clicks rather than the link, and
   `document.elementFromPoint()` uses the same lookup, so it returns a link
   or span under the point where it used to return the enclosing block.
+* Security: `window.open()` can no longer open `file:` URLs or privileged
+  `about:` pages from a web page. The popup path skipped the navigation
+  policy that `location` assignment goes through, the shell opened whatever
+  URL the renderer named, and the popup's fresh renderer had no referrer, so
+  the `file:`/`about:` gates took the load for a chrome-initiated one. The
+  engine now applies the same policy to popups as to navigations, the shell
+  accepts only `http(s):`, `data:`, `blob:`, `about:blank` and, from a local
+  page, `file:` popups, and a popup's load carries its opener's origin as the
+  initiator so a remote opener cannot reach local files or settings.
 * Printing: paged PDF from a program. Until now only the command line
   (`--dump=print:FILE`) could reach the paginator; the C API, the engine
   protocol and Java all wrote one page as tall as the document, laid out for
