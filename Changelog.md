@@ -10,6 +10,15 @@ Changelog:
   replaces the reading accessor with the value. A cross-origin frame has
   a realm of its own, so its sizes froze at the top window's: a 300 x 200
   frame in a 900 x 800 window reported 900 x 800.
+* Network: `fetch()` and XMLHttpRequest GETs say `Sec-Fetch-Mode: cors`.
+  The header was derived from the method alone, so every GET that was not
+  a navigation went out as `no-cors`, which describes an `<img>` or a
+  `<script>`, not a script-made request; servers that screen requests by
+  their fetch metadata refused them. Requests the engine already knows to
+  be CORS requests (fetch, XHR, sendBeacon) and font loads now say
+  `cors`. A frame navigation with GET no longer carries an `Origin`
+  header. Reddit's front page stopped after its first 8 posts and now
+  continues to 66.
 * Layout: a percentage height on `<html>` or `<body>` inside a frame is
   a percentage of the frame. The root elements took the top window's
   height as their base wherever they were, so `html, body { height: 100% }`
