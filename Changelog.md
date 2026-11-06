@@ -3,6 +3,11 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Service workers: the request for a service worker's script carries
+  `Service-Worker: script`, as the specification requires. Servers use
+  the header to tell a registration from a page fetching the file;
+  `chat.google.com/serviceworker.js` answers 400 without it and 200 with
+  it, so the Chat frames in Gmail never got their worker.
 * Scripts: script elements a page inserts run in the order they were
   inserted. An element inserted while a script, a timer or an event
   handler was running went on one queue, one inserted from a

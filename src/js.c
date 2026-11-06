@@ -28643,7 +28643,7 @@ ns_worker_fetch_script(ns_worker_host *host, const char *url,
     static const char *const worker_headers[] = {
         "X-ND-Fetch-Dest: worker", NULL };
     static const char *const service_headers[] = {
-        "X-ND-Fetch-Dest: serviceworker", NULL };
+        "X-ND-Fetch-Dest: serviceworker", "Service-Worker: script", NULL };
     const char *const *script_headers =
         allow_cross_origin ? import_headers
         : (host && host->is_service_worker ? service_headers : worker_headers);
