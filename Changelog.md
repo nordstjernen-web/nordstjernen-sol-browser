@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Layout: an `<iframe>` styled `display: flex`, `grid`, `inline-flex` or
+  `table` shows its document. The frame's box became a flex or grid
+  container and its document, which is not an element, was not laid out
+  or painted at all; `display: table` gave the frame the height of the
+  page. A frame lays its document out itself, so only the outer display
+  type applies and the inner one is used as `flow-root`;
+  `getComputedStyle` still reports the authored value. Gmail's Chat view
+  sizes its main frame with `display: flex`: the pane was blank and now
+  shows the conversation list.
 * Service workers: the request for a service worker's script carries
   `Service-Worker: script`, as the specification requires. Servers use
   the header to tell a registration from a page fetching the file;
