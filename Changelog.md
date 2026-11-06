@@ -3,6 +3,16 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Performance: changing a DOM tree that is not in the document no longer
+  forces a layout of the document. `append`, `prepend`, `replaceChildren`,
+  `removeChild`, `remove`, `replaceChild`, `before`, `after`, `replaceWith`,
+  `innerHTML`, `outerHTML`, `textContent`, `innerText`,
+  `insertAdjacentHTML/Element/Text`, `splitText` and `normalize` marked the
+  whole document dirty even on a detached element or a `DocumentFragment`,
+  so a script that builds a widget off-document and reads a size as it goes
+  (YouTube's player does) paid for a full layout at every read. On a
+  1,500-row page, building 100 detached nodes that way went from 1.5 s to
+  under a millisecond.
 * Java: `org.nordstjernen.swing.BrowserView`, a Swing component that shows
   a page and lets the user work it: painting, scrollbars, wheel and keyboard
   scrolling, zoom, text selection and the clipboard, dropped files, back

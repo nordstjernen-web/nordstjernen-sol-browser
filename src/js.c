@@ -1941,7 +1941,9 @@ static void
 ns_js_note_mutation(ns_js *js, const ns_node *n)
 {
     const ns_node *root = n ? ns_node_root(n) : NULL;
-    if (!root || root->kind == NS_NODE_DOCUMENT) js->mutated = TRUE;
+    if (!root || (root->kind == NS_NODE_DOCUMENT &&
+                  !(root->flags & NS_NODE_FRAGMENT)))
+        js->mutated = TRUE;
 }
 
 static void
@@ -7864,7 +7866,7 @@ ns_element_split_text(JSContext *ctx, JSValueConst this_val,
     } else if (_j) {
         g_hash_table_add(_j->orphan_nodes, tail);
     }
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_mutation(_j, n);
     return ns_make_element(ctx, tail);
 }
 
@@ -7927,7 +7929,7 @@ ns_text_replaceWholeText(JSContext *ctx, JSValueConst this_val,
         c = next;
     }
     if (js) {
-        js->mutated = TRUE;
+        if (parent) ns_js_note_mutation(js, parent);
         ns_qcache_invalidate(js);
         if (parent) ns_css_mark_text_dirty(parent);
     }
@@ -8803,7 +8805,7 @@ ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst v
     ns_element_replace_all_recorded(_j, n, added);
     if (free_s) JS_FreeCString(ctx, s);
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, n);
         if (added) ns_js_script_needs_prepare(_j, n);
     }
     return JS_UNDEFINED;
@@ -8844,7 +8846,7 @@ ns_element_set_innerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
         }
     }
     if (free_s) JS_FreeCString(ctx, s);
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_mutation(_j, n);
     return JS_UNDEFINED;
 }
 
@@ -8946,7 +8948,7 @@ ns_element_set_outerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
     if (next && next->prev_sibling)
         ns_merge_with_next_text_node(_j, next->prev_sibling);
     ns_merge_with_next_text_node(_j, previous);
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_mutation(_j, parent);
     return JS_UNDEFINED;
 }
 
@@ -9007,7 +9009,7 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
             c = next;
         }
         ns_node_free(tfrag);
-        if (_j) _j->mutated = TRUE;
+        if (_j) ns_js_note_mutation(_j, n);
         return JS_UNDEFINED;
     }
     const ns_node *root = ns_node_root(n);
@@ -9036,7 +9038,7 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
         ns_node_free(fragment);
     }
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, n);
         if (!ns_node_in_template_content(n)) {
             ns_ce_upgrade_subtree_all(_j, n);
             ns_js_run_inserted_scripts(_j, n);
@@ -9117,7 +9119,7 @@ ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
             ns_js_record_child_change_arrays(_j, parent, kids, removed,
                                              previous, next);
             g_ptr_array_free(removed, TRUE);
-            _j->mutated = TRUE;
+            ns_js_note_mutation(_j, parent);
             ns_js_run_inserted_scripts(_j, parent);
             ns_ce_upgrade_subtree_all(_j, parent);
         }
@@ -9253,7 +9255,7 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
             ns_mut_record_emit_child_list_arrays(_j, self,
                 added->len ? added : NULL, original->len ? original : NULL,
                 NULL, NULL);
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, self);
         ns_js_nodes_inserted(_j, self, added);
     }
     g_ptr_array_free(added, FALSE);
@@ -37287,7 +37289,7 @@ ns_element_removeChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     ns_node_remove(child);
     if (_j2) {
         g_hash_table_add(_j2->orphan_nodes, child);
-        _j2->mutated = TRUE;
+        ns_js_note_mutation(_j2, parent);
         ns_js_record_child_change(_j2, parent, NULL, child,
                                   saved_prev, saved_next);
     }
@@ -37641,12 +37643,13 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
         if (JS_IsException(verr)) return verr;
     }
     ns_js *_j = js_from_ctx(ctx);
+    if (_j && newc->parent) ns_js_note_mutation(_j, newc);
     if (newc == oldc) {
         if (_j) {
             ns_node *p = oldc->prev_sibling, *nx = oldc->next_sibling;
             ns_js_record_child_change(_j, parent, NULL, oldc, p, nx);
             ns_js_record_child_change(_j, parent, oldc, NULL, p, nx);
-            _j->mutated = TRUE;
+            ns_js_note_mutation(_j, parent);
         }
         return JS_DupValue(ctx, argv[1]);
     }
@@ -37683,7 +37686,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
             c = next;
         }
         if (_j) {
-            _j->mutated = TRUE;
+            ns_js_note_mutation(_j, parent);
             if (!inert_parent) {
                 ns_js_run_inserted_scripts(_j, parent);
                 ns_ce_upgrade_subtree_all(_j, parent);
@@ -37715,7 +37718,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
     if (_j) {
         ns_ce_disconnect_subtree(_j, oldc);
         g_hash_table_add(_j->orphan_nodes, oldc);
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, parent);
         ns_js_record_child_change(_j, parent, newc, oldc,
                                   newc->prev_sibling, newc->next_sibling);
         if (!inert_parent) {
@@ -37856,7 +37859,7 @@ ns_element_insertAdjacentHTML(JSContext *ctx, JSValueConst this_val,
         g_ptr_array_free(kids, TRUE);
         ns_node_free(fragment);
         if (_j) {
-            _j->mutated = TRUE;
+            ns_js_note_mutation(_j, self);
             if (upgrade_root) {
                 ns_ce_upgrade_subtree_all(_j, upgrade_root);
                 ns_js_run_inserted_scripts(_j, upgrade_root);
@@ -37953,6 +37956,7 @@ ns_element_insertAdjacentElement(JSContext *ctx, JSValueConst this_val,
     int chk = ns_insert_adjacent_check(ctx, self, pos, FALSE, child);
     if (chk <= 0) { JS_FreeCString(ctx, pos); return chk < 0 ? JS_EXCEPTION : JS_NULL; }
     ns_js *_j = js_from_ctx(ctx);
+    if (_j && child->parent) ns_js_note_mutation(_j, child);
     if (_j) g_hash_table_remove(_j->orphan_nodes, child);
     ns_node *parent = NULL;
     gboolean ok = ns_insert_adjacent_node(self, pos, child, &parent);
@@ -37961,7 +37965,7 @@ ns_element_insertAdjacentElement(JSContext *ctx, JSValueConst this_val,
     if (_j && parent) {
         ns_js_record_child_change(_j, parent, child, NULL,
                                   child->prev_sibling, child->next_sibling);
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, parent);
         ns_js_run_inserted_scripts(_j, child);
         ns_ce_upgrade_subtree_all(_j, child);
     }
@@ -37993,7 +37997,7 @@ ns_element_insertAdjacentText(JSContext *ctx, JSValueConst this_val,
     if (_j && parent) {
         ns_js_record_child_change(_j, parent, node, NULL,
                                   node->prev_sibling, node->next_sibling);
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, parent);
     }
     return JS_UNDEFINED;
 }
@@ -38080,7 +38084,7 @@ ns_element_before(JSContext *ctx, JSValueConst this_val,
                                       to_insert->next_sibling);
     }
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, parent);
         ns_js_nodes_inserted(_j, parent, seq);
     }
     g_ptr_array_free(seq, TRUE);
@@ -38118,7 +38122,7 @@ ns_element_after(JSContext *ctx, JSValueConst this_val,
                                       node->prev_sibling, node->next_sibling);
     }
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, parent);
         ns_js_nodes_inserted(_j, parent, seq);
     }
     g_ptr_array_free(seq, TRUE);
@@ -38181,7 +38185,7 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
         }
     }
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, parent);
         ns_js_nodes_inserted(_j, parent, seq);
     }
     g_ptr_array_free(seq, TRUE);
@@ -38232,7 +38236,7 @@ ns_element_normalize(JSContext *ctx, JSValueConst this_val,
     if (!el) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
     ns_node_normalize_walk(_j, el, 0);
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_mutation(_j, el);
     return JS_UNDEFINED;
 }
 
@@ -38341,7 +38345,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
                     g_hash_table_add(_j->orphan_nodes, target);
                     ns_js_record_child_change(_j, old_parent, NULL, target,
                                               saved_prev, saved_next);
-                    _j->mutated = TRUE;
+                    ns_js_note_mutation(_j, old_parent);
                 }
             }
         }
@@ -38359,7 +38363,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
         g_hash_table_add(_j->orphan_nodes, n);
         ns_js_record_child_change(_j, old_parent, NULL, n,
                                   saved_prev, saved_next);
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, old_parent);
     }
     return JS_UNDEFINED;
 }
@@ -38422,7 +38426,7 @@ ns_element_append(JSContext *ctx, JSValueConst this_val,
                                       added->prev_sibling, added->next_sibling);
     }
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, parent);
         ns_js_nodes_inserted(_j, parent, seq);
     }
     g_ptr_array_free(seq, TRUE);
@@ -38463,7 +38467,7 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
                                       to_insert->next_sibling);
     }
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_mutation(_j, parent);
         ns_js_nodes_inserted(_j, parent, seq);
     }
     g_ptr_array_free(seq, TRUE);
