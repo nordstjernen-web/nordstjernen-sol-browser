@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: the audio helper is confined like a renderer. It decodes
+  the media a page plays, yet its sandbox skipped the renderer's extra
+  rules, so a decoder bug there could write the settings and the
+  remote-control token, open Unix sockets such as the session D-Bus, and
+  write anywhere in `/tmp` and Downloads. The helper now gets read-only
+  config and runtime directories, no state or Downloads directory, no
+  new Unix sockets once its sound device is open, no anonymous
+  executable memory, and a private temporary directory under the
+  browser's cache.
 * Security: a framed document can no longer climb out of its frame. A
   frame's document hangs under the `<iframe>` element of the page that
   embeds it, and `getRootNode()`, `previousSibling`/`nextSibling` of the
