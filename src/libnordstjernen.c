@@ -4641,9 +4641,16 @@ ns_browser_release_full(ns_browser *browser, int x, int y, int button,
         !prevented && node && browser_dropdown_click(browser, node);
 
     if (!select_consumed) {
+    const ns_node *focused_before = ns_js_focused_node(browser->js);
     if (!prevented && browser->js && node &&
         ns_js_click_activate(browser->js, node))
         browser->dirty = TRUE;
+    const ns_node *focused_now = ns_js_focused_node(browser->js);
+    if (focused_now != focused_before && ns_node_is_editable(focused_now)) {
+        browser->caret_byte = strlen(ns_node_editable_value(focused_now));
+        browser->sel_anchor_byte = browser->caret_byte;
+        browser->dirty = TRUE;
+    }
 
     if (!prevented && node && browser->js &&
         ns_js_activate_summary(browser->js, node)) {
@@ -5164,13 +5171,28 @@ ns_browser_key(ns_browser *browser, int kind, const char *key,
     return ns_browser_key_full(browser, kind, key, code, keycode, mods, NULL);
 }
 
+static gboolean
+browser_node_takes_text(const ns_node *n)
+{
+    static const char *const other_inputs[] = {
+        "button", "submit", "reset", "image", "checkbox", "radio", "file",
+        "hidden", "range", "color", NULL,
+    };
+    if (ns_node_is_editable(n)) return TRUE;
+    if (!ns_node_is_element_named(n, "input")) return FALSE;
+    const char *type = ns_element_get_attr(n, "type");
+    for (int i = 0; type && other_inputs[i]; i++)
+        if (g_ascii_strcasecmp(type, other_inputs[i]) == 0) return FALSE;
+    return TRUE;
+}
+
 int
 ns_browser_focused_editable(ns_browser *browser)
 {
     if (!browser || !browser->js)
         return 0;
     const ns_node *f = ns_js_focused_node(browser->js);
-    return f && ns_node_editable_value(f) ? 1 : 0;
+    return f && browser_node_takes_text(f) ? 1 : 0;
 }
 
 int

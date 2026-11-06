@@ -21,6 +21,21 @@ Changelog:
 * Fixed: with images turned off in Settings, the browser still fetched the
   images of a page. The layout-driven image fetch did not look at the
   setting; only the one-shot command-line renderer did.
+* Fixed: clicking a `<label>` now focuses its text field, select or
+  textarea, by mouse and from `label.click()`; before, only checkboxes and
+  radio buttons reacted. And a focused button or link no longer counts as a
+  focused text field, which had stopped the arrow, Page Up/Down and Space
+  keys from scrolling the page after a button was clicked, and raised the
+  on-screen keyboard on Android for any focused element.
+* Fixed: a click on the right half of an inline box went to whatever came
+  after it. A text field followed by a label lost every click on its right
+  half to that label's control, and the last half-character of a link was
+  not part of the link, which left a one-character link half dead. The
+  lookup asked for the caret position nearest the point where it wanted the
+  character under it. An image or inline-block inside a link is now the
+  target of its own clicks rather than the link, and
+  `document.elementFromPoint()` uses the same lookup, so it returns a link
+  or span under the point where it used to return the enclosing block.
 * Printing: paged PDF from a program. Until now only the command line
   (`--dump=print:FILE`) could reach the paginator; the C API, the engine
   protocol and Java all wrote one page as tall as the document, laid out for

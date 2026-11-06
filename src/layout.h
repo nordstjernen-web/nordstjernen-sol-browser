@@ -350,6 +350,9 @@ const ns_node *ns_box_hit_form_dom(const ns_box *root, double x, double y);
 const ns_node *ns_box_hit_inline_dom(const ns_box *root, double x, double y);
 
 const ns_node *ns_box_hit_node(const ns_box *root, double x, double y);
+const ns_node *ns_box_hit_element(const ns_box *root, double x, double y,
+                                  const ns_box **out_box, double *local_x,
+                                  double *local_y);
 
 gboolean ns_box_inline_rect_for_dom(const ns_box *root, const ns_node *target,
                                     double *x, double *y,

@@ -6143,9 +6143,9 @@ ns_paint_sync_inline_atomic_offsets(ns_box *root)
                 g_array_index(root->inline_atomics, ns_inline_atomic, i).box);
 }
 
-gboolean
-ns_paint_inline_xy_to_byte(const ns_box *b, double rel_x, double rel_y,
-                           gsize *out_byte)
+static gboolean
+inline_point_to_index(const ns_box *b, double rel_x, double rel_y,
+                      int *index, int *trailing, gboolean *inside)
 {
     if (!b || !b->text || !*b->text) return FALSE;
 
@@ -6158,15 +6158,30 @@ ns_paint_inline_xy_to_byte(const ns_box *b, double rel_x, double rel_y,
         return FALSE;
     }
 
-    int index = 0, trailing = 0;
     double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
     double layout_x = rel_x;
     double layout_y = rel_y - y_offset;
     ns_inline_unshift_point(b, layout, &layout_x, &layout_y);
     if (layout_y < 0) layout_y = 0;
-    ns_pango_layout_xy_to_index(layout, (int)(layout_x * NS_PANGO_SCALE),
-                             (int)(layout_y * NS_PANGO_SCALE),
-                             &index, &trailing);
+    *inside = ns_pango_layout_xy_to_index(layout,
+                                          (int)(layout_x * NS_PANGO_SCALE),
+                                          (int)(layout_y * NS_PANGO_SCALE),
+                                          index, trailing);
+
+    g_object_unref(layout);
+    cairo_destroy(cr);
+    cairo_surface_destroy(surf);
+    return TRUE;
+}
+
+gboolean
+ns_paint_inline_xy_to_byte(const ns_box *b, double rel_x, double rel_y,
+                           gsize *out_byte)
+{
+    int index = 0, trailing = 0;
+    gboolean inside = FALSE;
+    if (!inline_point_to_index(b, rel_x, rel_y, &index, &trailing, &inside))
+        return FALSE;
     if (out_byte) {
         gsize tlen = strlen(b->text);
         gsize bi = (gsize)index <= tlen ? (gsize)index : tlen;
@@ -6174,10 +6189,19 @@ ns_paint_inline_xy_to_byte(const ns_box *b, double rel_x, double rel_y,
         gsize off = (gsize)(p - b->text);
         *out_byte = off <= tlen ? off : tlen;
     }
+    return TRUE;
+}
 
-    g_object_unref(layout);
-    cairo_destroy(cr);
-    cairo_surface_destroy(surf);
+gboolean
+ns_paint_inline_xy_to_hit_byte(const ns_box *b, double rel_x, double rel_y,
+                               gsize *out_byte)
+{
+    int index = 0, trailing = 0;
+    gboolean inside = FALSE;
+    if (!inline_point_to_index(b, rel_x, rel_y, &index, &trailing, &inside) ||
+        !inside || index < 0 || (gsize)index >= strlen(b->text))
+        return FALSE;
+    *out_byte = (gsize)index;
     return TRUE;
 }
 
