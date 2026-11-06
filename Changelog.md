@@ -13,6 +13,16 @@ Changelog:
   Gmail's widget frames ran a chunk before the one defining its helpers
   and reported "not a function". The queues are now drained one root at a
   time, oldest insertion first.
+* Frames: `Document.prototype` in a cross-origin frame carries the
+  document's members. A frame's realm got its document with every method
+  as an own property and a bare `Document.prototype`, so
+  `Document.prototype.createElement.call(document, 'div')` and
+  `Object.getOwnPropertyDescriptor(Document.prototype, 'cookie')` failed
+  with "Cannot read properties of undefined", reading
+  `Document.prototype.write` threw, and a script that replaced
+  `Document.prototype.createElement` saw none of the calls. The frame's
+  prototypes now get the members the top document's do and the frame
+  document's own methods move onto its prototype.
 * Frames: a frame reaches a same-origin sibling through its cross-origin
   parent. `parent[name]`, `parent.frames[name]` and `parent[index]` gave
   an opaque proxy for every child of a cross-origin parent, also for a
