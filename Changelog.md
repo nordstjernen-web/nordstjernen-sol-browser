@@ -3,6 +3,12 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Network: the alt-svc cache file is used only when HTTP/3 is enabled.
+  libcurl read `altsvc.txt` when each request was set up and rewrote it
+  when each request ended, though its records only ever lead to HTTP/3,
+  which is off unless `NS_FORCE_HTTP3` is set. On Windows, opening a file
+  that was rewritten a moment ago can wait on the antivirus scanner for
+  seconds; on x.com three requests were seen parked in that open for 15 s.
 * Java: `org.nordstjernen.swing.BrowserView`, a Swing component that shows
   a page and lets the user work it: painting, scrollbars, wheel and keyboard
   scrolling, zoom, text selection and the clipboard, dropped files, back
