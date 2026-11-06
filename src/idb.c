@@ -118,7 +118,7 @@ static const char *
 ns_idb_partition(JSContext *ctx)
 {
     ns_js *js = JS_GetContextOpaque(ctx);
-    const char *partition = ns_js_storage_partition(js);
+    const char *partition = ns_js_realm_storage_partition(js, ctx);
     if (!partition || !*partition || strcmp(partition, "null") == 0 ||
         g_str_has_prefix(partition, "opaque://"))
         return NULL;
@@ -143,7 +143,7 @@ ns_idb_partition_dir(JSContext *ctx)
 static char *
 ns_idb_path_for_name(JSContext *ctx, const char *name)
 {
-    if (!name || !*name) return NULL;
+    if (!name || !*name || !ns_idb_partition(ctx)) return NULL;
     const ns_config *cfg = ns_config_get();
     if (cfg && cfg->private_mode) return g_strdup(":memory:");
     g_autofree char *dir = ns_idb_partition_dir(ctx);
@@ -405,6 +405,10 @@ ns_idb_backend_open(JSContext *ctx, JSValueConst this_val,
     if (argc < 1) return ns_idb_throw(ctx, "TypeError", "Database name is required");
     const char *name = ns_idb_arg_string(ctx, argv[0]);
     if (!name) return JS_EXCEPTION;
+    if (!ns_idb_partition(ctx)) {
+        JS_FreeCString(ctx, name);
+        return ns_idb_throw(ctx, "SecurityError", "Storage is unavailable");
+    }
     ns_idb_db *h = ns_idb_open_db(ctx, name);
     if (!h) {
         JS_FreeCString(ctx, name);

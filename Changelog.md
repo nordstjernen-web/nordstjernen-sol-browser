@@ -9,6 +9,16 @@ Changelog:
   which is off unless `NS_FORCE_HTTP3` is set. On Windows, opening a file
   that was rewritten a moment ago can wait on the antivirus scanner for
   seconds; on x.com three requests were seen parked in that open for 15 s.
+* Performance: changing a DOM tree that is not in the document no longer
+  forces a layout of the document. `append`, `prepend`, `replaceChildren`,
+  `removeChild`, `remove`, `replaceChild`, `before`, `after`, `replaceWith`,
+  `innerHTML`, `outerHTML`, `textContent`, `innerText`,
+  `insertAdjacentHTML/Element/Text`, `splitText` and `normalize` marked the
+  whole document dirty even on a detached element or a `DocumentFragment`,
+  so a script that builds a widget off-document and reads a size as it goes
+  (YouTube's player does) paid for a full layout at every read. On a
+  1,500-row page, building 100 detached nodes that way went from 1.5 s to
+  under a millisecond.
 * Java: `org.nordstjernen.swing.BrowserView`, a Swing component that shows
   a page and lets the user work it: painting, scrollbars, wheel and keyboard
   scrolling, zoom, text selection and the clipboard, dropped files, back
@@ -68,6 +78,45 @@ Changelog:
   target of its own clicks rather than the link, and
   `document.elementFromPoint()` uses the same lookup, so it returns a link
   or span under the point where it used to return the enclosing block.
+* Security: `window.open()` can no longer open `file:` URLs or privileged
+  `about:` pages from a web page. The popup path skipped the navigation
+  policy that `location` assignment goes through, the shell opened whatever
+  URL the renderer named, and the popup's fresh renderer had no referrer, so
+  the `file:`/`about:` gates took the load for a chrome-initiated one. The
+  engine now applies the same policy to popups as to navigations, the shell
+  accepts only `http(s):`, `data:`, `blob:`, `about:blank` and, from a local
+  page, `file:` popups, and a popup's load carries its opener's origin as the
+  initiator so a remote opener cannot reach local files or settings.
+* Security hardening: the IndexedDB backend derives its storage partition
+  from the calling realm, not from the shared top-level key, so a frame or
+  realm other than the main document gets a `SecurityError` instead of the
+  embedding page's databases, in private mode as well. A cross-origin frame
+  could not reach the backend in practice (its `indexedDB` getter is denied
+  before the polyfill runs), but the partition no longer relies on that.
+* Security: canvas 2D state no longer outlives the document that drew it.
+  The table of canvas surfaces was keyed by the node's address and cleared
+  only at renderer exit, so after a navigation a new page whose `<canvas>`
+  landed at a recycled address could receive the previous page's drawing
+  context and pixels, and a resize could re-initialise that context through
+  a frame's already freed JavaScript context. The table is now dropped on
+  every navigation, an entry goes away with its node, and state is
+  re-initialised through the main realm's context.
+* Security: a synchronous `XMLHttpRequest` now pauses the page's other
+  tasks while it blocks, as the platform requires. It used to pump the main
+  loop with timers, message tasks and other requests' callbacks still
+  running, so a sync request issued from another request's
+  `readystatechange` handler could complete that request underneath its own
+  streaming callback and free the state it was still using. Only the
+  blocking request itself is delivered during the pump, and a request's
+  completion is deferred while one of its chunk handlers is on the stack.
+* Security: a streaming `XMLHttpRequest` checks CORS against the URL that
+  is actually answering, not the one script asked for. A same-origin
+  endpoint that redirected to a cross-origin resource without CORS headers
+  let the page read that resource's status, headers and body at readyState
+  2 and 3, before the final delivery check refused it. Each streamed chunk
+  now carries the URL of the hop it came from; the handler validates CORS,
+  connect-src and mixed content against it, exposes headers only when it is
+  same-origin, and reports it as `responseURL`.
 * Printing: paged PDF from a program. Until now only the command line
   (`--dump=print:FILE`) could reach the paginator; the C API, the engine
   protocol and Java all wrote one page as tall as the document, laid out for
