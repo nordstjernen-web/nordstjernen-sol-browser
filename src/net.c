@@ -2282,6 +2282,18 @@ ns_net_policy_scheme_is_network(const char *url)
     return FALSE;
 }
 
+static gboolean
+ns_net_policy_allows_host(const ns_net_policy *policy, const char *host)
+{
+    if (policy->offline) return FALSE;
+    if (!host || !*host) return !policy->allow_hosts;
+    if (ns_net_policy_host_matches(policy->deny_hosts, host)) return FALSE;
+    if (policy->allow_hosts &&
+        !ns_net_policy_host_matches(policy->allow_hosts, host))
+        return FALSE;
+    return !policy->block_private || !ns_net_policy_host_is_private(host);
+}
+
 gboolean
 ns_net_policy_allows(const char *url)
 {
@@ -2290,20 +2302,9 @@ ns_net_policy_allows(const char *url)
     if (!file && !ns_net_policy_scheme_is_network(url)) return TRUE;
     g_autofree char *host = file ? NULL : ns_url_host_from(url);
     g_autofree char *lower = host ? g_ascii_strdown(host, -1) : NULL;
-    gboolean allowed = TRUE;
     g_mutex_lock(&g_net_policy_lock);
-    if (file)
-        allowed = !g_net_policy.block_file;
-    else if (g_net_policy.offline || !lower || !*lower)
-        allowed = !g_net_policy.offline && !g_net_policy.allow_hosts;
-    else if (ns_net_policy_host_matches(g_net_policy.deny_hosts, lower))
-        allowed = FALSE;
-    else if (g_net_policy.allow_hosts &&
-             !ns_net_policy_host_matches(g_net_policy.allow_hosts, lower))
-        allowed = FALSE;
-    else if (g_net_policy.block_private &&
-             ns_net_policy_host_is_private(lower))
-        allowed = FALSE;
+    gboolean allowed = file ? !g_net_policy.block_file
+                            : ns_net_policy_allows_host(&g_net_policy, lower);
     g_mutex_unlock(&g_net_policy_lock);
     return allowed;
 }
