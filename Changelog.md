@@ -12,6 +12,13 @@ Changelog:
   `cors`. A frame navigation with GET no longer carries an `Origin`
   header. Reddit's front page stopped after its first 8 posts and now
   continues to 66.
+* Layout: a percentage height on `<html>` or `<body>` inside a frame is
+  a percentage of the frame. The root elements took the top window's
+  height as their base wherever they were, so `html, body { height: 100% }`
+  in a 300 x 200 frame of an 800 px tall window made the frame's document
+  800 px tall: an application shell in a frame overflowed it and its
+  bottom edge was cut off. The base is now the height of the frame the
+  document is shown in, and follows the frame when it is resized.
 * Layout: an `<iframe>` styled `display: flex`, `grid`, `inline-flex` or
   `table` shows its document. The frame's box became a flex or grid
   container and its document, which is not an element, was not laid out
