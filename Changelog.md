@@ -3,6 +3,17 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Java: a browser for agents, `org.nordstjernen.agent`. `AgentBrowser`
+  has tabs that keep their own scroll position and history, follow the
+  navigations a page asks for, open its windows as new tabs, save downloads
+  and settle after each action; a page is read as an outline of roles and
+  names with element references (`ref_12`) to click, type into, hover,
+  scroll to or set. `BrowserTools` offers those actions as named tools with
+  JSON Schemas for any tool-calling framework, and `McpServer` serves them
+  over the Model Context Protocol on stdio
+  (`java -cp nordstjernen-java.jar org.nordstjernen.agent.McpServer`), with
+  the same tool names as the desktop browser's `--mcp`. It is headless,
+  needs no display and adds no dependency.
 * HTML from a string. `ns_browser_open_html`, an `html` field on the
   protocol's `/open`, and `Page.setContent(html, baseUrl)` in Java show
   markup the caller already holds; the base URL resolves relative links and

@@ -93,6 +93,23 @@ jobs:
           grep -q 'ok:     true' page-smoke.txt
           grep -q '6 \* 7 = 42' page-smoke.txt
 
+      - name: Smoke test (MCP server drives a headless tab)
+        run: |
+          set -o pipefail
+          JAR=$(ls java/build/libs/nordstjernen-java-*.jar \
+                | grep -Ev -- '-(sources|javadoc)\.jar$' | head -1)
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"about:start"}}}' \
+            '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_page","arguments":{"filter":"interactive"}}}' \
+            | NORDSTJERNEN_RENDERER="$PWD/builddir-java/src/nordstjernen-renderer" \
+                java -cp "$JAR" org.nordstjernen.agent.McpServer --in-memory > mcp-smoke.txt
+          cut -c1-400 mcp-smoke.txt
+          grep -q '"name":"read_page"' mcp-smoke.txt
+          grep -q 'Tab 1: about:start' mcp-smoke.txt
+          grep -q 'ref_1' mcp-smoke.txt
+
       - name: Build jar with Maven
         working-directory: java
         run: |
@@ -101,6 +118,7 @@ jobs:
                 | grep -Ev -- '-(sources|javadoc)\.jar$' | head -1)
           unzip -l "$JAR" | grep -q 'org/nordstjernen/browser/Page.class'
           unzip -l "$JAR" | grep -q 'META-INF/License.md'
+          unzip -l "$JAR" | grep -q 'org/nordstjernen/agent/remote-page.js'
 
       - name: Upload jar
         if: hashFiles('java/build/libs/*.jar') != ''

@@ -164,6 +164,64 @@ try (Engine engine = Engine.launch();
 
 `examples/PageExample.java` is a runnable version of the snippet above.
 
+### Agents and the MCP server (`org.nordstjernen.agent`)
+
+`AgentBrowser` is the browser API with a window's half added, for a program
+or a model that drives pages rather than renders them. Its tabs keep their
+scroll position and history, follow the navigations a click, a form or a
+script asks for, open the windows a page opens as new tabs, save downloads,
+and wait for the page to settle after every action. A page is described as an
+outline whose elements carry references:
+
+```java
+try (AgentBrowser browser = AgentBrowser.launch()) {
+    Tab tab = browser.newTab("https://example.com");
+    String outline = tab.snapshot(false, 40_000);
+    // - heading "Example Domain" [ref_1] level=1 (x=..,y=..,w=..,h=..)
+    // - link "More information..." [ref_3] href="https://www.iana.org/..." (...)
+    tab.click("ref_3");                       // scrolls it into view, clicks, follows the link
+    tab.type("ref_7", "hello\n");             // click a field, type, press Enter
+    tab.setValue("ref_9", "Blue");            // a select by label, a checkbox by true/false
+    tab.press("ctrl+a", 1);
+    String found = tab.find("Sign in", 10);   // by text, name, placeholder or CSS selector
+    byte[] png = tab.screenshot();            // the viewport; click(x, y) takes its pixels
+    String value = tab.evaluate("document.title");
+}
+```
+
+Every action returns a short account of what happened, ending in the tab's
+URL and title, and a failed one throws `AgentException` with a message
+written for the model that asked (`unknown or stale ref ref_4 (call
+read_page or find again)`).
+
+`BrowserTools` offers the same actions as tools: a name, a description and
+a JSON Schema each, and `call(name, argumentsJson)` to run one. That is the
+shape LangChain4j, Spring AI and the model vendors' own SDKs take tools in,
+so wiring them up is a loop over `tools()`. The names and arguments are
+those of the desktop browser's MCP server: `navigate`, `read_page`, `find`,
+`click`, `double_click`, `hover`, `type`, `key`, `scroll`, `form_input`,
+`screenshot`, `javascript`, `get_page_text`, `wait`, `save_pdf`, `reload`
+and the `tabs_*` tools.
+
+`McpServer` serves those tools over the Model Context Protocol on stdio,
+with no dependency beyond the jar:
+
+```sh
+java -cp nordstjernen-java-<version>.jar org.nordstjernen.agent.McpServer \
+     --profile ~/.cache/agent-profile --downloads ~/Downloads --policy public-web
+```
+
+```json
+{ "mcpServers": { "nordstjernen": {
+    "command": "java",
+    "args": ["-cp", "/path/to/nordstjernen-java.jar", "org.nordstjernen.agent.McpServer"] } } }
+```
+
+`--policy public-web` keeps the browser off local files and private
+addresses, `--allow-host` / `--deny-host` narrow it further, and `--help`
+lists the rest. Unlike the desktop browser's `--mcp`, which drives the
+window on the user's screen, this one is headless and needs no display.
+
 ### In-process pages over JNI (`Nordstjernen`, `Page`)
 
 The older in-process path loads the engine into the JVM through its C
