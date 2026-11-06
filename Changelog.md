@@ -3,6 +3,13 @@ Changelog:
 
 1.0.45-dev:
 ======
+* HTTP cache: a body the page stored or read a moment ago is served from
+  memory. A second request for the same URL used to read the body file
+  back from disk straight after writing it; on Windows that open waits for
+  the antivirus scanner, and it was made holding the cache lock, so one
+  slow open held up every other request. Bodies up to 2 MB, 16 MB in all,
+  are kept per renderer, and a copy is only used while the cache index
+  still describes the same response.
 * Performance: changing a DOM tree that is not in the document no longer
   forces a layout of the document. `append`, `prepend`, `replaceChildren`,
   `removeChild`, `remove`, `replaceChild`, `before`, `after`, `replaceWith`,
