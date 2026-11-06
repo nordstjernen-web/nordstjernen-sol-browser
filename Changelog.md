@@ -3,6 +3,11 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Lists: an `inside` disc, circle or square marker is followed by a 1 em
+  gap, as in Chrome, instead of a word space, and whitespace at the start
+  of the item no longer adds to it. List text started about 10 px further
+  left than in other browsers and wrapped at different words; the Top 10
+  list on linux.org.ru now breaks its lines where Chrome does.
 * Fetch: a `Request` has a `signal`, and its attributes live on
   `Request.prototype` as in other browsers. The attributes were own data
   properties of each object and `signal` did not exist, so
