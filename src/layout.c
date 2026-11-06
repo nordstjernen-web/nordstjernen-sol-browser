@@ -152,6 +152,23 @@ static double intrinsic_keyword_width(ns_box *box, const char *kw,
                                       const ns_style *mi, double avail);
 
 static double
+box_viewport_height(const ns_box *box)
+{
+    const ns_box *inside = box;
+    for (const ns_box *p = box ? box->parent : NULL; p;
+         inside = p, p = p->parent) {
+        if (!p->dom || p->dom->kind != NS_NODE_ELEMENT || !p->dom->name ||
+            (strcmp(p->dom->name, "iframe") != 0 &&
+             strcmp(p->dom->name, "frame") != 0))
+            continue;
+        double h = containing_block_definite_height(inside);
+        if (h > 0) return h;
+        return p->content_height > 0 ? p->content_height : 150.0;
+    }
+    return ns_css_viewport_h();
+}
+
+static double
 resolve_used_height(const ns_box *box, const ns_css_value *hv,
                     double width_basis, double fallback)
 {
@@ -159,11 +176,11 @@ resolve_used_height(const ns_box *box, const ns_css_value *hv,
     if (value_is_percent(hv)) {
         double vh;
         if (box_is_doc_root(box)) {
-            vh = ns_css_viewport_h();
+            vh = box_viewport_height(box);
         } else if (box && box->style &&
                    ns_css_keyword_is(box->style->values[NS_CSS_POSITION],
                                      "fixed")) {
-            vh = ns_css_viewport_h();
+            vh = box_viewport_height(box);
         } else {
             vh = containing_block_definite_height(box);
             if (vh < 0) return fallback;
@@ -320,7 +337,7 @@ containing_block_definite_height(const ns_box *box)
         return -1;
     }
     if (value_is_percent(h)) {
-        double base = box_is_doc_root(p) ? ns_css_viewport_h()
+        double base = box_is_doc_root(p) ? box_viewport_height(p)
                                          : containing_block_definite_height(p);
         if (base < 0) return -1;
         double ch = h->kind == NS_CSS_V_CALC
@@ -18391,7 +18408,7 @@ relative_pct_cb_height(const ns_box *box)
     if (value_is_percent(h)) {
         double base;
         if (p->dom && p->dom->name && strcmp(p->dom->name, "html") == 0)
-            base = ns_css_viewport_h();
+            base = box_viewport_height(p);
         else
             base = relative_pct_cb_height(p);
         if (base < 0) return -1;

@@ -3,6 +3,13 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Layout: a percentage height on `<html>` or `<body>` inside a frame is
+  a percentage of the frame. The root elements took the top window's
+  height as their base wherever they were, so `html, body { height: 100% }`
+  in a 300 x 200 frame of an 800 px tall window made the frame's document
+  800 px tall: an application shell in a frame overflowed it and its
+  bottom edge was cut off. The base is now the height of the frame the
+  document is shown in, and follows the frame when it is resized.
 * Service workers: the request for a service worker's script carries
   `Service-Worker: script`, as the specification requires. Servers use
   the header to tell a registration from a page fetching the file;
