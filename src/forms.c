@@ -30,6 +30,30 @@ ns_form_is_submit_trigger(const ns_node *n)
     return FALSE;
 }
 
+static const ns_node *
+ns_form_default_button_in(const ns_node *scan, const ns_node *form,
+                          const ns_node *doc, int depth)
+{
+    if (!scan || depth >= NS_FORM_MAX_DEPTH) return NULL;
+    if (scan->kind == NS_NODE_DOCUMENT && scan->parent) return NULL;
+    if (scan->kind == NS_NODE_ELEMENT && ns_form_is_submit_trigger(scan) &&
+        ns_form_owner(scan, doc) == form)
+        return scan;
+    if (ns_node_is_element_named(scan, "template")) return NULL;
+    for (const ns_node *c = scan->first_child; c; c = c->next_sibling) {
+        const ns_node *hit = ns_form_default_button_in(c, form, doc, depth + 1);
+        if (hit) return hit;
+    }
+    return NULL;
+}
+
+const ns_node *
+ns_form_default_button(const ns_node *form, const ns_node *doc)
+{
+    if (!form) return NULL;
+    return ns_form_default_button_in(doc ? doc : form, form, doc, 0);
+}
+
 gboolean
 ns_form_is_reset_trigger(const ns_node *n)
 {

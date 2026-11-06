@@ -364,9 +364,18 @@ headless_js_form_submit(const ns_node *form, const ns_node *submitter,
 {
     headless_nav_capture *cap = user_data;
     if (!cap || !form) return;
+    gboolean from_button = submitter && submitter != form &&
+                           ns_form_is_submit_trigger(submitter);
     const char *method = ns_element_get_attr(form, "method");
+    const char *formmethod = from_button
+        ? ns_element_get_attr(submitter, "formmethod") : NULL;
+    if (formmethod && *formmethod) method = formmethod;
+    if (method && g_ascii_strcasecmp(method, "dialog") == 0) return;
     gboolean is_post = method && g_ascii_strcasecmp(method, "post") == 0;
     const char *action = ns_element_get_attr(form, "action");
+    const char *formaction = from_button
+        ? ns_element_get_attr(submitter, "formaction") : NULL;
+    if (formaction && *formaction) action = formaction;
     if (!action) action = "";
     GString *q = g_string_new(NULL);
     gboolean first = TRUE;
@@ -1286,6 +1295,13 @@ headless_submit_form_from(headless_flush_ctx *fc, headless_nav_capture *nav,
     const ns_node *form = ns_form_owner(trigger, doc);
     if (!form) return;
     const ns_node *root = doc ? doc : form;
+    if (ns_node_is_text_input(trigger)) {
+        const ns_node *def = ns_form_default_button(form, root);
+        if (def) {
+            if (ns_element_effectively_disabled(def)) return;
+            trigger = def;
+        }
+    }
     if (!ns_element_get_attr(form, "novalidate") &&
         !ns_element_get_attr(trigger, "formnovalidate")) {
         const ns_node *bad = ns_form_first_invalid(form, root, root);
@@ -1301,6 +1317,7 @@ headless_submit_form_from(headless_flush_ctx *fc, headless_nav_capture *nav,
         ns_js_dispatch_submit_event(fc->js, form, trigger, &prevented);
         ns_js_consume_mutated(fc->js);
         if (prevented) return;
+        if (ns_js_form_dialog_submit(fc->js, form, trigger)) return;
     }
     headless_js_form_submit(form, trigger, nav);
 }

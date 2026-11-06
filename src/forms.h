@@ -14,6 +14,7 @@ G_BEGIN_DECLS
 
 gboolean ns_form_is_submit_trigger(const ns_node *n);
 gboolean ns_form_is_reset_trigger(const ns_node *n);
+const ns_node *ns_form_default_button(const ns_node *form, const ns_node *doc);
 
 void ns_form_collect_inputs(const ns_node *form, const ns_node *n,
                             const ns_node *doc, GString *query,
