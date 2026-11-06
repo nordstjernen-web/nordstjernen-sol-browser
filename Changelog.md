@@ -3,6 +3,10 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Docs: `docs/security-review-2026-11.md` reports a security review of
+  the engine: the Critical and High findings fixed in this release, the
+  Medium and Low findings still open, and what LWN's article on the
+  sibling Northstar project means for this tree.
 * Security: an animated WebGL canvas that shrinks no longer overflows its
   picture. On Windows and macOS an animated canvas is copied out through
   two pixel buffers sized for the frame; resizing the canvas replaced
