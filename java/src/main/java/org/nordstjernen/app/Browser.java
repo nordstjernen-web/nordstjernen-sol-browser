@@ -153,6 +153,8 @@ public final class Browser {
 
     private final Set<String> cameraAsked = new HashSet<>();
     private final Set<Long> activeDownloads = new HashSet<>();
+    private final Map<String, Boolean> capabilityAnswers = new HashMap<>();
+    private boolean popupPollBusy = false;
 
     private JDialog console;
     private JTextArea consoleOut;
@@ -175,9 +177,14 @@ public final class Browser {
         }, "ns-shutdown"));
     }
 
-    private Browser(String startUrl, boolean privateMode) {
+    private Browser(String startUrl, boolean privateMode, String openerToken,
+                    String openerOrigin) {
         this.privateMode = privateMode;
         this.engine = new RemoteBrowser(privateMode);
+        this.engine.setPopupsSupported(true);
+        if (openerToken != null) {
+            this.engine.setOpener(openerToken, openerOrigin);
+        }
         buildUi();
         navigate(startUrl, true);
     }
@@ -196,8 +203,18 @@ public final class Browser {
      * and none of it outlives the window.
      */
     private static Browser openWindow(String url, boolean privateMode) {
+        return openWindow(url, privateMode, null, null);
+    }
+
+    /**
+     * Open a window for a page another page opened with {@code window.open()}:
+     * {@code openerToken} and {@code openerOrigin}, from the opener's request,
+     * give the new page its {@code window.opener}.
+     */
+    private static Browser openWindow(String url, boolean privateMode, String openerToken,
+                                      String openerOrigin) {
         Browser b = new Browser(url == null || url.isEmpty() ? HOME_URL : url,
-                                privateMode);
+                                privateMode, openerToken, openerOrigin);
         synchronized (WINDOWS) {
             WINDOWS.add(b);
         }
@@ -205,6 +222,10 @@ public final class Browser {
     }
 
     private void closeWindow() {
+        if (closed) {
+            return;
+        }
+        unlinkPopups();
         boolean last;
         synchronized (WINDOWS) {
             WINDOWS.remove(this);
@@ -888,8 +909,13 @@ public final class Browser {
                 if (f.windowAction != null) {
                     applyWindowAction(f.windowAction);
                 }
-                if (f.camera != null) {
+                if (f.capability != null) {
+                    promptCapabilities(f.capability);
+                } else if (f.camera != null) {
                     promptCamera(f.camera);
+                }
+                if (f.popup) {
+                    pollPopups();
                 }
                 if (f.download != null) {
                     startDownload(f.download, f.downloadName);
@@ -2010,6 +2036,14 @@ public final class Browser {
 
     private void promptCamera(String origin) {
         if (!cameraAsked.add(origin)) return;
+        final boolean allow = askCamera(origin);
+        io.submit(() -> {
+            engine.resolveCamera(origin, allow);
+            SwingUtilities.invokeLater(this::scheduleRefresh);
+        });
+    }
+
+    private boolean askCamera(String origin) {
         int choice = JOptionPane.showOptionDialog(frame,
             "This page wants to use your camera on\n" + origin
             + ".\n\nAllowing lets the site capture video from this device for "
@@ -2017,11 +2051,181 @@ public final class Browser {
             "Share your camera with " + origin + "?",
             JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE, null,
             new String[]{"Allow this site", "Block"}, "Block");
-        final boolean allow = choice == 0;
+        return choice == 0;
+    }
+
+    /**
+     * Answer the capability requests a page is suspended on. Each kind and
+     * origin is asked about once per window; the same answer is repeated to
+     * the engine when the page asks again.
+     */
+    private void promptCapabilities(String capability) {
+        for (String[] request : RemoteBrowser.capabilityRequests(capability)) {
+            final String kind = request[0];
+            final String origin = request[1];
+            Boolean known = capabilityAnswers.get(kind + " " + origin);
+            final boolean allow = known != null ? known
+                : kind.equals("camera") ? askCamera(origin) : askCapability(kind, origin);
+            capabilityAnswers.put(kind + " " + origin, allow);
+            io.submit(() -> {
+                try {
+                    engine.resolveCapability(kind, origin, allow);
+                } catch (RuntimeException ex) {
+                    return;
+                }
+                SwingUtilities.invokeLater(this::scheduleRefresh);
+            });
+        }
+    }
+
+    private boolean askCapability(String kind, String origin) {
+        String what = switch (kind) {
+            case "popups" -> "open a new window";
+            case "fullscreen" -> "take the whole screen";
+            case "pointer-lock" -> "capture the mouse pointer";
+            case "downloads" -> "download a file";
+            case "webgl" -> "draw with WebGL";
+            default -> "use " + kind;
+        };
+        return JOptionPane.showConfirmDialog(frame,
+            origin + "\nwants to " + what + ".", "Allow this site?",
+            JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /** A popup and the window that opened it, keyed by the engine's token. */
+    private static final class PopupLink {
+        final String token;
+        Browser opener;
+        final Browser popup;
+
+        PopupLink(String token, Browser opener, Browser popup) {
+            this.token = token;
+            this.opener = opener;
+            this.popup = popup;
+        }
+    }
+
+    private static final Map<String, PopupLink> POPUP_LINKS = new HashMap<>();
+    private static final String[] POPUP_FIELDS = {
+        "token", "to", "data", "origin", "target", "path", "ports", "id"
+    };
+
+    /** Fetch the popup operations the page queued and act on them. */
+    private void pollPopups() {
+        if (popupPollBusy || closed) {
+            return;
+        }
+        popupPollBusy = true;
         io.submit(() -> {
-            engine.resolveCamera(origin, allow);
+            List<Map<String, String>> ops;
+            try {
+                ops = engine.popupPoll();
+            } catch (RuntimeException ex) {
+                ops = List.of();
+            }
+            final List<Map<String, String>> polled = ops;
+            SwingUtilities.invokeLater(() -> {
+                popupPollBusy = false;
+                if (!closed) {
+                    handlePopupOps(polled);
+                }
+            });
+        });
+    }
+
+    /**
+     * Open the window an {@code open} asks for, and carry every other
+     * operation to the window at the far end of its link, checking that this
+     * window is the end allowed to send it.
+     */
+    private void handlePopupOps(List<Map<String, String>> ops) {
+        for (Map<String, String> op : ops) {
+            String kind = op.get("op");
+            if (kind == null) {
+                continue;
+            }
+            if (kind.equals("open")) {
+                openPopup(op);
+                continue;
+            }
+            PopupLink link = POPUP_LINKS.get(op.get("token"));
+            if (link == null || (link.opener != this && link.popup != this)) {
+                continue;
+            }
+            boolean fromPopup = link.popup == this;
+            switch (kind) {
+                case "post" -> {
+                    boolean toPopup = "popup".equals(op.get("to"));
+                    if (toPopup && !fromPopup) {
+                        link.popup.deliverPopupOp("message", op);
+                    } else if (!toPopup && fromPopup && link.opener != null) {
+                        link.opener.deliverPopupOp("message", op);
+                    }
+                }
+                case "call" -> {
+                    if (fromPopup && link.opener != null) {
+                        link.opener.deliverPopupOp("call", op);
+                    }
+                }
+                case "port" -> {
+                    Browser target = fromPopup ? link.opener : link.popup;
+                    if (target != null) {
+                        target.deliverPopupOp("port", op);
+                    }
+                }
+                case "close" -> link.popup.closeWindow();
+                default -> { }
+            }
+        }
+    }
+
+    private void openPopup(Map<String, String> op) {
+        String url = op.get("url");
+        String token = op.get("token");
+        if (url == null || url.isEmpty()) {
+            return;
+        }
+        boolean linked = token != null && !token.isEmpty() && !POPUP_LINKS.containsKey(token);
+        Browser popup = openWindow(url, privateMode, linked ? token : null,
+                                   linked ? op.get("origin") : null);
+        if (linked) {
+            POPUP_LINKS.put(token, new PopupLink(token, this, popup));
+        }
+    }
+
+    private void deliverPopupOp(String kind, Map<String, String> op) {
+        if (closed) {
+            return;
+        }
+        Map<String, String> fields = new java.util.LinkedHashMap<>();
+        for (String field : POPUP_FIELDS) {
+            if (op.get(field) != null) {
+                fields.put(field, op.get(field));
+            }
+        }
+        io.submit(() -> {
+            try {
+                engine.popupDeliver(kind, fields);
+            } catch (RuntimeException ex) {
+                return;
+            }
             SwingUtilities.invokeLater(this::scheduleRefresh);
         });
+    }
+
+    /** Tell openers their popup is gone, and forget the links this window was part of. */
+    private void unlinkPopups() {
+        for (var it = POPUP_LINKS.values().iterator(); it.hasNext();) {
+            PopupLink link = it.next();
+            if (link.popup == this) {
+                if (link.opener != null) {
+                    link.opener.deliverPopupOp("closed", Map.of("token", link.token));
+                }
+                it.remove();
+            } else if (link.opener == this) {
+                link.opener = null;
+            }
+        }
     }
 
     // --- Media ---------------------------------------------------------------

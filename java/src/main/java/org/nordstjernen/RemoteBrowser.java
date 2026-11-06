@@ -74,12 +74,20 @@ public final class RemoteBrowser implements AutoCloseable {
         public final int requestedScrollY;
         /** Horizontal scroll position the page asked for, or -1. */
         public final int requestedScrollX;
+        /** The page queued popup operations; fetch them with {@link #popupPoll()}. */
+        public final boolean popup;
+        /**
+         * Capability requests waiting for a decision, as {@code <kind> <origin>}
+         * entries separated by {@code ;}, or null; see {@link #capabilityRequests(String)}.
+         */
+        public final String capability;
 
         Frame(BufferedImage image, String nav, boolean unchanged,
               boolean animating, boolean caretBlinking, String webgl,
               String camera, String download, String windowAction,
               String audio, boolean clipboard, int pageWidth, int pageHeight,
-              int requestedScrollY, int requestedScrollX) {
+              int requestedScrollY, int requestedScrollX,
+              boolean popup, String capability) {
             this.image = image;
             this.nav = nav;
             this.unchanged = unchanged;
@@ -96,6 +104,8 @@ public final class RemoteBrowser implements AutoCloseable {
             this.pageHeight = pageHeight;
             this.requestedScrollY = requestedScrollY;
             this.requestedScrollX = requestedScrollX;
+            this.popup = popup;
+            this.capability = capability;
         }
     }
 
@@ -184,10 +194,15 @@ public final class RemoteBrowser implements AutoCloseable {
         public final String downloadName;
         public final String windowAction;
         public final String audio;
+        /** The page queued popup operations; fetch them with {@link #popupPoll()}. */
+        public final boolean popup;
+        /** Capability requests waiting for a decision, or null; see {@link Frame#capability}. */
+        public final String capability;
 
         Tick(boolean changed, boolean animating, int pageWidth, int pageHeight,
              String nav, String webgl, String camera, String download,
-             String windowAction, String audio) {
+             String windowAction, String audio, boolean popup,
+             String capability) {
             this.changed = changed;
             this.animating = animating;
             this.pageWidth = pageWidth;
@@ -199,6 +214,8 @@ public final class RemoteBrowser implements AutoCloseable {
             this.downloadName = downloadName(download);
             this.windowAction = windowAction;
             this.audio = audio;
+            this.popup = popup;
+            this.capability = capability;
         }
     }
 
@@ -224,6 +241,9 @@ public final class RemoteBrowser implements AutoCloseable {
     private int pageWidth;
     private int pageHeight;
     private double devicePixelRatio = 1.0;
+    private boolean popupsSupported;
+    private String openerToken = "";
+    private String openerOrigin = "";
 
     public RemoteBrowser() {
         this(false);
@@ -312,6 +332,9 @@ public final class RemoteBrowser implements AutoCloseable {
             + ",\"settle_ms\":" + settleMs
             + ",\"history\":" + (fromHistory ? 1 : 0)
             + ",\"user_activated\":" + (userActivated ? 1 : 0)
+            + ",\"popups\":" + (popupsSupported ? 1 : 0)
+            + ",\"opener_token\":" + Json.quote(openerToken)
+            + ",\"opener_origin\":" + Json.quote(openerOrigin)
             + ",\"dpr\":" + formatScale(devicePixelRatio) + "}";
         RendererProcess.Response resp = renderer.request("POST", "/open", body);
         String json = new String(resp.body, StandardCharsets.UTF_8);
@@ -403,7 +426,9 @@ public final class RemoteBrowser implements AutoCloseable {
         return new Frame(img, nav, unchanged || img == null, animating,
                          caretBlinking, webgl, camera, download, windowAction,
                          audio, clipboard, pageWidth, pageHeight,
-                         requestedScrollY, requestedScrollX);
+                         requestedScrollY, requestedScrollX,
+                         headerInt(resp, "X-Popup", 0) != 0,
+                         emptyToNull(resp.header("X-Capability")));
     }
 
     /**
@@ -537,7 +562,9 @@ public final class RemoteBrowser implements AutoCloseable {
                         Json.stringOrNull(json, "camera"),
                         Json.stringOrNull(json, "download"),
                         Json.stringOrNull(json, "window_action"),
-                        Json.stringOrNull(json, "audio"));
+                        Json.stringOrNull(json, "audio"),
+                        Json.flag(json, "popup"),
+                        Json.stringOrNull(json, "capability"));
     }
 
     /**
@@ -768,6 +795,108 @@ public final class RemoteBrowser implements AutoCloseable {
     public void resolveWebgl(String origin, boolean allow) {
         renderer.request("POST", "/webgl",
             "{\"origin\":\"" + Json.escape(origin) + "\",\"allow\":" + (allow ? 1 : 0) + "}");
+    }
+
+    /**
+     * Tell the engine this shell opens popups itself. Without it
+     * {@code window.open()} navigates the page it was called from. With it the
+     * request arrives as an {@code open} operation from {@link #popupPoll()}
+     * and the shell opens a window of its own for it. Takes effect on the next
+     * {@link #navigate}.
+     */
+    public void setPopupsSupported(boolean supported) {
+        this.popupsSupported = supported;
+    }
+
+    /**
+     * Mark this session as a popup another page opened, so its page gets a
+     * working {@code window.opener}: {@code token} and {@code origin} come from
+     * the opener's {@code open} operation. Takes effect on the next
+     * {@link #navigate}.
+     */
+    public void setOpener(String token, String origin) {
+        this.openerToken = token == null ? "" : token;
+        this.openerOrigin = origin == null ? "" : origin;
+    }
+
+    /**
+     * The popup operations the page queued since the last call, when a
+     * {@link Frame} or {@link Tick} reported {@link Frame#popup}. Each is a map
+     * of string fields: {@code op} is {@code open} (with {@code url},
+     * {@code token}, {@code origin}), {@code post}, {@code call}, {@code port}
+     * or {@code close}. The shell opens the window for an {@code open} and
+     * carries the others between opener and popup with {@link #popupDeliver}.
+     */
+    public List<java.util.Map<String, String>> popupPoll() {
+        RendererProcess.Response resp = renderer.request("POST", "/popup-poll", "{}");
+        List<java.util.Map<String, String>> ops = new java.util.ArrayList<>();
+        Object parsed;
+        try {
+            parsed = Json.parse(resp.text());
+        } catch (IllegalArgumentException e) {
+            return ops;
+        }
+        if (!(parsed instanceof List<?> items)) {
+            return ops;
+        }
+        for (Object item : items) {
+            if (!(item instanceof java.util.Map<?, ?> fields)) {
+                continue;
+            }
+            java.util.Map<String, String> op = new java.util.LinkedHashMap<>();
+            for (java.util.Map.Entry<?, ?> field : fields.entrySet()) {
+                if (field.getValue() instanceof String value) {
+                    op.put(String.valueOf(field.getKey()), value);
+                }
+            }
+            ops.add(op);
+        }
+        return ops;
+    }
+
+    /**
+     * Hand the page one operation from the window at the other end of a popup
+     * link: {@code kind} is {@code message}, {@code call}, {@code port} or
+     * {@code closed}, and {@code fields} are the string fields to pass on
+     * ({@code token} at least).
+     */
+    public void popupDeliver(String kind, java.util.Map<String, String> fields) {
+        StringBuilder json = new StringBuilder("[{\"op\":").append(Json.quote(kind));
+        for (java.util.Map.Entry<String, String> field : fields.entrySet()) {
+            if (!field.getKey().equals("op") && field.getValue() != null) {
+                json.append(',').append(Json.quote(field.getKey())).append(':')
+                    .append(Json.quote(field.getValue()));
+            }
+        }
+        renderer.request("POST", "/popup-deliver", json.append("}]").toString());
+    }
+
+    /**
+     * Split a {@link Frame#capability} value into its requests, each a
+     * two-element array of the capability kind ({@code camera},
+     * {@code popups}, {@code fullscreen}, …) and the origin asking.
+     */
+    public static List<String[]> capabilityRequests(String capability) {
+        List<String[]> out = new java.util.ArrayList<>();
+        if (capability == null) {
+            return out;
+        }
+        for (String entry : capability.split(";")) {
+            String[] parts = entry.strip().split(" ", 2);
+            if (parts.length == 2 && !parts[0].isEmpty() && !parts[1].isEmpty()) {
+                out.add(parts);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Answer a capability request: the page is suspended at the point it asked
+     * until the shell allows or denies it.
+     */
+    public void resolveCapability(String kind, String origin, boolean allow) {
+        renderer.exchange("/capability", "{\"kind\":" + Json.quote(kind) + ",\"origin\":"
+            + Json.quote(origin) + ",\"allow\":" + (allow ? 1 : 0) + "}", renderer.timeoutMs());
     }
 
     /** Allow or block camera access for {@code origin} for the rest of the session. */

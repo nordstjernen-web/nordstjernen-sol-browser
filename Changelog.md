@@ -3,6 +3,19 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Java browser: `window.open()` opens a window, and permission requests
+  are answered. The Swing shell never told the engine it could open
+  popups, so a page that called `window.open()` was navigated away
+  instead, and a sign-in or payment flow that expects its opener to stay
+  put lost it. The shell now opens a window with a renderer of its own for
+  each popup, gives it a working `window.opener`, carries `postMessage`,
+  opener calls and message ports between the two, closes it on
+  `window.close()` and tells the opener when the user closes it. It also
+  reads the `X-Capability` side channel and answers each request, where it
+  used to understand only the deprecated camera header, leaving any other
+  request suspended for good. `RemoteBrowser` gains `setPopupsSupported`,
+  `setOpener`, `popupPoll`, `popupDeliver`, `capabilityRequests` and
+  `resolveCapability`.
 * Build: `-Dlibav=disabled`, `-Dpoppler=disabled` and `-Denchant=disabled`
   leave FFmpeg, PDF viewing and spell-checking out, for a renderer that
   only has to lay out and paint pages (a server, an embedding runtime).
