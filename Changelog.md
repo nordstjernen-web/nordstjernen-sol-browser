@@ -3,6 +3,12 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Fixed: clicking a `<label>` now focuses its text field, select or
+  textarea, by mouse and from `label.click()`; before, only checkboxes and
+  radio buttons reacted. And a focused button or link no longer counts as a
+  focused text field, which had stopped the arrow, Page Up/Down and Space
+  keys from scrolling the page after a button was clicked, and raised the
+  on-screen keyboard on Android for any focused element.
 * Fixed: a click on the right half of an inline box went to whatever came
   after it. A text field followed by a label lost every click on its right
   half to that label's control, and the last half-character of a link was

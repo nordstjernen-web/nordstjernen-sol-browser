@@ -49865,6 +49865,7 @@ ns_js_activate_label(ns_js *js, const ns_node *label, const ns_node *target)
     if (!control) control = ns_js_first_labelable_descendant(label, 0);
     if (!control || control == target) return;
     if (ns_node_is_disabled_form_control(control)) return;
+    if (ns_node_is_focusable(control)) ns_js_set_focus(js, control);
     ns_js_activate_element(js, control);
 }
 
@@ -50083,6 +50084,7 @@ ns_js_click_activate(ns_js *js, const ns_node *node)
 {
     if (!js || !node) return FALSE;
     const ns_node *control = NULL;
+    gboolean through_label = FALSE;
     for (const ns_node *cur = node; cur && !control; cur = cur->parent) {
         if (ns_node_is_element_named(cur, "label")) {
             const char *forv = ns_element_get_attr(cur, "for");
@@ -50092,13 +50094,18 @@ ns_js_click_activate(ns_js *js, const ns_node *node)
             }
             if (!control)
                 control = ns_js_first_labelable_descendant(cur, 0);
+            through_label = TRUE;
             break;
         }
         if (ns_node_is_element_named(cur, "input")) control = cur;
+        else if (ns_node_is_interactive_content(cur)) return FALSE;
     }
-    if (!control || !ns_node_is_element_named(control, "input")) return FALSE;
+    if (!control) return FALSE;
     if (ns_node_is_disabled_form_control(control)) return FALSE;
     if (ns_element_effectively_inert(control)) return FALSE;
+    if (through_label && ns_node_is_focusable(control))
+        ns_js_set_focus(js, control);
+    if (!ns_node_is_element_named(control, "input")) return FALSE;
     const char *type = ns_element_get_attr(control, "type");
     if (!type) return FALSE;
     if (g_ascii_strcasecmp(type, "checkbox") == 0) {
