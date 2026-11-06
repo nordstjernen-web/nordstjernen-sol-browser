@@ -1250,11 +1250,13 @@ ns_css_dimension_px(const ns_css_value *v, double font_size, double basis)
     case NS_CSS_UNIT_RCH:    return n * 8.0;
     case NS_CSS_UNIT_RCAP:   return n * 11.2;
     case NS_CSS_UNIT_RIC:    return n * 16.0;
-    default: {
-        double r = container_unit_resolve(n, unit);
-        if (r != 0) return r;
+    case NS_CSS_UNIT_CQW:
+    case NS_CSS_UNIT_CQH:
+    case NS_CSS_UNIT_CQMIN:
+    case NS_CSS_UNIT_CQMAX:
+        return container_unit_resolve(n, unit);
+    default:
         return viewport_resolve(n, unit);
-    }
     }
 }
 
