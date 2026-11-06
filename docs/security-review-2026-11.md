@@ -142,6 +142,24 @@ multipart submission; CSS-3 stylesheet re-parse on changed bytes; LAY-4 grid
 track cap; the WPT clusters mapped in the conformance section (innerText,
 `dir=auto` with slots, `Attr`/`NamedNodeMap`, UTF-16 `CharacterData`).
 
+## Status of the High findings (2026-11-06)
+
+Each High finding got its own pull request, built on Linux, macOS and Windows
+by CI and, where the review container allowed it, reproduced headless before
+and after the change.
+
+| ID | Pull request | Outcome |
+|---|---|---|
+| APP-1 | [#919](https://github.com/nordstjernen-web/nordstjernen-sol-browser/pull/919) | Fixed: popup URLs go through the navigation policy, the shell allow-lists popup schemes, and the opener origin becomes the load's initiator. |
+| JSB-1 | [#922](https://github.com/nordstjernen-web/nordstjernen-sol-browser/pull/922) | Hardened. **Severity corrected to Medium**: a real cross-origin frame never receives `IDBFactory` or the backend, because the frame's `indexedDB` deny getter is installed before the polyfill, which then skips its IndexedDB section. The partition is now realm-aware regardless. |
+| JSB-2 | [#923](https://github.com/nordstjernen-web/nordstjernen-sol-browser/pull/923) | Fixed: canvas state dropped on navigation and node removal; re-initialisation uses the main realm's context. |
+| JSA-2 / JSA-3 | [#924](https://github.com/nordstjernen-web/nordstjernen-sol-browser/pull/924) | Fixed: sync XHR holds page tasks; only its own completion is delivered; delivery deferred while a chunk handler is on the stack. |
+| JSA-1 | [#926](https://github.com/nordstjernen-web/nordstjernen-sol-browser/pull/926) | Fixed and reproduced: the unfixed build exposed 2400 body bytes and 122 header bytes of a cross-origin redirect target at readyState 3; the fixed build exposes nothing. |
+| GPU-1 | [#928](https://github.com/nordstjernen-web/nordstjernen-sol-browser/pull/928) | Fixed: attribute pointers need a bound array buffer, draws need a program. The Windows context profile is unchanged (a core profile would need a default VAO). |
+| GPU-2 / GPU-3 | [#929](https://github.com/nordstjernen-web/nordstjernen-sol-browser/pull/929) | Fixed: buffer, target and readback creation and the readback copy run inside a validation scope. |
+| LAY-1 | [#930](https://github.com/nordstjernen-web/nordstjernen-sol-browser/pull/930) | Fixed and reproduced: 12 nested inline-blocks took 50 s and 16 never finished; after the change 40 levels take 0.14 s, with identical layout dumps for all bundled render tests. |
+| NET-1 | none | Not fixed. Giving renderers a network/storage broker so they stop holding the profile is the multi-step architectural change `docs/tab-isolation.md` already describes; it is not a single pull request. |
+
 ## Cross-cutting recommendations
 
 - **Make the realm, not the process, the unit of trust for storage and
