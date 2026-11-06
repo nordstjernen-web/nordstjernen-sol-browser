@@ -70,6 +70,14 @@ Changelog:
   a frame's already freed JavaScript context. The table is now dropped on
   every navigation, an entry goes away with its node, and state is
   re-initialised through the main realm's context.
+* Security: a synchronous `XMLHttpRequest` now pauses the page's other
+  tasks while it blocks, as the platform requires. It used to pump the main
+  loop with timers, message tasks and other requests' callbacks still
+  running, so a sync request issued from another request's
+  `readystatechange` handler could complete that request underneath its own
+  streaming callback and free the state it was still using. Only the
+  blocking request itself is delivered during the pump, and a request's
+  completion is deferred while one of its chunk handlers is on the stack.
 * Printing: paged PDF from a program. Until now only the command line
   (`--dump=print:FILE`) could reach the paginator; the C API, the engine
   protocol and Java all wrote one page as tall as the document, laid out for
