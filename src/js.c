@@ -49865,6 +49865,7 @@ ns_js_activate_label(ns_js *js, const ns_node *label, const ns_node *target)
     if (!control) control = ns_js_first_labelable_descendant(label, 0);
     if (!control || control == target) return;
     if (ns_node_is_disabled_form_control(control)) return;
+    if (ns_node_is_focusable(control)) ns_js_set_focus(js, control);
     ns_js_activate_element(js, control);
 }
 
@@ -50083,6 +50084,7 @@ ns_js_click_activate(ns_js *js, const ns_node *node)
 {
     if (!js || !node) return FALSE;
     const ns_node *control = NULL;
+    gboolean through_label = FALSE;
     for (const ns_node *cur = node; cur && !control; cur = cur->parent) {
         if (ns_node_is_element_named(cur, "label")) {
             const char *forv = ns_element_get_attr(cur, "for");
@@ -50092,13 +50094,18 @@ ns_js_click_activate(ns_js *js, const ns_node *node)
             }
             if (!control)
                 control = ns_js_first_labelable_descendant(cur, 0);
+            through_label = TRUE;
             break;
         }
         if (ns_node_is_element_named(cur, "input")) control = cur;
+        else if (ns_node_is_interactive_content(cur)) return FALSE;
     }
-    if (!control || !ns_node_is_element_named(control, "input")) return FALSE;
+    if (!control) return FALSE;
     if (ns_node_is_disabled_form_control(control)) return FALSE;
     if (ns_element_effectively_inert(control)) return FALSE;
+    if (through_label && ns_node_is_focusable(control))
+        ns_js_set_focus(js, control);
+    if (!ns_node_is_element_named(control, "input")) return FALSE;
     const char *type = ns_element_get_attr(control, "type");
     if (!type) return FALSE;
     if (g_ascii_strcasecmp(type, "checkbox") == 0) {
@@ -56678,10 +56685,10 @@ ns_hit_layout_point(JSContext *ctx, ns_js *js, const ns_node *doc, double *x, do
 }
 
 static const ns_node *
-ns_hit_owner_node(const ns_box *hit, const ns_node *doc)
+ns_hit_owner_node(const ns_node *target, const ns_node *doc)
 {
-    const ns_node *node = hit->dom;
-    const ns_node *p = hit->dom;
+    const ns_node *node = target;
+    const ns_node *p = target;
     for (; p && p != doc; p = p->parent)
         if (p->kind == NS_NODE_DOCUMENT && p->parent)
             node = p->parent;
@@ -56700,10 +56707,11 @@ ns_document_hit_node(JSContext *ctx, JSValueConst this_val, double x, double y,
     if (!js) return NULL;
     const ns_node *doc = ns_hit_layout_point(ctx, js, ns_unwrap_element(this_val), &x, &y);
     if (!doc) return NULL;
-    const ns_box *hit = ns_box_hit_test_local(js->layout_root, x, y,
-                                              local_x, local_y);
-    if (!hit || !hit->dom) return NULL;
-    const ns_node *node = ns_hit_owner_node(hit, doc);
+    const ns_box *hit = NULL;
+    const ns_node *target = ns_box_hit_element(js->layout_root, x, y, &hit,
+                                               local_x, local_y);
+    if (!hit || !hit->dom || !target) return NULL;
+    const ns_node *node = ns_hit_owner_node(target, doc);
     if (!node) return NULL;
     *doc_out = doc;
     *box_out = node == hit->dom ? hit : NULL;

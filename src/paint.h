@@ -103,6 +103,9 @@ gboolean ns_paint_inline_empty_rect(const ns_box *b, const ns_inline_attr *r,
 gboolean ns_paint_inline_xy_to_byte(const ns_box *b,
                                     double rel_x, double rel_y,
                                     gsize *out_byte);
+gboolean ns_paint_inline_xy_to_hit_byte(const ns_box *b,
+                                        double rel_x, double rel_y,
+                                        gsize *out_byte);
 gboolean ns_paint_inline_moved_extents(const ns_box *b, double *x0, double *y0,
                                        double *x1, double *y1);
 gboolean ns_paint_inline_on_shifted_text(const ns_box *b,
