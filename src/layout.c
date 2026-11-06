@@ -4711,6 +4711,21 @@ decoration_stops_at(const ns_style *s)
            ns_display_is_atomic_inline(ns_css_display_of(s));
 }
 
+static const char *
+inside_marker_text(char *marker)
+{
+    static const char *const symbols[] = {
+        "\xe2\x80\xa2 ", "\xe2\x97\x8b ", "\xe2\x96\xaa ",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(symbols); i++) {
+        if (strcmp(marker, symbols[i]) != 0) continue;
+        gsize glyph = strlen(symbols[i]) - 1;
+        g_strlcpy(marker + glyph, "\xe2\x80\x83", 4);
+        break;
+    }
+    return marker;
+}
+
 static ns_box *
 build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
                       GHashTable *styles, gboolean abs_placeholders)
@@ -4734,14 +4749,17 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
             if (kw && strcmp(kw, "none") != 0) ctx.text_transform = kw;
         }
     }
+    gsize marker_end = 0;
     if (first && first->parent && first->parent->kind == NS_NODE_ELEMENT) {
         const ns_style *li_style = g_hash_table_lookup(styles, first->parent);
         if (ns_paint_li_is_inside(li_style) &&
             inline_run_opens_parent(first, styles)) {
             char marker[64];
             if (ns_paint_li_marker_text(first->parent, li_style,
-                                        marker, sizeof marker))
-                g_string_append(buf, marker);
+                                        marker, sizeof marker)) {
+                g_string_append(buf, inside_marker_text(marker));
+                marker_end = buf->len;
+            }
         }
     }
     for (const ns_node *n = first; n && n != last_excl; n = n->next_sibling)
@@ -4757,6 +4775,7 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
     guint ri = 0;
     for (gsize i = 0; i < buf->len; i++) {
         char c = buf->str[i];
+        if (marker_end > 0 && i == marker_end) prev_ws = TRUE;
         while (ri < ws_ranges->len &&
                g_array_index(ws_ranges, ns_ws_range, ri).end <= i)
             ri++;

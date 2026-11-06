@@ -10,6 +10,11 @@ Changelog:
   of their icon: linux.org.ru's tag icon was a red bookmark. Loaded web
   fonts in the family list are now tried before the emoji font; system
   fonts are not, so ordinary emoji stay in colour.
+* Lists: an `inside` disc, circle or square marker is followed by a 1 em
+  gap, as in Chrome, instead of a word space, and whitespace at the start
+  of the item no longer adds to it. List text started about 10 px further
+  left than in other browsers and wrapped at different words; the Top 10
+  list on linux.org.ru now breaks its lines where Chrome does.
 * Layout: an image whose width comes from its height and aspect ratio
   contributes its real width to a flex container's size. The max-content
   measure of a replaced element that had not been laid out yet fell back
