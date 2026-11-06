@@ -10,6 +10,24 @@ Changelog:
   `{once: true}` was ignored, and an exception a listener threw vanished.
   They now behave as on the top window, and the exception is reported as
   an `error` event on the frame's own window.
+* Scripts: script elements a page inserts run in the order they were
+  inserted. An element inserted while a script, a timer or an event
+  handler was running went on one queue, one inserted from a
+  MessageChannel or `message` handler on another, and each pass ran the
+  head of both, so of three chunks inserted A, B, C the third could run
+  before the second. Code loaders that fetch chunks in parallel with
+  `async = false` and schedule through a MessageChannel rely on the order;
+  Gmail's widget frames ran a chunk before the one defining its helpers
+  and reported "not a function". The queues are now drained one root at a
+  time, oldest insertion first.
+* Frames: XMLHttpRequest and `navigator.sendBeacon` called while a
+  script-inserted or module script is being evaluated inside a frame
+  resolve their URL against the frame's document. The engine entered the
+  script's own URL as the document URL for the length of the evaluation,
+  so a relative request went to the host the script was served from, with
+  that host as its `Origin`; an application frame whose bundle comes from
+  a CDN sent its start-up requests to the CDN. Gmail's widget frames
+  posted their error reports to `www.gstatic.com` this way.
 * Frames: `Document.prototype` in a cross-origin frame carries the
   document's members. A frame's realm got its document with every method
   as an own property and a bare `Document.prototype`, so
