@@ -3,6 +3,13 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Frames: `innerWidth` and `innerHeight` in a cross-origin frame are the
+  frame's size. A frame's window reads them from its frame element, but
+  the engine's own update of the window metrics assigned the top window's
+  size to whichever realm was current, and assigning to these properties
+  replaces the reading accessor with the value. A cross-origin frame has
+  a realm of its own, so its sizes froze at the top window's: a 300 x 200
+  frame in a 900 x 800 window reported 900 x 800.
 * Layout: a percentage height on `<html>` or `<body>` inside a frame is
   a percentage of the frame. The root elements took the top window's
   height as their base wherever they were, so `html, body { height: 100% }`
