@@ -66948,7 +66948,7 @@ ns_js_free(ns_js *js)
         }
         g_array_free(js->raf_pending, TRUE);
     }
-    if (js->canvas_states) g_hash_table_destroy(js->canvas_states);
+    g_clear_pointer(&js->canvas_states, g_hash_table_destroy);
     if (js->js_image_loads) {
         g_hash_table_destroy(js->js_image_loads);
         js->js_image_loads = NULL;

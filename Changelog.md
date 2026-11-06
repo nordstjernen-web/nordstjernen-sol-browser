@@ -3,6 +3,12 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: closing a page used a freed table. Tearing a page down
+  destroyed its canvas-state table and left the pointer in place, then
+  freed the DOM nodes that scripts had detached; freeing a node looks its
+  canvas state up, in the table that was already gone. Leaving a YouTube
+  watch page for another site hung the renderer in that lookup about two
+  times in three. The pointer is cleared with the table.
 * Security: a cross-origin frame could reach the real window of its
   parent, of a sibling frame or of the top page, and with it their
   documents. The proxy a frame holds for a foreign window kept its cache
