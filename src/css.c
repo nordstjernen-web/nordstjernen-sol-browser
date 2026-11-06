@@ -37092,6 +37092,21 @@ button_inline_to_inline_block(const ns_node *el, ns_style *s)
 }
 
 static void
+frame_inner_display_to_flow_root(const ns_node *el, ns_style *s)
+{
+    if (s->display.box != NS_DISPLAY_BOX_NORMAL ||
+        s->display.internal != NS_DISPLAY_INTERNAL_NONE ||
+        (!ns_node_is_element_named(el, "iframe") &&
+         !ns_node_is_element_named(el, "frame")))
+        return;
+    if (s->display.inner == NS_DISPLAY_INNER_FLEX ||
+        s->display.inner == NS_DISPLAY_INNER_GRID ||
+        s->display.inner == NS_DISPLAY_INNER_TABLE ||
+        s->display.inner == NS_DISPLAY_INNER_RUBY)
+        s->display.inner = NS_DISPLAY_INNER_FLOW_ROOT;
+}
+
+static void
 strip_native_widget_decorations(const ns_node *el, ns_style *s)
 {
     if (!ns_node_is_element_named(el, "input")) return;
@@ -37669,6 +37684,7 @@ cascade_walk(ns_node *node,
             s = ns_style_clone_shared(shared);
             display_contents_to_none(node, s);
             button_inline_to_inline_block(node, s);
+            frame_inner_display_to_flow_root(node, s);
             g_array_set_size(matches, 0);
             g_array_set_size(var_matches, 0);
             g_array_set_size(pending_matches, 0);
@@ -37687,6 +37703,7 @@ cascade_walk(ns_node *node,
             strip_native_widget_decorations(node, s);
             if (display_contents_to_none(node, s)) have_key = FALSE;
             button_inline_to_inline_block(node, s);
+            frame_inner_display_to_flow_root(node, s);
             g_array_set_size(matches, 0);
             g_array_set_size(var_matches, 0);
             g_array_set_size(pending_matches, 0);
