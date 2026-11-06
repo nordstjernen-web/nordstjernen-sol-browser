@@ -3,6 +3,14 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Frames: XMLHttpRequest and `navigator.sendBeacon` called while a
+  script-inserted or module script is being evaluated inside a frame
+  resolve their URL against the frame's document. The engine entered the
+  script's own URL as the document URL for the length of the evaluation,
+  so a relative request went to the host the script was served from, with
+  that host as its `Origin`; an application frame whose bundle comes from
+  a CDN sent its start-up requests to the CDN. Gmail's widget frames
+  posted their error reports to `www.gstatic.com` this way.
 * Security: a cross-origin frame could reach the real window of its
   parent, of a sibling frame or of the top page, and with it their
   documents. The proxy a frame holds for a foreign window kept its cache
