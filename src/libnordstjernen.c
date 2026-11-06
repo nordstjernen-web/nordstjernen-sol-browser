@@ -5624,6 +5624,22 @@ ns_browser_favicon_url(ns_browser *browser)
     return dup;
 }
 
+ns_response *
+ns_browser_fetch_favicon(ns_browser *browser)
+{
+    char *url = ns_browser_favicon_url(browser);
+    if (!url || !*url ||
+        !(ns_url_is_http_or_https(url) || g_str_has_prefix(url, "data:"))) {
+        free(url);
+        return NULL;
+    }
+    ns_response *resp = ns_net_request_blocking(
+        url, browser->base_url, "GET", NULL, 0, NULL,
+        ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), NULL, NULL);
+    free(url);
+    return resp;
+}
+
 int
 ns_browser_bfcache_eligible(ns_browser *browser)
 {

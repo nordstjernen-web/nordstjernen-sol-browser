@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: the tab icon is fetched as an image of the page. The icon a
+  page names in `<link rel=icon>` was requested with no page behind it,
+  the way the browser fetches for itself, so it carried the icon site's
+  own first-party cookies, `SameSite=Strict` ones included, and skipped
+  third-party cookie blocking, the Private Network Access guard, CSP
+  `img-src` and the HSTS-store rule. Any page could aim it at another
+  site to forge a logged-in GET, or use it as a tracking pixel with
+  first-party cookies. It now goes out as a cross-site image request of
+  the page, and only `http:`, `https:` and `data:` icons are fetched.
 * Security: the audio helper is confined like a renderer. It decodes
   the media a page plays, yet its sandbox skipped the renderer's extra
   rules, so a decoder bug there could write the settings and the

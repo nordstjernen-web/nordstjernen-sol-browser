@@ -236,6 +236,7 @@ char *ns_browser_take_pending_window_action(ns_browser *browser);
 char *ns_browser_links(ns_browser *browser);
 
 char *ns_browser_favicon_url(ns_browser *browser);
+struct ns_response *ns_browser_fetch_favicon(ns_browser *browser);
 
 int  ns_browser_bfcache_eligible(ns_browser *browser);
 void ns_browser_bfcache_park(ns_browser *browser);

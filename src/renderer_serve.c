@@ -230,13 +230,7 @@ reply_href_changed(int fd, const char *href, int changed, int newtab)
 static unsigned char *
 favicon_bgra(ns_browser *b, int *out_w, int *out_h)
 {
-    char *url = ns_browser_favicon_url(b);
-    if (!url || !*url) {
-        free(url);
-        return NULL;
-    }
-    ns_response *resp = ns_net_fetch_blocking(url, NULL, NULL);
-    free(url);
+    ns_response *resp = ns_browser_fetch_favicon(b);
     if (!resp || resp->status >= 400 || !resp->body || resp->body->len == 0) {
         if (resp)
             ns_response_free(resp);
