@@ -1562,14 +1562,6 @@ ns_net_cookie_store_from_js(const char *url, const char *top_url,
     ns_cookie_store_set(site, url, cookie, FALSE);
 }
 
-static const char *
-ns_net_altsvc_path(void)
-{
-    if (ns_net_is_private())
-        return NULL;
-    return ns_net_data_path(&g_altsvc_path, "altsvc.txt");
-}
-
 static long
 ns_net_http_version(void)
 {
@@ -1587,6 +1579,14 @@ ns_net_http_version(void)
 #else
     return CURL_HTTP_VERSION_2TLS;
 #endif
+}
+
+static const char *
+ns_net_altsvc_path(void)
+{
+    if (ns_net_is_private() || ns_net_http_version() == CURL_HTTP_VERSION_2TLS)
+        return NULL;
+    return ns_net_data_path(&g_altsvc_path, "altsvc.txt");
 }
 
 #define NS_NET_DOMAIN ns_net_error_quark()
