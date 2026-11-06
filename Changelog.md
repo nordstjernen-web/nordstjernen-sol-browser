@@ -3,6 +3,24 @@ Changelog:
 
 1.0.45-dev:
 ======
+* HTML from a string. `ns_browser_open_html`, an `html` field on the
+  protocol's `/open`, and `Page.setContent(html, baseUrl)` in Java show
+  markup the caller already holds; the base URL resolves relative links and
+  decides the origin, and may be a `file:` directory. `HtmlRenderer` is the
+  one-call form: `renderer.pdf(html)` and `renderer.png(html, width)`.
+* A resource policy for embedders. `POST /policy` and Java's
+  `ResourcePolicy` say what a renderer may load: nothing at all, the public
+  web only (no local files, no private or loopback address, also when a
+  public name resolves to one), or an allow or deny list of hosts. It is
+  checked on every hop of every request, redirects, `fetch`, preconnects,
+  WebSocket and EventSource included, and again on the address a connection
+  is made to.
+* Java: `ContextOptions` takes a user agent, `Accept-Language`, a proxy,
+  JavaScript and image switches and the colour scheme. `NS_ACCEPT_LANGUAGE`
+  joins the engine's environment overrides.
+* Fixed: with images turned off in Settings, the browser still fetched the
+  images of a page. The layout-driven image fetch did not look at the
+  setting; only the one-shot command-line renderer did.
 * Fixed: clicking a `<label>` now focuses its text field, select or
   textarea, by mouse and from `label.click()`; before, only checkboxes and
   radio buttons reacted. And a focused button or link no longer counts as a

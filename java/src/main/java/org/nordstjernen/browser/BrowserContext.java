@@ -120,12 +120,12 @@ public final class BrowserContext implements AutoCloseable {
     }
 
     /**
-     * The variables that point a renderer at this context's profile. The
-     * engine asks GLib for its directories, and GLib takes them from these on
-     * every platform.
+     * The variables that hand a renderer this context's settings and point it
+     * at its profile. The engine asks GLib for its directories, and GLib takes
+     * them from these on every platform.
      */
     Map<String, String> environment() {
-        Map<String, String> env = new LinkedHashMap<>();
+        Map<String, String> env = new LinkedHashMap<>(options.environment());
         if (directory != null) {
             env.put("XDG_CONFIG_HOME", directory.resolve("config").toString());
             env.put("XDG_DATA_HOME", directory.resolve("data").toString());

@@ -47,7 +47,7 @@ Every request is `POST <path>` with an `application/json` body. The reply is
 
 | Area | Paths |
 |------|-------|
-| Lifecycle | `/hello`, `/quit`, `/viewport`, `/colorscheme`, `/clear-cache` |
+| Lifecycle | `/hello`, `/quit`, `/viewport`, `/colorscheme`, `/clear-cache`, `/policy` |
 | Navigation and rendering | `/open`, `/render`, `/tick`, `/favicon`, `/dump`, `/export`, `/print`, `/screenshot`, `/pdf` |
 | Pointer and keyboard | `/click`, `/hover`, `/scroll`, `/scrollbar-press`, `/scrollbar-drag`, `/scrollbar-release`, `/release`, `/key`, `/select`, `/link`, `/dropfiles`, `/contextmenu` |
 | Editing | `/focused-editable`, `/focused-editable-state`, `/focused-editable-selection`, `/clipboard`, `/find` |
@@ -157,3 +157,36 @@ of sheets. Every field is optional: `width`, `height` and the four
 `header_right` / `footer_left` / `footer_center` / `footer_right`. See
 [printing.md](printing.md), "PDF from a program". An empty body means the
 document could not be printed.
+
+## A document from a string
+
+`POST /open` with an `html` field shows that markup as the document instead
+of fetching `url`, which then only names the document: relative URLs resolve
+against it and it decides the origin. Leave `url` out and the document is
+`about:blank`. Nothing is fetched for the document itself and it is never
+taken from or parked in the back/forward cache; its subresources load as
+they would for any page at that URL, so a `file:` URL lets it read files in
+that directory and below.
+
+## Resource policy
+
+`POST /policy` says what the renderer may load from then on. It replaces the
+previous policy; a renderer starts with none.
+
+| Field | Meaning |
+|-------|---------|
+| `offline` | non-zero: no `http`, `https`, `ws`, `wss` or `ftp` request at all |
+| `block_file` | non-zero: no `file:` URL loads, navigations included |
+| `block_private` | non-zero: no private, link-local or loopback address |
+| `allow_hosts` | host patterns, separated by newlines, commas or spaces; when present only these hosts load, so an empty string allows none |
+| `deny_hosts` | host patterns that never load; checked before `allow_hosts` |
+
+A pattern is a host name, `*.example.com` for the subdomains of
+`example.com` (not `example.com` itself) or `*`. The policy is checked for
+every hop of every request the page causes: navigations, redirects,
+subresources, `fetch`, `XMLHttpRequest`, preconnects, WebSocket and
+EventSource. `data:`, `blob:` and `about:` URLs are not requests and always
+load. `block_private` looks at the host in the URL and again at the address
+the connection is made to, so a public name that resolves to `127.0.0.1` is
+refused as well; through a proxy only the name can be judged. A refused
+request fails with `blocked by the embedder's resource policy`.

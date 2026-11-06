@@ -812,9 +812,25 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/policy") == 0) {
+        long offline = 0, block_file = 0, block_private = 0;
+        json_get_long(body, "offline", &offline);
+        json_get_long(body, "block_file", &block_file);
+        json_get_long(body, "block_private", &block_private);
+        char *allow = json_get_str(body, "allow_hosts");
+        char *deny = json_get_str(body, "deny_hosts");
+        ns_net_policy_set(offline != 0, block_file != 0, block_private != 0,
+                          allow, deny);
+        free(allow);
+        free(deny);
+        http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
+        return 0;
+    }
+
     if (strcmp(head->path, "/open") == 0) {
         ns_config_reload();
         char *url = json_get_str(body, "url");
+        char *html = json_get_str(body, "html");
         long w = 0, h = 0, settle = 0, history = 0, user_activated = 0;
         long reload = 0;
         json_get_long(body, "width", &w);
@@ -839,7 +855,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         double dpr = request_device_pixel_ratio(body);
         if (dpr > 0)
             ns_browser_set_device_pixel_ratio(NULL, dpr);
-        ns_browser *restored = (history && !reload && url)
+        ns_browser *restored = (history && !reload && url && !html)
             ? session_bfcache_take(s, url) : NULL;
         char *referrer = (!history && !reload && s->cur)
             ? ns_browser_url(s->cur) : NULL;
@@ -867,7 +883,9 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             if (dpr > 0)
                 ns_browser_set_device_pixel_ratio(restored, dpr);
             s->cur = restored;
-        } else if (url && s->post_body && s->post_url &&
+        } else if (html)
+            s->cur = ns_browser_open_html(html, url, vw, vh, (int)settle);
+        else if (url && s->post_body && s->post_url &&
             strcmp(url, s->post_url) == 0)
             s->cur = ns_browser_open_post_viewport(url, vw, vh, (int)settle,
                                                    s->post_body, s->post_len,
@@ -916,6 +934,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         free(final_url);
         free(nav);
         free(url);
+        free(html);
         return 0;
     }
 

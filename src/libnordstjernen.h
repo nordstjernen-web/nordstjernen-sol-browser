@@ -25,6 +25,9 @@ ns_browser *ns_browser_open_post_viewport(const char *url, int viewport_width,
                                           int settle_ms, const void *body,
                                           size_t body_len,
                                           const char *content_type);
+ns_browser *ns_browser_open_html(const char *html, const char *base_url,
+                                 int viewport_width, double viewport_height,
+                                 int settle_ms);
 
 char *ns_browser_take_post(ns_browser *browser, size_t *out_len,
                            char **out_content_type);

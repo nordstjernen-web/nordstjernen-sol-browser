@@ -212,6 +212,9 @@ public final class Page implements AutoCloseable {
     private volatile boolean popupsSupported;
     private volatile String openerToken = "";
     private volatile String openerOrigin = "";
+    private volatile ResourcePolicy resourcePolicy;
+    private volatile ContextOptions.ColorScheme colorScheme;
+    private volatile String content;
 
     Page(BrowserContext context, int viewportWidth, int viewportHeight) {
         if (viewportWidth < 1 || viewportHeight < 1) {
@@ -221,6 +224,8 @@ public final class Page implements AutoCloseable {
         this.viewportWidth = viewportWidth;
         this.viewportHeight = viewportHeight;
         this.timeout = context.engine().options().timeout();
+        this.resourcePolicy = context.options().resourcePolicy();
+        this.colorScheme = context.options().colorScheme();
     }
 
     public BrowserContext context() {
@@ -242,6 +247,41 @@ public final class Page implements AutoCloseable {
         }
     }
 
+    /** What this page may load; the context's policy unless set. */
+    public ResourcePolicy resourcePolicy() {
+        return resourcePolicy;
+    }
+
+    /**
+     * Change what this page may load. The policy holds for every request
+     * from now on, including those of the document already showing.
+     */
+    public synchronized void setResourcePolicy(ResourcePolicy policy) {
+        if (policy == null) {
+            throw new IllegalArgumentException("policy must not be null");
+        }
+        this.resourcePolicy = policy;
+        if (renderer != null && renderer.isAlive()) {
+            renderer.request("/policy", policy.toJson(), timeout.toMillis());
+        }
+    }
+
+    public ContextOptions.ColorScheme colorScheme() {
+        return colorScheme;
+    }
+
+    /** What {@code prefers-color-scheme} answers; the document restyles at once. */
+    public synchronized void setColorScheme(ContextOptions.ColorScheme scheme) {
+        if (scheme == null) {
+            throw new IllegalArgumentException("scheme must not be null");
+        }
+        this.colorScheme = scheme;
+        if (renderer != null && renderer.isAlive()) {
+            renderer.request("/colorscheme", "{\"dark\":"
+                + (scheme == ContextOptions.ColorScheme.DARK ? 1 : 0) + "}", timeout.toMillis());
+        }
+    }
+
     /** Load {@code url} as a navigation the user asked for; see {@link #navigate(String, Navigation)}. */
     public Response navigate(String url) {
         return navigate(url, Navigation.defaults());
@@ -260,6 +300,11 @@ public final class Page implements AutoCloseable {
         if (url == null || url.isEmpty()) {
             throw new IllegalArgumentException("url must not be empty");
         }
+        this.content = null;
+        return open(url, "", how);
+    }
+
+    private Response open(String url, String content, Navigation how) {
         RendererProcess process = renderer(true);
         String body = "{\"url\":" + Json.quote(url)
             + ",\"width\":" + viewportWidth + ",\"height\":" + viewportHeight
@@ -269,7 +314,7 @@ public final class Page implements AutoCloseable {
             + ",\"popups\":" + (popupsSupported ? 1 : 0)
             + ",\"opener_token\":" + Json.quote(openerToken)
             + ",\"opener_origin\":" + Json.quote(openerOrigin)
-            + ",\"dpr\":" + decimal(devicePixelRatio) + "}";
+            + ",\"dpr\":" + decimal(devicePixelRatio) + content + "}";
         String json = process.request("/open", body, timeout.toMillis()).text();
         if (!Json.flag(json, "ok")) {
             return new Response(false, url, "", Security.NONE, null, null);
@@ -284,11 +329,48 @@ public final class Page implements AutoCloseable {
                             Json.stringOrNull(json, "nav"));
     }
 
-    /** Load the current document again. */
+    /** Show {@code html} as the document, with no base URL; see {@link #setContent(String, String, Navigation)}. */
+    public Response setContent(String html) {
+        return setContent(html, null, Navigation.defaults());
+    }
+
+    /** Show {@code html} as the document at {@code baseUrl}; see {@link #setContent(String, String, Navigation)}. */
+    public Response setContent(String html, String baseUrl) {
+        return setContent(html, baseUrl, Navigation.defaults());
+    }
+
+    /**
+     * Show {@code html} as the document, without fetching it from anywhere.
+     * {@code baseUrl} becomes the document's URL: relative links, style
+     * sheets, scripts and images resolve against it, and it decides the
+     * document's origin, so the page reads the cookies and storage this
+     * context holds for that origin. With a {@code file:} base URL the
+     * document may load files from that directory and below. With null the
+     * document is {@code about:blank}, has an origin of its own, and only
+     * absolute URLs in it load.
+     *
+     * <p>What the document may load is the page's {@link ResourcePolicy}. The
+     * call returns once the document is parsed, scripted for
+     * {@link Navigation#settle()} and laid out, with its subresources loaded.
+     */
+    public Response setContent(String html, String baseUrl, Navigation how) {
+        if (html == null) {
+            throw new IllegalArgumentException("html must not be null");
+        }
+        String base = baseUrl == null || baseUrl.isEmpty() ? "about:blank" : baseUrl;
+        this.content = html;
+        return open(base, ",\"html\":" + Json.quote(html.replace('\0', '�')), how);
+    }
+
+    /** Load the current document again; one given as HTML is shown again as it was given. */
     public Response reload() {
         String current = url;
         if (current.isEmpty()) {
             throw new IllegalStateException("there is no document to reload");
+        }
+        String html = content;
+        if (html != null) {
+            return setContent(html, current);
         }
         return navigate(current);
     }
@@ -922,6 +1004,10 @@ public final class Page implements AutoCloseable {
                                        context.inMemory(), context.environment());
         renderer.setTimeoutMs(timeout.toMillis());
         engineVersion = renderer.engineVersion();
+        renderer.request("/policy", resourcePolicy.toJson(), timeout.toMillis());
+        if (colorScheme == ContextOptions.ColorScheme.DARK) {
+            renderer.request("/colorscheme", "{\"dark\":1}", timeout.toMillis());
+        }
         return renderer;
     }
 

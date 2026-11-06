@@ -2038,7 +2038,9 @@ engine_collect_wanted_images(ns_box *root, const char *base_url,
                              double viewport_h, gboolean *deferred_any)
 {
     GPtrArray *imgs = g_ptr_array_new();
-    ns_layout_collect_images(root, imgs);
+    const ns_config *cfg = ns_config_get();
+    if (!cfg || cfg->images_enabled)
+        ns_layout_collect_images(root, imgs);
     GHashTable *wanted = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                g_free, NULL);
     double lazy_limit = (viewport_h > 0.0)

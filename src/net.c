@@ -2205,15 +2205,137 @@ ns_net_environment_proxy_applies(const char *url)
     return !ns_host_in_no_proxy_list(host, no_proxy);
 }
 
+typedef struct {
+    gboolean offline;
+    gboolean block_file;
+    gboolean block_private;
+    char   **allow_hosts;
+    char   **deny_hosts;
+} ns_net_policy;
+
+static GMutex g_net_policy_lock;
+static ns_net_policy g_net_policy;
+
+static char **
+ns_net_policy_host_list(const char *text)
+{
+    if (!text) return NULL;
+    GPtrArray *hosts = g_ptr_array_new();
+    g_auto(GStrv) entries = g_strsplit_set(text, ", \t\r\n", -1);
+    for (char **e = entries; *e; e++)
+        if (**e) g_ptr_array_add(hosts, g_ascii_strdown(*e, -1));
+    g_ptr_array_add(hosts, NULL);
+    return (char **)g_ptr_array_free(hosts, FALSE);
+}
+
+void
+ns_net_policy_set(gboolean offline, gboolean block_file,
+                  gboolean block_private, const char *allow_hosts,
+                  const char *deny_hosts)
+{
+    g_mutex_lock(&g_net_policy_lock);
+    g_strfreev(g_net_policy.allow_hosts);
+    g_strfreev(g_net_policy.deny_hosts);
+    g_net_policy.offline = offline;
+    g_net_policy.block_file = block_file;
+    g_net_policy.block_private = block_private;
+    g_net_policy.allow_hosts = ns_net_policy_host_list(allow_hosts);
+    g_net_policy.deny_hosts = ns_net_policy_host_list(deny_hosts);
+    g_mutex_unlock(&g_net_policy_lock);
+}
+
+static gboolean
+ns_net_policy_host_matches(char **patterns, const char *host)
+{
+    size_t hn = strlen(host);
+    for (char **p = patterns; p && *p; p++) {
+        const char *pattern = *p;
+        if (strcmp(pattern, "*") == 0 || strcmp(pattern, host) == 0)
+            return TRUE;
+        if (pattern[0] != '*' || pattern[1] != '.') continue;
+        size_t sn = strlen(pattern + 1);
+        if (hn > sn && strcmp(host + hn - sn, pattern + 1) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+ns_net_policy_host_is_private(const char *host)
+{
+    if (ns_host_is_loopback(host)) return TRUE;
+    ns_address_space literal = ns_address_space_of_ip_string(host);
+    if (literal != NS_ADDRESS_SPACE_UNKNOWN)
+        return literal != NS_ADDRESS_SPACE_PUBLIC;
+    return ns_host_name_is_private(host);
+}
+
+static gboolean
+ns_net_policy_scheme_is_network(const char *url)
+{
+    static const char *const schemes[] = {
+        "http:", "https:", "ws:", "wss:", "ftp:", "ftps:", NULL,
+    };
+    for (int i = 0; schemes[i]; i++)
+        if (g_ascii_strncasecmp(url, schemes[i], strlen(schemes[i])) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_net_policy_allows_host(const ns_net_policy *policy, const char *host)
+{
+    if (policy->offline) return FALSE;
+    if (!host || !*host) return !policy->allow_hosts;
+    if (ns_net_policy_host_matches(policy->deny_hosts, host)) return FALSE;
+    if (policy->allow_hosts &&
+        !ns_net_policy_host_matches(policy->allow_hosts, host))
+        return FALSE;
+    return !policy->block_private || !ns_net_policy_host_is_private(host);
+}
+
+gboolean
+ns_net_policy_allows(const char *url)
+{
+    if (!url) return TRUE;
+    gboolean file = g_ascii_strncasecmp(url, "file:", 5) == 0;
+    if (!file && !ns_net_policy_scheme_is_network(url)) return TRUE;
+    g_autofree char *host = file ? NULL : ns_url_host_from(url);
+    g_autofree char *lower = host ? g_ascii_strdown(host, -1) : NULL;
+    g_mutex_lock(&g_net_policy_lock);
+    gboolean allowed = file ? !g_net_policy.block_file
+                            : ns_net_policy_allows_host(&g_net_policy, lower);
+    g_mutex_unlock(&g_net_policy_lock);
+    return allowed;
+}
+
+const char *
+ns_net_policy_message(void)
+{
+    return "blocked by the embedder's resource policy";
+}
+
+static gboolean
+ns_net_policy_blocks_private(void)
+{
+    g_mutex_lock(&g_net_policy_lock);
+    gboolean blocks = g_net_policy.block_private;
+    g_mutex_unlock(&g_net_policy_lock);
+    return blocks;
+}
+
 void
 ns_net_address_guard_init(ns_net_address_guard *guard,
                           const char *document_url, const char *request_url)
 {
     guard->document_space = NS_ADDRESS_SPACE_UNKNOWN;
     guard->blocked = FALSE;
-    if (!document_url || !*document_url || !request_url) return;
-    if (ns_net_pick_configured_proxy(request_url)) return;
-    if (ns_net_environment_proxy_applies(request_url)) return;
+    guard->by_policy = FALSE;
+    guard->proxied = request_url &&
+        (ns_net_pick_configured_proxy(request_url) ||
+         ns_net_environment_proxy_applies(request_url));
+    if (guard->proxied || !document_url || !*document_url || !request_url)
+        return;
     guard->document_space = ns_address_space_of_document(document_url);
 }
 
@@ -2222,12 +2344,18 @@ ns_net_guarded_open_socket(void *clientp, curlsocktype purpose,
                            struct curl_sockaddr *address)
 {
     ns_net_address_guard *guard = clientp;
-    if (purpose == CURLSOCKTYPE_IPCXN &&
-        guard->document_space != NS_ADDRESS_SPACE_UNKNOWN) {
+    if (purpose == CURLSOCKTYPE_IPCXN && !guard->proxied) {
         ns_address_space target =
             ns_address_space_of_sockaddr(&address->addr, address->addrlen);
-        if (target > guard->document_space) {
+        if (guard->document_space != NS_ADDRESS_SPACE_UNKNOWN &&
+            target > guard->document_space) {
             guard->blocked = TRUE;
+            return CURL_SOCKET_BAD;
+        }
+        if (target > NS_ADDRESS_SPACE_PUBLIC &&
+            ns_net_policy_blocks_private()) {
+            guard->blocked = TRUE;
+            guard->by_policy = TRUE;
             return CURL_SOCKET_BAD;
         }
     }
@@ -2244,8 +2372,9 @@ ns_net_apply_curl_address_guard(void *curl_handle, ns_net_address_guard *guard)
 }
 
 const char *
-ns_net_address_guard_message(void)
+ns_net_address_guard_message(const ns_net_address_guard *guard)
 {
+    if (guard->by_policy) return ns_net_policy_message();
     return "blocked: a page from a more public network may not reach "
            "a private or local network address";
 }
@@ -5987,7 +6116,8 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
         wctx->exceeded = TRUE;
     out->ok = (rc == CURLE_OK);
     if (address_guard.blocked)
-        out->error_message = g_strdup(ns_net_address_guard_message());
+        out->error_message =
+            g_strdup(ns_net_address_guard_message(&address_guard));
     else if (rc != CURLE_OK && wctx->decode_failed)
         out->error_message = g_strdup("content decoding failed");
     else if (rc != CURLE_OK && !wctx->exceeded)
@@ -6302,6 +6432,11 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     const char *request_site_url = initiator ? initiator : top_url;
     ns_response *resp = g_new0(ns_response, 1);
     resp->body = g_byte_array_new();
+    if (!ns_net_policy_allows(url)) {
+        resp->final_url = g_strdup(url);
+        resp->error = g_strdup(ns_net_policy_message());
+        return resp;
+    }
     ns_csp_kind policy_kind = is_navigation ? NS_CSP_KIND_COUNT
                                             : ns_net_hop_csp_kind(extra_headers);
     if (policy_kind != NS_CSP_KIND_COUNT &&
@@ -7773,8 +7908,13 @@ ns_preconnect_thread(GTask *task, gpointer source_object, gpointer task_data,
     g_mutex_lock(&g_fetch_throttle_mutex);
     g_preconnect_active++;
     g_mutex_unlock(&g_fetch_throttle_mutex);
-    CURL *curl = g_atomic_int_get(&g_net_aborting) ? NULL : curl_easy_init();
+    gboolean refused = g_atomic_int_get(&g_net_aborting) ||
+                       !ns_net_policy_allows(url);
+    CURL *curl = refused ? NULL : curl_easy_init();
     if (curl) {
+        ns_net_address_guard address_guard;
+        ns_net_address_guard_init(&address_guard, NULL, url);
+        ns_net_apply_curl_address_guard(curl, &address_guard);
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 1L);
         if (g_share) curl_easy_setopt(curl, CURLOPT_SHARE, g_share);
