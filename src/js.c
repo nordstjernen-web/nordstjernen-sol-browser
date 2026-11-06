@@ -69219,7 +69219,8 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
     ns_frame_url fu;
     js->current_doc = document ? document : previous_doc;
     js->current_script = script;
-    ns_frame_url_enter(js, &fu, origin);
+    const char *document_url = ns_js_realm_url(js, realm);
+    ns_frame_url_enter(js, &fu, document_url ? document_url : origin);
 
     if (is_module) {
         JSContext *previous_module_ctx = js->module_ctx;
