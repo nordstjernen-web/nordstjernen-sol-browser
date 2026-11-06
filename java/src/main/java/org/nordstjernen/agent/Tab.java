@@ -603,15 +603,12 @@ public final class Tab {
     }
 
     private String wheel(Point at, String direction, int pixels) {
-        boolean horizontal;
-        int sign;
-        switch (direction == null ? "" : direction.toLowerCase(Locale.ROOT)) {
-            case "down" -> { horizontal = false; sign = 1; }
-            case "up" -> { horizontal = false; sign = -1; }
-            case "right" -> { horizontal = true; sign = 1; }
-            case "left" -> { horizontal = true; sign = -1; }
-            default -> throw new AgentException("direction must be up, down, left or right");
+        String way = direction == null ? "" : direction.toLowerCase(Locale.ROOT);
+        if (!List.of("up", "down", "left", "right").contains(way)) {
+            throw new AgentException("direction must be up, down, left or right");
         }
+        boolean horizontal = way.equals("left") || way.equals("right");
+        int sign = way.equals("down") || way.equals("right") ? 1 : -1;
         int span = horizontal ? page.viewportWidth() : page.viewportHeight();
         int by = sign * (pixels > 0 ? pixels : span * 4 / 5);
         int dx = horizontal ? by : 0;
@@ -620,7 +617,7 @@ public final class Tab {
             scrollBy(dx, dy);
         }
         syncScroll();
-        return "Scrolled " + direction.toLowerCase(Locale.ROOT) + " by " + Math.abs(by)
+        return "Scrolled " + way + " by " + Math.abs(by)
             + " px; the page is now at " + scrollX + "," + scrollY + " of "
             + page.pageWidth() + "x" + page.pageHeight() + ".";
     }
