@@ -11,6 +11,26 @@ Changelog:
   waited with it. libcurl now gets the entries through its read and write
   callbacks; the file keeps its format and is saved when a host is added,
   removed or changed.
+* HTTP cache: a body the page stored or read a moment ago is served from
+  memory. A second request for the same URL used to read the body file
+  back from disk straight after writing it; on Windows that open waits for
+  the antivirus scanner, and it was made holding the cache lock, so one
+  slow open held up every other request. Bodies up to 2 MB, 16 MB in all,
+  are kept per renderer, and a copy is only used while the cache index
+  still describes the same response.
+* Network: the alt-svc cache file is used only when HTTP/3 is enabled.
+  libcurl read `altsvc.txt` when each request was set up and rewrote it
+  when each request ended, though its records only ever lead to HTTP/3,
+  which is off unless `NS_FORCE_HTTP3` is set. On Windows, opening a file
+  that was rewritten a moment ago can wait on the antivirus scanner for
+  seconds; on x.com three requests were seen parked in that open for 15 s.
+* Fixed: the first change after a burst of script layout reads could take
+  0.7 s to show. The layout dampener, which rations relayouts for a page
+  that keeps mutating itself with nobody at the keyboard, also counted the
+  layouts a script forces by reading sizes, which it can neither skip nor
+  ration. A page that measured a few elements while starting up (YouTube's
+  player) tripped it, and the next real update waited out the ration. Only
+  the relayouts the dampener can hold back are counted now.
 * Performance: changing a DOM tree that is not in the document no longer
   forces a layout of the document. `append`, `prepend`, `replaceChildren`,
   `removeChild`, `remove`, `replaceChild`, `before`, `after`, `replaceWith`,
