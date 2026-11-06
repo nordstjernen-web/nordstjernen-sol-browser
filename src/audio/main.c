@@ -18,6 +18,10 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <curl/curl.h>
+#ifdef __linux__
+#include <glib.h>
+#include <glib/gstdio.h>
+#endif
 
 #include "pl_mpeg.h"
 
@@ -1290,8 +1294,19 @@ curl_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 static const char *
 audio_tmp_dir(void)
 {
+#ifdef __linux__
+    static char *dir;
+    if (!dir) {
+        dir = g_build_filename(g_get_user_cache_dir(), "nordstjernen",
+                               "audio-tmp", NULL);
+        g_mkdir_with_parents(dir, 0700);
+        g_chmod(dir, 0700);
+    }
+    return dir;
+#else
     const char *d = getenv("TMPDIR");
     return (d && *d) ? d : "/tmp";
+#endif
 }
 
 static char *
@@ -1859,12 +1874,23 @@ next_token(char **cursor)
 void ns_security_add_writable_dir(const char *dir);
 void ns_security_sandbox_init(const char *self_exe);
 void ns_security_seccomp_init(void);
+void ns_security_runtime_dir_read_only(void);
+void ns_security_config_dir_read_only(void);
+void ns_security_landlock_scope_abstract_sockets(void);
+void ns_security_seccomp_deny_unix_sockets(void);
+void ns_security_seccomp_deny_exec_memory(void);
 
 static void
 sandbox_self(void)
 {
+    g_setenv("ORC_CODE", "backup", TRUE);
     ns_os_media_preinit();
     ns_security_add_writable_dir(audio_tmp_dir());
+    ns_security_runtime_dir_read_only();
+    ns_security_config_dir_read_only();
+    ns_security_landlock_scope_abstract_sockets();
+    ns_security_seccomp_deny_unix_sockets();
+    ns_security_seccomp_deny_exec_memory();
     char self[PATH_MAX];
     ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
     self[n > 0 ? n : 0] = '\0';
