@@ -10613,8 +10613,9 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         g_ptr_array_add(st->js->pending_fetches, st);
 
     JSValue signal_v = JS_UNDEFINED;
-    if (argc >= 2 && JS_IsObject(argv[1])) {
-        JSValue s = JS_GetPropertyStr(ctx, argv[1], "signal");
+    for (int si = argc >= 2 ? 1 : 0; si >= 0 && !JS_IsObject(signal_v); si--) {
+        if (si >= argc || !JS_IsObject(argv[si])) continue;
+        JSValue s = JS_GetPropertyStr(ctx, argv[si], "signal");
         if (JS_IsObject(s)) signal_v = s;
         else                JS_FreeValue(ctx, s);
     }
@@ -25248,9 +25249,66 @@ ns_request_get_url(JSContext *ctx, JSValueConst this_val)
     return JS_GetPropertyStr(ctx, this_val, "__ns_url");
 }
 
+static const char *const ns_request_attributes[] = {
+    "method", "headers", "destination", "referrer", "referrerPolicy", "mode",
+    "credentials", "cache", "redirect", "integrity", "keepalive", "signal",
+    "duplex", "isReloadNavigation", "isHistoryNavigation",
+};
+
+static JSValue
+ns_request_get_attribute(JSContext *ctx, JSValueConst this_val, int magic)
+{
+    JSValue state = JS_IsObject(this_val)
+        ? JS_GetPropertyStr(ctx, this_val, "__ns_request") : JS_UNDEFINED;
+    if (!JS_IsObject(state)) {
+        JS_FreeValue(ctx, state);
+        return JS_ThrowTypeError(ctx, "Illegal invocation");
+    }
+    JSValue v = JS_GetPropertyStr(ctx, state, ns_request_attributes[magic]);
+    JS_FreeValue(ctx, state);
+    return v;
+}
+
 static const JSCFunctionListEntry ns_request_proto_accessors[] = {
     JS_CGETSET_DEF("url", ns_request_get_url, NULL),
+    JS_CGETSET_MAGIC_DEF("method", ns_request_get_attribute, NULL, 0),
+    JS_CGETSET_MAGIC_DEF("headers", ns_request_get_attribute, NULL, 1),
+    JS_CGETSET_MAGIC_DEF("destination", ns_request_get_attribute, NULL, 2),
+    JS_CGETSET_MAGIC_DEF("referrer", ns_request_get_attribute, NULL, 3),
+    JS_CGETSET_MAGIC_DEF("referrerPolicy", ns_request_get_attribute, NULL, 4),
+    JS_CGETSET_MAGIC_DEF("mode", ns_request_get_attribute, NULL, 5),
+    JS_CGETSET_MAGIC_DEF("credentials", ns_request_get_attribute, NULL, 6),
+    JS_CGETSET_MAGIC_DEF("cache", ns_request_get_attribute, NULL, 7),
+    JS_CGETSET_MAGIC_DEF("redirect", ns_request_get_attribute, NULL, 8),
+    JS_CGETSET_MAGIC_DEF("integrity", ns_request_get_attribute, NULL, 9),
+    JS_CGETSET_MAGIC_DEF("keepalive", ns_request_get_attribute, NULL, 10),
+    JS_CGETSET_MAGIC_DEF("signal", ns_request_get_attribute, NULL, 11),
+    JS_CGETSET_MAGIC_DEF("duplex", ns_request_get_attribute, NULL, 12),
+    JS_CGETSET_MAGIC_DEF("isReloadNavigation", ns_request_get_attribute, NULL, 13),
+    JS_CGETSET_MAGIC_DEF("isHistoryNavigation", ns_request_get_attribute, NULL, 14),
 };
+
+static JSValue
+ns_request_signal_for(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    for (int i = argc >= 2 ? 1 : 0; i >= 0; i--) {
+        if (i >= argc || !JS_IsObject(argv[i])) continue;
+        JSValue s = JS_GetPropertyStr(ctx, argv[i], "signal");
+        if (JS_IsException(s) || JS_IsObject(s)) return s;
+        JS_FreeValue(ctx, s);
+    }
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "AbortController");
+    JS_FreeValue(ctx, global);
+    JSValue controller = JS_IsConstructor(ctx, ctor)
+        ? JS_CallConstructor(ctx, ctor, 0, NULL) : JS_UNDEFINED;
+    JS_FreeValue(ctx, ctor);
+    if (JS_IsException(controller)) return controller;
+    JSValue signal = JS_IsObject(controller)
+        ? JS_GetPropertyStr(ctx, controller, "signal") : JS_NULL;
+    JS_FreeValue(ctx, controller);
+    return signal;
+}
 
 static JSValue
 ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
@@ -25311,9 +25369,11 @@ ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
         resolved = ns_url_resolve(js->current_url, url_raw);
         if (resolved) final_url = resolved;
     }
-    ns_def_ro(ctx, obj, "url", JS_NewString(ctx, final_url));
     JS_DefinePropertyValueStr(ctx, obj, "__ns_url",
                               JS_NewString(ctx, final_url), 0);
+    JSValue state = JS_NewObject(ctx);
+    JS_DefinePropertyValueStr(ctx, obj, "__ns_request",
+                              JS_DupValue(ctx, state), 0);
     g_autofree char *norm_method = ns_fetch_normalize_method(method);
     if (norm_method && (!strcmp(norm_method, "GET") || !strcmp(norm_method, "HEAD")) &&
         !JS_IsNull(body_v) && !JS_IsUndefined(body_v)) {
@@ -25323,35 +25383,50 @@ ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
         JS_FreeValue(ctx, method_v);
         JS_FreeValue(ctx, headers_init);
         JS_FreeValue(ctx, body_v);
+        JS_FreeValue(ctx, state);
         JS_FreeValue(ctx, obj);
         return JS_ThrowTypeError(ctx,
             "Request with GET/HEAD method cannot have a body");
     }
-    ns_def_ro(ctx, obj, "method",
+    JS_SetPropertyStr(ctx, state, "method",
         JS_NewString(ctx, norm_method ? norm_method : "GET"));
     JS_DefinePropertyValueStr(ctx, obj, "__ns_method",
                               JS_NewString(ctx, norm_method ? norm_method : "GET"), 0);
-    ns_def_ro(ctx, obj, "headers",
+    JS_SetPropertyStr(ctx, state, "headers",
         ns_make_headers_from_init(ctx, headers_init));
     ns_body_install(ctx, obj, body_v, TRUE);
     ns_body_apply_inferred_ct(ctx, obj);
     ns_def_ro(ctx, obj, "bodyUsed",       JS_FALSE);
-    ns_def_ro(ctx, obj, "mode",           JS_NewString(ctx, "cors"));
+    JS_SetPropertyStr(ctx, state, "mode", JS_NewString(ctx, "cors"));
     g_autofree char *credentials = argc >= 2 ? ns_fetch_credentials_from(ctx, argv[1]) : NULL;
     if (!credentials && argc >= 1)
         credentials = ns_fetch_credentials_from(ctx, argv[0]);
-    ns_def_ro(ctx, obj, "credentials",
+    JS_SetPropertyStr(ctx, state, "credentials",
               JS_NewString(ctx, credentials ? credentials : "same-origin"));
-    ns_def_ro(ctx, obj, "cache",          JS_NewString(ctx, "default"));
-    ns_def_ro(ctx, obj, "redirect",       JS_NewString(ctx, "follow"));
-    ns_def_ro(ctx, obj, "referrer",       JS_NewString(ctx, "about:client"));
-    ns_def_ro(ctx, obj, "referrerPolicy", JS_NewString(ctx, ""));
-    ns_def_ro(ctx, obj, "integrity",      JS_NewString(ctx, ""));
-    ns_def_ro(ctx, obj, "keepalive",      JS_FALSE);
-    ns_def_ro(ctx, obj, "destination",    JS_NewString(ctx, ""));
-    ns_def_ro(ctx, obj, "isReloadNavigation",  JS_FALSE);
-    ns_def_ro(ctx, obj, "isHistoryNavigation", JS_FALSE);
-    ns_def_ro(ctx, obj, "duplex",         JS_NewString(ctx, "half"));
+    JS_SetPropertyStr(ctx, state, "cache", JS_NewString(ctx, "default"));
+    JS_SetPropertyStr(ctx, state, "redirect", JS_NewString(ctx, "follow"));
+    JS_SetPropertyStr(ctx, state, "referrer", JS_NewString(ctx, "about:client"));
+    JS_SetPropertyStr(ctx, state, "referrerPolicy", JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, state, "integrity", JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, state, "keepalive", JS_FALSE);
+    JS_SetPropertyStr(ctx, state, "destination", JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, state, "isReloadNavigation", JS_FALSE);
+    JS_SetPropertyStr(ctx, state, "isHistoryNavigation", JS_FALSE);
+    JS_SetPropertyStr(ctx, state, "duplex", JS_NewString(ctx, "half"));
+    JSValue signal = ns_request_signal_for(ctx, argc, argv);
+    if (JS_IsException(signal)) {
+        if (url_raw) JS_FreeCString(ctx, url_raw);
+        if (method)  JS_FreeCString(ctx, method);
+        JS_FreeValue(ctx, url_v);
+        JS_FreeValue(ctx, method_v);
+        JS_FreeValue(ctx, headers_init);
+        JS_FreeValue(ctx, body_v);
+        JS_FreeValue(ctx, state);
+        JS_FreeValue(ctx, obj);
+        return signal;
+    }
+    JS_SetPropertyStr(ctx, state, "signal", signal);
+    JS_FreeValue(ctx, state);
     ns_attach_body_consumers(ctx, obj);
     if (url_raw) JS_FreeCString(ctx, url_raw);
     if (method)  JS_FreeCString(ctx, method);

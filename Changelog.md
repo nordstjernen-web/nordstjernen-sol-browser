@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Fetch: a `Request` has a `signal`, and its attributes live on
+  `Request.prototype` as in other browsers. The attributes were own data
+  properties of each object and `signal` did not exist, so
+  `fetch(request)` could not be aborted through the request, and the
+  widely used AbortController polyfill, which checks
+  `Request.prototype.hasOwnProperty('signal')`, decided the browser needed
+  it and replaced `window.fetch`. On mail.ru that assignment threw,
+  because the page makes `fetch` read-only, and stopped its start-up: the
+  news list, weather and calendar stayed grey placeholders.
 * Docs: `docs/security-review-2026-11.md` reports a security review of
   the engine: the Critical and High findings fixed in this release, the
   Medium and Low findings still open, and what LWN's article on the
