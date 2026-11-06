@@ -198,6 +198,44 @@ public final class Json {
     }
 
     /**
+     * The JSON text of a value: a {@code Map} with string keys, an
+     * {@code Iterable}, a {@code String}, a {@code Number}, a {@code Boolean}
+     * or null; anything else is written as its {@code toString()}.
+     */
+    public static String write(Object value) {
+        StringBuilder out = new StringBuilder();
+        write(out, value);
+        return out.toString();
+    }
+
+    private static void write(StringBuilder out, Object value) {
+        if (value == null || value instanceof Boolean) {
+            out.append(value);
+        } else if (value instanceof Number number) {
+            double d = number.doubleValue();
+            out.append(Double.isFinite(d) ? number.toString() : "null");
+        } else if (value instanceof java.util.Map<?, ?> map) {
+            String separator = "{";
+            for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {
+                out.append(separator).append(quote(String.valueOf(entry.getKey()))).append(':');
+                write(out, entry.getValue());
+                separator = ",";
+            }
+            out.append(map.isEmpty() ? "{}" : "}");
+        } else if (value instanceof Iterable<?> items) {
+            String separator = "[";
+            for (Object item : items) {
+                out.append(separator);
+                write(out, item);
+                separator = ",";
+            }
+            out.append(separator.equals("[") ? "[]" : "]");
+        } else {
+            out.append(quote(value.toString()));
+        }
+    }
+
+    /**
      * Parse a whole JSON text. Objects become {@code Map<String, Object>} in
      * document order, arrays {@code List<Object>}, strings {@code String},
      * numbers {@code Long} when integral and {@code Double} otherwise,

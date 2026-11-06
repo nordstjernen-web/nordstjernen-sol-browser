@@ -40,6 +40,15 @@ sourceSets {
     }
 }
 
+// The in-page helper the agent tools evaluate is the engine's own; it is
+// taken from data/js so the two cannot drift apart.
+tasks.named('processResources') {
+    from('../data/js') {
+        include 'remote-page.js'
+        into 'org/nordstjernen/agent'
+    }
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
