@@ -3,6 +3,14 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security review: `docs/security-review-2026-11.md` is a static
+  source review of the whole tree at 1.0.44 (network and sandbox, HTML/DOM,
+  CSS, the JS bindings, layout and paint, WebGL/WebGPU and media, the GTK
+  shell, the bundled pages and the vendored-engine forks): 137 findings,
+  none Critical, 10 High, 27 Medium, each with `file:line`, trigger and a
+  suggested fix, plus HTML/CSS conformance deviations and a map of the
+  largest failing WPT clusters to the responsible code. Nothing in it has
+  been fixed yet; the priority list at the top is the order to take them.
 * Java: a browser API, `org.nordstjernen.browser`. `Engine`,
   `BrowserContext` and `Page` replace the two earlier families
   (`RemotePage`/`RemoteBrowser` and their numbered `select(int kind, …)`
