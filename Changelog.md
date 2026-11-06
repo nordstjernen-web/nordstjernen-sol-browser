@@ -71,6 +71,12 @@ Changelog:
   accepts only `http(s):`, `data:`, `blob:`, `about:blank` and, from a local
   page, `file:` popups, and a popup's load carries its opener's origin as the
   initiator so a remote opener cannot reach local files or settings.
+* Security hardening: the IndexedDB backend derives its storage partition
+  from the calling realm, not from the shared top-level key, so a frame or
+  realm other than the main document gets a `SecurityError` instead of the
+  embedding page's databases, in private mode as well. A cross-origin frame
+  could not reach the backend in practice (its `indexedDB` getter is denied
+  before the polyfill runs), but the partition no longer relies on that.
 * Printing: paged PDF from a program. Until now only the command line
   (`--dump=print:FILE`) could reach the paginator; the C API, the engine
   protocol and Java all wrote one page as tall as the document, laid out for

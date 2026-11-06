@@ -18,6 +18,7 @@ G_BEGIN_DECLS
 #define NS_JS_EVAL_BUDGET_MAX_MS 60000
 
 typedef struct ns_js ns_js;
+struct JSContext;
 typedef struct ns_js_drag_session ns_js_drag_session;
 
 typedef void (*ns_js_log_cb)(const char *line, gpointer user_data);
@@ -165,6 +166,7 @@ char    *ns_js_base_url_for_document(ns_js *js, const ns_node *doc,
                                      const char *document_url);
 const char *ns_js_current_url(const ns_js *js);
 const char *ns_js_storage_partition(const ns_js *js);
+const char *ns_js_realm_storage_partition(const ns_js *js, struct JSContext *realm);
 void   ns_js_dispatch_hashchange(ns_js *js,
                                  const char *old_url, const char *new_url);
 void   ns_js_free(ns_js *js);
