@@ -3,6 +3,13 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Docs: `docs/security-review-2026-11-07.md` reports a second security review of
+  the engine source, made against a working build (ten new High, seventeen
+  Medium and twelve Low findings, four of the High verified by running the
+  browser). Most cluster on the page/cross-origin-frame boundary, plus two
+  WebGL texture-upload memory-safety bugs. Two reported issues were rejected
+  after building and running. The CSS engine, the binary parsers, layout/paint,
+  remote control and the supply chain came back clean.
 * Network: the libcurl protocol allow-list is built from the protocols the
   linked libcurl provides, so an `ftp`-less libcurl (the mobile dependency
   sysroots now compile in only HTTP(S), FTP(S) and WebSocket, after the
