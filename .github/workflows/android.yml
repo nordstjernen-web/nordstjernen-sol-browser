@@ -21,6 +21,7 @@ concurrency:
 
 permissions:
   contents: read
+  attestations: read
 
 jobs:
   build:
@@ -73,6 +74,8 @@ jobs:
           echo "NDK: ${ANDROID_NDK_HOME}"
 
       - name: Fetch prebuilt dependency sysroots
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File android/scripts/fetch-prebuilt-deps.ps1 \
             -Abi arm64-v8a,x86_64 \
