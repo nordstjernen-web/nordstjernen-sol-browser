@@ -8,6 +8,12 @@
 #define NS_TITLE_ROW_FULL_NAME "Nordstjernen Web Browser"
 #define NS_TITLE_ROW_SHORT_NAME "Sol Explorer"
 
+#ifdef __APPLE__
+#define NS_TITLE_ROW_SHOWS_NAME FALSE
+#else
+#define NS_TITLE_ROW_SHOWS_NAME TRUE
+#endif
+
 typedef struct {
     GtkWidget *start_controls;
     GtkWidget *tabstrip;
@@ -71,8 +77,13 @@ title_row_measure(GtkWidget *row, GtkOrientation orientation, int for_size,
     int tabs_min = 0, tabs_nat = 0;
     measure_width(r->tabstrip, &tabs_min, &tabs_nat);
     int edges = controls_width(r->start_controls) +
-                controls_width(r->end_controls) + NS_TITLE_ROW_NAME_GAP +
-                NS_TITLE_ROW_TRAILING_GAP;
+                controls_width(r->end_controls);
+    if (!NS_TITLE_ROW_SHOWS_NAME) {
+        *minimum = edges + tabs_min;
+        *natural = edges + tabs_nat;
+        return;
+    }
+    edges += NS_TITLE_ROW_NAME_GAP + NS_TITLE_ROW_TRAILING_GAP;
     *minimum = edges + tabs_min + natural_width(r->short_name);
     *natural = edges + tabs_nat + natural_width(r->full_name);
 }
@@ -122,6 +133,13 @@ title_row_allocate(GtkWidget *row, int width, int height, int baseline)
 
     int tabs_min = 0, tabs_nat = 0;
     measure_width(r->tabstrip, &tabs_min, &tabs_nat);
+    if (!NS_TITLE_ROW_SHOWS_NAME) {
+        gtk_widget_set_child_visible(r->full_name, FALSE);
+        gtk_widget_set_child_visible(r->short_name, FALSE);
+        title_row_place(row, r->tabstrip, left,
+                        CLAMP(right - left, tabs_min, tabs_nat), height);
+        return;
+    }
     int full_width = natural_width(r->full_name);
     int room = right - left - NS_TITLE_ROW_NAME_GAP -
                NS_TITLE_ROW_TRAILING_GAP;

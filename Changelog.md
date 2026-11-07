@@ -12,10 +12,13 @@ Changelog:
   (`tnum`, `pnum`, `lnum`, `onum`, `frac`, `afrc`, `ordn`, `zero`). It was
   parsed but ignored, so `tabular-nums` columns of times and prices kept
   proportional digits and did not line up.
-* UI: the window chrome turns dark with the dark colour scheme, the status
-  pill no longer shows "Done" after every load, built-in pages show the
-  Nordstjernen icon in their tab, and the New Tab address bar is empty.
-  On macOS the window buttons sit on the left as traffic lights. The
+* UI: the window chrome turns dark with the dark colour scheme, using the
+  same slate tones as the built-in pages, the status pill no longer shows
+  "Done" after every load, built-in pages declare their own favicons
+  (History, Settings, About, folder listing, error and Safe Browsing
+  pages), and the New Tab address bar is empty. On macOS the window buttons
+  sit on the left as traffic lights and the tab strip carries no title;
+  the toolbar's Nordstjernen button moved into the menu. The
   file:// folder listing and the Safe Browsing warning use the shared page
   style with a dark variant. New Tab lists the most visited sites (not in
   private windows). Settings marks the current section, puts Cookies
@@ -23,7 +26,9 @@ Changelog:
   animating them on load. History day headers are always English, without
   the double space, and tiles take the letter of the registrable domain.
   A failed connection reads "This site can't be reached" instead of
-  claiming the device is offline.
+  claiming the device is offline, with the address and the libcurl message
+  under Details. Settings saves the home page on change (New Tab page or a
+  custom address) without a Save button; About lists Security first.
 * Network: the libcurl protocol allow-list is built from the protocols the
   linked libcurl provides, so an `ftp`-less libcurl (the mobile dependency
   sysroots now compile in only HTTP(S), FTP(S) and WebSocket, after the

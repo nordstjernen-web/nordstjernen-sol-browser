@@ -39,12 +39,22 @@
     ".btn.danger{background:transparent;border-color:var(--line);" \
     "color:var(--danger)}\n" \
     ".btn:disabled{opacity:.55;cursor:default}\n" \
+    ".btn[hidden]{display:none}\n" \
     ".kicker{margin:0 0 10px;font-size:12px;font-weight:700;" \
     "letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}\n" \
     ".crumb{display:inline-flex;align-items:center;gap:6px;height:32px;" \
     "padding:0 14px;border-radius:999px;background:var(--field);" \
     "color:var(--muted);font-size:13px;font-weight:600}\n" \
-    ".crumb:hover{color:var(--text);text-decoration:none}\n"
+    ".crumb:hover{color:var(--text);text-decoration:none}\n" \
+    "details > summary{display:inline-flex;align-items:center;gap:6px;" \
+    "min-height:32px;padding:0 10px 0 6px;margin-left:-6px;" \
+    "border-radius:999px;cursor:pointer;color:var(--text);" \
+    "font-size:13.5px;font-weight:600}\n" \
+    "details > summary:hover{background:var(--field)}\n" \
+    "details > summary::before{content:\"\";width:7px;height:7px;" \
+    "margin:0 4px 0 6px;border-right:1.6px solid currentColor;" \
+    "border-bottom:1.6px solid currentColor;transform:rotate(-45deg)}\n" \
+    "details[open] > summary::before{transform:rotate(45deg)}\n"
 
 #define NS_ABOUT_TINT_CSS \
     ".av.h1{background:rgba(13,148,136,.13);color:#0b7a70}\n" \
@@ -62,5 +72,31 @@
     ".av.h5{background:rgba(244,114,182,.16);color:#f9a8d4}" \
     ".av.h6{background:rgba(167,139,250,.17);color:#c4b5fd}" \
     ".av.h7{background:rgba(148,163,184,.16);color:#cbd5e1}}\n"
+
+#define NS_ABOUT_ICON_LINK(stroke, paths) \
+    "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg " \
+    "xmlns='http://www.w3.org/2000/svg' width='32' height='32' " \
+    "viewBox='0 0 16 16' fill='none' stroke='" stroke "' " \
+    "stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E" \
+    paths "%3C/svg%3E\">"
+#define NS_ABOUT_ICON_BLUE "%234a86f0"
+#define NS_ABOUT_ICON_HISTORY NS_ABOUT_ICON_LINK(NS_ABOUT_ICON_BLUE, \
+    "%3Ccircle cx='8' cy='8' r='5.75'/%3E%3Cpath d='M8 4.75V8l2.25 1.5'/%3E")
+#define NS_ABOUT_ICON_SETTINGS NS_ABOUT_ICON_LINK(NS_ABOUT_ICON_BLUE, \
+    "%3Cpath d='M2.75 4.5h6.5M12.25 4.5h1M2.75 11.5h1M6.75 11.5h6.5'/%3E" \
+    "%3Ccircle cx='10.75' cy='4.5' r='1.5'/%3E" \
+    "%3Ccircle cx='5.25' cy='11.5' r='1.5'/%3E")
+#define NS_ABOUT_ICON_INFO NS_ABOUT_ICON_LINK(NS_ABOUT_ICON_BLUE, \
+    "%3Ccircle cx='8' cy='8' r='5.75'/%3E%3Cpath d='M8 7.25v3.5M8 5v.1'/%3E")
+#define NS_ABOUT_ICON_FOLDER NS_ABOUT_ICON_LINK(NS_ABOUT_ICON_BLUE, \
+    "%3Cpath d='M1.75 4.25c0-.83.67-1.5 1.5-1.5h2.9l1.5 1.75h5.1c.83 0 " \
+    "1.5.67 1.5 1.5v5.75c0 .83-.67 1.5-1.5 1.5H3.25c-.83 0-1.5-.67-1.5" \
+    "-1.5z'/%3E")
+#define NS_ABOUT_ICON_ERROR NS_ABOUT_ICON_LINK("%238a93a3", \
+    "%3Cpath d='M4 1.75h4.75L12 5v9.25H4zM8.5 1.75V5.25H12M6.25 " \
+    "8.25l3.5 3.5M9.75 8.25l-3.5 3.5'/%3E")
+#define NS_ABOUT_ICON_DANGER NS_ABOUT_ICON_LINK("%23e5484d", \
+    "%3Cpath d='M8 1.75 13.25 3.75v4c0 3.25-2.25 5.5-5.25 6.5-3-1-5.25" \
+    "-3.25-5.25-6.5v-4z'/%3E%3Cpath d='M8 5.25v3.25M8 10.6v.1'/%3E")
 
 #endif

@@ -225,8 +225,6 @@ install_chrome_css(void)
         "headerbar > windowhandle > box > box.end { margin: 0; }"
         ".ns-brand-title {"
         "  font-size: 13px;"
-        "  font-weight: bold;"
-        "  letter-spacing: 0.02em;"
         "  color: alpha(currentColor, 0.72);"
         "}"
         "headerbar:backdrop .ns-brand-title {"
@@ -347,10 +345,7 @@ install_chrome_css(void)
         ".ns-toolbar menubutton.ns-nav-button > button:checked {"
         "  background-color: alpha(currentColor, 0.14);"
         "}"
-        ".ns-toolbar button.ns-nav-button.ns-logo {"
-        "  margin-left: 4px;"
-        "  -gtk-icon-size: 22px;"
-        "}"
+
         ".ns-toolbar button.ns-nav-button:disabled {"
         "  background: none;"
         "  color: alpha(currentColor, 0.3);"
@@ -477,6 +472,33 @@ install_chrome_css(void)
         "}"
         "frame.ns-findbar button:hover {"
         "  background-color: alpha(currentColor, 0.09);"
+        "}"
+        "@define-color ns_dark_strip #0b0e13;"
+        "@define-color ns_dark_surface #181c24;"
+        "@define-color ns_dark_field #0f1218;"
+        "window.ns-dark headerbar,"
+        "window.ns-dark headerbar:backdrop {"
+        "  background: @ns_dark_strip;"
+        "}"
+        "window.ns-dark .ns-tab.ns-tab-active,"
+        "window.ns-dark .ns-toolbar,"
+        "window.ns-dark .ns-procstatus,"
+        "window.ns-dark frame.ns-findbar {"
+        "  background-color: @ns_dark_surface;"
+        "}"
+        "window.ns-dark .ns-tab.ns-tab-private.ns-tab-active,"
+        "window.ns-dark .ns-toolbar.ns-private {"
+        "  background-color: mix(@ns_dark_surface, @ns_private, 0.12);"
+        "}"
+        "window.ns-dark .ns-toolbar {"
+        "  border-bottom-color: alpha(white, 0.06);"
+        "}"
+        "window.ns-dark .ns-toolbar entry.ns-address,"
+        "window.ns-dark .ns-toolbar entry.ns-address:focus-within {"
+        "  background-color: @ns_dark_field;"
+        "}"
+        "window.ns-dark .ns-toolbar entry.ns-address:hover {"
+        "  background-color: mix(@ns_dark_field, white, 0.03);"
         "}");
     gtk_style_context_add_provider_for_display(
         display, GTK_STYLE_PROVIDER(p),
@@ -699,6 +721,7 @@ apply_color_scheme(ProcWindow *pw)
     case NS_COLOR_SCHEME_PREF_DARK:  dark = TRUE;  break;
     default: dark = desktop_prefers_dark(pw->window); break;
     }
+    toggle_css_class(pw->window, "ns-dark", dark);
     const char *want = dark ? "dark" : "light";
     const char *have = g_getenv("NS_COLOR_SCHEME");
     if (have && g_str_equal(have, want))
@@ -1443,11 +1466,12 @@ refresh_tab_icon(GtkWidget *page, NsProcView *v)
         return;
     const char *url = ns_proc_view_url(v);
     GdkPaintable *fav = ns_proc_view_favicon(v);
-    if (url && g_str_has_prefix(url, "about:") &&
-        !g_str_equal(url, "about:blank"))
-        ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen");
-    else if (fav)
+    gboolean internal = url && g_str_has_prefix(url, "about:") &&
+                        !g_str_equal(url, "about:blank");
+    if (fav && !(url && g_str_equal(url, "about:start")))
         gtk_image_set_from_paintable(GTK_IMAGE(icon), fav);
+    else if (internal)
+        ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen");
     else
         ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen-page-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
@@ -2177,10 +2201,10 @@ on_home_clicked(GtkButton *b, gpointer ud)
 }
 
 static void
-on_logo_clicked(GtkButton *b, gpointer ud)
+act_website(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
-    (void)b;
-    NsProcView *v = current_view(ud);
+    (void)action; (void)parameter;
+    NsProcView *v = current_view(user_data);
     if (v)
         ns_proc_view_load(v, "https://nordstjernen.org");
 }
@@ -3051,6 +3075,7 @@ install_shortcuts(ProcWindow *pw)
     install_action(pw, "downloads", G_CALLBACK(act_downloads),
                    (const char *[]){ "<Ctrl>j", NULL });
     install_action(pw, "about", G_CALLBACK(act_about), NULL);
+    install_action(pw, "website", G_CALLBACK(act_website), NULL);
     install_action(pw, "history", G_CALLBACK(act_history),
                    (const char *[]){ "<Ctrl>h", NULL });
     install_action(pw, "print", G_CALLBACK(act_print),
@@ -3216,7 +3241,7 @@ proc_window_new(GtkApplication *app)
                                     GTK_ENTRY_ICON_PRIMARY,
                                     ns_i18n("Page location"));
     gtk_entry_set_placeholder_text(GTK_ENTRY(pw->address),
-                                   ns_i18n("Search or enter a URL"));
+                                   ns_i18n("Search or enter an address"));
     set_accessible_label(pw->address, ns_i18n("Address and search bar"));
     g_signal_connect(pw->address, "activate",
                      G_CALLBACK(on_address_activate), pw);
@@ -3306,6 +3331,7 @@ proc_window_new(GtkApplication *app)
     g_object_unref(sec_tools);
     GMenu *appmenu_about = g_menu_new();
     g_menu_append(appmenu_about, ns_i18n("About Nordstjernen Web Browser"), "win.about");
+    g_menu_append(appmenu_about, ns_i18n("Visit nordstjernen.org"), "win.website");
     g_menu_append_section(appmenu, NULL, G_MENU_MODEL(appmenu_about));
     g_object_unref(appmenu_about);
     GtkWidget *menu_button = gtk_menu_button_new();
@@ -3321,10 +3347,6 @@ proc_window_new(GtkApplication *app)
     set_accessible_label(menu_button, ns_i18n("Menu"));
     g_object_unref(appmenu);
 
-    GtkWidget *logo = toolbar_button("nordstjernen",
-                                     ns_i18n("Visit nordstjernen.org"),
-                                     G_CALLBACK(on_logo_clicked), pw);
-    gtk_widget_add_css_class(logo, "ns-logo");
 
     gtk_box_append(GTK_BOX(pw->toolbar), pw->back);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->forward);
@@ -3336,7 +3358,6 @@ proc_window_new(GtkApplication *app)
     gtk_box_append(GTK_BOX(pw->toolbar), pw->bookmarks_button);
     gtk_box_append(GTK_BOX(pw->toolbar), downloads);
     gtk_box_append(GTK_BOX(pw->toolbar), menu_button);
-    gtk_box_append(GTK_BOX(pw->toolbar), logo);
     gtk_box_append(GTK_BOX(vbox), pw->toolbar);
 
     pw->notebook = gtk_notebook_new();

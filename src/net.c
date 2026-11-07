@@ -3383,7 +3383,7 @@ diag_feature(GString *s, const char *key, gboolean on)
     g_string_append_printf(s,
         "<div class=\"drow\"><span class=\"dk\">%s</span>"
         "<span class=\"dv %s\">%s</span></div>",
-        key, on ? "on" : "off", on ? "Enabled" : "Not built");
+        key, on ? "on" : "off", on ? "On" : "Not built");
 }
 
 static void
@@ -3467,24 +3467,23 @@ about_security_html(void)
                st.allocator_hardened ? "Freed memory is poisoned" : "Off");
 #endif
 #ifdef NS_IPC_RUST
-    diag_state(s, "Memory-safe IPC parser (Rust)", TRUE,
-               "Renderer messages parsed in Rust");
+    diag_state(s, "Memory-safe message parser", TRUE, "On");
 #else
-    diag_state(s, "Memory-safe IPC parser (Rust)", FALSE, "Off (C parser)");
+    diag_state(s, "Memory-safe message parser", FALSE, "Off");
 #endif
 
     g_string_append(s, "<h3>Browsing</h3>");
     gboolean https_first = cfg && cfg->https_first;
     diag_state(s, "HTTPS-First", https_first, https_first ? "On" : "Off");
     gboolean js_on = !cfg || cfg->javascript_enabled;
-    diag_state(s, "JavaScript", js_on, js_on ? "Enabled" : "Disabled");
+    diag_state(s, "JavaScript", js_on, js_on ? "On" : "Off");
     gboolean gpc = cfg && cfg->global_privacy_control;
     diag_state(s, "Global Privacy Control", gpc, gpc ? "Sent" : "Off");
     gboolean dnt = cfg && cfg->do_not_track;
     diag_state(s, "Do Not Track", dnt, dnt ? "Sent" : "Off");
     gboolean strip = cfg && cfg->strip_tracking_params;
     diag_state(s, "Tracking parameter removal", strip, strip ? "On" : "Off");
-    diag_state(s, "Telemetry", TRUE, "None \xe2\x80\x94 never phones home");
+    diag_state(s, "Telemetry", TRUE, "None");
 
     g_string_append(s, "</div>");
     return g_string_free(s, FALSE);
@@ -3958,7 +3957,7 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
     char *esc_detail = NULL;
     if (transport_error && *transport_error) {
         char *esc_err = ns_html_escape_text(transport_error);
-        esc_detail = g_strdup_printf("Technical detail: %s", esc_err);
+        esc_detail = g_strdup(esc_err);
         g_free(esc_err);
     } else if (status > 0) {
         esc_detail = g_strdup_printf("HTTP status: %ld", status);
@@ -3972,7 +3971,7 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         "<!doctype html><html><head><meta charset=\"utf-8\">"
         "<title>");
     g_string_append(out, esc_title);
-    g_string_append(out, "</title>"
+    g_string_append(out, "</title>" NS_ABOUT_ICON_ERROR
         "<meta name=\"color-scheme\" content=\"light dark\">"
         "<style>" NS_ABOUT_BASE_CSS
         "body{display:flex;align-items:center;justify-content:center;"
@@ -3984,18 +3983,16 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         "h1{margin:0 0 10px;font-size:24px;letter-spacing:-.01em;"
         "line-height:1.25}"
         "p.summary{margin:0 0 20px;color:var(--muted);font-size:15.5px}"
-        ".url{margin:0 0 10px;padding:10px 14px;border-radius:12px;"
-        "background:var(--field);font-family:var(--mono);font-size:13px;"
-        "color:var(--muted);overflow-wrap:anywhere}"
-        ".detail{margin:0 0 22px;font-family:var(--mono);font-size:12px;"
-        "color:var(--muted);overflow-wrap:anywhere}"
-        ".actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}"
+        ".actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}"
         ".tips{margin-top:26px;padding-top:20px;"
         "border-top:1px solid var(--line);"
         "color:var(--muted);font-size:13.5px}"
         ".tips strong{color:var(--text)}"
         ".tips ul{margin:8px 0 0;padding-left:20px}"
         ".tips li{margin:4px 0}"
+        "details{margin-top:14px}"
+        ".detail{margin:8px 0 0;font-family:var(--mono);font-size:12px;"
+        "color:var(--muted);overflow-wrap:anywhere}"
         "</style></head><body>"
         "<main class=\"card\">"
         "<div class=\"icon\">");
@@ -4006,15 +4003,7 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
     g_string_append(out, "</h1>"
         "<p class=\"summary\">");
     g_string_append(out, esc_summary);
-    g_string_append(out, "</p>"
-        "<p class=\"url\">");
-    g_string_append(out, esc_url);
     g_string_append(out, "</p>");
-    if (esc_detail) {
-        g_string_append(out, "<p class=\"detail\">");
-        g_string_append(out, esc_detail);
-        g_string_append(out, "</p>");
-    }
     g_string_append(out, "<div class=\"actions\">");
     if (can_retry) {
         g_string_append(out, "<a class=\"btn primary\" href=\"");
@@ -4024,7 +4013,7 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
     g_string_append(out,
         "<button class=\"btn\" "
         "onclick=\"history.back()\">Go back</button>"
-        "<a class=\"btn\" href=\"about:start\">New Tab</a>"
+        "<a class=\"btn\" href=\"about:start\">New tab</a>"
         "</div>"
         "<div class=\"tips\">"
         "<strong>What to try:</strong>"
@@ -4040,8 +4029,18 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
             "<li>Make sure your internet connection is working.</li>"
             "<li>Reload the page in a moment. Short outages happen.</li>");
     }
+    g_string_append(out, "</ul>");
+    g_string_append(out, "<details><summary>Details</summary>"
+                         "<p class=\"detail\">");
+    g_string_append(out, esc_url);
+    g_string_append(out, "</p>");
+    if (esc_detail) {
+        g_string_append(out, "<p class=\"detail\">");
+        g_string_append(out, esc_detail);
+        g_string_append(out, "</p>");
+    }
     g_string_append(out,
-        "</ul>"
+        "</details>"
         "</div>"
         "</main></body></html>");
 
@@ -4366,9 +4365,17 @@ file_mtime_label(gint64 mtime)
     if (mtime <= 0) return g_strdup("");
     GDateTime *dt = g_date_time_new_from_unix_local(mtime);
     if (!dt) return g_strdup("");
-    char *out = g_date_time_format(dt, "%Y-%m-%d %H:%M");
+    static const char *const months[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
+        "Nov", "Dec" };
+    char *out = g_strdup_printf("%d %s %d, %02d:%02d",
+                                g_date_time_get_day_of_month(dt),
+                                months[g_date_time_get_month(dt) - 1],
+                                g_date_time_get_year(dt),
+                                g_date_time_get_hour(dt),
+                                g_date_time_get_minute(dt));
     g_date_time_unref(dt);
-    return out ? out : g_strdup("");
+    return out;
 }
 
 static char *
@@ -4432,9 +4439,10 @@ dir_listing_begin(const char *title, const char *parent_uri)
     g_string_append(out, "<!doctype html><html lang=\"en\"><head>"
         "<meta charset=\"utf-8\">"
         "<meta name=\"color-scheme\" content=\"light dark\">");
-    g_string_append(out, "<title>Index of ");
-    g_string_append(out, esc_title);
-    g_string_append(out, "</title><style>" NS_ABOUT_BASE_CSS
+    g_string_append(out, "<title>");
+    g_string_append(out, esc_heading);
+    g_string_append(out, "</title>" NS_ABOUT_ICON_FOLDER
+        "<style>" NS_ABOUT_BASE_CSS
         ".wrap{max-width:860px;margin:0 auto;padding:36px 24px 56px}"
         "h1{margin:0;font-size:28px;letter-spacing:-.02em;line-height:1.2;"
         "overflow-wrap:anywhere}"
@@ -4969,14 +4977,14 @@ static const char k_about_start_template[] =
     "<title>New Tab</title>"
     "<style>\n" NS_ABOUT_BASE_CSS
     "html,body{height:100%;background:#fff}\n"
-    ".ntp{max-width:720px;margin:0 auto;padding:13vh 24px 40px;"
+    ".ntp{max-width:720px;margin:0 auto;padding:12vh 24px 64px;"
     "display:flex;flex-direction:column;align-items:center}\n"
     ".brand{display:flex;flex-direction:column;align-items:center;"
-    "gap:14px;margin-bottom:30px}\n"
-    ".mark-img{display:block;width:76px;height:76px;border-radius:20px;"
-    "box-shadow:0 10px 30px rgba(20,40,110,.28)}\n"
-    ".brand h1{margin:0;font-size:32px;font-weight:700;"
-    "letter-spacing:-.02em;line-height:1.1;text-align:center}\n"
+    "gap:12px;margin-bottom:32px}\n"
+    ".mark-img{display:block;width:56px;height:56px;border-radius:15px;"
+    "box-shadow:0 8px 22px rgba(20,40,110,.24)}\n"
+    ".brand h1{margin:0;font-size:26px;font-weight:700;"
+    "letter-spacing:-.02em;line-height:1.15;text-align:center}\n"
 
     ".search{display:flex;align-items:center;gap:12px;width:100%;"
     "height:58px;padding:0 7px 0 22px;border-radius:999px;"
@@ -4999,7 +5007,7 @@ static const char k_about_start_template[] =
     ".hint kbd{padding:1px 6px;border:1px solid var(--line);"
     "border-radius:5px;font:inherit;font-size:12px;color:var(--muted)}\n"
     ".sites{display:grid;grid-template-columns:repeat(4,112px);gap:6px 14px;"
-    "justify-content:center;margin-top:30px}\n"
+    "justify-content:center;margin-top:22px}\n"
     ".site{display:flex;flex-direction:column;align-items:center;gap:9px;"
     "min-width:0;padding:14px 6px 10px;border-radius:16px;color:var(--text)}\n"
     ".site:hover{background:var(--field);text-decoration:none}\n"
@@ -5011,15 +5019,14 @@ static const char k_about_start_template[] =
     ".nm{max-width:100%;font-size:12.5px;color:var(--muted);"
     "white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n"
     ".links{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;"
-    "margin-top:34px}\n"
+    "margin-top:28px}\n"
     ".links a{display:flex;align-items:center;gap:7px;height:32px;"
     "padding:0 12px;border-radius:999px;color:var(--muted);font-size:13px;"
     "font-weight:600}\n"
     ".links a:hover{background:var(--field);color:var(--text);"
     "text-decoration:none}\n"
     ".links svg{width:16px;height:16px;color:var(--accent)}\n"
-    ".foot{margin-top:18px;color:var(--faint);font-size:12.5px}\n"
-    ".foot a{color:var(--faint);margin:0 8px}\n"
+
     "@media (prefers-color-scheme:dark){html,body{background:var(--bg)}}\n"
     "@media (max-width:560px){.ntp{padding-top:7vh}"
     ".brand h1{font-size:26px}"
@@ -5033,7 +5040,7 @@ static const char k_about_start_template[] =
     "<circle cx=\"7\" cy=\"7\" r=\"4.6\"/><path d=\"M10.4 10.4 14 14\"/></svg>"
     "<input id=\"sq\" name=\"q\" autocomplete=\"off\" dir=\"auto\""
     " aria-label=\"Search the web or enter an address\""
-    " placeholder=\"Search with __ND_SEARCH_NAME__ or enter an address\">"
+    " placeholder=\"Search or enter an address\">"
     "<button type=\"submit\" aria-label=\"Search\">"
     "<svg width=\"18\" height=\"18\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\""
@@ -5065,8 +5072,6 @@ static const char k_about_start_template[] =
     " r=\"5.75\"/><ellipse cx=\"8\" cy=\"8\" rx=\"2.4\" ry=\"5.75\"/>"
     "<path d=\"M2.5 8h11\"/></svg>nordstjernen.org</a>"
     "</nav>"
-    "<p class=\"foot\"><a href=\"about:license\">License</a>"
-    "<a href=\"https://nordstjernen.org/privacy\">Privacy</a></p>"
     "</main>"
     "<script>\n"
     "var searchUrl='__ND_SEARCH_URL__';\n"
@@ -5103,7 +5108,7 @@ static const char k_about_nordstjernen_template[] =
     "<meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "<meta name=\"color-scheme\" content=\"light dark\">"
-    "<title>About Nordstjernen Web Browser</title>"
+    "<title>About Nordstjernen</title>" NS_ABOUT_ICON_INFO
     "<style>\n" NS_ABOUT_BASE_CSS
     ".wrap{max-width:760px;margin:0 auto;padding:36px 24px 48px}\n"
     ".head{display:flex;align-items:center;gap:18px;margin:0 4px 26px}\n"
@@ -5143,6 +5148,8 @@ static const char k_about_nordstjernen_template[] =
     "<div class=\"head\">__ND_LOGO_MARK__<div>"
     "<h1>Nordstjernen Web Browser<span class=\"ver\">" NS_VERSION "</span></h1>"
     "<p>A web browser implemented in C.</p></div></div>"
+    "<section class=\"card\"><h2>Security</h2>__ND_SECURITY__</section>"
+    "<section class=\"card\">__ND_DIAG__</section>"
     "<section class=\"card\">"
     "<h2>License</h2>"
     "<p>Nordstjernen is \xc2\xa9 2026 Andreas R\xc3\xb8sdal and dual-licensed: "
@@ -5163,8 +5170,6 @@ static const char k_about_nordstjernen_template[] =
     "<a class=\"btn\" href=\"about:third-party\">Third-party notices</a>"
     "</div>"
     "</section>"
-    "<section class=\"card\"><h2>Security</h2>__ND_SECURITY__</section>"
-    "<section class=\"card\">__ND_DIAG__</section>"
     "<div class=\"foot\"><span>Nordstjernen Web Browser \xc2\xa9 2026 "
     "Andreas R\xc3\xb8sdal</span><span>"
     "<a href=\"https://nordstjernen.org/privacy\">Privacy</a>"
@@ -5188,7 +5193,7 @@ static const char k_about_settings_html[] =
 "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n"
 "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
 "<meta name=\"color-scheme\" content=\"light dark\">\n"
-"<title>Settings</title>\n"
+"<title>Settings</title>" NS_ABOUT_ICON_SETTINGS "\n"
 "<style>\n" NS_ABOUT_BASE_CSS
 ".page{max-width:980px;margin:0 auto;padding:36px 28px 60px}\n"
 ".page > h1{margin:0 0 22px 12px;font-size:28px;letter-spacing:-.02em;"
@@ -5234,8 +5239,7 @@ static const char k_about_settings_html[] =
 ".sw input:focus-visible + span{box-shadow:0 0 0 3px var(--accent-soft)}\n"
 ".danger-row{display:flex;align-items:center;justify-content:space-between;"
 "gap:20px;padding:16px 0}\n"
-"#custom_wrap[hidden]{display:none}\n"
-".save-row{display:flex;justify-content:flex-end;padding:14px 0}\n"
+"#custom_wrap[hidden],#home_wrap[hidden]{display:none}\n"
 ".site-row{display:flex;align-items:center;justify-content:space-between;"
 "gap:20px;padding:12px 0}\n"
 ".site-row .lbl{word-break:break-all}\n"
@@ -5275,16 +5279,19 @@ static const char k_about_settings_html[] =
 "<main>\n"
 "<section id=\"general\"><h2>General</h2><div class=\"card\">"
 "<label class=\"field\"><span class=\"lbl\">Home page</span>"
-"<input id=\"home_url\" type=\"text\" spellcheck=\"false\"></label>"
+"<select id=\"home_pick\"><option value=\"start\">New Tab page</option>"
+"<option value=\"custom\">Custom address\xe2\x80\xa6</option></select></label>"
+"<label class=\"field\" id=\"home_wrap\"><span class=\"lbl\">"
+"Home page address</span>"
+"<input id=\"home_url\" type=\"text\" spellcheck=\"false\" "
+"placeholder=\"https://example.com\"></label>"
 "<label class=\"field\"><span class=\"lbl\">Search engine</span>"
 "<select id=\"search_pick\"></select></label>"
 "<label class=\"field\" id=\"custom_wrap\"><span class=\"lbl\">"
 "Custom search URL</span>"
 "<input id=\"search_engine\" type=\"text\" spellcheck=\"false\" "
 "placeholder=\"https://example.com/?q=%s\"></label>"
-"<div class=\"save-row\">"
-"<button id=\"save\" class=\"btn primary\" type=\"button\">Save</button>"
-"</div></div></section>\n"
+"</div></section>\n"
 "<section id=\"privacy\"><h2>Privacy</h2><div class=\"card\">"
 "<label class=\"field\"><span class=\"lbl\">Cookies</span>"
 "<select id=\"cookie_policy\">"
@@ -5299,9 +5306,9 @@ SETTINGS_SWITCH("global_privacy_control",
     "Tell sites not to sell or share your data.")
 SETTINGS_SWITCH("strip_tracking_params",
     "Strip tracking parameters",
-    "Remove utm_ and similar tags from links you open.")
+    "Remove tracking codes from the links you open.")
 SETTINGS_SWITCH("https_first",
-    "HTTPS first",
+    "HTTPS-First",
     "Try a secure connection before plain HTTP on every site.")
 SETTINGS_SWITCH("remote_control",
     "Allow remote control",
@@ -5317,7 +5324,7 @@ SETTINGS_SWITCH("javascript_enabled",
     "Run scripts that pages need for interactive features.")
 SETTINGS_SWITCH("webgl_enabled",
     "WebGL",
-    "Allow 3D graphics in the canvas element.")
+    "Let pages draw 3D graphics.")
 SETTINGS_SWITCH("webgpu_enabled",
     "WebGPU",
     "Allow pages to use the graphics card directly for 3D and compute work.")
@@ -5330,8 +5337,8 @@ SETTINGS_SWITCH("cache_enabled",
 "</div></section>\n"
 "<section id=\"cookies\"><h2>Cookies</h2><div class=\"card\">"
 "<div class=\"danger-row\"><span class=\"txt\"><span class=\"lbl\">"
-"Cookies by site</span><span class=\"desc\">Cookies are kept per "
-"top-level site. Remove the cookies of one site, or all of them.</span>"
+"Cookies by site</span><span class=\"desc\">Remove the cookies of one "
+"site, or of all sites.</span>"
 "</span><button id=\"cookies_clear\" class=\"btn danger\">Remove all"
 "</button></div><div id=\"cookie_sites\"></div>"
 "</div></section>\n"
@@ -5371,20 +5378,25 @@ SETTINGS_SWITCH("cache_enabled",
 "$('custom_wrap').hidden=matched;}\n"
 "function load(){fetch('about:settings-data').then(function(r){"
 "return r.json();}).then(function(c){"
-"$('home_url').value=c.home_url||'';"
+"$('home_url').value=c.home_url||'';showHome(c.home_url||'');"
 "$('search_engine').value=c.search_engine||'';buildPick(c.search_engine||'');"
 "$('cookie_policy').value=''+(c.cookie_policy||0);"
-"toggles.forEach(function(k){$(k).checked=!!c[k];});loaded=true;"
-"setTimeout(function(){document.body.classList.add('ready');},0);});}\n"
+"toggles.forEach(function(k){$(k).checked=!!c[k];});loaded=true;});}\n"
+"function ready(){document.body.classList.add('ready');}\n"
+"document.addEventListener('pointerdown',ready,{once:true});\n"
+"document.addEventListener('keydown',ready,{once:true});\n"
 "function bv(id){return $(id).checked?'1':'0';}\n"
 "function save(o){if(!loaded)return;"
 "fetch('about:settings-save',{method:'POST',headers:{'Content-Type':"
 "'application/x-www-form-urlencoded'},body:enc(o)}).then(function(){"
 "toast('Saved. Applies to newly opened pages.');});}\n"
 "function saveField(k){var o={};o[k]=$(k).value;save(o);}\n"
-"function saveGeneral(){var se=$('search_pick').value;"
-"if(se!=='custom')$('search_engine').value=se;"
-"save({home_url:$('home_url').value,search_engine:$('search_engine').value});}\n"
+"function showHome(u){var start=!u||u==='about:start';"
+"$('home_pick').value=start?'start':'custom';$('home_wrap').hidden=start;}\n"
+"$('home_pick').onchange=function(){if(this.value==='start'){"
+"$('home_url').value='about:start';$('home_wrap').hidden=true;"
+"saveField('home_url');}else{if($('home_url').value==='about:start')"
+"$('home_url').value='';$('home_wrap').hidden=false;$('home_url').focus();}};\n"
 "$('search_pick').onchange=function(){"
 "var v=this.value;$('custom_wrap').hidden=v!=='custom';"
 "if(v!=='custom'){$('search_engine').value=v;saveField('search_engine');}};\n"
@@ -5392,7 +5404,7 @@ SETTINGS_SWITCH("cache_enabled",
 "$(k).onchange=function(){saveField(k);};});\n"
 "toggles.forEach(function(k){$(k).onchange=function(){"
 "var o={};o[k]=bv(k);save(o);};});\n"
-"$('save').onclick=saveGeneral;\n"
+
 "$('clear').onclick=function(){var b=$('clear');b.disabled=true;"
 "fetch('about:settings-clear',{method:'POST'}).then(function(){"
 "b.textContent='Cleared';toast('Browsing data cleared');loadCookies();});};\n"
@@ -5404,7 +5416,7 @@ SETTINGS_SWITCH("cache_enabled",
 "toast(site?'Cookies removed for '+site:'All cookies removed');loadCookies();});}\n"
 "function loadCookies(){fetch('about:settings-cookies').then(function(r){"
 "return r.json();}).then(function(list){var box=$('cookie_sites');box.textContent='';"
-"$('cookies_clear').disabled=!list.length;"
+"$('cookies_clear').hidden=!list.length;"
 "if(!list.length){box.appendChild(el('div','desc empty','No cookies are stored.'));return;}"
 "list.forEach(function(s){var row=el('div','site-row');var txt=el('span','txt');"
 "txt.appendChild(el('span','lbl',s.site));"

@@ -156,7 +156,9 @@ static const char k_history_style[] =
     ".top{display:flex;align-items:center;justify-content:space-between;"
     "gap:16px;margin:0 0 22px}\n"
     "h1{margin:0;font-size:28px;letter-spacing:-.02em}\n"
-    ".filter{flex:0 1 320px;display:flex;align-items:center;gap:10px;"
+    ".tools{display:flex;align-items:center;gap:10px;flex:0 1 auto}\n"
+    ".tools .btn{flex:0 0 auto;white-space:nowrap}\n"
+    ".filter{flex:0 1 300px;display:flex;align-items:center;gap:10px;"
     "height:42px;padding:0 16px;border-radius:999px;background:var(--card);"
     "border:1px solid var(--line);box-shadow:var(--shadow);"
     "color:var(--faint)}\n"
@@ -168,17 +170,17 @@ static const char k_history_style[] =
     ".day h2{margin:0 0 10px 6px;font-size:14px;font-weight:600;"
     "color:var(--muted)}\n"
     ".day ul{list-style:none;margin:0;padding:6px;}\n"
-    ".day li a{display:flex;align-items:center;gap:14px;padding:9px 12px;"
+    ".day li a{display:flex;align-items:center;gap:12px;padding:6px 12px;"
     "border-radius:12px;color:var(--text)}\n"
     ".day li a:hover{background:var(--field);text-decoration:none}\n"
     ".av{flex:0 0 auto;display:flex;align-items:center;"
-    "justify-content:center;width:32px;height:32px;border-radius:10px;"
+    "justify-content:center;width:28px;height:28px;border-radius:9px;"
     "background:var(--accent-soft);color:var(--accent);font-weight:700;"
     "font-size:14px;text-transform:uppercase}\n"
     NS_ABOUT_TINT_CSS
 
     ".tx{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}\n"
-    ".t{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;"
+    ".t{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;"
     "text-overflow:ellipsis}\n"
     ".u{font-size:12.5px;color:var(--muted);white-space:nowrap;"
     "overflow:hidden;text-overflow:ellipsis}\n"
@@ -396,6 +398,7 @@ ns_history_top_sites_html(int max_sites)
             char *e_url = g_markup_escape_text(url, -1);
             char *e_init = g_markup_escape_text(initial, -1);
             char *e_title = g_markup_escape_text(title, -1);
+            char *e_host = g_markup_escape_text(host, -1);
             if (count == 0)
                 g_string_append(s, "<nav class=\"sites\" "
                                    "aria-label=\"Top sites\">");
@@ -403,8 +406,9 @@ ns_history_top_sites_html(int max_sites)
                 "<a class=\"site\" href=\"%s\" title=\"%s\">"
                 "<span class=\"av h%u\">%s</span>"
                 "<span class=\"nm\">%s</span></a>",
-                e_url, e_title, tint, e_init, e_title);
+                e_url, e_title, tint, e_init, e_host);
             count++;
+            g_free(e_host);
             g_free(e_url);
             g_free(e_init);
             g_free(e_title);
@@ -427,18 +431,20 @@ ns_history_html_page(void)
     GString *s = g_string_new(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"color-scheme\" content=\"light dark\">"
-        "<title>History</title>");
+        "<title>History</title>" NS_ABOUT_ICON_HISTORY);
     g_string_append(s, k_history_style);
     g_string_append(s,
         "</head><body><main class=\"wrap\">"
-        "<div class=\"top\"><h1>History</h1>"
+        "<div class=\"top\"><h1>History</h1><div class=\"tools\">"
         "<label class=\"filter\">"
         "<svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\""
         " stroke=\"currentColor\" stroke-width=\"1.6\""
         " stroke-linecap=\"round\"><circle cx=\"7\" cy=\"7\" r=\"4.6\"/>"
         "<path d=\"M10.4 10.4 14 14\"/></svg>"
         "<input id=\"hq\" type=\"search\" placeholder=\"Search history\""
-        " aria-label=\"Search history\" autocomplete=\"off\"></label></div>");
+        " aria-label=\"Search history\" autocomplete=\"off\"></label>"
+        "<a class=\"btn\" href=\"about:settings#data\">"
+        "Clear browsing data\xe2\x80\xa6</a></div></div>");
     if (!history_append_visits(s))
         g_string_append(s, "<div class=\"card empty\"><span class=\"ic\">"
             "<svg width=\"22\" height=\"22\" viewBox=\"0 0 16 16\""

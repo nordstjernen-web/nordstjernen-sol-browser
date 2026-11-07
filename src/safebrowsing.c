@@ -171,11 +171,14 @@ ns_safebrowsing_interstitial(const char *url, const char *host)
     char *html = g_strconcat(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"color-scheme\" content=\"light dark\">"
-        "<title>Security warning</title><style>" NS_ABOUT_BASE_CSS
+        "<title>Security warning</title>" NS_ABOUT_ICON_DANGER
+        "<style>" NS_ABOUT_BASE_CSS
         "html,body{background:#a3201a}"
         "body{display:flex;align-items:center;justify-content:center;"
         "min-height:100vh;padding:32px 18px}"
-        ".card{width:100%;max-width:600px;padding:36px 38px 30px}"
+        ".card{width:100%;max-width:600px;padding:36px 38px 30px;"
+        "border-top:4px solid var(--danger)}"
+        ".btn.primary{background:var(--danger);color:#fff}"
         ".icon{display:flex;align-items:center;justify-content:center;"
         "width:64px;height:64px;margin-bottom:20px;border-radius:20px;"
         "background:rgba(198,47,58,.12);color:var(--danger)}"
@@ -190,9 +193,9 @@ ns_safebrowsing_interstitial(const char *url, const char *host)
         "details{margin-top:26px;padding-top:18px;"
         "border-top:1px solid var(--line);color:var(--muted);"
         "font-size:13.5px}"
-        "summary{cursor:pointer;color:var(--text);font-weight:600}"
-        "details p{margin:10px 0 14px}"
+        "details p{margin:8px 0 14px}"
         "@media (prefers-color-scheme:dark){html,body{background:#4a1210}"
+        ".btn.primary{color:#2a0607}"
         ".icon{background:rgba(255,107,116,.14)}"
         ".host{background:rgba(255,107,116,.1)}}"
         "</style></head><body><main class=\"card\">"
