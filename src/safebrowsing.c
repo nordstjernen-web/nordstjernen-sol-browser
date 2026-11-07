@@ -15,6 +15,8 @@ static GMutex      g_lock;
 static GHashTable *g_blocked;
 static GHashTable *g_allow;
 static gboolean    g_loaded;
+static gint        g_checks;
+static gint        g_local_blocks;
 
 static gboolean ns_safebrowsing_blocked_locked(const char *host);
 
@@ -159,9 +161,27 @@ ns_safebrowsing_check_url(const char *url)
     g_autofree char *host = ns_url_host_from(url);
     if (!host || !*host || ns_safebrowsing_host_allowed(host))
         return NS_SB_SAFE;
-    if (ns_safebrowsing_blocked(host))
+    g_atomic_int_inc(&g_checks);
+    if (ns_safebrowsing_blocked(host)) {
+        g_atomic_int_inc(&g_local_blocks);
         return NS_SB_LOCAL_LIST;
+    }
     return ns_sbg_check_url(url);
+}
+
+void
+ns_safebrowsing_get_stats(ns_sb_stats *out)
+{
+    memset(out, 0, sizeof *out);
+    const ns_config *cfg = ns_config_get();
+    out->enabled = !cfg || cfg->safe_browsing;
+    g_mutex_lock(&g_lock);
+    ensure_loaded();
+    out->local_hosts = g_hash_table_size(g_blocked);
+    g_mutex_unlock(&g_lock);
+    out->checks = (guint)g_atomic_int_get(&g_checks);
+    out->local_blocks = (guint)g_atomic_int_get(&g_local_blocks);
+    ns_sbg_get_stats(out);
 }
 
 static gboolean

@@ -89,6 +89,12 @@ static GHashTable *g_sbg_full_hits;
 static GHashTable *g_sbg_prefix_misses;
 static gint64      g_sbg_retry_at[G_N_ELEMENTS(sbg_lists)];
 static guint       g_sbg_failures[G_N_ELEMENTS(sbg_lists)];
+static gint        g_sbg_prefix_matches;
+static gint        g_sbg_searches;
+static gint        g_sbg_search_failures;
+static gint        g_sbg_blocks;
+
+G_STATIC_ASSERT(G_N_ELEMENTS(sbg_lists) == NS_SB_GOOGLE_LISTS);
 
 static const char *
 sbg_api_key(void)
@@ -97,6 +103,13 @@ sbg_api_key(void)
     if (env && *env)
         return env;
     return NS_SAFE_BROWSING_API_KEY;
+}
+
+gboolean
+ns_sbg_have_key(void)
+{
+    const char *key = sbg_api_key();
+    return key && *key;
 }
 
 gboolean
@@ -1162,10 +1175,13 @@ sbg_search(const guint32 *prefixes, gsize n)
         g_string_append(url, "&hashPrefixes=");
         g_string_append(url, esc);
     }
+    g_atomic_int_inc(&g_sbg_searches);
     GByteArray *body = sbg_http_get(url->str, 5, SBG_MAX_SEARCH_BYTES);
     g_string_free(url, TRUE);
-    if (!body)
+    if (!body) {
+        g_atomic_int_inc(&g_sbg_search_failures);
         return FALSE;
+    }
     sbg_store_search_response(body->data, body->len, prefixes, n);
     g_byte_array_free(body, TRUE);
     return TRUE;
@@ -1231,6 +1247,7 @@ ns_sbg_check_url(const char *url)
         any = any || hit[i];
     ns_sb_verdict verdict = NS_SB_SAFE;
     if (any) {
+        g_atomic_int_inc(&g_sbg_prefix_matches);
         gboolean need_search = FALSE;
         verdict = sbg_cached_verdict(hashes, n, prefixes, hit, &need_search);
         if (verdict == NS_SB_SAFE && need_search) {
@@ -1251,5 +1268,33 @@ ns_sbg_check_url(const char *url)
     g_free(hashes);
     g_free(prefixes);
     g_free(hit);
+    if (verdict != NS_SB_SAFE)
+        g_atomic_int_inc(&g_sbg_blocks);
     return verdict;
+}
+
+void
+ns_sbg_get_stats(ns_sb_stats *out)
+{
+    out->have_key = ns_sbg_have_key();
+    for (gsize i = 0; i < G_N_ELEMENTS(sbg_lists); i++) {
+        ns_sb_list_stats *ls = &out->lists[i];
+        memset(ls, 0, sizeof *ls);
+        ls->name = sbg_lists[i];
+        sbg_list l;
+        if (sbg_list_load(sbg_lists[i], &l, FALSE)) {
+            ls->present = TRUE;
+            ls->prefixes = l.count;
+            ls->next_update = l.next_update;
+            g_autofree char *path = sbg_list_path(sbg_lists[i]);
+            GStatBuf st;
+            if (g_stat(path, &st) == 0)
+                ls->updated = (gint64)st.st_mtime;
+        }
+        sbg_list_clear(&l);
+    }
+    out->prefix_matches = (guint)g_atomic_int_get(&g_sbg_prefix_matches);
+    out->searches = (guint)g_atomic_int_get(&g_sbg_searches);
+    out->search_failures = (guint)g_atomic_int_get(&g_sbg_search_failures);
+    out->google_blocks = (guint)g_atomic_int_get(&g_sbg_blocks);
 }
