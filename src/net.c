@@ -5492,12 +5492,11 @@ about_settings_clear(void)
     ns_net_site_storage_clear();
 }
 
-static gboolean
-about_request_from_chrome(const char *top_url)
+gboolean
+ns_net_url_is_chrome_page(const char *url)
 {
-    if (!top_url || !*top_url) return TRUE;
-    if (!g_str_has_prefix(top_url, "about:")) return FALSE;
-    const char *page = top_url + strlen("about:");
+    if (!url || g_ascii_strncasecmp(url, "about:", 6) != 0) return FALSE;
+    const char *page = url + strlen("about:");
     gsize page_len = strcspn(page, "?#");
     if (page_len == 5 && g_ascii_strncasecmp(page, "blank", 5) == 0)
         return FALSE;
@@ -5516,7 +5515,7 @@ synthesize_about_response(const char *url, const char *top_url,
     if ((g_str_has_prefix(what, "ai") || g_str_equal(what, "history") ||
          g_str_equal(what, "config") ||
          g_str_has_prefix(what, "settings")) &&
-        !about_request_from_chrome(top_url)) {
+        !ns_net_url_is_chrome_page(top_url)) {
         resp->status = 403;
         resp->final_url = g_strdup(url);
         resp->content_type = g_strdup("text/plain; charset=utf-8");
@@ -5812,8 +5811,8 @@ synthesize_view_source_response(const char *url, const char *top_url,
     if (!g_str_has_prefix(url, prefix)) return FALSE;
     const char *inner = url + sizeof prefix - 1;
     resp->final_url = g_strdup(url);
-    gboolean from_chrome = about_request_from_chrome(top_url) ||
-        g_str_has_prefix(top_url, prefix);
+    gboolean from_chrome = ns_net_url_is_chrome_page(top_url) ||
+        (top_url && g_str_has_prefix(top_url, prefix));
     gboolean inner_allowed =
         g_str_has_prefix(inner, "http:") ||
         g_str_has_prefix(inner, "https:") ||
@@ -5829,7 +5828,8 @@ synthesize_view_source_response(const char *url, const char *top_url,
         return TRUE;
     }
     GError *err = NULL;
-    ns_response *in = ns_net_request_blocking(inner, NULL, "GET", NULL, 0,
+    const char *inner_site = g_str_has_prefix(inner, "about:") ? inner : NULL;
+    ns_response *in = ns_net_request_blocking(inner, inner_site, "GET", NULL, 0,
                                               NULL, NULL, cancellable, &err);
     if (!in || in->error || (in->status != 0 && in->status >= 400 &&
                              (!in->body || in->body->len == 0))) {
@@ -6631,6 +6631,9 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     gboolean chain_cross_site = is_navigation &&
                                 ns_fetch_chain_cross_site(extra_headers);
     const char *request_site_url = initiator ? initiator : top_url;
+    const char *privileged_site_url =
+        request_site_url && *request_site_url ? request_site_url
+        : is_navigation ? url : NULL;
     ns_response *resp = g_new0(ns_response, 1);
     resp->body = g_byte_array_new();
     if (!ns_net_policy_allows(url)) {
@@ -6660,10 +6663,11 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         }
     }
 
-    if (synthesize_about_response(url, request_site_url, method, body,
+    if (synthesize_about_response(url, privileged_site_url, method, body,
                                   body_len, resp))
         return resp;
-    if (synthesize_view_source_response(url, top_url, cancellable, resp))
+    if (synthesize_view_source_response(url, privileged_site_url, cancellable,
+                                        resp))
         return resp;
     if (synthesize_data_response(url, resp))
         return resp;

@@ -3,6 +3,11 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: requests for the settings, config, history and view-source
+  backends are refused unless they come from one of the browser's own
+  pages. A request with no top-level URL used to be let through; now only
+  a browser-initiated top-level navigation qualifies, judged by its own
+  URL. The navigation gate and the backend share one check.
 * The iOS port is removed: the `ios/` UIKit shell, its cross-compile and
   sysroot scripts, the `-Dios` meson option, `docs/iOS.md` and the
   `TARGET_OS_IPHONE` guards in the engine are gone. iOS is not supported;
