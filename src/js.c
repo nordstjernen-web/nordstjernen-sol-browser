@@ -50183,7 +50183,11 @@ ns_js_run_javascript_url(ns_js *js, const ns_node *anchor, const char *body)
     if (!ns_csp_inline_event_handler_allowed(ns_js_node_csp(js, anchor)))
         return;
     JSContext *realm = ns_js_node_realm_context(js, anchor);
-    if (!realm) realm = js->main_realm_ctx;
+    if (!realm) {
+        const ns_node *frame = ns_js_node_frame(anchor);
+        if (frame && ns_iframe_is_cross_origin(js, frame)) return;
+        realm = js->main_realm_ctx;
+    }
     ns_realm_scope scope;
     ns_js_realm_scope_enter(js, realm, &scope);
     char *code = g_uri_unescape_string(body, NULL);
