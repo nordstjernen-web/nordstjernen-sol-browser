@@ -26,7 +26,7 @@ modern HTML, CSS and JavaScript standards.
 | Debian 13, Ubuntu 26.04, Fedora 45 | `.deb` and `.rpm` packages and a portable Linux `.zip` on [GitHub Releases](https://github.com/nordstjernen-web/nordstjernen-sol-browser/releases) |
 | npm (Linux, macOS, BSD, Windows) | [`nordstjernen-browser`](https://www.npmjs.com/package/nordstjernen-browser), see below |
 | Java/JVM | [`org.nordstjernen:nordstjernen-java`](https://github.com/nordstjernen-web/nordstjernen-sol-browser/packages) on GitHub Packages (Maven) |
-| Alpine (musl), Arch, FreeBSD, NetBSD, iOS (experimental) | build from source — see [docs/](docs/README.md) and [docs/iOS.md](docs/iOS.md) |
+| Alpine (musl), Arch, FreeBSD, NetBSD | build from source — see [docs/](docs/README.md) |
 
 Packaging scripts for `.deb`, AppImage, RPM, Alpine, the BSDs, the macOS
 `.dmg`, MSIX and the Windows installer are in `scripts/`; the Arch `PKGBUILD`
@@ -123,7 +123,7 @@ system.
 - **Text layout** — desktop builds shape text with web-text-lib, a Pango fork
   in `src/web-text-lib/` that caches shaped glyph strings and font metrics
   across layouts, so a run reaches HarfBuzz once instead of three times.
-  Android and iOS use the system Pango.
+  Android uses the system Pango.
 - **JavaScript** — the QuickJS interpreter: the in-tree quickjs-ng fork, with
   `Temporal`, the full `Intl` suite without ICU and `ShadowRealm`, or Fabrice
   Bellard's original QuickJS with `-Dquickjs=quickjs`
@@ -278,7 +278,7 @@ FFmpeg), brotli (`br` content encoding and WOFF2 fonts), zstd (`zstd` content
 encoding), poppler-glib (inline PDF), libavif (`-Davif`), libjxl (`-Djxl`),
 Enchant (spell checking), FreeType (WOFF/WOFF2 unpacking), wgpu-native where
 it publishes no release (the BSDs, musl, Windows on Arm; WebGPU is not built
-for Android and iOS) and Fabrice Bellard's original
+for Android) and Fabrice Bellard's original
 [QuickJS](https://github.com/bellard/quickjs) (`-Dquickjs=quickjs`, fetched
 through a meson wrap).
 

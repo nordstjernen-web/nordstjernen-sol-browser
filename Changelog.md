@@ -3,10 +3,14 @@ Changelog:
 
 1.0.45-dev:
 ======
-* Android/iOS: the prebuilt dependency sysroots are pinned by
-  `android/sysroot.lock` and `ios/sysroot.lock` (an immutable per-commit
-  release tag plus the sha256 of its `SHA256SUMS`) instead of following the
-  rolling `latest` release. The fetch scripts refuse a release whose
+* The iOS port is removed: the `ios/` UIKit shell, its cross-compile and
+  sysroot scripts, the `-Dios` meson option, `docs/iOS.md` and the
+  `TARGET_OS_IPHONE` guards in the engine are gone. iOS is not supported;
+  Android keeps the GTK-free engine build.
+* Android: the prebuilt dependency sysroot is pinned by
+  `android/sysroot.lock` (an immutable per-commit release tag plus the
+  sha256 of its `SHA256SUMS`) instead of following the rolling `latest`
+  release. The fetch script refuses a release whose
   `SHA256SUMS` no longer hashes to the locked value, CI verifies the
   build-provenance attestation when one is present (required once an
   attested release is locked), and the new `sysroot-bump` workflow opens a
@@ -17,12 +21,11 @@ Changelog:
   sysroots now compile in only HTTP(S), FTP(S) and WebSocket, after the
   dependency repository's security review) no longer makes the
   `CURLOPT_PROTOCOLS_STR` call fail and fall back to libcurl's defaults.
-* Android/iOS: `fetch-prebuilt-deps` verifies each sysroot asset's GitHub
+* Android: `fetch-prebuilt-deps` verifies each sysroot asset's GitHub
   build-provenance attestation when an authenticated `gh` CLI is available
   (`NORDSTJERNEN_REQUIRE_ATTESTATION=1` makes it mandatory; a missing
-  attestation, as after a Sigstore outage, only warns), the iOS script
-  pins its downloads to HTTPS across redirects, and both accept the new
-  immutable per-commit release tags for pinning. The sysroots themselves pick
+  attestation, as after a Sigstore outage, only warns) and accepts the new
+  immutable per-commit release tags for pinning. The sysroot itself picks
   up brotli 1.2.1 (CVE-2026-111497), curl 8.23.0, expat 2.10.0, freetype
   2.15.0 and sqlite 3.54.1.
 * CI: the Android workflows hand `gh` the job token, so the attestation check

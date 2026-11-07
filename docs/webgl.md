@@ -47,7 +47,7 @@ kill switch for WebGL context creation.
 only when `NS_ENABLE_WEBGL` is defined (every desktop build — Linux, macOS,
 Windows — that found the glslang shader validator, `-Dglslang`; see
 [Security](#security)), and runs in the engine wherever it is hosted, including the
-out-of-process renderer. Mobile engine builds (Android, iOS) do not define
+out-of-process renderer. The Android engine build does not define
 it, so `getContext("webgl")` returns `null` there. The status-bar activity indicator belongs to the GTK shell; the GL
 implementation itself contains no toolkit UI code.
 

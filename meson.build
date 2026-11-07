@@ -103,12 +103,9 @@ message('nordstjernen build profile: ' +
                        : 'development (debug symbols + frame pointer + hardened)'))
 
 is_android = host_machine.system() == 'android'
-# iOS (set by the ios/ meson cross file) cross-compiles the same GTK-free
-# embeddable engine as Android, driven by a UIKit host app instead of GTK 4.
-# is_mobile gathers the two: both drop GTK 4, gdk-pixbuf, epoxy/WebGL
-# and the desktop-only helper executables, building only libnordstjernen.
-is_ios = get_option('ios')
-is_mobile = is_android or is_ios
+# is_mobile drops GTK 4, gdk-pixbuf, epoxy/WebGL and the desktop-only helper
+# executables, building only libnordstjernen.
+is_mobile = is_android
 if is_mobile
   add_project_arguments('-DNS_MOBILE=1', language: 'c')
 endif
@@ -174,10 +171,9 @@ cairo      = dependency('cairo')
 # Text is shaped through web-text-lib (src/web-text-lib/), the in-tree Pango
 # fork that caches finished glyph strings across layouts; every symbol in it is
 # renamed, because GTK loads the system Pango into the same process. Android
-# and iOS link the system Pango instead -- the fork carries no CoreText backend
-# and requires fontconfig -- and src/ns_pango_names.h maps the renamed API back
-# for them. Its targets are declared next to lexbor's, after the last project
-# argument.
+# links the system Pango instead -- the fork requires fontconfig -- and
+# src/ns_pango_names.h maps the renamed API back for it. Its targets are
+# declared next to lexbor's, after the last project argument.
 if use_web_text_lib
   add_project_arguments('-DNS_USE_WEB_TEXT_LIB=1', language: 'c')
 else
@@ -312,7 +308,7 @@ endif
 # glibc/macOS/MinGW releases for -- the pinned release fetched by the
 # subprojects/wgpu-native-<platform>.wrap and linked statically. On those
 # platforms WebGPU, like WebGL, is a required part of the build; elsewhere
-# (the BSDs, musl, Android, iOS) it stays optional. -Dwebgpu=disabled always
+# (the BSDs, musl, Android) it stays optional. -Dwebgpu=disabled always
 # drops it. At runtime it is on by default, like WebGL; Settings can turn it
 # off, and --enable-webgpu (NS_WEBGPU_ALLOW=1) overrides that.
 have_webgpu = false
@@ -466,7 +462,7 @@ endif
 
 # H.264 video and AAC audio decode through the operating system's own codecs,
 # so the binary carries no patent-encumbered decoder and pays no codec licence:
-# Media Foundation on Windows, VideoToolbox/AudioToolbox on macOS and iOS,
+# Media Foundation on Windows, VideoToolbox/AudioToolbox on macOS,
 # MediaCodec on Android, and GStreamer elsewhere (which in turn picks VA-API,
 # V4L2 or a software decoder installed on the system). libav still demuxes the
 # MP4 container; see src/media_os.h and docs/media.md.
@@ -515,7 +511,7 @@ if media_os_backend != 'none'
   media_os_sources += files('src/media_os_' + media_os_backend + '.c')
 endif
 # Without libav there is no MP4 demuxer, so the in-tree one (src/mp4.c) feeds
-# the OS decoder instead: Android, iOS and macOS builds without FFmpeg.
+# the OS decoder instead: Android and macOS builds without FFmpeg.
 have_os_mp4 = media_os_backend != 'none' and not have_libav
 if have_os_mp4
   add_project_arguments('-DNS_HAVE_OS_MP4=1', language: 'c')

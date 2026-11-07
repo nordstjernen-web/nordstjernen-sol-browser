@@ -1,7 +1,7 @@
 # The engine protocol
 
 The engine protocol is the contract between the browser shell (the GTK
-window process, the Android, iOS and JVM shells, the headless driver) and an
+window process, the Android and JVM shells, the headless driver) and an
 engine renderer. It is the seam along which the engine is pluggable: a shell
 that speaks this protocol can drive any renderer that implements it, and a
 renderer that implements it can be driven by any shell. Everything the shell

@@ -133,7 +133,7 @@ standards mode (see [§13](#13-the-html-syntax)).
 | `link rel="preload"`/`prefetch` | ✅ | fetched early into the disk cache by the speculative-preload scanner (`src/engine.c`); no `as=`-based prioritization |
 | `link rel="preconnect"`/`dns-prefetch` | ✅ | warm the origin's DNS + TLS connection early via libcurl (`ns_net_preconnect_async`) |
 | `meta charset` | ✅ | feeds charset decode |
-| `meta name="viewport"` | 🟡 | ignored on desktop, as in desktop browsers; Android and iOS widen the layout viewport to a fixed `width=` larger than the screen (`src/render.c`); other directives are not enforced |
+| `meta name="viewport"` | 🟡 | ignored on desktop, as in desktop browsers; Android widens the layout viewport to a fixed `width=` larger than the screen (`src/render.c`); other directives are not enforced |
 | `meta http-equiv` (CSP, refresh, etc.) | ✅ | CSP/Referrer-Policy honoured where reflected; **declarative refresh is applied**: the `refresh` directive and the HTTP `Refresh` response header are parsed per the WHATWG shared-declarative-refresh steps (digit time, `;`/`,` separators, optional `url`/`=` keyword, quoted/whitespace-trimmed URL — `ns_net_parse_refresh` in `src/net.c`), armed on document open (`browser_arm_declarative_refresh` in `src/libnordstjernen.c`, header first then the first `<meta>` in tree order), and after the timeout the navigation is handed to the shell through the pending-nav channel (`ns_browser_take_pending_nav` → the renderer's `X-Nav` header); an armed refresh keeps `ns_browser_animating` true so the shell's frame loop stays alive to deliver it |
 | `meta name="referrer"` | ✅ | Referrer-Policy applied in `src/net.c` |
 | `style` (inline sheet) | ✅ | parsed and cascaded by `src/css.c` |
