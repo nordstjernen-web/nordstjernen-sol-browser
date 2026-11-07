@@ -3,6 +3,18 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Network: the libcurl protocol allow-list is built from the protocols the
+  linked libcurl provides, so an `ftp`-less libcurl (the mobile dependency
+  sysroots now compile in only HTTP(S), FTP(S) and WebSocket, after the
+  dependency repository's security review) no longer makes the
+  `CURLOPT_PROTOCOLS_STR` call fail and fall back to libcurl's defaults.
+* Android/iOS: `fetch-prebuilt-deps` verifies each sysroot asset's GitHub
+  build-provenance attestation when the `gh` CLI is installed
+  (`NORDSTJERNEN_REQUIRE_ATTESTATION=1` makes it mandatory), the iOS script
+  pins its downloads to HTTPS across redirects, and both accept the new
+  immutable per-commit release tags for pinning. The sysroots themselves pick
+  up brotli 1.2.1 (CVE-2026-111497), curl 8.23.0, expat 2.10.0, freetype
+  2.15.0 and sqlite 3.54.1.
 * Layout: `grid-auto-flow: column` places items pinned to a column
   before the auto-placed ones and adds rows for them, and counts the rows
   that row-placed items span. An item pinned to a full column was pushed

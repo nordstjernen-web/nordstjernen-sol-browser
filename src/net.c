@@ -170,6 +170,7 @@ static gboolean    g_hsts_dirty;
 static GMutex      g_hsts_lock;
 static char *g_ca_bundle;
 static const char *g_ec_curves = "X25519:P-256:P-384";
+static const char *g_request_protocols = "http,https";
 static char *g_accept_encoding;
 static char *g_proxy_override;
 static CURLSH *g_share;
@@ -2003,6 +2004,10 @@ ns_net_init(void)
         sscanf(vi->ssl_version, "OpenSSL/%u.%u", &ossl_major, &ossl_minor) == 2 &&
         (ossl_major > 3 || (ossl_major == 3 && ossl_minor >= 5)))
         g_ec_curves = "*X25519MLKEM768:*X25519:P-256:P-384";
+
+    for (const char *const *proto = vi ? vi->protocols : NULL; proto && *proto; proto++)
+        if (g_ascii_strcasecmp(*proto, "ftp") == 0)
+            g_request_protocols = "http,https,ftp";
 
     g_free(g_accept_encoding);
     g_accept_encoding = g_strdup(ns_content_decode_accept_encoding());
@@ -6190,7 +6195,7 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, ns_header_cb);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, hctx);
 
-    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https,ftp");
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, g_request_protocols);
     curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR,
                      req->initial_https ? "https" :
                      (req->request_ftp ? "ftp" : "http,https"));

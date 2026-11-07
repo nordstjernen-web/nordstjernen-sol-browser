@@ -9,6 +9,11 @@
 #   nordstjernen-ios-sysroot-<platform>.tar.gz   # each contains a top-level <platform>/
 #   SHA256SUMS
 #
+# Each asset also carries a GitHub build-provenance attestation. When the `gh`
+# CLI is installed it is verified (`gh attestation verify`); set
+# NORDSTJERNEN_REQUIRE_ATTESTATION=1 to refuse to install without it. Pass
+# --tag ios-sysroot-<date>-<sha> (an immutable per-commit release) to pin.
+#
 # platform is 'device' (arm64 iphoneos) or 'simulator' (arm64 iphonesimulator).
 # These are public, so no authentication is required — just curl, tar and
 # sha256sum. After running, the layout is:
@@ -47,7 +52,22 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 
 UA="nordstjernen-ios-deps/1.0 (+https://github.com/${REPO})"
-dl() { curl -fsSL --retry 4 --retry-delay 2 -A "${UA}" -o "$2" "$1"; }
+dl() { curl -fsSL --proto '=https' --proto-redir '=https' --retry 4 --retry-delay 2 -A "${UA}" -o "$2" "$1"; }
+
+verify_attestation() {
+  local file="$1"
+  if ! command -v gh >/dev/null 2>&1; then
+    if [ "${NORDSTJERNEN_REQUIRE_ATTESTATION:-0}" != "0" ]; then
+      echo "gh CLI not found but NORDSTJERNEN_REQUIRE_ATTESTATION is set; install gh to verify ${file##*/}" >&2
+      exit 1
+    fi
+    echo "gh CLI not found; skipping provenance verification of ${file##*/}" >&2
+    return 0
+  fi
+  gh attestation verify "${file}" --repo "${REPO}" >/dev/null 2>&1 \
+    || { echo "provenance attestation check FAILED for ${file##*/} (repo ${REPO}); refusing to install" >&2; exit 1; }
+  echo "verified build provenance of ${file##*/}"
+}
 
 # The published sysroot's pkg-config files bake in the dependency-build repo's
 # build-time absolute prefix (…/sysroot/<platform>), which does not exist on the
@@ -92,6 +112,7 @@ for platform in "${PLATFORMS[@]}"; do
   [ -n "${want}" ] || { echo "no checksum for ${asset} in SHA256SUMS" >&2; exit 1; }
   echo "${want}  ${tmp}/${asset}" | sha256sum -c - >/dev/null \
     || { echo "checksum mismatch for ${asset}" >&2; exit 1; }
+  verify_attestation "${tmp}/${asset}"
 
   rm -rf "${SYSROOT_BASE:?}/${platform}"
   tar -xzf "${tmp}/${asset}" -C "${SYSROOT_BASE}"

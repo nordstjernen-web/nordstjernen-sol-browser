@@ -128,8 +128,10 @@ the engine via `-Wl,-z,max-page-size=16384` in the `build-deps.sh` cross-file.
 
 The Android dependency sysroot is produced by
 `nordstjernen-web/nordstjernen-dependencies-build` and published on the public
-`sysroot-latest` release. Fetch the prebuilt sysroot and then build the engine
-for the emulator ABI:
+`sysroot-latest` release (and an immutable `sysroot-<date>-<sha>` release per
+commit, pinnable with `-Tag`). The fetch script verifies `SHA256SUMS` and, when
+`gh` is installed, the GitHub build-provenance attestation of each asset. Fetch
+the prebuilt sysroot and then build the engine for the emulator ABI:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File android\scripts\fetch-prebuilt-deps.ps1 `

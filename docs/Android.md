@@ -145,8 +145,12 @@ cross-built at the same API level (`<= 34`) for the app to run on Android 14.
 
 The dependency sysroot is built by
 `nordstjernen-web/nordstjernen-dependencies-build` and published as the public
-`sysroot-latest` release. `android/scripts/fetch-prebuilt-deps.ps1` downloads
-those release assets and verifies them against `SHA256SUMS`.
+`sysroot-latest` release, plus an immutable per-commit copy
+(`sysroot-<date>-<sha>`) that can be pinned with `-Tag`.
+`android/scripts/fetch-prebuilt-deps.ps1` downloads those release assets,
+verifies them against `SHA256SUMS` and, when the `gh` CLI is installed, against
+their GitHub build-provenance attestation (`gh attestation verify`); set
+`NORDSTJERNEN_REQUIRE_ATTESTATION=1` to make that mandatory.
 
 ## Signing
 
