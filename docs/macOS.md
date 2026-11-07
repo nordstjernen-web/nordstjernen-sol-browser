@@ -527,13 +527,3 @@ The macOS CI workflow runs on every push and pull request to `main`
 `workflow_dispatch`, and exists to catch regressions that
 the local Linux build misses (Apple Silicon ABI, BSD libc, GTK 4
 Quartz backend).
-
-## iPhone / iPad
-
-The macOS `.app` does not carry over to iOS: GTK 4 has no UIKit backend, and
-iOS apps cannot `fork`/`exec` the per-tab renderer and media helpers. iOS is
-instead an Android-style port in [`ios/`](../ios) — the GTK-free engine
-cross-compiled to a static `libnordstjernen.a` (`-Dios=true`) under a native
-UIKit shell written in Swift. It builds for the iOS Simulator on a Mac but is
-not in CI, not signed for devices, and not on the App Store. See
-[`iOS.md`](iOS.md) for the build steps and status.

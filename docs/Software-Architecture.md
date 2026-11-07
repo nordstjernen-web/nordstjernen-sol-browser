@@ -333,7 +333,7 @@ clip-paths, and paints positioned/z-indexed children in stacking order.
 **Text** is shaped with **Pango** — on desktop through the **web-text-lib**
 fork vendored in-tree at `src/web-text-lib/` (loaded via `subdir()`,
 included as `"ns_pango.h"`), which caches shaped glyph strings across layouts;
-Android and iOS link the system Pango. `@font-face`
+Android links the system Pango. `@font-face`
 fonts are fetched, converted from WOFF and WOFF2 to SFNT through FreeType
 (`src/font.c`) -- or, when FreeType predates 2.10.2 or was built without
 Brotli, from WOFF2 by the in-tree decoder over libbrotlidec (`src/woff2.c`,
@@ -606,7 +606,7 @@ See [webgl.md](webgl.md), [webgpu.md](webgpu.md).
   synchronous pipeline the headless driver uses. See
   [Embedding.md](Embedding.md).
 - **Platforms:** Linux, macOS, Windows (MSYS2/MinGW), plus Android and a
-  JVM binding (`java/`, JNI over the same C API) and iOS. Desktop uses
+  JVM binding (`java/`, JNI over the same C API). Desktop uses
   GTK 4; the engine core is GTK-optional.
 - **License:** Nordstjernen Source License v1.0 or GNU GPL version 3 or
   later, at your option (`LicenseRef-NSL-1.0 OR GPL-3.0-or-later`).

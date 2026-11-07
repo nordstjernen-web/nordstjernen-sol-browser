@@ -316,9 +316,8 @@ nordstjernen_deps += media_os_deps
 
 # macOS WebGL: src/glctx.c creates the offscreen GL context through CGL, whose
 # symbols live in the OpenGL framework. Unused targets drop it via
-# -dead_strip_dylibs. iOS has no OpenGL framework (and WebGL is off there, like
-# Android), so it is desktop-macOS only.
-if host_machine.system() == 'darwin' and not is_ios
+# -dead_strip_dylibs.
+if host_machine.system() == 'darwin'
   nordstjernen_deps += [dependency('appleframeworks', modules: ['OpenGL'])]
 endif
 

@@ -34,11 +34,7 @@
 #endif
 #endif
 
-#ifdef __APPLE__
-#include <TargetConditionals.h>
-#endif
-
-#if (defined(__APPLE__) && !TARGET_OS_IPHONE) || defined(__FreeBSD__) || \
+#if defined(__APPLE__) || defined(__FreeBSD__) || \
     defined(__NetBSD__) || defined(__DragonFly__)
 #include <sys/random.h>
 #endif
@@ -121,7 +117,7 @@ ns_security_csprng_fill(void *buf, gsize len)
         off += (gsize)n;
     }
     if (off == len) return TRUE;
-#elif (defined(__APPLE__) && !TARGET_OS_IPHONE) || defined(__FreeBSD__) || \
+#elif defined(__APPLE__) || defined(__FreeBSD__) || \
       defined(__NetBSD__) || defined(__DragonFly__)
     gsize off = 0;
     while (off < len) {
@@ -1092,7 +1088,7 @@ ns_security_seccomp_init(void)
 #endif
 }
 
-#elif defined(__APPLE__) && !TARGET_OS_IPHONE
+#elif defined(__APPLE__)
 
 #include <limits.h>
 #include <sandbox.h>

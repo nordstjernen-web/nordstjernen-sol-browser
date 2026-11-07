@@ -288,4 +288,3 @@ Console internal track by hand.
 
 - **F-Droid** — separate track; reproducible builds are the only twist.
 - **Samsung / Huawei / Amazon stores** — year-two store-listing ports.
-- **iOS** — see [`iOS.md`](iOS.md); much worse cost/benefit.

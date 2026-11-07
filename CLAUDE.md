@@ -33,7 +33,7 @@ Update Changelog.md
   build on glibc Linux, macOS and Windows (x86_64/aarch64): meson takes
   wgpu-native from its pkg-config file, from `-Dwgpu_native_root`, or else
   fetches the pinned release through `subprojects/wgpu-native-<platform>.wrap`
-  and links it statically. On the BSDs, musl, Android and iOS — where
+  and links it statically. On the BSDs, musl and Android — where
   wgpu-native publishes no release — it stays optional, and `-Dwebgpu=disabled`
   drops it anywhere. WebGPU is **on at runtime** by default, like WebGL; it
   can be switched off in Settings (the `webgpu` config key), and
@@ -81,7 +81,7 @@ Update Changelog.md
   cross-build FFmpeg. **H.264 video and AAC audio are decoded by the
   operating system, never by a bundled decoder** (`src/media_os.h`): Media
   Foundation on Windows (`media_os_mf.c`, mfplat loaded at runtime),
-  VideoToolbox/AudioToolbox on macOS and iOS (`media_os_vt.c`), MediaCodec on
+  VideoToolbox/AudioToolbox on macOS (`media_os_vt.c`), MediaCodec on
   Android (`media_os_android.c`) and GStreamer on Linux/BSD
   (`media_os_gst.c`, required on Linux, optional on the BSDs, `-Dgstreamer`;
   it also takes VP9/AV1/HEVC when a hardware decoder exists). libav only demuxes MP4
@@ -210,9 +210,9 @@ Three rules when touching text code:
   `src/web-text-lib/`). The renaming is not cosmetic: GTK loads the
   system Pango into the same process, and GObject aborts when a second
   library registers a type name it already holds.
-- **Android and iOS link the system Pango**, since the fork has no CoreText
-  backend and requires fontconfig. `src/ns_pango_names.h` maps every renamed
-  name back to its stock spelling for those builds; regenerate it with
+- **Android links the system Pango**, since the fork requires fontconfig.
+  `src/ns_pango_names.h` maps every renamed name back to its stock spelling
+  for that build; regenerate it with
   `scripts/gen-ns-pango-names.py` after using a new Pango entry point, and
   build `-Dweb-text-lib=disabled` to compile that path on desktop. Anything
   the fork adds and stock Pango lacks -- `ns_pango_cache_*` -- must sit behind

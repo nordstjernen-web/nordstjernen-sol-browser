@@ -65,7 +65,7 @@ How libav is obtained differs by platform, to keep it redistributable:
   (`scripts/build-ffmpeg-lgpl.sh`), carrying just the matroska/ogg demuxers and
   the native VP8/VP9/Theora/Opus/Vorbis decoders — no GPL parts, no external codec
   libraries.
-- **Android / iOS** do not cross-build FFmpeg, so the inline libav WebM path is
+- **Android** does not cross-build FFmpeg, so the inline libav WebM path is
   unavailable there; MP4/H.264 plays through the in-tree demuxer below.
 
 ### MP4 — H.264 and AAC through the operating system
@@ -82,11 +82,11 @@ decoder); the compressed frames then go through `src/media_os.h`:
 | Platform | Backend | File |
 |---|---|---|
 | Windows | Media Foundation transforms (`IMFTransform`, H.264 and AAC decoder MFTs) | `src/media_os_mf.c` |
-| macOS, iOS | VideoToolbox (`VTDecompressionSession`) and AudioToolbox (`AudioConverter`) | `src/media_os_vt.c` |
+| macOS | VideoToolbox (`VTDecompressionSession`) and AudioToolbox (`AudioConverter`) | `src/media_os_vt.c` |
 | Android | NDK MediaCodec (`AMediaCodec`) | `src/media_os_android.c` |
 | Linux, BSDs | GStreamer (`decodebin`), which picks VA-API, V4L2 or an installed software decoder | `src/media_os_gst.c` |
 
-Builds without libav (Android, iOS, and macOS without FFmpeg) demux MP4 with
+Builds without libav (Android, or macOS without FFmpeg) demux MP4 with
 a small in-tree parser instead (`src/mp4.c`: `moov` sample tables, edit
 lists, and `moof`/`traf`/`trun` fragments as MSE appends them) and play it
 through `src/video_mp4.c`, which feeds the same OS decoder, seeks to the

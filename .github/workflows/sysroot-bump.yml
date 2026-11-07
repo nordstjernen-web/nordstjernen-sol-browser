@@ -1,8 +1,8 @@
 name: sysroot-bump
 
 # Watch nordstjernen-dependencies-build for a newer immutable prebuilt-sysroot
-# release and open a pull request that bumps android/sysroot.lock and
-# ios/sysroot.lock to it. Only releases whose assets carry a verified GitHub
+# release and open a pull request that bumps android/sysroot.lock to it.
+# Only releases whose assets carry a verified GitHub
 # build-provenance attestation are proposed. The PR body carries the diff of the
 # dependency manifest between the locked and the proposed release, so a sysroot
 # update is reviewed like any other dependency bump.
@@ -41,7 +41,7 @@ jobs:
           mkdir -p .bump
           changed=0
           : > .bump/body.md
-          for spec in android:sysroot ios:ios-sysroot; do
+          for spec in android:sysroot; do
             platform="${spec%%:*}"; prefix="${spec##*:}"
             lock="${platform}/sysroot.lock"
             current="$(sed -n 's/^tag=//p' "${lock}" | head -1)"
@@ -99,7 +99,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "${BUMP_BRANCH}"
-          git add android/sysroot.lock ios/sysroot.lock
+          git add android/sysroot.lock
           {
             echo "deps: bump the prebuilt dependency sysroots"
             echo
