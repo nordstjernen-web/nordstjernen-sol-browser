@@ -22,7 +22,7 @@
     "--text:#e8eaf0;--muted:#a4abba;--faint:#808898;--switch-off:#687185;" \
     "--line:rgba(255,255,255,.08);--field:rgba(255,255,255,.06);" \
     "--accent:#6c9cff;--accent-ink:#0b1020;--accent-text:#8fb3ff;" \
-    "--switch-on:#6c9cff;" \
+    "--switch-on:#3b74e8;" \
     "--accent-soft:rgba(108,156,255,.16);--ok:#4cc48a;--danger:#ff6b74;" \
     "--shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35)}}\n" \
     "*{box-sizing:border-box}\n" \

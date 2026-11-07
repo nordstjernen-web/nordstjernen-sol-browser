@@ -208,6 +208,10 @@ install_macos_window_controls(GdkDisplay *display)
         "headerbar:backdrop windowcontrols.start button {"
         "  background-color: alpha(currentColor, 0.18);"
         "  border-color: transparent;"
+        "}"
+        "window.ns-dark headerbar:backdrop windowcontrols.start button {"
+        "  background-color: #3a3d44;"
+        "  border-color: #4c5059;"
         "}");
     gtk_style_context_add_provider_for_display(
         display, GTK_STYLE_PROVIDER(p),
@@ -314,7 +318,8 @@ install_chrome_css(void)
         "  background: none;"
         "  box-shadow: none;"
         "  -gtk-icon-size: 16px;"
-        "  opacity: 0.85;"
+        "  color: #4b5254;"
+        "  opacity: 1;"
         "  transition: opacity 120ms ease-out, background-color 120ms ease-out;"
         "}"
         ".ns-tab:hover > button.ns-tab-close,"
@@ -561,6 +566,9 @@ install_chrome_css(void)
         "}"
         "window.ns-dark .ns-toolbar {"
         "  border-bottom-color: alpha(white, 0.06);"
+        "}"
+        "window.ns-dark .ns-tab > button.ns-tab-close {"
+        "  color: #cccccb;"
         "}"
         "window.ns-dark .ns-toolbar box.ns-address-box,"
         "window.ns-dark .ns-toolbar box.ns-address-box:focus-within {"

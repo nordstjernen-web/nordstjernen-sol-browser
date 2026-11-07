@@ -380,7 +380,7 @@ static char *
 history_site_label(const char *title, const char *fallback)
 {
     static const char *const separators[] = {
-        " - ", " | ", " \xe2\x80\x93 ", " \xe2\x80\x94 ", " \xc2\xb7 " };
+        " - ", " | ", " \xe2\x80\x93 ", " \xe2\x80\x94 ", " \xc2\xb7 ", ": " };
     if (!title || !*title)
         return g_strdup(fallback);
     GString *joined = g_string_new(title);
@@ -432,10 +432,14 @@ ns_history_top_sites_html(int max_sites)
             g_hash_table_add(seen, site);
             char *title = raw_title && *raw_title
                 ? g_utf8_make_valid(raw_title, -1) : g_strdup(host);
+            char *label = history_site_label(raw_title ? title : NULL, site);
+            gunichar first = g_utf8_get_char_validated(label, -1);
+            if (first != (gunichar)-1 && first != (gunichar)-2 &&
+                g_unichar_isalnum(first))
+                initial[g_unichar_to_utf8(first, initial)] = '\0';
             char *e_url = g_markup_escape_text(url, -1);
             char *e_init = g_markup_escape_text(initial, -1);
             char *e_title = g_markup_escape_text(title, -1);
-            char *label = history_site_label(raw_title ? title : NULL, site);
             char *e_site = g_markup_escape_text(label, -1);
             g_free(label);
             if (count == 0)
