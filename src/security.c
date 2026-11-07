@@ -201,8 +201,12 @@ ns_security_sri_check(const char *integrity_attr,
     return FALSE;
 }
 
-#if defined(NS_HAVE_SECCOMP) && (defined(__x86_64__) || defined(__aarch64__))
+#ifdef NS_HAVE_SECCOMP
 #define NS_SECCOMP_FILTER_ARGS 1
+#endif
+#if defined(NS_HAVE_SECCOMP) && (defined(__x86_64__) || defined(__aarch64__) || \
+    (defined(__riscv) && __riscv_xlen == 64) || defined(__loongarch__))
+#define NS_SECCOMP_CLONE_FLAGS_ARG0 1
 #endif
 
 #ifdef NS_SECCOMP_FILTER_ARGS
@@ -982,35 +986,34 @@ ns_seccomp_add_memory_rules(scmp_filter_ctx ctx)
 static void
 ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
 {
-#ifdef NS_SECCOMP_FILTER_ARGS
+#ifdef NS_SECCOMP_CLONE_FLAGS_ARG0
     const scmp_datum_t new_namespaces =
         CLONE_NEWNS | CLONE_NEWCGROUP | CLONE_NEWUTS | CLONE_NEWIPC |
         CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNET;
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 1,
                            SCMP_A0(SCMP_CMP_MASKED_EQ, new_namespaces, 0));
+#else
+    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
+#endif
     int clone3_nr = seccomp_syscall_resolve_name("clone3");
     if (clone3_nr != __NR_SCMP_ERROR)
         (void)seccomp_rule_add(ctx, SCMP_ACT_ERRNO(ENOSYS), clone3_nr, 0);
     static const int domains[] = { AF_UNIX, AF_INET, AF_INET6, AF_NETLINK };
+    int sock_rc = 0;
     for (gsize i = 0; i < G_N_ELEMENTS(domains); i++) {
         if (domains[i] == AF_UNIX && !ns_seccomp_unix_sockets) continue;
-        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
-                               SCMP_A0(SCMP_CMP_EQ, (scmp_datum_t)domains[i], 0));
+        int rc = seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
+                                  SCMP_A0(SCMP_CMP_EQ,
+                                          (scmp_datum_t)domains[i], 0));
+        if (rc != 0) sock_rc = rc;
     }
+    if (sock_rc != 0)
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 0);
     const scmp_datum_t self_pid = (scmp_datum_t)getpid();
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(kill), 1,
                            SCMP_A0(SCMP_CMP_EQ, self_pid, 0));
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 1,
                            SCMP_A0(SCMP_CMP_EQ, self_pid, 0));
-#else
-    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
-    int clone3_nr = seccomp_syscall_resolve_name("clone3");
-    if (clone3_nr != __NR_SCMP_ERROR)
-        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, clone3_nr, 0);
-    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 0);
-    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(kill), 0);
-    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 0);
-#endif
 }
 
 static int
