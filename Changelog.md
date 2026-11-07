@@ -28,7 +28,8 @@ Changelog:
   close button when it is the only one. A new tab focuses the address bar. The address bar shows a "Not
   secure" chip on plain HTTP and invalid certificates and a red
   "Dangerous" chip on a Safe Browsing block (loopback addresses get no
-  chip), built-in pages show a "Nordstjernen" chip, and both search fields name
+  chip), built-in pages show a "Nordstjernen" chip and file pages a "File"
+  chip, error tabs are titled with the host, and both search fields name
   the search engine. The
   file:// folder listing and the Safe Browsing warning use the shared page
   style with a dark variant. New Tab lists the most visited sites (not in

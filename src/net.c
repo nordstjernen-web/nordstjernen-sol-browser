@@ -3469,7 +3469,9 @@ about_security_html(void)
 #endif
 
     g_string_append(s, "</div></section>"
-                       "<h2 class=\"group-label\">Privacy</h2>"
+                       "<h2 class=\"group-label\">Privacy"
+                       "<a class=\"edit\" href=\"about:settings#privacy\">"
+                       "Change in Settings</a></h2>"
                        "<section class=\"card\"><div class=\"diag\">");
     gboolean dnt = cfg && cfg->do_not_track;
     diag_state(s, "Send \xe2\x80\x9c" "Do Not Track\xe2\x80\x9d", dnt,
@@ -3989,7 +3991,11 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
                                                is_file_url);
     const char *safe_url = url && *url ? url : "(no URL)";
     char *esc_url = ns_html_escape_text(safe_url);
-    char *esc_title = ns_html_escape_text(info->title);
+    char *title_host = url && *url && !is_file_url ? ns_url_host_from(url)
+                                                   : NULL;
+    char *esc_title = ns_html_escape_text(title_host && *title_host
+                                          ? title_host : info->title);
+    g_free(title_host);
     char *esc_heading = ns_html_escape_text(info->heading);
     char *esc_summary = ns_html_escape_text(info->summary);
     char *esc_detail = NULL;
@@ -5061,6 +5067,9 @@ static const char k_about_start_template[] =
     "border-radius:50%;background:var(--accent);color:var(--accent-ink);"
     "cursor:pointer}\n"
     ".search button svg{color:var(--accent-ink)}\n"
+    ".search:not(.typed) button{background:var(--field);"
+    "color:var(--muted)}\n"
+    ".search:not(.typed) button svg{color:var(--muted)}\n"
     ".search button:hover{filter:brightness(1.08)}\n"
     ".hint{min-height:18px;margin:10px 0 0;color:var(--faint);"
     "font-size:13px;text-align:center}\n"
@@ -5149,7 +5158,8 @@ static const char k_about_start_template[] =
     " hint.appendChild(document.createTextNode(a\n"
     "  ? ' to open '+a.replace(/^https:\\/\\//,'')\n"
     "  : ' to search with __ND_SEARCH_NAME__'));}\n"
-    "sq.addEventListener('input',showHint);\n"
+    "sq.addEventListener('input',function(){showHint();"
+    "dsearch.classList.toggle('typed',sq.value.trim()!=='');});\n"
     "dsearch.addEventListener('submit',function(e){e.preventDefault();\n"
     " var s=sq.value.trim(); if(!s) return;\n"
     " var a=addressFor(s); if(a){window.location.href=a;return;}\n"
@@ -5198,6 +5208,8 @@ static const char k_about_nordstjernen_template[] =
     ".dv.on::before{content:\"\\2713\\00a0\"}\n"
     ".dv.off{color:var(--muted);background:var(--field)}\n"
     ".dv.plain{color:var(--muted);background:var(--field)}\n"
+    ".group-label .edit{float:right;margin-right:20px;font-size:13px;"
+    "font-weight:600;color:var(--accent-text)}\n"
     ".foot{display:flex;flex-wrap:wrap;justify-content:space-between;"
     "gap:12px;margin-top:26px;color:var(--faint);font-size:13px}\n"
     ".foot a{color:var(--muted);margin-left:14px}\n"
@@ -5268,13 +5280,13 @@ static const char k_about_settings_html[] =
 "font-weight:600}\n"
 ".side a:hover{background:var(--field);color:var(--text);"
 "text-decoration:none}\n"
-".side a.on{background:var(--accent-soft);color:var(--accent)}\n"
+".side a.on{background:var(--accent-soft);color:var(--accent-text)}\n"
 ".side svg{color:currentColor}\n"
 "main{flex:1 1 auto;min-width:0;padding-top:8px}\n"
 "section{margin:0 0 26px}\n"
 ".card{padding:6px 20px}\n"
 ".row{display:flex;align-items:center;justify-content:space-between;"
-"gap:20px;padding:12px 0;cursor:pointer}\n"
+"gap:20px;padding:9px 0;cursor:pointer}\n"
 ".card > * + *{border-top:1px solid var(--line)}\n"
 ".txt{display:flex;flex-direction:column;gap:2px;min-width:0}\n"
 ".lbl{font-size:14.5px;font-weight:500}\n"
@@ -5295,7 +5307,7 @@ static const char k_about_settings_html[] =
 "box-shadow:0 1px 3px rgba(0,0,0,.3)}\n"
 ".ready .sw span{transition:background .18s}\n"
 ".ready .sw span::after{transition:left .18s}\n"
-".sw input:checked + span{background:var(--accent)}\n"
+".sw input:checked + span{background:var(--switch-on)}\n"
 ".sw input:checked + span::after{left:21px}\n"
 ".sw input:focus-visible + span{box-shadow:0 0 0 3px var(--accent-soft)}\n"
 ".danger-row{display:flex;align-items:center;justify-content:space-between;"
@@ -5419,7 +5431,8 @@ SETTINGS_SWITCH("cache_enabled",
 "<div class=\"danger-row\"><span class=\"txt\"><span class=\"lbl\">"
 "Clear browsing data</span><span class=\"desc\">History, cookies, "
 "cache and site storage on this device.</span></span>"
-"<button id=\"clear\" class=\"btn danger\">Clear</button></div>"
+"<button id=\"clear\" class=\"btn danger\">Clear browsing data\xe2\x80\xa6"
+"</button></div>"
 "</div></section>\n"
 "</main></div></div>\n"
 "<div class=\"toast\" id=\"status\" role=\"status\"></div>\n"
@@ -5478,7 +5491,9 @@ SETTINGS_SWITCH("cache_enabled",
 "toggles.forEach(function(k){$(k).onchange=function(){"
 "var o={};o[k]=bv(k);save(o);};});\n"
 
-"$('clear').onclick=function(){var b=$('clear');b.disabled=true;"
+"$('clear').onclick=function(){var b=$('clear');"
+"if(!confirm('Clear history, cookies, cache and site storage on this "
+"device?'))return;b.disabled=true;"
 "fetch('about:settings-clear',{method:'POST'}).then(function(){"
 "b.textContent='Cleared';toast('Browsing data cleared');loadCookies();});};\n"
 "function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;"

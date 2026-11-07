@@ -155,7 +155,7 @@ static const char k_history_style[] =
     ".wrap{max-width:860px;margin:0 auto;padding:36px 24px 56px}\n"
     ".top{display:flex;align-items:flex-start;justify-content:space-between;"
     "gap:16px;min-height:42px;margin:0 0 22px}\n"
-    "h1{margin:0;font-size:28px;letter-spacing:-.02em}\n"
+    "h1{margin:0;font-size:28px;letter-spacing:-.02em;line-height:1.2}\n"
     ".tools{display:flex;align-items:center;gap:10px;flex:0 1 auto;"
     "margin-top:-4px}\n"
     ".tools .btn{flex:0 0 auto;white-space:nowrap}\n"
@@ -185,7 +185,7 @@ static const char k_history_style[] =
     "text-overflow:ellipsis}\n"
     ".u{font-size:12.5px;color:var(--muted);white-space:nowrap;"
     "overflow:hidden;text-overflow:ellipsis}\n"
-    ".tm{flex:0 0 auto;font-size:12.5px;color:var(--faint);"
+    ".tm{flex:0 0 auto;font-size:12.5px;color:var(--muted);"
     "font-variant-numeric:tabular-nums}\n"
     ".empty{display:flex;flex-direction:column;align-items:center;"
     "padding:36px 24px 34px;text-align:center;color:var(--muted)}\n"
@@ -444,8 +444,8 @@ ns_history_html_page(void)
         "<path d=\"M10.4 10.4 14 14\"/></svg>"
         "<input id=\"hq\" type=\"search\" placeholder=\"Search history\""
         " aria-label=\"Search history\" autocomplete=\"off\"></label>"
-        "<a class=\"btn\" href=\"about:settings#data\">"
-        "Clear browsing data</a></div></div>");
+        "<a class=\"btn danger\" href=\"about:settings#data\">"
+        "Clear browsing data\xe2\x80\xa6</a></div></div>");
     if (!history_append_visits(s))
         g_string_append(s, "<style>#tools{display:none}</style>"
             "<div class=\"card empty\"><span class=\"ic\">"

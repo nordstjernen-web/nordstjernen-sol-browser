@@ -9,7 +9,8 @@
     ":root{color-scheme:light dark;--bg:#f5f7fb;--card:#ffffff;" \
     "--text:#14171f;--muted:#596173;--faint:#6f7787;--switch-off:#878fa0;" \
     "--line:rgba(17,24,39,.08);--field:rgba(17,24,39,.05);" \
-    "--accent:#2f6fed;--accent-ink:#ffffff;--accent-text:#1d4ed8;" \
+    "--accent:#2563eb;--accent-ink:#ffffff;--accent-text:#1d4ed8;" \
+    "--switch-on:#2563eb;" \
     "--accent-soft:rgba(47,111,237,.11);--ok:#0f6b3e;--danger:#c62f3a;" \
     "--shadow:0 1px 2px rgba(16,24,40,.04),0 8px 28px rgba(16,24,40,.07);" \
     "--radius:18px;" \
@@ -21,6 +22,7 @@
     "--text:#e8eaf0;--muted:#a4abba;--faint:#808898;--switch-off:#687185;" \
     "--line:rgba(255,255,255,.08);--field:rgba(255,255,255,.06);" \
     "--accent:#6c9cff;--accent-ink:#0b1020;--accent-text:#8fb3ff;" \
+    "--switch-on:#3b6fe0;" \
     "--accent-soft:rgba(108,156,255,.16);--ok:#4cc48a;--danger:#ff6b74;" \
     "--shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35)}}\n" \
     "*{box-sizing:border-box}\n" \
@@ -41,7 +43,7 @@
     "color:var(--danger)}\n" \
     ".btn:disabled{opacity:.55;cursor:default}\n" \
     ".btn[hidden]{display:none}\n" \
-    ".group-label{margin:0 0 10px 20px;font-size:15px;font-weight:600;" \
+    ".group-label{margin:0 0 10px 20px;font-size:16px;font-weight:600;" \
     "color:var(--text)}\n" \
     ".kicker{margin:0 0 10px;font-size:12px;font-weight:700;" \
     "letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}\n" \
@@ -89,8 +91,9 @@
     "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg " \
     "xmlns='http://www.w3.org/2000/svg' width='32' height='32' " \
     "viewBox='0 0 16 16'%3E%3Crect x='.5' y='.5' width='15' height='15' " \
-    "rx='4' fill='%232f6fed'/%3E%3Cpath fill='%23fff' d='M4.25 12V4h1.5l4.65 " \
-    "5.6V4h1.35v8h-1.5L5.6 6.4V12z'/%3E%3C/svg%3E\">"
+    "rx='4' fill='%23101a45'/%3E%3Cpath fill='%23fff' d='M4.25 12V4h1.5l4.65 " \
+    "5.6V4h1.35v8h-1.5L5.6 6.4V12z'/%3E%3Ccircle cx='12.6' cy='3.4' r='1.15' " \
+    "fill='%23f5c451'/%3E%3C/svg%3E\">"
 #define NS_ABOUT_ICON_SETTINGS NS_ABOUT_ICON_LINK(NS_ABOUT_ICON_BLUE, \
     "%3Cpath d='M2.75 4.5h6.5M12.25 4.5h1M2.75 11.5h1M6.75 11.5h6.5'/%3E" \
     "%3Ccircle cx='10.75' cy='4.5' r='1.5'/%3E" \

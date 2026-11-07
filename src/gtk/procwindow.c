@@ -226,7 +226,7 @@ install_chrome_css(void)
     gtk_css_provider_load_from_string(
         p,
         "@define-color ns_strip_base mix(@theme_bg_color, @theme_fg_color, .07);"
-        "@define-color ns_strip mix(@ns_strip_base, #3a5a9a, 0.05);"
+        "@define-color ns_strip mix(@ns_strip_base, #3a5a9a, 0.12);"
         "@define-color ns_surface mix(@theme_base_color, #3a5a9a, 0.03);"
         "@define-color ns_accent @theme_selected_bg_color;"
         "@define-color ns_private #8b5cf6;"
@@ -792,8 +792,16 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
                                               NULL);
             return;
         }
-        set_security_chip(pw, NULL, NULL, FALSE, NULL);
         gboolean local = url && g_str_has_prefix(url, "file:");
+        if (local) {
+            set_security_chip(pw, "nordstjernen-page-symbolic",
+                              ns_i18n("File"), FALSE,
+                              ns_i18n("A file on this computer"));
+            gtk_entry_set_icon_from_paintable(entry, GTK_ENTRY_ICON_PRIMARY,
+                                              NULL);
+            return;
+        }
+        set_security_chip(pw, NULL, NULL, FALSE, NULL);
         const char *page_icon = internal ? "nordstjernen-badge"
                               : local ? "nordstjernen-page-symbolic"
                                       : "nordstjernen-globe-symbolic";
