@@ -127,7 +127,9 @@ The check protects without sending your browsing to Google:
 A small built-in blocklist works alongside Google's, and you can add your own
 hosts in `~/.config/nordstjernen/safebrowsing.list`. Safe browsing is on by
 default and is switched off under Settings → Privacy → "Block dangerous
-sites", which turns off both lists.
+sites", which turns off both lists. about:nordstjernen shows whether Google
+Safe Browsing is active, the size and update times of each list, and how many
+addresses the current tab has checked, looked up and blocked.
 
 Builds need a Safe Browsing API key, read from the `NS_SAFE_BROWSING_API_KEY`
 environment variable when the browser is compiled; the official release

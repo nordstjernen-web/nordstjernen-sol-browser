@@ -3397,6 +3397,103 @@ diag_state(GString *s, const char *key, gboolean on, const char *text)
 }
 
 static char *
+diag_count(guint64 n)
+{
+    char digits[32];
+    g_snprintf(digits, sizeof digits, "%" G_GUINT64_FORMAT, n);
+    GString *out = g_string_new(NULL);
+    gsize len = strlen(digits);
+    for (gsize i = 0; i < len; i++) {
+        if (i > 0 && (len - i) % 3 == 0)
+            g_string_append_c(out, ',');
+        g_string_append_c(out, digits[i]);
+    }
+    return g_string_free(out, FALSE);
+}
+
+static char *
+diag_relative_time(gint64 when, gint64 now)
+{
+    gint64 delta = when - now;
+    gboolean future = delta > 0;
+    gint64 mag = future ? delta : -delta;
+    char *span;
+    if (mag < 60)
+        span = g_strdup("less than a minute");
+    else if (mag < 7200)
+        span = g_strdup_printf("%d min", (int)(mag / 60));
+    else if (mag < 172800)
+        span = g_strdup_printf("%d h", (int)(mag / 3600));
+    else
+        span = g_strdup_printf("%d days", (int)(mag / 86400));
+    char *out = future ? g_strdup_printf("in %s", span)
+                       : g_strdup_printf("%s ago", span);
+    g_free(span);
+    return out;
+}
+
+static void
+about_safe_browsing_rows(GString *s)
+{
+    static const char *const list_labels[NS_SB_GOOGLE_LISTS] = {
+        "Phishing list", "Malware list", "Unwanted software list",
+    };
+    ns_sb_stats st;
+    ns_safebrowsing_get_stats(&st);
+    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
+    g_string_append(s, "</div></section>"
+                       "<h2 class=\"group-label\">Safe Browsing"
+                       "<a class=\"edit\" href=\"about:settings#privacy\">"
+                       "Change in Settings</a></h2>"
+                       "<section class=\"card\"><div class=\"diag\">");
+    gboolean google = st.enabled && st.have_key;
+    diag_state(s, "Google Safe Browsing", google,
+               !st.enabled ? "Off in Settings"
+               : !st.have_key ? "No API key in this build (local list only)"
+               : "On");
+    char *hosts = diag_count(st.local_hosts);
+    char *local = g_strdup_printf("%s %s", hosts,
+                                  st.local_hosts == 1 ? "host" : "hosts");
+    diag_state(s, "Local blocklist", st.enabled, st.enabled ? local : "Off");
+    g_free(local);
+    g_free(hosts);
+    if (google) {
+        for (gsize i = 0; i < NS_SB_GOOGLE_LISTS; i++) {
+            const ns_sb_list_stats *ls = &st.lists[i];
+            g_autofree char *label = g_strdup_printf("%s (%s)", list_labels[i],
+                                                     ls->name);
+            if (!ls->present) {
+                diag_kv(s, label, "Not downloaded yet");
+                continue;
+            }
+            g_autofree char *count = diag_count(ls->prefixes);
+            g_autofree char *updated = diag_relative_time(ls->updated, now);
+            g_autofree char *next = ls->next_update > now
+                ? diag_relative_time(ls->next_update, now) : g_strdup("due now");
+            g_autofree char *value = g_strdup_printf(
+                "%s prefixes, updated %s, next update %s", count, updated, next);
+            diag_kv(s, label, value);
+        }
+    }
+    g_autofree char *checks = diag_count(st.checks);
+    diag_kv(s, "Addresses checked in this tab", checks);
+    g_autofree char *local_blocks = diag_count(st.local_blocks);
+    diag_kv(s, "Blocked by the local list", local_blocks);
+    if (google) {
+        g_autofree char *matches = diag_count(st.prefix_matches);
+        diag_kv(s, "Hash-prefix matches", matches);
+        g_autofree char *searches = diag_count(st.searches);
+        g_autofree char *failures = diag_count(st.search_failures);
+        g_autofree char *lookups = st.search_failures
+            ? g_strdup_printf("%s (%s failed)", searches, failures)
+            : g_strdup(searches);
+        diag_kv(s, "Prefix lookups sent to Google", lookups);
+        g_autofree char *blocks = diag_count(st.google_blocks);
+        diag_kv(s, "Blocked by Google Safe Browsing", blocks);
+    }
+}
+
+static char *
 about_security_html(void)
 {
     ns_security_status st;
@@ -3487,6 +3584,8 @@ about_security_html(void)
         "<div class=\"drow\"><span class=\"dk\">JavaScript</span>"
         "<span class=\"dv plain\">%s</span></div>", js_on ? "On" : "Off");
     diag_state(s, "Telemetry", TRUE, "None");
+
+    about_safe_browsing_rows(s);
 
     g_string_append(s, "</div>");
     return g_string_free(s, FALSE);
