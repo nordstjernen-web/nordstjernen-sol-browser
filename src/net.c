@@ -5854,6 +5854,21 @@ ns_net_url_is_chrome_page(const char *url)
 }
 
 static gboolean
+about_page_is_privileged(const char *page)
+{
+    static const char *const exact[] = { "history", "config", "nordstjernen",
+                                         "about" };
+    static const char *const prefixes[] = { "ai", "settings" };
+    for (gsize i = 0; i < G_N_ELEMENTS(exact); i++)
+        if (g_str_equal(page, exact[i]))
+            return TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(prefixes); i++)
+        if (g_str_has_prefix(page, prefixes[i]))
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
 synthesize_about_response(const char *url, const char *top_url,
                           const char *method, const void *req_body,
                           gsize req_body_len, ns_response *resp)
@@ -5861,11 +5876,7 @@ synthesize_about_response(const char *url, const char *top_url,
     if (!g_str_has_prefix(url, "about:")) return FALSE;
     g_autofree char *what = g_strndup(url + strlen("about:"),
                                       strcspn(url + strlen("about:"), "?#"));
-    if ((g_str_has_prefix(what, "ai") || g_str_equal(what, "history") ||
-         g_str_equal(what, "config") || g_str_equal(what, "nordstjernen") ||
-         g_str_equal(what, "about") ||
-         g_str_has_prefix(what, "settings")) &&
-        !ns_net_url_is_chrome_page(top_url)) {
+    if (about_page_is_privileged(what) && !ns_net_url_is_chrome_page(top_url)) {
         resp->status = 403;
         resp->final_url = g_strdup(url);
         resp->content_type = g_strdup("text/plain; charset=utf-8");
