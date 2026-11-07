@@ -235,6 +235,7 @@ gboolean ns_url_same_origin(const char *a, const char *b);
 gboolean ns_url_is_same_site(const char *a, const char *b);
 char *ns_net_raw_header_values(const char *raw, const char *name);
 gboolean ns_url_is_http_or_https(const char *url);
+gboolean ns_net_url_is_chrome_page(const char *url);
 
 gboolean ns_net_parse_refresh(const char *input, double *time_out,
                               char **url_out);
