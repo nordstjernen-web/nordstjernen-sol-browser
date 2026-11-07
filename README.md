@@ -97,46 +97,6 @@ one person to read and audit end to end.
 [docs/Software-Architecture.md](docs/Software-Architecture.md) maps the whole
 system.
 
-## Google Safe Browsing
-
-Nordstjernen warns before it opens a site that
-[Google Safe Browsing](https://safebrowsing.google.com/) lists as phishing,
-malware or unwanted software. Every navigation and every redirect is checked
-before the page loads, so a link in an email, a search result or an ad that
-leads to a known attack site stops at a red warning page instead. The warning
-names the kind of threat, and you can still go on to the site at your own
-risk.
-
-The check protects without sending your browsing to Google:
-
-- **The lists live on your device.** In the background the browser downloads
-  Google's lists of 4-byte hash prefixes for phishing (`se-4b`), malware
-  (`mw-4b`) and unwanted software (`uws-4b`), and keeps them current at the
-  pace Google asks for, about every 30 minutes. Each list is verified against
-  Google's SHA-256 checksum before it is used.
-- **Addresses are hashed locally.** The browser normalises the address,
-  hashes its host and path combinations with SHA-256, and looks the prefixes
-  up in the local lists.
-- **Only a matching prefix leaves the device.** On a match, which is rare, the
-  browser sends that 4-byte prefix to Google and compares the full hashes that
-  come back. The address itself is never sent, and the request carries no
-  cookies or account.
-- **It fails safe for privacy, and open for availability.** When Google cannot
-  be reached the page loads normally, and the local blocklist still applies.
-
-A small built-in blocklist works alongside Google's, and you can add your own
-hosts in `~/.config/nordstjernen/safebrowsing.list`. Safe browsing is on by
-default and is switched off under Settings → Privacy → "Block dangerous
-sites", which turns off both lists. about:nordstjernen shows whether Google
-Safe Browsing is active, the size and update times of each list, and how many
-addresses the current tab has checked, looked up and blocked.
-
-Builds need a Safe Browsing API key, read from the `NS_SAFE_BROWSING_API_KEY`
-environment variable when the browser is compiled; the official release
-builds include one. A build without a key uses only the local blocklist.
-Google Safe Browsing is offered for non-commercial use; see Google's
-[terms](https://developers.google.com/safe-browsing/terms).
-
 ## Browser variants
 
 | Browser | What it is | Downloads |
@@ -247,6 +207,20 @@ Google Safe Browsing is offered for non-commercial use; see Google's
   so an engine crash can't take down the JVM. The fat jar is also a Swing
   browser (`java -jar nordstjernen-java.jar <url>`); JDK 21 is required. See
   [java/README.md](java/README.md).
+
+## Google Safe Browsing
+
+Nordstjernen warns before opening a site that
+[Google Safe Browsing](https://safebrowsing.google.com/) lists as phishing,
+malware or unwanted software, checking every navigation and redirect.
+
+- **Private by design.** Google's hash-prefix lists are kept on your device.
+  Only a 4-byte hash prefix is sent to Google, and only when an address
+  matches one, never the address itself.
+- **On by default.** Turn it off under Settings → Privacy → "Block dangerous
+  sites". about:nordstjernen shows its status and list sizes.
+- **Builds without a key** (`NS_SAFE_BROWSING_API_KEY` at compile time) use
+  only the local blocklist, `~/.config/nordstjernen/safebrowsing.list`.
 
 ## Build
 
