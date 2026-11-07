@@ -194,7 +194,7 @@ nordstjernen_platform_sources = files(
   'security_root.c',
 )
 
-nordstjernen_platform_deps = [glib, gobject, gio, sqlite3]
+nordstjernen_platform_deps = [glib, gobject, gio, sqlite3, libpsl]
 if have_seccomp
   nordstjernen_platform_deps += [libseccomp]
 endif

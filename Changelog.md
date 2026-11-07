@@ -3,6 +3,45 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Forms: a `<select>` styled with its own background or border draws its
+  arrow inside its padding box. With an explicit `width` the arrow was
+  placed from the start of the text plus the CSS width, so padding and
+  border pushed it past the right edge of the control.
+* Paint: a rounded border whose sides differ in width or colour splits
+  its corners within the corner area. Each side was clipped to a triangle
+  reaching the point where two corner diagonals meet, which for a thick top
+  border lies past the bottom of the box, so the top colour drew a strip
+  along the bottom edge and the bottom colour covered the middle of the top.
+* Text: `font-variant-numeric` reaches the shaper as OpenType features
+  (`tnum`, `pnum`, `lnum`, `onum`, `frac`, `afrc`, `ordn`, `zero`). It was
+  parsed but ignored, so `tabular-nums` columns of times and prices kept
+  proportional digits and did not line up.
+* UI: the window chrome turns dark with the dark colour scheme, using the
+  same slate tones as the built-in pages, the status pill no longer shows
+  "Done" after every load, built-in pages declare their own favicons
+  (History, Settings, About, folder listing, error and Safe Browsing
+  pages), and the New Tab address bar is empty. On macOS the window buttons
+  sit on the left as traffic lights at native spacing, page scrollbars
+  overlay the page and fade when idle, and the tab strip carries no title;
+  the toolbar's Nordstjernen button moved into the menu. Tabs are 220 px
+  wide and shrink evenly, with separators, and the active tab keeps its
+  close button when it is the only one. A new tab focuses the address bar. The address bar shows a "Not
+  secure" chip on plain HTTP and invalid certificates and a red
+  "Dangerous" chip on a Safe Browsing block (loopback addresses get no
+  chip), built-in pages show a "Nordstjernen" chip and file pages a "File"
+  chip, error tabs are titled with the host, New Tab tiles carry short
+  site names, and both search fields name
+  the search engine. The
+  file:// folder listing and the Safe Browsing warning use the shared page
+  style with a dark variant. New Tab lists the most visited sites (not in
+  private windows). Settings marks the current section, puts Cookies
+  before Browsing data and shows off switches at 3:1 contrast without
+  animating them on load. History day headers are always English, without
+  the double space, and tiles take the letter of the registrable domain.
+  A failed connection reads "This site can't be reached" instead of
+  claiming the device is offline, with the address and the libcurl message
+  under Details. Settings saves the home page on change (New Tab page or a
+  custom address) without a Save button; About lists Security first.
 * macOS: the renderer's Seatbelt profile denies starting programs and
   sending Apple Events. Only the renderer opts in, so the browser window
   and the headless driver can still launch their renderer.

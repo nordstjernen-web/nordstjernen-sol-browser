@@ -3,6 +3,7 @@
 #define _GNU_SOURCE 1
 #include "safebrowsing.h"
 #include "net.h"
+#include "about_style.h"
 
 #include <string.h>
 
@@ -161,60 +162,65 @@ ns_safebrowsing_blocked_locked(const char *host)
 char *
 ns_safebrowsing_interstitial(const char *url, const char *host)
 {
-    char *esc_url = g_markup_escape_text(url && *url ? url : "", -1);
     char *esc_host = g_markup_escape_text(host && *host ? host : "", -1);
     char *continue_href = g_strconcat(NS_UNSAFE_CONTINUE_SCHEME,
                                       url ? url : "", NULL);
     char *esc_continue = g_markup_escape_text(continue_href, -1);
     g_free(continue_href);
 
-    char *html = g_strdup_printf(
-        "<!doctype html><html><head><meta charset=\"utf-8\">"
-        "<title>Security warning — Nordstjernen</title><style>"
-        "body{font-family:system-ui,-apple-system,\"Segoe UI\",Helvetica,"
-        "Arial,sans-serif;background:#7a1212;color:#1b1b22;margin:0;padding:0;"
-        "min-height:100vh;display:flex;align-items:center;justify-content:center}"
-        ".card{background:#fff;border:1px solid #e3e3e8;border-top:6px solid "
-        "#c0271c;border-radius:10px;box-shadow:0 6px 30px rgba(0,0,0,0.25);"
-        "padding:36px 40px;max-width:640px;margin:32px 16px;line-height:1.5}"
-        ".icon{font-size:52px;line-height:1;margin-bottom:14px}"
-        "h1{font-size:23px;margin:0 0 12px 0;color:#a01b12}"
-        "p.summary{font-size:16px;color:#33333d;margin:0 0 16px 0}"
-        ".host{font-family:ui-monospace,\"SF Mono\",Menlo,Consolas,monospace;"
-        "background:#fbeeec;border:1px solid #f0cfcb;border-radius:6px;"
-        "padding:8px 12px;font-size:14px;color:#a01b12;font-weight:600;"
-        "overflow-wrap:anywhere;margin:0 0 18px 0}"
-        ".actions{display:flex;gap:10px;flex-wrap:wrap}"
-        ".btn{display:inline-block;padding:10px 18px;border-radius:6px;"
-        "text-decoration:none;font-size:14px;font-weight:600;"
-        "border:1px solid transparent;font-family:inherit}"
-        ".btn.primary{background:#2f7d36;color:#fff;border-color:#2f7d36}"
-        ".btn.primary:hover{background:#286b2e}"
-        ".btn.danger{background:#fff;color:#a01b12;border-color:#e0b6b2}"
-        ".btn.danger:hover{background:#fbeeec}"
-        ".tips{margin-top:24px;padding-top:18px;border-top:1px solid #ececf0;"
-        "color:#555;font-size:13px}"
-        "</style></head><body><div class=\"card\">"
-        "<div class=\"icon\">\xe2\x9a\xa0\xef\xb8\x8f</div>"
-        "<h1>Deceptive site ahead</h1>"
-        "<p class=\"summary\">Nordstjernen blocked this page because the site "
-        "below is on your local list of known phishing or malware hosts. "
-        "Attackers there may try to trick you into revealing passwords or "
-        "payment details, or to install harmful software.</p>"
-        "<p class=\"host\">%s</p>"
+    char *html = g_strconcat(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"color-scheme\" content=\"light dark\">"
+        "<title>Dangerous site</title>" NS_ABOUT_ICON_DANGER
+        "<style>" NS_ABOUT_BASE_CSS
+        "html,body{background:#a3201a}"
+        "body{display:flex;align-items:center;justify-content:center;"
+        "min-height:100vh;padding:32px 18px}"
+        ".card{width:100%;max-width:600px;padding:36px 38px 30px}"
+        ".btn.primary{background:var(--danger);color:#fff}"
+        ".icon{display:flex;align-items:center;justify-content:center;"
+        "width:64px;height:64px;margin-bottom:20px;border-radius:20px;"
+        "background:rgba(198,47,58,.12);color:var(--danger)}"
+        "h1{margin:0 0 10px;font-size:24px;letter-spacing:-.01em;"
+        "line-height:1.25}"
+        "p.summary{margin:0 0 20px;color:var(--muted);font-size:15.5px}"
+        ".host{display:inline-block;margin:0 0 22px;padding:6px 12px;"
+        "border-radius:8px;background:rgba(198,47,58,.08);"
+        "color:var(--danger);font-family:var(--mono);font-size:13px;"
+        "overflow-wrap:anywhere}"
+        ".actions{display:flex;flex-wrap:wrap;gap:10px}"
+        "details{margin-top:26px;padding-top:18px;"
+        "border-top:1px solid var(--line);color:var(--muted);"
+        "font-size:13.5px}"
+        "details p{margin:8px 0 14px}"
+        "@media (prefers-color-scheme:dark){html,body{background:#4a1210}"
+        ".btn.primary{color:#2a0607}"
+        ".icon{background:rgba(255,107,116,.14)}"
+        ".host{background:rgba(255,107,116,.1)}"
+        ".card{background:#241618;border-color:rgba(255,107,116,.18)}}"
+        "</style></head><body><main class=\"card\">"
+        "<div class=\"icon\"><svg width=\"30\" height=\"30\" "
+        "viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" "
+        "stroke-width=\"1.4\" stroke-linecap=\"round\" "
+        "stroke-linejoin=\"round\"><path d=\"M8 1.75 13.25 3.75v4c0 "
+        "3.25-2.25 5.5-5.25 6.5-3-1-5.25-3.25-5.25-6.5v-4z\"/>"
+        "<path d=\"M8 5.25v3.25M8 10.6v.1\"/></svg></div>"
+        "<h1>Dangerous site ahead</h1>"
+        "<p class=\"summary\">This site is on Nordstjernen\xe2\x80\x99s list "
+        "of known phishing and malware sites. It may try to steal passwords or "
+        "payment details, or install harmful software.</p>"
+        "<p class=\"host\">", esc_host, "</p>"
         "<div class=\"actions\">"
         "<a class=\"btn primary\" href=\"about:start\">Back to safety</a>"
-        "<a class=\"btn danger\" href=\"%s\">Continue anyway "
-        "(not recommended)</a>"
         "</div>"
-        "<div class=\"tips\">This check runs entirely on your device against a "
-        "local list — nothing about the page you visited was sent anywhere. "
-        "The blocked address was <span style=\"font-family:ui-monospace,"
-        "monospace;overflow-wrap:anywhere\">%s</span>.</div>"
-        "</div></body></html>",
-        esc_host, esc_continue, esc_url);
+        "<details><summary>Details</summary>"
+        "<p>This check runs on your device against a local list. Nothing "
+        "about this page was sent anywhere.</p>"
+        "<a class=\"btn danger\" href=\"", esc_continue,
+        "\">Visit this unsafe site</a>"
+        "</details>"
+        "</main></body></html>", NULL);
 
-    g_free(esc_url);
     g_free(esc_host);
     g_free(esc_continue);
     return html;

@@ -6,6 +6,7 @@
 
 #include <glib/gstdio.h>
 #include <string.h>
+#include <libpsl.h>
 
 #ifdef G_OS_WIN32
 #include <windows.h>
@@ -184,6 +185,40 @@ ns_search_url_for(const char *query)
         out = g_strconcat(engine, enc, NULL);
     }
     g_free(enc);
+    return out;
+}
+
+char *
+ns_search_engine_name(void)
+{
+    static const struct { const char *site, *name; } known[] = {
+        { "google.com", "Google" },       { "duckduckgo.com", "DuckDuckGo" },
+        { "startpage.com", "Startpage" }, { "bing.com", "Bing" },
+        { "brave.com", "Brave" },         { "wikipedia.org", "Wikipedia" },
+    };
+    const ns_config *cfg = ns_config_get();
+    const char *engine = (cfg && cfg->search_engine && *cfg->search_engine)
+        ? cfg->search_engine : NS_DEFAULT_SEARCH_ENGINE;
+    GUri *uri = g_uri_parse(engine, G_URI_FLAGS_PARSE_RELAXED |
+                                    G_URI_FLAGS_ENCODED, NULL);
+    const char *host = uri ? g_uri_get_host(uri) : NULL;
+    if (!host || !*host) {
+        if (uri) g_uri_unref(uri);
+        return NULL;
+    }
+    char *lower = g_ascii_strdown(host, -1);
+    g_uri_unref(uri);
+    const psl_ctx_t *psl = psl_builtin();
+    const char *site = psl ? psl_registrable_domain(psl, lower) : NULL;
+    char *out = g_strdup(site && *site ? site : lower);
+    for (gsize i = 0; i < G_N_ELEMENTS(known); i++) {
+        if (g_str_equal(out, known[i].site)) {
+            g_free(out);
+            out = g_strdup(known[i].name);
+            break;
+        }
+    }
+    g_free(lower);
     return out;
 }
 

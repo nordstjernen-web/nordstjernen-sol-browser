@@ -1754,10 +1754,13 @@ browser_open_blocked(const char *url, const char *host, int viewport_width,
     char *html = ns_safebrowsing_interstitial(url, host);
     ns_node *doc = ns_html_parse(html, html ? (gssize)strlen(html) : 0);
     g_free(html);
-    return browser_build_from_doc(doc, g_strdup(url), viewport_width,
-                                  viewport_height, settle_ms, FALSE,
-                                  NULL, NULL, NULL, g_strdup("UTF-8"),
-                                  url, NULL);
+    ns_browser *b = browser_build_from_doc(doc, g_strdup(url), viewport_width,
+                                           viewport_height, settle_ms, FALSE,
+                                           NULL, NULL, NULL, g_strdup("UTF-8"),
+                                           url, NULL);
+    if (b)
+        b->security = NS_SEC_DANGEROUS;
+    return b;
 }
 
 static ns_browser *

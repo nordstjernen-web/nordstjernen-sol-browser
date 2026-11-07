@@ -3369,7 +3369,7 @@ about_substitute(const char *template_text,
 static void
 diag_kv(GString *s, const char *key, const char *value)
 {
-    char *ev = g_markup_escape_text((value && *value) ? value : "\xe2\x80\x94",
+    char *ev = g_markup_escape_text((value && *value) ? value : "Unknown",
                                     -1);
     g_string_append_printf(s,
         "<div class=\"drow\"><span class=\"dk\">%s</span>"
@@ -3383,7 +3383,7 @@ diag_feature(GString *s, const char *key, gboolean on)
     g_string_append_printf(s,
         "<div class=\"drow\"><span class=\"dk\">%s</span>"
         "<span class=\"dv %s\">%s</span></div>",
-        key, on ? "on" : "off", on ? "Enabled" : "Not built");
+        key, on ? "on" : "off", on ? "On" : "Not built");
 }
 
 static void
@@ -3404,7 +3404,7 @@ about_security_html(void)
     const ns_config *cfg = ns_config_get();
     GString *s = g_string_new("<div class=\"diag\">");
 
-    g_string_append(s, "<h3>Process sandbox</h3>");
+
 #if defined(__linux__)
     if (st.landlock_abi > 0) {
         char *abi = g_strdup_printf("Supported (ABI v%d)", st.landlock_abi);
@@ -3442,12 +3442,10 @@ about_security_html(void)
                st.no_new_privs ? "Set" : "Not set");
 #elif defined(__APPLE__)
     if (st.sandbox_disabled)
-        diag_state(s, "Filesystem sandbox (Seatbelt)", FALSE,
-                   "Disabled by NS_NO_SANDBOX");
+        diag_state(s, "Page sandbox", FALSE, "Off (NS_NO_SANDBOX)");
     else
-        diag_state(s, "Filesystem sandbox (Seatbelt)", st.seatbelt_enforced,
-                   st.seatbelt_enforced ? "Write-confined"
-                                        : "Not enforced in this process");
+        diag_state(s, "Page sandbox", st.seatbelt_enforced,
+                   st.seatbelt_enforced ? "On" : "Off");
 #elif defined(G_OS_WIN32)
     diag_state(s, "Process mitigations", st.win32_mitigations,
                st.win32_mitigations
@@ -3459,32 +3457,36 @@ about_security_html(void)
 #endif
 #if defined(__linux__) || defined(__APPLE__)
     gboolean root = geteuid() == 0 || getuid() == 0;
-    diag_state(s, "Running as root", !root,
-               root ? "Yes (NS_ALLOW_ROOT)" : "No");
+    diag_state(s, "Administrator rights", !root,
+               root ? "In use (NS_ALLOW_ROOT)" : "Not used");
 #endif
 #ifdef __GLIBC__
     diag_state(s, "Hardened allocator", st.allocator_hardened,
                st.allocator_hardened ? "Freed memory is poisoned" : "Off");
 #endif
 #ifdef NS_IPC_RUST
-    diag_state(s, "Memory-safe IPC parser (Rust)", TRUE,
-               "Renderer messages parsed in Rust");
-#else
-    diag_state(s, "Memory-safe IPC parser (Rust)", FALSE, "Off (C parser)");
+    diag_state(s, "Memory-safe message parser", TRUE, "On");
 #endif
 
-    g_string_append(s, "<h3>Browsing</h3>");
+    g_string_append(s, "</div></section>"
+                       "<h2 class=\"group-label\">Privacy"
+                       "<a class=\"edit\" href=\"about:settings#privacy\">"
+                       "Change in Settings</a></h2>"
+                       "<section class=\"card\"><div class=\"diag\">");
+    gboolean dnt = cfg && cfg->do_not_track;
+    diag_state(s, "Send \xe2\x80\x9c" "Do Not Track\xe2\x80\x9d", dnt,
+               dnt ? "On" : "Off");
+    gboolean gpc = cfg && cfg->global_privacy_control;
+    diag_state(s, "Send Global Privacy Control", gpc, gpc ? "On" : "Off");
+    gboolean strip = cfg && cfg->strip_tracking_params;
+    diag_state(s, "Strip tracking parameters", strip, strip ? "On" : "Off");
     gboolean https_first = cfg && cfg->https_first;
     diag_state(s, "HTTPS-First", https_first, https_first ? "On" : "Off");
     gboolean js_on = !cfg || cfg->javascript_enabled;
-    diag_state(s, "JavaScript", js_on, js_on ? "Enabled" : "Disabled");
-    gboolean gpc = cfg && cfg->global_privacy_control;
-    diag_state(s, "Global Privacy Control", gpc, gpc ? "Sent" : "Off");
-    gboolean dnt = cfg && cfg->do_not_track;
-    diag_state(s, "Do Not Track", dnt, dnt ? "Sent" : "Off");
-    gboolean strip = cfg && cfg->strip_tracking_params;
-    diag_state(s, "Tracking parameter removal", strip, strip ? "On" : "Off");
-    diag_state(s, "Telemetry", TRUE, "None \xe2\x80\x94 never phones home");
+    g_string_append_printf(s,
+        "<div class=\"drow\"><span class=\"dk\">JavaScript</span>"
+        "<span class=\"dv plain\">%s</span></div>", js_on ? "On" : "Off");
+    diag_state(s, "Telemetry", TRUE, "None");
 
     g_string_append(s, "</div>");
     return g_string_free(s, FALSE);
@@ -3517,13 +3519,12 @@ about_diagnostics_html(void)
 #endif
 
     GString *s = g_string_new("<div class=\"diag\">");
-
-    g_string_append(s, "<h3>System</h3>");
     char *os = g_get_os_info(G_OS_INFO_KEY_PRETTY_NAME);
     if (!os) os = g_get_os_info(G_OS_INFO_KEY_NAME);
     diag_kv(s, "Operating system", os ? os : platform);
+    if (os && g_strcmp0(os, platform) != 0)
+        diag_kv(s, "Platform", platform);
     g_free(os);
-    diag_kv(s, "Platform", platform);
     diag_kv(s, "Architecture", arch);
     char *cores = g_strdup_printf("%u", g_get_num_processors());
     diag_kv(s, "Logical CPUs", cores);
@@ -3747,22 +3748,60 @@ typedef struct ns_error_info {
     const char *summary;
 } ns_error_info;
 
+static char *
+error_host_port(const char *url)
+{
+    GUri *uri = g_uri_parse(url, G_URI_FLAGS_PARSE_RELAXED, NULL);
+    if (!uri)
+        return NULL;
+    const char *host = g_uri_get_host(uri);
+    int port = g_uri_get_port(uri);
+    char *out = NULL;
+    if (host && *host)
+        out = port > 0 ? g_strdup_printf("%s:%d", host, port) : g_strdup(host);
+    g_uri_unref(uri);
+    return out;
+}
+
+static void
+append_error_favicon(GString *out, const char *icon_svg)
+{
+    GString *svg = g_string_new(icon_svg);
+    g_string_replace(svg, "currentColor", "#8a93a3", 0);
+    g_string_replace(svg, "width=\"30\" height=\"30\"",
+                     "width=\"32\" height=\"32\"", 1);
+    g_string_replace(svg, "<svg ",
+                     "<svg xmlns=\"http://www.w3.org/2000/svg\" ", 1);
+    g_string_append(out, "<link rel=\"icon\" href=\"data:image/svg+xml,");
+    for (const char *p = svg->str; *p; p++) {
+        switch (*p) {
+        case '<': g_string_append(out, "%3C"); break;
+        case '>': g_string_append(out, "%3E"); break;
+        case '#': g_string_append(out, "%23"); break;
+        case '"': g_string_append_c(out, '\''); break;
+        default:  g_string_append_c(out, *p); break;
+        }
+    }
+    g_string_append(out, "\">");
+    g_string_free(svg, TRUE);
+}
+
 static const ns_error_info *
 classify_error(long status, const char *transport_error, gboolean is_file_url)
 {
     static const ns_error_info NO_NETWORK = {
         ERROR_ICON_OFFLINE,
-        "Can't reach the network",
-        "Can't reach the network",
-        "Nordstjernen couldn't connect to any server. Your device may be "
+        "Can’t reach the network",
+        "Can’t reach the network",
+        "Nordstjernen couldn’t connect to any server. Your device may be "
         "offline, or a firewall is blocking outbound traffic."
     };
     static const ns_error_info DNS = {
         ERROR_ICON_SEARCH,
         "Server address not found",
         "Server address not found",
-        "Nordstjernen couldn't look up the host name. The address may be "
-        "mistyped, or your DNS resolver isn't responding."
+        "Nordstjernen couldn’t look up the host name. The address may be "
+        "mistyped, or your DNS resolver isn’t responding."
     };
     static const ns_error_info REFUSED = {
         ERROR_ICON_BLOCKED,
@@ -3771,25 +3810,32 @@ classify_error(long status, const char *transport_error, gboolean is_file_url)
         "The host is reachable but no service is listening on that port, "
         "or it actively closed the connection."
     };
+    static const ns_error_info CONNECT = {
+        ERROR_ICON_SERVER,
+        "This site can’t be reached",
+        "This site can’t be reached",
+        "Nordstjernen couldn’t connect to the server. It may be down, "
+        "or it isn’t accepting connections at this address."
+    };
     static const ns_error_info TIMEOUT = {
         ERROR_ICON_CLOCK,
         "The connection timed out",
         "The connection timed out",
-        "The server didn't respond within the allowed time. It may be "
+        "The server didn’t respond within the allowed time. It may be "
         "overloaded or temporarily unreachable."
     };
     static const ns_error_info TLS = {
         ERROR_ICON_LOCK,
         "Secure connection failed",
         "Secure connection failed",
-        "Nordstjernen couldn't establish a trustworthy TLS connection. "
+        "Nordstjernen couldn’t establish a trustworthy TLS connection. "
         "The certificate may be invalid, expired, or self-signed."
     };
     static const ns_error_info BAD_URL = {
         ERROR_ICON_LINK,
         "That address looks malformed",
         "That address looks malformed",
-        "The URL couldn't be parsed. Check for typos, missing slashes, "
+        "The URL couldn’t be parsed. Check for typos, missing slashes, "
         "or an unsupported scheme."
     };
     static const ns_error_info HTTP_404 = {
@@ -3809,7 +3855,7 @@ classify_error(long status, const char *transport_error, gboolean is_file_url)
         ERROR_ICON_LOCK,
         "Authentication required",
         "Authentication required",
-        "The server needs credentials Nordstjernen doesn't have. Sign in "
+        "The server needs credentials Nordstjernen doesn’t have. Sign in "
         "elsewhere first, or try a different URL."
     };
     static const ns_error_info HTTP_403 = {
@@ -3836,7 +3882,7 @@ classify_error(long status, const char *transport_error, gboolean is_file_url)
         ERROR_ICON_SERVER,
         "Bad gateway",
         "Bad gateway",
-        "An upstream server returned an invalid response. The site's "
+        "An upstream server returned an invalid response. The site’s "
         "infrastructure may be misconfigured."
     };
     static const ns_error_info HTTP_503 = {
@@ -3850,13 +3896,13 @@ classify_error(long status, const char *transport_error, gboolean is_file_url)
         ERROR_ICON_CLOCK,
         "Gateway timeout",
         "Gateway timeout",
-        "An upstream server didn't answer in time."
+        "An upstream server didn’t answer in time."
     };
     static const ns_error_info HTTP_GENERIC_4XX = {
         ERROR_ICON_ALERT,
         "Request rejected",
         "Request rejected",
-        "The server didn't accept this request."
+        "The server didn’t accept this request."
     };
     static const ns_error_info HTTP_GENERIC_5XX = {
         ERROR_ICON_SERVER,
@@ -3866,8 +3912,8 @@ classify_error(long status, const char *transport_error, gboolean is_file_url)
     };
     static const ns_error_info GENERIC = {
         ERROR_ICON_ALERT,
-        "Couldn't load page",
-        "Couldn't load page",
+        "Couldn’t load page",
+        "Couldn’t load page",
         "Something went wrong fetching this URL."
     };
     static const ns_error_info FILE_MISSING = {
@@ -3914,9 +3960,10 @@ classify_error(long status, const char *transport_error, gboolean is_file_url)
             return &BAD_URL;
         if (g_strstr_len(e, -1, "network") ||
             g_strstr_len(e, -1, "unreachable") ||
-            g_strstr_len(e, -1, "No route") ||
-            g_strstr_len(e, -1, "onnect"))
+            g_strstr_len(e, -1, "No route"))
             return &NO_NETWORK;
+        if (g_strstr_len(e, -1, "onnect"))
+            return &CONNECT;
     }
 
     switch (status) {
@@ -3944,13 +3991,17 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
                                                is_file_url);
     const char *safe_url = url && *url ? url : "(no URL)";
     char *esc_url = ns_html_escape_text(safe_url);
-    char *esc_title = ns_html_escape_text(info->title);
+    char *title_host = url && *url && !is_file_url ? ns_url_host_from(url)
+                                                   : NULL;
+    char *esc_title = ns_html_escape_text(title_host && *title_host
+                                          ? title_host : info->title);
+    g_free(title_host);
     char *esc_heading = ns_html_escape_text(info->heading);
     char *esc_summary = ns_html_escape_text(info->summary);
     char *esc_detail = NULL;
     if (transport_error && *transport_error) {
         char *esc_err = ns_html_escape_text(transport_error);
-        esc_detail = g_strdup_printf("Technical detail: %s", esc_err);
+        esc_detail = g_strdup(esc_err);
         g_free(esc_err);
     } else if (status > 0) {
         esc_detail = g_strdup_printf("HTTP status: %ld", status);
@@ -3964,7 +4015,9 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         "<!doctype html><html><head><meta charset=\"utf-8\">"
         "<title>");
     g_string_append(out, esc_title);
-    g_string_append(out, " — Nordstjernen</title>"
+    g_string_append(out, "</title>");
+    append_error_favicon(out, info->icon);
+    g_string_append(out,
         "<meta name=\"color-scheme\" content=\"light dark\">"
         "<style>" NS_ABOUT_BASE_CSS
         "body{display:flex;align-items:center;justify-content:center;"
@@ -3976,18 +4029,19 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         "h1{margin:0 0 10px;font-size:24px;letter-spacing:-.01em;"
         "line-height:1.25}"
         "p.summary{margin:0 0 20px;color:var(--muted);font-size:15.5px}"
-        ".url{margin:0 0 10px;padding:10px 14px;border-radius:12px;"
-        "background:var(--field);font-family:var(--mono);font-size:13px;"
-        "color:var(--muted);overflow-wrap:anywhere}"
-        ".detail{margin:0 0 22px;font-family:var(--mono);font-size:12px;"
-        "color:var(--faint);overflow-wrap:anywhere}"
-        ".actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}"
+        ".actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}"
+        ".host{display:inline-block;margin:0 0 22px;padding:6px 12px;"
+        "border-radius:8px;background:var(--field);font-family:var(--mono);"
+        "font-size:13px;overflow-wrap:anywhere}"
         ".tips{margin-top:26px;padding-top:20px;"
         "border-top:1px solid var(--line);"
         "color:var(--muted);font-size:13.5px}"
         ".tips strong{color:var(--text)}"
         ".tips ul{margin:8px 0 0;padding-left:20px}"
         ".tips li{margin:4px 0}"
+        "details{margin-top:14px}"
+        ".detail{margin:8px 0 0;font-family:var(--mono);font-size:12px;"
+        "color:var(--muted);overflow-wrap:anywhere}"
         "</style></head><body>"
         "<main class=\"card\">"
         "<div class=\"icon\">");
@@ -3998,15 +4052,16 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
     g_string_append(out, "</h1>"
         "<p class=\"summary\">");
     g_string_append(out, esc_summary);
-    g_string_append(out, "</p>"
-        "<p class=\"url\">");
-    g_string_append(out, esc_url);
     g_string_append(out, "</p>");
-    if (esc_detail) {
-        g_string_append(out, "<p class=\"detail\">");
-        g_string_append(out, esc_detail);
+    char *host = url && *url && !is_file_url ? error_host_port(url) : NULL;
+    if (host && *host) {
+        char *esc_host = ns_html_escape_text(host);
+        g_string_append(out, "<p class=\"host\">");
+        g_string_append(out, esc_host);
         g_string_append(out, "</p>");
+        g_free(esc_host);
     }
+    g_free(host);
     g_string_append(out, "<div class=\"actions\">");
     if (can_retry) {
         g_string_append(out, "<a class=\"btn primary\" href=\"");
@@ -4016,10 +4071,9 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
     g_string_append(out,
         "<button class=\"btn\" "
         "onclick=\"history.back()\">Go back</button>"
-        "<a class=\"btn\" href=\"about:start\">New Tab</a>"
         "</div>"
         "<div class=\"tips\">"
-        "<strong>What to try:</strong>"
+        "<strong>What to try</strong>"
         "<ul>");
     if (is_file_url) {
         g_string_append(out,
@@ -4028,13 +4082,28 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
             "<li>Open the enclosing folder to browse what is there.</li>");
     } else {
         g_string_append(out,
-            "<li>Double-check the address bar for typos.</li>"
-            "<li>Make sure your internet connection is working.</li>"
-            "<li>Reload the page in a moment — temporary outages do "
-            "happen.</li>");
+            "<li>Double-check the address bar for typos.</li>");
+        if (strcmp(info->icon, ERROR_ICON_OFFLINE) == 0 ||
+            strcmp(info->icon, ERROR_ICON_SEARCH) == 0)
+            g_string_append(out,
+                "<li>Make sure your internet connection is working.</li>");
+        else
+            g_string_append(out,
+                "<li>Check that the server at this address is running.</li>");
+
+    }
+    g_string_append(out, "</ul>");
+    g_string_append(out, "<details><summary>Details</summary>"
+                         "<p class=\"detail\">");
+    g_string_append(out, esc_url);
+    g_string_append(out, "</p>");
+    if (esc_detail) {
+        g_string_append(out, "<p class=\"detail\">");
+        g_string_append(out, esc_detail);
+        g_string_append(out, "</p>");
     }
     g_string_append(out,
-        "</ul>"
+        "</details>"
         "</div>"
         "</main></body></html>");
 
@@ -4359,9 +4428,17 @@ file_mtime_label(gint64 mtime)
     if (mtime <= 0) return g_strdup("");
     GDateTime *dt = g_date_time_new_from_unix_local(mtime);
     if (!dt) return g_strdup("");
-    char *out = g_date_time_format(dt, "%Y-%m-%d %H:%M");
+    static const char *const months[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
+        "Nov", "Dec" };
+    char *out = g_strdup_printf("%d %s %d, %02d:%02d",
+                                g_date_time_get_day_of_month(dt),
+                                months[g_date_time_get_month(dt) - 1],
+                                g_date_time_get_year(dt),
+                                g_date_time_get_hour(dt),
+                                g_date_time_get_minute(dt));
     g_date_time_unref(dt);
-    return out ? out : g_strdup("");
+    return out;
 }
 
 static char *
@@ -4388,41 +4465,85 @@ file_directory_error_page(const char *url, long status, const char *error)
                                   "<p>Cannot read folder.</p>");
 }
 
+#define DIR_LISTING_ICON(paths) \
+    "<svg width=\"18\" height=\"18\" viewBox=\"0 0 16 16\" fill=\"none\" " \
+    "stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\" " \
+    "stroke-linejoin=\"round\">" paths "</svg>"
+#define DIR_LISTING_ICON_FOLDER DIR_LISTING_ICON( \
+    "<path d=\"M1.75 4.25c0-.83.67-1.5 1.5-1.5h2.9l1.5 1.75h5.1c.83 0 " \
+    "1.5.67 1.5 1.5v5.75c0 .83-.67 1.5-1.5 1.5H3.25c-.83 0-1.5-.67-1.5" \
+    "-1.5z\"/>")
+#define DIR_LISTING_ICON_FILE DIR_LISTING_ICON( \
+    "<path d=\"M4 1.75h4.75L12 5v9.25H4zM8.5 1.75V5.25H12\"/>")
+#define DIR_LISTING_ICON_PARENT DIR_LISTING_ICON( \
+    "<path d=\"M8 13.25V3.5M4.25 7.25 8 3.5l3.75 3.75\"/>")
+
+static char *
+dir_listing_heading(const char *title)
+{
+    char *trimmed = g_strdup(title);
+    gsize len = strlen(trimmed);
+    while (len > 1 && trimmed[len - 1] == '/')
+        trimmed[--len] = '\0';
+    const char *slash = strrchr(trimmed, '/');
+    char *name = g_strdup(slash && slash[1] ? slash + 1 : trimmed);
+    g_free(trimmed);
+    return name;
+}
+
 static GString *
 dir_listing_begin(const char *title, const char *parent_uri)
 {
     char *esc_title = ns_html_escape_text(title);
+    char *heading = dir_listing_heading(title);
+    char *esc_heading = ns_html_escape_text(heading);
     char *esc_parent = parent_uri ? ns_html_escape_text(parent_uri) : NULL;
     GString *out = g_string_new(NULL);
-    g_string_append(out, "<!doctype html><html><head><meta charset=\"utf-8\">");
-    g_string_append(out, "<title>Index of ");
+    g_string_append(out, "<!doctype html><html lang=\"en\"><head>"
+        "<meta charset=\"utf-8\">"
+        "<meta name=\"color-scheme\" content=\"light dark\">");
+    g_string_append(out, "<title>");
+    g_string_append(out, esc_heading);
+    g_string_append(out, "</title>" NS_ABOUT_ICON_FOLDER
+        "<style>" NS_ABOUT_BASE_CSS
+        ".wrap{max-width:860px;margin:0 auto;padding:36px 24px 56px}"
+        "h1{margin:0;font-size:28px;letter-spacing:-.02em;line-height:1.2;"
+        "overflow-wrap:anywhere}"
+        ".path{margin:6px 0 22px;font-family:var(--mono);font-size:12.5px;"
+        "color:var(--muted);overflow-wrap:anywhere}"
+        ".card{padding:4px 8px}"
+        "table{width:100%;border-collapse:collapse;font-size:14px}"
+        "th{padding:12px 12px 10px;text-align:left;font-size:12.5px;"
+        "font-weight:600;color:var(--muted);border-bottom:1px solid var(--line)}"
+        "td{height:32px;padding:0 12px;border-bottom:1px solid var(--line)}"
+        "tbody tr:last-child td{border-bottom:0}"
+        "td.name{width:100%;overflow-wrap:anywhere}"
+        "td.name a{display:flex;align-items:center;gap:10px;"
+        "color:var(--text);font-weight:500}"
+        "td.name a:hover{color:var(--accent);text-decoration:none}"
+        ".size,.date{white-space:nowrap;color:var(--muted);"
+        "font-variant-numeric:tabular-nums}"
+        "th.size,td.size,th.date,td.date{text-align:right}"
+        ".ic{flex:0 0 auto;display:flex;color:var(--faint)}"
+        ".dir .ic,.up .ic{color:var(--accent)}"
+        "</style></head><body><main class=\"wrap\"><h1>");
+    g_string_append(out, esc_heading);
+    g_string_append(out, "</h1><p class=\"path\">");
     g_string_append(out, esc_title);
-    g_string_append(out, "</title><style>"
-        "body{font-family:serif;margin:8px;color:#000;background:#fff}"
-        "h1{font-size:2em;margin:.4em 0}"
-        "table{border-collapse:collapse}"
-        "th{text-align:left;font-weight:bold;padding:0 3em .25em 0}"
-        "td{padding:0 3em 0 0;white-space:nowrap}"
-        "td.name{min-width:22em}"
-        "td.size{text-align:right}"
-        ".ico{display:inline-block;width:1.35em;margin-right:.35em;"
-        "text-align:center;font-family:\"Segoe UI Emoji\",\"Apple Color Emoji\","
-        "\"Noto Color Emoji\",sans-serif}"
-        "a{color:#00e;text-decoration:underline}"
-        "hr{border:0;border-top:1px solid #bbb;margin:.6em 0}"
-        "</style></head><body><h1>Index of ");
-    g_string_append(out, esc_title);
-    g_string_append(out, "</h1><hr><table><thead><tr>"
-        "<th>Name</th><th>Size</th><th>Date modified</th>"
+    g_string_append(out, "</p><div class=\"card\"><table><thead><tr>"
+        "<th>Name</th><th class=\"size\">Size</th>"
+        "<th class=\"date\">Date modified</th>"
         "</tr></thead><tbody>");
     if (parent_uri) {
-        g_string_append(out, "<tr><td class=\"name\"><span class=\"ico dir\""
-            " aria-hidden=\"true\">&#128193;</span><a href=\"");
+        g_string_append(out, "<tr class=\"up\"><td class=\"name\"><a href=\"");
         g_string_append(out, esc_parent);
-        g_string_append(out, "\">../</a></td><td class=\"size\"></td>"
-            "<td></td></tr>");
+        g_string_append(out, "\"><span class=\"ic\" aria-hidden=\"true\">"
+            DIR_LISTING_ICON_PARENT "</span>Parent folder</a></td>"
+            "<td class=\"size\"></td><td class=\"date\"></td></tr>");
     }
     g_free(esc_title);
+    g_free(heading);
+    g_free(esc_heading);
     g_free(esc_parent);
     return out;
 }
@@ -4435,19 +4556,17 @@ dir_listing_row(GString *out, const char *uri, const char *name,
     char *esc_name = ns_html_escape_text(name);
     char *esc_size = ns_html_escape_text(size);
     char *esc_date = ns_html_escape_text(date);
-    g_string_append(out, "<tr><td class=\"name\"><span class=\"ico ");
-    g_string_append(out, is_dir ? "dir" : "file");
-    g_string_append(out, "\" aria-hidden=\"true\">");
-    g_string_append(out, is_dir ? "&#128193;" : "&#128196;");
-    g_string_append(out, "</span><a href=\"");
+    g_string_append(out, is_dir ? "<tr class=\"dir\">" : "<tr class=\"file\">");
+    g_string_append(out, "<td class=\"name\"><a href=\"");
     g_string_append(out, esc_uri);
-    g_string_append(out, "\">");
+    g_string_append(out, "\"><span class=\"ic\" aria-hidden=\"true\">");
+    g_string_append(out, is_dir ? DIR_LISTING_ICON_FOLDER
+                                : DIR_LISTING_ICON_FILE);
+    g_string_append(out, "</span>");
     g_string_append(out, esc_name);
-    if (is_dir)
-        g_string_append_c(out, '/');
     g_string_append(out, "</a></td><td class=\"size\">");
     g_string_append(out, esc_size);
-    g_string_append(out, "</td><td>");
+    g_string_append(out, "</td><td class=\"date\">");
     g_string_append(out, esc_date);
     g_string_append(out, "</td></tr>");
     g_free(esc_uri);
@@ -4459,7 +4578,7 @@ dir_listing_row(GString *out, const char *uri, const char *name,
 static char *
 dir_listing_end(GString *out)
 {
-    g_string_append(out, "</tbody></table><hr></body></html>");
+    g_string_append(out, "</tbody></table></div></main></body></html>");
     return g_string_free(out, FALSE);
 }
 
@@ -4918,18 +5037,21 @@ static const char k_about_start_template[] =
     "<meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "<meta name=\"color-scheme\" content=\"light dark\">"
-    "<title>New Tab</title>"
+    "<title>New Tab</title>" NS_ABOUT_ICON_START
     "<style>\n" NS_ABOUT_BASE_CSS
-    "html,body{height:100%;background:#fff}\n"
-    ".ntp{max-width:720px;margin:0 auto;padding:13vh 24px 40px;"
-    "display:flex;flex-direction:column;align-items:center}\n"
+    "html,body{height:100%}\n"
+    ".ntp{max-width:720px;min-height:100vh;margin:0 auto;"
+    "padding:48px 24px 10vh;display:flex;flex-direction:column;"
+    "align-items:center;justify-content:center}\n"
     ".brand{display:flex;flex-direction:column;align-items:center;"
-    "gap:14px;margin-bottom:30px}\n"
-    ".mark-img{display:block;width:76px;height:76px;border-radius:20px;"
-    "box-shadow:0 10px 30px rgba(20,40,110,.28)}\n"
-    ".brand h1{margin:0;font-size:32px;font-weight:700;"
-    "letter-spacing:-.02em;line-height:1.1;text-align:center}\n"
-    ".brand h1 .ver{color:var(--faint);font-weight:500}\n"
+    "gap:12px;margin-bottom:32px}\n"
+    ".mark-img{display:block;width:56px;height:56px;border-radius:15px;"
+    "box-shadow:0 8px 22px rgba(20,40,110,.24)}\n"
+    ".brand h1{position:absolute;width:1px;height:1px;overflow:hidden;"
+    "clip:rect(0 0 0 0);white-space:nowrap}\n"
+    "@media (prefers-color-scheme:dark){.mark-img{box-shadow:"
+    "0 0 0 1px rgba(255,255,255,.1),0 8px 24px rgba(0,0,0,.5)}}\n"
+
     ".search{display:flex;align-items:center;gap:12px;width:100%;"
     "height:58px;padding:0 7px 0 22px;border-radius:999px;"
     "background:var(--card);border:1px solid var(--line);"
@@ -4945,69 +5067,76 @@ static const char k_about_start_template[] =
     "border-radius:50%;background:var(--accent);color:var(--accent-ink);"
     "cursor:pointer}\n"
     ".search button svg{color:var(--accent-ink)}\n"
+    ".search:not(.typed) button{background:var(--field);"
+    "color:var(--muted)}\n"
+    ".search:not(.typed) button svg{color:var(--muted)}\n"
     ".search button:hover{filter:brightness(1.08)}\n"
     ".hint{min-height:18px;margin:10px 0 0;color:var(--faint);"
     "font-size:13px;text-align:center}\n"
     ".hint kbd{padding:1px 6px;border:1px solid var(--line);"
     "border-radius:5px;font:inherit;font-size:12px;color:var(--muted)}\n"
-    ".tiles{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;"
-    "margin-top:22px}\n"
-    ".tile{display:flex;align-items:center;gap:7px;padding:6px 14px 6px 8px;"
-    "border-radius:999px;background:var(--card);"
-    "border:1px solid var(--line);color:var(--text);font-size:13px;"
+    ".sites{display:grid;grid-template-columns:repeat(4,124px);gap:6px 10px;"
+    "justify-content:center;margin-top:22px}\n"
+    ".site{display:flex;flex-direction:column;align-items:center;gap:9px;"
+    "min-width:0;padding:14px 6px 10px;border-radius:16px;color:var(--text)}\n"
+    ".site:hover{background:var(--field);text-decoration:none}\n"
+    ".av{display:flex;align-items:center;justify-content:center;"
+    "width:48px;height:48px;border-radius:14px;background:var(--accent-soft);"
+    "color:var(--accent);font-size:20px;font-weight:700;"
+    "text-transform:uppercase}\n"
+    NS_ABOUT_TINT_CSS
+    ".nm{max-width:100%;font-size:12.5px;color:var(--muted);"
+    "white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n"
+    ".links{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;"
+    "margin-top:28px}\n"
+    ".links a{display:flex;align-items:center;gap:7px;height:32px;"
+    "padding:0 12px;border-radius:999px;color:var(--muted);font-size:13px;"
     "font-weight:600}\n"
-    ".tile:hover{text-decoration:none;border-color:var(--accent);"
-    "background:var(--accent-soft)}\n"
-    ".ic{display:flex;align-items:center;justify-content:center;"
-    "width:24px;height:24px;border-radius:50%;"
-    "background:var(--accent-soft);color:var(--accent)}\n"
-    ".foot{margin-top:40px;color:var(--faint);font-size:13px}\n"
-    ".foot a{color:var(--muted);margin:0 8px}\n"
-    "@media (prefers-color-scheme:dark){html,body{background:var(--bg)}}\n"
+    ".links a:hover{background:var(--field);color:var(--text);"
+    "text-decoration:none}\n"
+    ".links svg{width:16px;height:16px;color:var(--accent)}\n"
+
+
+
     "@media (max-width:560px){.ntp{padding-top:7vh}"
-    ".brand h1{font-size:26px}}\n"
+    ".brand h1{font-size:26px}"
+    ".sites{grid-template-columns:repeat(4,minmax(0,1fr))}}\n"
     "</style></head>"
     "<body><main class=\"ntp\">"
-    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen Web Browser "
-    "<span class=\"ver\">" NS_VERSION "</span></h1></div>"
+    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen Web Browser</h1></div>"
     "<form class=\"search\" id=\"dsearch\" role=\"search\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\">"
     "<circle cx=\"7\" cy=\"7\" r=\"4.6\"/><path d=\"M10.4 10.4 14 14\"/></svg>"
-    "<input id=\"sq\" name=\"q\" autocomplete=\"off\" autofocus dir=\"auto\""
+    "<input id=\"sq\" name=\"q\" autocomplete=\"off\" dir=\"auto\""
     " aria-label=\"Search the web or enter an address\""
-    " placeholder=\"Search with __ND_SEARCH_NAME__ or enter an address\">"
+    " placeholder=\"Search with __ND_SEARCH_NAME__\">"
     "<button type=\"submit\" aria-label=\"Search\">"
     "<svg width=\"18\" height=\"18\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\""
     " stroke-linejoin=\"round\"><path d=\"M3 8h9.5M8.5 4l4 4-4 4\"/></svg>"
     "</button></form>"
     "<p class=\"hint\" id=\"hint\" aria-live=\"polite\"></p>"
-    "<nav class=\"tiles\">"
-    "<a class=\"tile\" href=\"about:history\"><span class=\"ic\">"
+    "__ND_TOP_SITES__"
+    "<nav class=\"links\">"
+    "<a href=\"about:history\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\""
     " stroke-linejoin=\"round\"><circle cx=\"8\" cy=\"8\" r=\"5.75\"/>"
-    "<path d=\"M8 4.75V8l2.25 1.5\"/></svg></span>History</a>"
-    "<a class=\"tile\" href=\"about:settings\"><span class=\"ic\">"
+    "<path d=\"M8 4.75V8l2.25 1.5\"/></svg>History</a>"
+    "<a href=\"about:settings\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\">"
     "<path d=\"M2.75 4.5h6.5M12.25 4.5h1M2.75 11.5h1M6.75 11.5h6.5\"/>"
     "<circle cx=\"10.75\" cy=\"4.5\" r=\"1.5\"/>"
-    "<circle cx=\"5.25\" cy=\"11.5\" r=\"1.5\"/></svg></span>Settings</a>"
-    "<a class=\"tile\" href=\"about:nordstjernen\"><span class=\"ic\">"
-    "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\""
-    " fill=\"currentColor\">"
-    "<path d=\"M8 1.5l1.35 4.15L13.5 7l-4.15 1.35L8 12.5 6.65 8.35 2.5 7"
-    "l4.15-1.35z\"/></svg></span>About</a>"
-    "<a class=\"tile\" href=\"https://nordstjernen.org\"><span class=\"ic\">"
+    "<circle cx=\"5.25\" cy=\"11.5\" r=\"1.5\"/></svg>Settings</a>"
+    "<a href=\"about:nordstjernen\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
-    " stroke=\"currentColor\" stroke-width=\"1.5\"><circle cx=\"8\" cy=\"8\""
-    " r=\"5.75\"/><ellipse cx=\"8\" cy=\"8\" rx=\"2.4\" ry=\"5.75\"/>"
-    "<path d=\"M2.5 8h11\"/></svg></span>nordstjernen.org</a>"
+    " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\">"
+    "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/><path d=\"M8 7.25v3.5\"/>"
+    "<circle cx=\"8\" cy=\"5.1\" r=\".4\" fill=\"currentColor\"/>"
+    "</svg>About</a>"
     "</nav>"
-    "<p class=\"foot\"><a href=\"about:license\">License</a>"
-    "<a href=\"https://nordstjernen.org/privacy\">Privacy</a></p>"
     "</main>"
     "<script>\n"
     "var searchUrl='__ND_SEARCH_URL__';\n"
@@ -5029,14 +5158,15 @@ static const char k_about_start_template[] =
     " hint.appendChild(document.createTextNode(a\n"
     "  ? ' to open '+a.replace(/^https:\\/\\//,'')\n"
     "  : ' to search with __ND_SEARCH_NAME__'));}\n"
-    "sq.addEventListener('input',showHint);\n"
+    "sq.addEventListener('input',function(){showHint();"
+    "dsearch.classList.toggle('typed',sq.value.trim()!=='');});\n"
     "dsearch.addEventListener('submit',function(e){e.preventDefault();\n"
     " var s=sq.value.trim(); if(!s) return;\n"
     " var a=addressFor(s); if(a){window.location.href=a;return;}\n"
     " window.location.href=searchUrl.indexOf('%s')>=0\n"
     "  ? searchUrl.replace('%s',encodeURIComponent(s))\n"
     "  : searchUrl+encodeURIComponent(s);});\n"
-    "try{sq.focus();}catch(e){}\n"
+
     "</script></body></html>";
 
 static const char k_about_nordstjernen_template[] =
@@ -5044,37 +5174,46 @@ static const char k_about_nordstjernen_template[] =
     "<meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "<meta name=\"color-scheme\" content=\"light dark\">"
-    "<title>About Nordstjernen Web Browser</title>"
+    "<title>About Nordstjernen</title>" NS_ABOUT_ICON_INFO
     "<style>\n" NS_ABOUT_BASE_CSS
-    ".wrap{max-width:760px;margin:0 auto;padding:28px 24px 48px}\n"
-    ".top{margin-bottom:22px}\n"
-    ".head{display:flex;align-items:center;gap:18px;margin:6px 4px 26px}\n"
+    ".wrap{max-width:860px;margin:0 auto;padding:36px 24px 48px}\n"
+    ".head{display:flex;align-items:center;gap:18px;margin:0 4px 26px}\n"
     ".mark-img{display:block;width:64px;height:64px;border-radius:17px;"
     "box-shadow:0 8px 24px rgba(20,40,110,.25)}\n"
+    "@media (prefers-color-scheme:dark){.mark-img{box-shadow:"
+    "0 0 0 1px rgba(255,255,255,.1),0 8px 24px rgba(0,0,0,.5)}}\n"
     ".head h1{margin:0;font-size:30px;font-weight:700;letter-spacing:-.02em;"
     "line-height:1.15}\n"
     ".head p{margin:2px 0 0;color:var(--muted)}\n"
     ".ver{display:inline-block;margin-left:10px;padding:3px 10px;"
-    "border-radius:999px;background:var(--accent-soft);color:var(--accent);"
+    "border-radius:999px;background:var(--accent-soft);color:var(--accent-text);"
     "font-size:13px;font-weight:700;vertical-align:middle;letter-spacing:0}\n"
-    ".card{padding:22px 24px;margin-bottom:16px}\n"
-    ".card h2{margin:0 0 8px;font-size:17px}\n"
+    ".card{padding:20px;margin-bottom:26px}\n"
     ".card p{margin:0 0 10px;color:var(--muted);font-size:14px}\n"
     ".card p b{color:var(--text)}\n"
     ".actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}\n"
-    ".diag h3{margin:20px 0 6px;font-size:12px;font-weight:700;"
-    "letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}\n"
+    ".diag h3{margin:20px 0 6px;font-size:13.5px;font-weight:600;"
+    "color:var(--muted)}\n"
     ".diag h3:first-child{margin-top:0}\n"
     ".drow{display:flex;justify-content:space-between;gap:20px;"
-    "padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px}\n"
+    "padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px}\n"
     ".drow:last-child{border-bottom:0}\n"
-    ".dk{color:var(--muted);flex:0 0 auto}\n"
+    ".dk{color:var(--text);font-weight:500;flex:0 0 auto}\n"
     ".dv{color:var(--text);text-align:right;word-break:break-word;"
-    "font-family:var(--mono);font-size:12.5px}\n"
-    ".dv.on,.dv.off{font-family:var(--font);font-weight:600;font-size:12px;"
+    "font-size:13px;font-variant-numeric:tabular-nums}\n"
+    ".dv.on,.dv.off,.dv.plain{min-width:72px;text-align:center;"
+    "font-family:var(--font);font-weight:600;font-size:12px;"
     "padding:1px 10px;border-radius:999px}\n"
     ".dv.on{color:var(--ok);background:rgba(19,128,74,.1)}\n"
-    ".dv.off{color:var(--faint);background:var(--field)}\n"
+    ".dv.on::before{content:\"\";display:inline-block;width:9px;"
+    "height:5px;margin:0 6px 2px 0;border-left:1.7px solid currentColor;"
+    "border-bottom:1.7px solid currentColor;transform:rotate(-45deg)}\n"
+    ".dv.off{color:var(--muted);background:none;min-width:0;padding:0;"
+    "font-weight:400;font-size:13px}\n"
+    ".dv.plain{color:var(--muted);background:none;min-width:0;padding:0;"
+    "font-weight:400;font-size:13px}\n"
+    ".group-label .edit{margin-right:20px;font-size:13px;"
+    "font-weight:600;color:var(--accent-text)}\n"
     ".foot{display:flex;flex-wrap:wrap;justify-content:space-between;"
     "gap:12px;margin-top:26px;color:var(--faint);font-size:13px}\n"
     ".foot a{color:var(--muted);margin-left:14px}\n"
@@ -5082,13 +5221,15 @@ static const char k_about_nordstjernen_template[] =
     "align-items:flex-start}.drow{font-size:12.5px}}\n"
     "</style></head>"
     "<body><main class=\"wrap\">"
-    "<div class=\"top\"><a class=\"crumb\" href=\"about:start\">"
-    "\xe2\x86\x90 New Tab</a></div>"
     "<div class=\"head\">__ND_LOGO_MARK__<div>"
     "<h1>Nordstjernen Web Browser<span class=\"ver\">" NS_VERSION "</span></h1>"
-    "<p>A web browser implemented in C.</p></div></div>"
+    "<p>An independent web browser, built from scratch.</p></div></div>"
+    "<h2 class=\"group-label\">Security</h2>"
+    "<section class=\"card\">__ND_SECURITY__</section>"
+    "<h2 class=\"group-label\">System</h2>"
+    "<section class=\"card\">__ND_DIAG__</section>"
+    "<h2 class=\"group-label\">License</h2>"
     "<section class=\"card\">"
-    "<h2>License</h2>"
     "<p>Nordstjernen is \xc2\xa9 2026 Andreas R\xc3\xb8sdal and dual-licensed: "
     "you may use, modify and redistribute it under either the "
     "<b>Nordstjernen Source License v1.0 (NSL-1.0)</b> or the "
@@ -5107,8 +5248,6 @@ static const char k_about_nordstjernen_template[] =
     "<a class=\"btn\" href=\"about:third-party\">Third-party notices</a>"
     "</div>"
     "</section>"
-    "<section class=\"card\"><h2>Security</h2>__ND_SECURITY__</section>"
-    "<section class=\"card\">__ND_DIAG__</section>"
     "<div class=\"foot\"><span>Nordstjernen Web Browser \xc2\xa9 2026 "
     "Andreas R\xc3\xb8sdal</span><span>"
     "<a href=\"https://nordstjernen.org/privacy\">Privacy</a>"
@@ -5132,49 +5271,53 @@ static const char k_about_settings_html[] =
 "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n"
 "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
 "<meta name=\"color-scheme\" content=\"light dark\">\n"
-"<title>Settings</title>\n"
+"<title>Settings</title>" NS_ABOUT_ICON_SETTINGS "\n"
 "<style>\n" NS_ABOUT_BASE_CSS
-".layout{display:flex;gap:32px;max-width:980px;margin:0 auto;"
-"padding:36px 28px 60px}\n"
-".side{flex:0 0 200px;position:sticky;top:36px;align-self:flex-start}\n"
-".side h1{margin:0 0 18px 12px;font-size:24px;letter-spacing:-.02em}\n"
+".page{max-width:980px;margin:0 auto;padding:36px 28px 60px}\n"
+".page > h1{margin:0 0 22px 12px;font-size:28px;letter-spacing:-.02em;"
+"line-height:1.2}\n"
+".layout{display:flex;gap:32px}\n"
+".side{flex:0 0 200px;position:sticky;top:24px;align-self:flex-start;"
+"display:flex;flex-direction:column;gap:2px}\n"
 ".side a{display:flex;align-items:center;gap:10px;height:38px;"
 "padding:0 12px;border-radius:999px;color:var(--muted);font-size:14px;"
 "font-weight:600}\n"
 ".side a:hover{background:var(--field);color:var(--text);"
 "text-decoration:none}\n"
-".side svg{color:var(--accent)}\n"
-"main{flex:1 1 auto;min-width:0}\n"
+".side a.on{background:var(--accent-soft);color:var(--accent-text)}\n"
+".side svg{color:currentColor}\n"
+"main{flex:1 1 auto;min-width:0;padding-top:8px}\n"
 "section{margin:0 0 26px}\n"
-"section h2{margin:0 0 10px 6px;font-size:15px;font-weight:700}\n"
-".card{padding:6px 22px}\n"
+".card{padding:6px 20px}\n"
 ".row{display:flex;align-items:center;justify-content:space-between;"
-"gap:20px;padding:14px 0;cursor:pointer}\n"
+"gap:20px;padding:9px 0;cursor:pointer}\n"
 ".card > * + *{border-top:1px solid var(--line)}\n"
 ".txt{display:flex;flex-direction:column;gap:2px;min-width:0}\n"
-".lbl{font-size:14.5px;font-weight:600}\n"
+".lbl{font-size:14.5px;font-weight:500}\n"
+".row select{flex:0 0 220px;width:220px}\n"
 ".desc{font-size:13px;color:var(--muted)}\n"
 ".field{display:flex;flex-direction:column;gap:8px;padding:14px 0}\n"
-"input[type=text],select{width:100%;padding:9px 12px;"
-"border-radius:12px;border:1px solid var(--line);background:var(--field);"
+"input[type=text],select{width:100%;padding:9px 14px;"
+"border-radius:999px;border:1px solid var(--line);background:var(--field);"
 "color:var(--text);font:inherit;font-size:14px;outline:none}\n"
 "input[type=text]:focus,select:focus{border-color:var(--accent);"
 "box-shadow:0 0 0 3px var(--accent-soft)}\n"
 ".sw{position:relative;flex:0 0 auto;width:42px;height:24px}\n"
 ".sw input{position:absolute;opacity:0;width:0;height:0;margin:0}\n"
 ".sw span{position:absolute;top:0;left:0;right:0;bottom:0;"
-"border-radius:999px;background:rgba(120,128,145,.35);"
-"transition:background .18s}\n"
+"border-radius:999px;background:var(--switch-off)}\n"
 ".sw span::after{content:\"\";position:absolute;top:3px;left:3px;"
 "width:18px;height:18px;border-radius:50%;background:#fff;"
-"box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .18s}\n"
-".sw input:checked + span{background:var(--accent)}\n"
+"box-shadow:0 1px 3px rgba(0,0,0,.3)}\n"
+".ready .sw span{transition:background .18s}\n"
+".ready .sw span::after{transition:left .18s}\n"
+".sw input:checked + span{background:var(--switch-on)}\n"
 ".sw input:checked + span::after{left:21px}\n"
+
 ".sw input:focus-visible + span{box-shadow:0 0 0 3px var(--accent-soft)}\n"
 ".danger-row{display:flex;align-items:center;justify-content:space-between;"
-"gap:20px;padding:16px 0}\n"
-"#custom_wrap[hidden]{display:none}\n"
-".save-row{display:flex;justify-content:flex-end;padding:14px 0}\n"
+"gap:20px;padding:9px 0}\n"
+"#custom_wrap[hidden],#home_wrap[hidden],#cookie_sites[hidden]{display:none}\n"
 ".site-row{display:flex;align-items:center;justify-content:space-between;"
 "gap:20px;padding:12px 0}\n"
 ".site-row .lbl{word-break:break-all}\n"
@@ -5185,13 +5328,13 @@ static const char k_about_settings_html[] =
 "color:var(--bg);font-size:13.5px;font-weight:600;"
 "box-shadow:0 8px 24px rgba(0,0,0,.2);opacity:0;transition:opacity .2s}\n"
 ".toast.show{opacity:1}\n"
-"@media (max-width:760px){.layout{flex-direction:column;gap:8px;"
-"padding:24px 18px 48px}.side{position:static}"
+"@media (max-width:760px){.page{padding:24px 18px 48px}"
+".layout{flex-direction:column;gap:8px}.side{position:static}"
 ".side a{display:none}}\n"
 "</style></head><body>\n"
-"<div class=\"layout\">\n"
-"<nav class=\"side\"><h1>Settings</h1>"
-"<a href=\"#general\">" SETTINGS_NAV_ICON(
+"<div class=\"page\"><h1>Settings</h1><div class=\"layout\">\n"
+"<nav class=\"side\">"
+"<a class=\"on\" href=\"#general\">" SETTINGS_NAV_ICON(
     "<path d=\"M2.25 7.5 8 2.5l5.75 5\"/>"
     "<path d=\"M3.75 6.5v7h8.5v-7\"/>")
     "General</a>"
@@ -5207,29 +5350,41 @@ static const char k_about_settings_html[] =
     "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/>"
     "<circle cx=\"6\" cy=\"6.5\" r=\".6\"/><circle cx=\"9.5\" cy=\"9.5\" r=\".6\"/>"
     "<circle cx=\"6.5\" cy=\"10\" r=\".6\"/>")
-    "Cookies</a>"
+    "Site data</a>"
 "<a href=\"#data\">" SETTINGS_NAV_ICON(
     "<path d=\"M3.25 4.5h9.5M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.75h5.8l.6-8.75\"/>")
     "Browsing data</a></nav>\n"
 "<main>\n"
-"<section id=\"general\"><h2>General</h2><div class=\"card\">"
-"<label class=\"field\"><span class=\"lbl\">Home page</span>"
-"<input id=\"home_url\" type=\"text\" spellcheck=\"false\"></label>"
-"<label class=\"field\"><span class=\"lbl\">Search engine</span>"
-"<select id=\"search_pick\"></select></label>"
+"<section id=\"general\"><h2 class=\"group-label\">General</h2>"
+"<div class=\"card\">"
+"<div class=\"row\"><span class=\"txt\"><span class=\"lbl\">Home page"
+"</span><span class=\"desc\">Opens with the Home button and in new "
+"windows.</span></span>"
+"<select id=\"home_pick\" aria-label=\"Home page\">"
+"<option value=\"start\">New Tab page</option>"
+"<option value=\"custom\">Custom address\xe2\x80\xa6</option></select></div>"
+"<label class=\"field\" id=\"home_wrap\"><span class=\"lbl\">"
+"Home page address</span>"
+"<input id=\"home_url\" type=\"text\" spellcheck=\"false\" "
+"placeholder=\"https://example.com\"></label>"
+"<div class=\"row\"><span class=\"txt\"><span class=\"lbl\">Search engine"
+"</span><span class=\"desc\">Used for searches from the address bar."
+"</span></span>"
+"<select id=\"search_pick\" aria-label=\"Search engine\"></select></div>"
 "<label class=\"field\" id=\"custom_wrap\"><span class=\"lbl\">"
 "Custom search URL</span>"
 "<input id=\"search_engine\" type=\"text\" spellcheck=\"false\" "
 "placeholder=\"https://example.com/?q=%s\"></label>"
-"<div class=\"save-row\">"
-"<button id=\"save\" class=\"btn primary\" type=\"button\">Save</button>"
-"</div></div></section>\n"
-"<section id=\"privacy\"><h2>Privacy</h2><div class=\"card\">"
-"<label class=\"field\"><span class=\"lbl\">Cookies</span>"
-"<select id=\"cookie_policy\">"
-"<option value=\"0\">Accept all cookies</option>"
-"<option value=\"1\">Block third-party cookies</option>"
-"<option value=\"2\">Block all cookies</option></select></label>\n"
+"</div></section>\n"
+"<section id=\"privacy\"><h2 class=\"group-label\">Privacy</h2>"
+"<div class=\"card\">"
+"<div class=\"row\"><span class=\"txt\"><span class=\"lbl\">Cookies"
+"</span><span class=\"desc\">Which sites may store cookies on this "
+"device.</span></span>"
+"<select id=\"cookie_policy\" aria-label=\"Cookies\">"
+"<option value=\"0\">Allow all</option>"
+"<option value=\"1\">Block third-party</option>"
+"<option value=\"2\">Block all</option></select></div>\n"
 SETTINGS_SWITCH("do_not_track",
     "Send \xe2\x80\x9c" "Do Not Track\xe2\x80\x9d",
     "Ask every site not to track you.")
@@ -5238,16 +5393,17 @@ SETTINGS_SWITCH("global_privacy_control",
     "Tell sites not to sell or share your data.")
 SETTINGS_SWITCH("strip_tracking_params",
     "Strip tracking parameters",
-    "Remove utm_ and similar tags from links you open.")
+    "Remove tracking codes from the links you open.")
 SETTINGS_SWITCH("https_first",
-    "HTTPS first",
+    "HTTPS-First",
     "Try a secure connection before plain HTTP on every site.")
 SETTINGS_SWITCH("remote_control",
     "Allow remote control",
-    "Let local tools such as Claude Code drive this browser through "
-    "nordstjernen --mcp. Only programs on this computer can connect.")
+    "Let automation tools on this computer control the browser. "
+    "Other devices can\xe2\x80\x99t connect.")
 "</div></section>\n"
-"<section id=\"content\"><h2>Content</h2><div class=\"card\">\n"
+"<section id=\"content\"><h2 class=\"group-label\">Content</h2>"
+"<div class=\"card\">\n"
 SETTINGS_SWITCH("images_enabled",
     "Load images",
     "Show pictures on web pages.")
@@ -5256,10 +5412,10 @@ SETTINGS_SWITCH("javascript_enabled",
     "Run scripts that pages need for interactive features.")
 SETTINGS_SWITCH("webgl_enabled",
     "WebGL",
-    "Allow 3D graphics in the canvas element.")
+    "Let pages draw 3D graphics.")
 SETTINGS_SWITCH("webgpu_enabled",
     "WebGPU",
-    "Allow pages to use the graphics card directly for 3D and compute work.")
+    "Let pages use the graphics card directly for 3D and compute work.")
 SETTINGS_SWITCH("local_storage_enabled",
     "Local storage",
     "Let sites keep data on this device.")
@@ -5267,20 +5423,23 @@ SETTINGS_SWITCH("cache_enabled",
     "Cache",
     "Keep copies of pages and files to load them faster.")
 "</div></section>\n"
-"<section id=\"data\"><h2>Browsing data</h2><div class=\"card\">"
+"<section id=\"cookies\"><h2 class=\"group-label\">Site data</h2>"
+"<div class=\"card\">"
 "<div class=\"danger-row\"><span class=\"txt\"><span class=\"lbl\">"
-"Clear all browsing data</span><span class=\"desc\">History, cookies, "
-"cache and site storage on this device.</span></span>"
-"<button id=\"clear\" class=\"btn danger\">Clear data</button></div>"
-"</div></section>\n"
-"<section id=\"cookies\"><h2>Cookies</h2><div class=\"card\">"
-"<div class=\"danger-row\"><span class=\"txt\"><span class=\"lbl\">"
-"Cookies by site</span><span class=\"desc\">Cookies are kept per "
-"top-level site. Remove the cookies of one site, or all of them.</span>"
+"Cookies by site</span><span class=\"desc\" id=\"cookie_desc\">Remove "
+"the cookies of one site, or of all sites.</span>"
 "</span><button id=\"cookies_clear\" class=\"btn danger\">Remove all"
 "</button></div><div id=\"cookie_sites\"></div>"
 "</div></section>\n"
-"</main></div>\n"
+"<section id=\"data\"><h2 class=\"group-label\">Browsing data</h2>"
+"<div class=\"card\">"
+"<div class=\"danger-row\"><span class=\"txt\"><span class=\"lbl\">"
+"History, cookies and cache</span><span class=\"desc\">Everything "
+"stored on this device by sites and by Nordstjernen.</span></span>"
+"<button id=\"clear\" class=\"btn\">Clear browsing data\xe2\x80\xa6"
+"</button></div>"
+"</div></section>\n"
+"</main></div></div>\n"
 "<div class=\"toast\" id=\"status\" role=\"status\"></div>\n"
 "<script>\n"
 "function $(i){return document.getElementById(i);}\n"
@@ -5310,19 +5469,25 @@ SETTINGS_SWITCH("cache_enabled",
 "$('custom_wrap').hidden=matched;}\n"
 "function load(){fetch('about:settings-data').then(function(r){"
 "return r.json();}).then(function(c){"
-"$('home_url').value=c.home_url||'';"
+"$('home_url').value=c.home_url||'';showHome(c.home_url||'');"
 "$('search_engine').value=c.search_engine||'';buildPick(c.search_engine||'');"
 "$('cookie_policy').value=''+(c.cookie_policy||0);"
 "toggles.forEach(function(k){$(k).checked=!!c[k];});loaded=true;});}\n"
+"function ready(){document.body.classList.add('ready');}\n"
+"document.addEventListener('pointerdown',ready,{once:true});\n"
+"document.addEventListener('keydown',ready,{once:true});\n"
 "function bv(id){return $(id).checked?'1':'0';}\n"
 "function save(o){if(!loaded)return;"
 "fetch('about:settings-save',{method:'POST',headers:{'Content-Type':"
 "'application/x-www-form-urlencoded'},body:enc(o)}).then(function(){"
 "toast('Saved. Applies to newly opened pages.');});}\n"
 "function saveField(k){var o={};o[k]=$(k).value;save(o);}\n"
-"function saveGeneral(){var se=$('search_pick').value;"
-"if(se!=='custom')$('search_engine').value=se;"
-"save({home_url:$('home_url').value,search_engine:$('search_engine').value});}\n"
+"function showHome(u){var start=!u||u==='about:start';"
+"$('home_pick').value=start?'start':'custom';$('home_wrap').hidden=start;}\n"
+"$('home_pick').onchange=function(){if(this.value==='start'){"
+"$('home_url').value='about:start';$('home_wrap').hidden=true;"
+"saveField('home_url');}else{if($('home_url').value==='about:start')"
+"$('home_url').value='';$('home_wrap').hidden=false;$('home_url').focus();}};\n"
 "$('search_pick').onchange=function(){"
 "var v=this.value;$('custom_wrap').hidden=v!=='custom';"
 "if(v!=='custom'){$('search_engine').value=v;saveField('search_engine');}};\n"
@@ -5330,8 +5495,10 @@ SETTINGS_SWITCH("cache_enabled",
 "$(k).onchange=function(){saveField(k);};});\n"
 "toggles.forEach(function(k){$(k).onchange=function(){"
 "var o={};o[k]=bv(k);save(o);};});\n"
-"$('save').onclick=saveGeneral;\n"
-"$('clear').onclick=function(){var b=$('clear');b.disabled=true;"
+
+"$('clear').onclick=function(){var b=$('clear');"
+"if(!confirm('Clear history, cookies, cache and site storage on this "
+"device?'))return;b.disabled=true;"
 "fetch('about:settings-clear',{method:'POST'}).then(function(){"
 "b.textContent='Cleared';toast('Browsing data cleared');loadCookies();});};\n"
 "function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;"
@@ -5342,8 +5509,10 @@ SETTINGS_SWITCH("cache_enabled",
 "toast(site?'Cookies removed for '+site:'All cookies removed');loadCookies();});}\n"
 "function loadCookies(){fetch('about:settings-cookies').then(function(r){"
 "return r.json();}).then(function(list){var box=$('cookie_sites');box.textContent='';"
-"$('cookies_clear').disabled=!list.length;"
-"if(!list.length){box.appendChild(el('div','desc empty','No cookies are stored.'));return;}"
+"$('cookies_clear').hidden=!list.length;"
+"$('cookie_desc').textContent=list.length?'Remove the cookies of one site, "
+"or of all sites.':'Sites that store cookies will be listed here.';"
+"box.hidden=!list.length;if(!list.length)return;"
 "list.forEach(function(s){var row=el('div','site-row');var txt=el('span','txt');"
 "txt.appendChild(el('span','lbl',s.site));"
 "txt.appendChild(el('span','desc',s.count+(s.count===1?' cookie':' cookies')));"
@@ -5351,7 +5520,17 @@ SETTINGS_SWITCH("cache_enabled",
 "b.onclick=function(){b.disabled=true;removeCookies(s.site);};"
 "row.appendChild(txt);row.appendChild(b);box.appendChild(row);});});}\n"
 "$('cookies_clear').onclick=function(){removeCookies('');};\n"
-"load();loadCookies();\n"
+"var navLinks=document.querySelectorAll('.side a');\n"
+"function markNav(){var cur=navLinks[0];for(var i=0;i<navLinks.length;i++){"
+"var sec=$(navLinks[i].getAttribute('href').slice(1));"
+"if(sec&&sec.getBoundingClientRect().top<=window.innerHeight/3)"
+"cur=navLinks[i];}"
+"if(window.innerHeight+window.scrollY>=document.documentElement.scrollHeight-2)"
+"cur=navLinks[navLinks.length-1];"
+"for(var j=0;j<navLinks.length;j++)"
+"navLinks[j].className=navLinks[j]===cur?'on':'';}\n"
+"window.addEventListener('scroll',markNav);\n"
+"load();loadCookies();markNav();\n"
 "</script></body></html>";
 
 static gboolean
@@ -5547,18 +5726,8 @@ synthesize_about_response(const char *url, const char *top_url,
             else
                 g_string_append_c(esc_engine, *p);
         }
-        char *engine_host = ns_url_host_from(engine);
-        const char *search_name = "the web";
-        g_autofree char *engine_host_lower = NULL;
-        if (engine_host && *engine_host) {
-            engine_host_lower = g_ascii_strdown(engine_host, -1);
-            const psl_ctx_t *psl = psl_builtin();
-            const char *reg =
-                psl ? psl_registrable_domain(psl, engine_host_lower) : NULL;
-            search_name = (reg && *reg) ? reg
-                : (g_str_has_prefix(engine_host, "www.") ? engine_host + 4
-                                                         : engine_host);
-        }
+        char *engine_name = ns_search_engine_name();
+        const char *search_name = engine_name ? engine_name : "the web";
         char *with_search = about_substitute(k_about_start_template,
                                              "__ND_SEARCH_URL__",
                                              esc_engine->str);
@@ -5569,12 +5738,17 @@ synthesize_about_response(const char *url, const char *top_url,
         g_free(esc_name);
         g_free(with_search);
         g_string_free(esc_engine, TRUE);
-        g_free(engine_host);
+        g_free(engine_name);
         char *logo_markup = about_logo_markup();
-        char *body = about_substitute(with_name, "__ND_LOGO_MARK__",
-                                      logo_markup);
+        char *with_logo = about_substitute(with_name, "__ND_LOGO_MARK__",
+                                           logo_markup);
         g_free(logo_markup);
         g_free(with_name);
+        char *sites = ns_net_is_private() ? g_strdup("")
+                                          : ns_history_top_sites_html(8);
+        char *body = about_substitute(with_logo, "__ND_TOP_SITES__", sites);
+        g_free(sites);
+        g_free(with_logo);
         g_byte_array_append(resp->body, (const guint8 *)body,
                             (guint)strlen(body));
         g_free(body);

@@ -188,7 +188,8 @@ ns_paint_inline_font_attr(const ns_inline_attr *r)
             ns_pango_stretch_from_css(r->font_stretch));
     case NS_INLINE_FONT_FEATURES:
         return ns_paint_font_features_attr_from_values(
-            r->font_kerning, r->font_ligatures, r->font_features);
+            r->font_kerning, r->font_ligatures, r->font_numeric,
+            r->font_features);
     case NS_INLINE_FONT_VARIATIONS:
         return ns_paint_font_variations_attr_from_values(r->font_variations);
     case NS_INLINE_ITALIC:
@@ -1050,21 +1051,18 @@ paint_double_border_side(cairo_t *cr, int side, double width, rgba c,
 }
 
 static void
-border_wedge_apex(const double a0[2], const double a1[2],
-                  const double b0[2], const double b1[2],
-                  double cx, double cy, double *out_x, double *out_y)
+border_corner_split(const double outer[2], const double inner[2],
+                    double rx, double ry, double max_x, double max_y,
+                    double out[2])
 {
-    double dax = a1[0] - a0[0], day = a1[1] - a0[1];
-    double dbx = b1[0] - b0[0], dby = b1[1] - b0[1];
-    double den = dax * dby - day * dbx;
-    if (fabs(den) < 1e-9) {
-        *out_x = cx;
-        *out_y = cy;
-        return;
-    }
-    double t = ((b0[0] - a0[0]) * dby - (b0[1] - a0[1]) * dbx) / den;
-    *out_x = a0[0] + t * dax;
-    *out_y = a0[1] + t * day;
+    double dx = fabs(inner[0] - outer[0]), dy = fabs(inner[1] - outer[1]);
+    double kx = dx > 0 ? MIN(MAX(rx, dx), max_x) / dx : INFINITY;
+    double ky = dy > 0 ? MIN(MAX(ry, dy), max_y) / dy : INFINITY;
+    double k = MIN(kx, ky);
+    if (!isfinite(k) || k < 1.0)
+        k = 1.0;
+    out[0] = outer[0] + k * (inner[0] - outer[0]);
+    out[1] = outer[1] + k * (inner[1] - outer[1]);
 }
 
 static double
@@ -1141,6 +1139,12 @@ paint_rounded_mixed_border(cairo_t *cr, const ns_box *b, const ns_style *s,
     corner_radii inner = corner_radii_inset(outer, bw[0], bw[1], bw[2], bw[3]);
     const double oc[4][2] = { { x, y }, { x + w, y }, { x + w, y + h }, { x, y + h } };
     const double ic[4][2] = { { ix, iy }, { ix + iw, iy }, { ix + iw, iy + ih }, { ix, iy + ih } };
+    const double crx[4] = { outer.tl, outer.tr, outer.br, outer.bl };
+    const double cry[4] = { outer.tlv, outer.trv, outer.brv, outer.blv };
+    double split[4][2];
+    for (int i = 0; i < 4; i++)
+        border_corner_split(oc[i], ic[i], crx[i], cry[i], w / 2.0, h / 2.0,
+                            split[i]);
     for (int i = 0; i < 4; i++) {
         if (bw[i] <= 0) continue;
         rgba c = rgba_of(s->values[color_props[i]] ? s->values[color_props[i]]
@@ -1150,12 +1154,10 @@ paint_rounded_mixed_border(cairo_t *cr, const ns_box *b, const ns_style *s,
         cairo_save(cr);
         cairo_new_path(cr);
         int a = i, bidx = (i + 1) % 4;
-        double apex_x, apex_y;
-        border_wedge_apex(oc[a], ic[a], oc[bidx], ic[bidx],
-                          x + w / 2.0, y + h / 2.0, &apex_x, &apex_y);
         cairo_move_to(cr, oc[a][0], oc[a][1]);
         cairo_line_to(cr, oc[bidx][0], oc[bidx][1]);
-        cairo_line_to(cr, apex_x, apex_y);
+        cairo_line_to(cr, split[bidx][0], split[bidx][1]);
+        cairo_line_to(cr, split[a][0], split[a][1]);
         cairo_close_path(cr);
         cairo_clip(cr);
         cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
@@ -3449,6 +3451,26 @@ append_font_ligature_features(GString *out, const char *ligatures)
     g_strfreev(tokens);
 }
 
+static void
+append_font_numeric_features(GString *out, const char *numeric)
+{
+    static const struct { const char *token, *feature; } map[] = {
+        { "lining-nums", "lnum=1" },       { "oldstyle-nums", "onum=1" },
+        { "proportional-nums", "pnum=1" }, { "tabular-nums", "tnum=1" },
+        { "diagonal-fractions", "frac=1" }, { "stacked-fractions", "afrc=1" },
+        { "ordinal", "ordn=1" },           { "slashed-zero", "zero=1" },
+    };
+    if (!numeric || !*numeric) return;
+    char **tokens = g_strsplit_set(numeric, " \t\r\n\f", -1);
+    for (int i = 0; tokens[i]; i++) {
+        for (gsize m = 0; m < G_N_ELEMENTS(map); m++) {
+            if (strcmp(tokens[i], map[m].token) == 0)
+                append_font_feature(out, map[m].feature);
+        }
+    }
+    g_strfreev(tokens);
+}
+
 static const char *
 paint_font_feature_skip_ws(const char *p)
 {
@@ -3565,6 +3587,7 @@ paint_font_variations_from_css(const char *settings)
 
 NsPangoAttribute *
 ns_paint_font_features_attr_from_values(int kerning, const char *ligatures,
+                                        const char *numeric,
                                         const char *settings)
 {
     GString *s = g_string_new(NULL);
@@ -3573,6 +3596,7 @@ ns_paint_font_features_attr_from_values(int kerning, const char *ligatures,
     else if (kerning > 0)
         append_font_feature(s, "kern=1");
     append_font_ligature_features(s, ligatures);
+    append_font_numeric_features(s, numeric);
     append_font_feature_settings_features(s, settings);
     if (s->len == 0) {
         g_string_free(s, TRUE);
@@ -3607,6 +3631,9 @@ ns_paint_apply_font_features(NsPangoAttrList *attrs, const ns_style *s,
     const ns_css_value *lig = s->values[NS_CSS_FONT_VARIANT_LIGATURES];
     if (lig && lig->kind == NS_CSS_V_KEYWORD)
         append_font_ligature_features(features, lig->u.keyword);
+    const ns_css_value *num = s->values[NS_CSS_FONT_VARIANT_NUMERIC];
+    if (num && num->kind == NS_CSS_V_KEYWORD)
+        append_font_numeric_features(features, num->u.keyword);
     const ns_css_value *settings = s->values[NS_CSS_FONT_FEATURE_SETTINGS];
     if (settings && settings->kind == NS_CSS_V_KEYWORD)
         append_font_feature_settings_features(features, settings->u.keyword);
@@ -5835,7 +5862,14 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                     ? r->style->values[NS_CSS_COLOR] : NULL;
                 rgba arrow = rgba_of(cv, 0.1, 0.1, 0.1, 1);
                 double sz = MIN(5.0, (y1 - y0) / 5.0);
-                double ax = x1 - 6.0 - sz;
+                double right = x1;
+                if (block_chrome)
+                    right = field_box->x + field_box->margin.left +
+                            field_box->border.left +
+                            field_box->padding.left +
+                            field_box->content_width +
+                            field_box->padding.right;
+                double ax = right - 6.0 - sz;
                 double ay = (y0 + y1) / 2.0;
                 cairo_save(cr);
                 set_source_rgba(cr, arrow);

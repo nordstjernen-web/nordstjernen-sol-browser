@@ -2,6 +2,9 @@
 <gresources>
   <gresource prefix="/org/nordstjernen/WebBrowser/icons/scalable/apps">
     <file alias="nordstjernen.svg">hicolor/scalable/apps/nordstjernen.svg</file>
+    <file alias="nordstjernen-badge.svg">hicolor/scalable/apps/nordstjernen-badge.svg</file>
+    <file alias="nordstjernen-shield-symbolic.svg">hicolor/scalable/apps/nordstjernen-shield-symbolic.svg</file>
+    <file alias="nordstjernen-symbolic.svg">hicolor/scalable/apps/nordstjernen-symbolic.svg</file>
     <file alias="nordstjernen-back-symbolic.svg">hicolor/scalable/apps/nordstjernen-back-symbolic.svg</file>
     <file alias="nordstjernen-bookmarks-symbolic.svg">hicolor/scalable/apps/nordstjernen-bookmarks-symbolic.svg</file>
     <file alias="nordstjernen-close-symbolic.svg">hicolor/scalable/apps/nordstjernen-close-symbolic.svg</file>
