@@ -3,6 +3,9 @@ Changelog:
 
 1.0.45-dev:
 ======
+* macOS: the renderer's Seatbelt profile denies starting programs and
+  sending Apple Events. Only the renderer opts in, so the browser window
+  and the headless driver can still launch their renderer.
 * The iOS port is removed: the `ios/` UIKit shell, its cross-compile and
   sysroot scripts, the `-Dios` meson option, `docs/iOS.md` and the
   `TARGET_OS_IPHONE` guards in the engine are gone. iOS is not supported;

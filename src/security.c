@@ -61,6 +61,17 @@ static gboolean ns_landlock_scope_abstract_sockets;
 #endif
 
 static ns_security_status ns_status = { .landlock_abi = -1 };
+#ifdef __APPLE__
+static gboolean ns_process_exec_denied;
+#endif
+
+void
+ns_security_deny_process_exec(void)
+{
+#ifdef __APPLE__
+    ns_process_exec_denied = TRUE;
+#endif
+}
 
 void
 ns_security_landlock_scope_abstract_sockets(void)
@@ -1160,9 +1171,10 @@ ns_security_sandbox_init(const char *self_exe)
 
     g_string_append(prof, ")\n");
 
-    g_string_append(prof,
-        "(deny process-exec*)\n"
-        "(deny appleevent-send)\n");
+    if (ns_process_exec_denied)
+        g_string_append(prof,
+            "(deny process-exec*)\n"
+            "(deny appleevent-send)\n");
 
     char *err = NULL;
 #pragma clang diagnostic push
