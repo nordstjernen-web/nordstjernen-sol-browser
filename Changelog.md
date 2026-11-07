@@ -3,6 +3,8 @@ Changelog:
 
 1.0.45-dev:
 ======
+* about:nordstjernen names the Safe Browsing API in use (Google Safe Browsing
+  v5, local-list mode).
 * Security: Google Safe Browsing. Every navigation and redirect is checked
   against Google's phishing, malware and unwanted-software lists (Safe
   Browsing v5, local-list mode) as well as the local blocklist, and a match
