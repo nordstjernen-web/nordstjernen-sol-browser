@@ -34904,6 +34904,7 @@ ns_fire_inline_on_handler(ns_js *js, const ns_node *target, const char *type,
                           JSValue event)
 {
     if (!js || !target || target->kind != NS_NODE_ELEMENT || !type) return FALSE;
+    if (ns_node_sandbox_blocks_scripts(target)) return FALSE;
     ns_node *target_doc = target->parent;
     while (target_doc && target_doc->kind != NS_NODE_DOCUMENT)
         target_doc = target_doc->parent;
