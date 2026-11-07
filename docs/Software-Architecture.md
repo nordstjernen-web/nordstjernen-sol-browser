@@ -58,8 +58,9 @@ architecture below.
   [HTML-compatibility.md](HTML-compatibility.md),
   [CSS-compatibility.md](CSS-compatibility.md)), not against another
   browser's quirks.
-- **No telemetry.** The browser does not phone home. Safe-browsing is a
-  local on-device blocklist with no network callout.
+- **No telemetry.** The browser does not phone home. Safe browsing checks
+  pages on-device against a local blocklist and Google Safe Browsing's
+  hash-prefix lists; only a 4-byte prefix of a matching address is ever sent.
 - **Reuse proven libraries, write the browser.** Hard, well-solved
   problems (HTML tokenisation, WHATWG URL parsing, a conformant JS
   interpreter, memory-safe image decoding) are delegated to vendored
@@ -502,8 +503,14 @@ boundary** (`src/security.c`).
 - **No JIT** means no runtime code generation for JS or wasm, removing
   the W^X attack surface entirely; runaway scripts are bounded by the
   60-second interrupt monitor rather than a kill.
-- **Safe-browsing** (`src/safebrowsing.c`) is a **local** SHA-256 host
-  blocklist with an interstitial — no network callout, no telemetry.
+- **Safe browsing** (`src/safebrowsing.c`) checks each top-level navigation
+  and redirect against a local SHA-256 host blocklist, then against Google
+  Safe Browsing v5 (`src/safebrowsing_google.c`): the renderer keeps the
+  `se-4b`, `mw-4b` and `uws-4b` hash-prefix lists in the cache directory,
+  updates them in the background under a cross-process file lock, and asks
+  `hashes:search` for full hashes only on a prefix match. The API key comes
+  from `NS_SAFE_BROWSING_API_KEY` at build time; without one only the local
+  list is used.
 - **Capabilities.** What a page may do beyond rendering its own content
   is a capability defined once in `src/capability.h` (name, label,
   prompt, default state, revoke action) and compiled into both the shell

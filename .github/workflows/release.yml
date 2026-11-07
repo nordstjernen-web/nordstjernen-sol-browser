@@ -26,6 +26,7 @@ permissions:
 
 env:
   TAG: ${{ inputs.tag || github.ref_name }}
+  NS_SAFE_BROWSING_API_KEY: ${{ secrets.NS_SAFE_BROWSING_API_KEY }}
 
 jobs:
   linux:

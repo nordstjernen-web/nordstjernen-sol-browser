@@ -13,6 +13,9 @@ permissions:
   contents: read
   attestations: read
 
+env:
+  NS_SAFE_BROWSING_API_KEY: ${{ secrets.NS_SAFE_BROWSING_API_KEY }}
+
 jobs:
   bundle:
     name: release AAB on ubuntu-26.04

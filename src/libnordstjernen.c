@@ -37,6 +37,7 @@
 #include "pdf.h"
 #include "render.h"
 #include "safebrowsing.h"
+#include "safebrowsing_google.h"
 #include "security.h"
 #include "selection.h"
 #include "svg_external.h"
@@ -1180,6 +1181,8 @@ ns_browser_init(void)
     ns_history_init();
     ns_font_init();
     ns_spell_init();
+    if (ns_sbg_available())
+        ns_sbg_start();
     return 0;
 }
 
@@ -1748,10 +1751,10 @@ ns_browser_set_reduced_motion(int reduce)
 }
 
 static ns_browser *
-browser_open_blocked(const char *url, const char *host, int viewport_width,
-                     double viewport_height, int settle_ms)
+browser_open_blocked(const char *url, const char *host, ns_sb_verdict verdict,
+                     int viewport_width, double viewport_height, int settle_ms)
 {
-    char *html = ns_safebrowsing_interstitial(url, host);
+    char *html = ns_safebrowsing_interstitial(url, host, verdict);
     ns_node *doc = ns_html_parse(html, html ? (gssize)strlen(html) : 0);
     g_free(html);
     ns_browser *b = browser_build_from_doc(doc, g_strdup(url), viewport_width,
@@ -1803,8 +1806,11 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
 
     {
         char *host = ns_url_host_from(url);
-        if (host && ns_safebrowsing_blocked(host)) {
-            ns_browser *b = browser_open_blocked(url, host, viewport_width,
+        ns_sb_verdict verdict = host ? ns_safebrowsing_check_url(url)
+                                     : NS_SB_SAFE;
+        if (verdict != NS_SB_SAFE) {
+            ns_browser *b = browser_open_blocked(url, host, verdict,
+                                                 viewport_width,
                                                  viewport_height, settle_ms);
             g_free(host);
             return b;
@@ -1850,7 +1856,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
                                            user_activated, &err);
     char *landed_host = resp && resp->final_url
         ? ns_url_host_from(resp->final_url) : NULL;
-    if (landed_host && ns_safebrowsing_blocked(landed_host)) {
+    ns_sb_verdict landed_verdict = landed_host
+        ? ns_safebrowsing_check_url(resp->final_url) : NS_SB_SAFE;
+    if (landed_verdict != NS_SB_SAFE) {
         char *landed = g_strdup(resp->final_url);
         ns_response_free(resp);
         g_clear_error(&err);
@@ -1858,6 +1866,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         g_free(stripped_url);
         g_free(https_url);
         ns_browser *b = browser_open_blocked(landed, landed_host,
+                                             landed_verdict,
                                              viewport_width, viewport_height,
                                              settle_ms);
         g_free(landed);

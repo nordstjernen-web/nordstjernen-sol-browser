@@ -15,7 +15,9 @@ other store fronts ask for the same URL.
 Nordstjernen collects nothing. The browser has no telemetry, no
 crash reporting, no update pinger, no analytics, no accounts, and no
 "studies" infrastructure. It never phones home — the Nordstjernen
-project operates no server that the browser talks to.
+project operates no server that the browser talks to. The only
+third-party service it contacts on its own is Google Safe Browsing,
+described below.
 
 ## Data the browser stores on your device
 
@@ -34,9 +36,17 @@ Nordstjernen connects only to the sites you visit: the address you
 type, the links you click, and the resources those pages reference.
 Text typed into the search box is sent to your configured search
 engine (Google by default, changeable in settings).
-There are no background connections, prefetch
-services, safe-browsing lookups, or other third-party services
-built in.
+The one background service is Google Safe Browsing, which is on by
+default and can be switched off in Settings ("Block dangerous sites").
+The browser downloads Google's lists of hash prefixes of known phishing
+and malware addresses, about every 30 minutes, and checks each page
+against them on your device. Only when an address matches a prefix
+does it ask Google for the matching full hashes, sending that 4-byte
+prefix and never the address itself. No cookies or account
+information go with these requests, but Google sees your IP address,
+as it would for any connection. Google's own privacy policy covers
+the data it receives. There are no prefetch services or other
+third-party services built in.
 
 Websites you visit receive the information any browser sends them
 (your IP address, requested URLs, cookies they set) and are governed

@@ -54,6 +54,14 @@ endforeach
 polyfills_h = engine_bundles['polyfills']
 streaming_h = engine_bundles['streaming']
 
+sb_key_h = custom_target(
+  'ns_sb_key.h',
+  input: '../scripts/gen-safebrowsing-key.py',
+  output: 'ns_sb_key.h',
+  command: [python, '@INPUT@', '@OUTPUT@'],
+  build_always_stale: true,
+)
+
 remote_page_h = custom_target(
   'remote_page.h',
   input: ['../scripts/embed-text.py', '../data/js/remote-page.js'],
@@ -121,6 +129,7 @@ nordstjernen_engine_sources = files(
   'pdf.c',
   'render.c',
   'safebrowsing.c',
+  'safebrowsing_google.c',
   'security.c',
   'selection.c',
   'spellcheck.c',
@@ -176,6 +185,7 @@ if have_webgpu
 endif
 
 nordstjernen_engine_sources += media_os_sources
+nordstjernen_engine_sources += [sb_key_h]
 if have_os_mp4
   nordstjernen_engine_sources += files('mp4.c', 'video_mp4.c')
 endif
