@@ -1178,7 +1178,6 @@ ns_browser_init(void)
     ns_net_set_allow_file_urls(TRUE);
     ns_cache_init();
     ns_bytecode_cache_init();
-    ns_history_init();
     ns_font_init();
     ns_spell_init();
     if (ns_sbg_available())
@@ -1216,7 +1215,6 @@ ns_browser_shutdown(void)
 {
     ns_font_shutdown();
     ns_bytecode_cache_shutdown();
-    ns_history_shutdown();
     ns_cache_shutdown();
     ns_net_shutdown();
     ns_config_shutdown();

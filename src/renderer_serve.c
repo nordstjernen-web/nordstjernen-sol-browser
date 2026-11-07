@@ -576,6 +576,9 @@ render_reply(ns_renderer_session *s, int ctrl_w, const render_view *rv,
     if (ns_browser_pointer_locked(s->cur) && hn > 0 && (size_t)hn < sizeof hdrs)
         hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                        "X-Pointer-Lock: 1\r\n");
+    if (ns_net_history_clear_pending() && hn > 0 && (size_t)hn < sizeof hdrs)
+        hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
+                       "X-History-Clear: 1\r\n");
     if (ns_session_storage_generation() && hn > 0 && (size_t)hn < sizeof hdrs)
         hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                        "X-Session-Gen: %lu\r\n",
@@ -989,7 +992,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             "\"download\":\"%s\",\"config\":\"%s\",\"audio\":\"%s\","
             "\"window_action\":\"%s\",\"title\":\"%s\",\"url\":\"%s\","
             "\"url_pushed\":%d,\"popup\":%d,\"pointer_lock\":%d,"
-            "\"webauthn\":%d,\"session_gen\":%lu}",
+            "\"webauthn\":%d,\"session_gen\":%lu,\"history_clear\":%d}",
             changed != 0, session_animating(s) ? 1 : 0, session_wake_ms(s),
             page_w, page_h, nav_e ? nav_e : "", webgl_e ? webgl_e : "",
             camera_e ? camera_e : "", capability_e ? capability_e : "",
@@ -1000,7 +1003,8 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             ns_browser_popup_pending(),
             ns_browser_pointer_locked(s->cur) ? 1 : 0,
             ns_browser_webauthn_pending(),
-            ns_session_storage_generation());
+            ns_session_storage_generation(),
+            ns_net_history_clear_pending() ? 1 : 0);
         if (n >= 0)
             http_write_response(ctrl_w, 200, "application/json", NULL, json,
                                 (size_t)n);

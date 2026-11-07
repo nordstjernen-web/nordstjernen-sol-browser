@@ -579,8 +579,8 @@ ns_rproc_http_open(ns_rproc_http *r, const char *url, int viewport_width,
 }
 
 static int
-rproc_open(ns_rproc_http *r, const char *url, int viewport_width,
-           int viewport_height, int settle_ms, int history,
+rproc_open(ns_rproc_http *r, const char *url, const char *html,
+           int viewport_width, int viewport_height, int settle_ms, int history,
            int user_activated, int reload, ns_rproc_http_page *out)
 {
     if (!r || !url || !out)
@@ -591,6 +591,7 @@ rproc_open(ns_rproc_http *r, const char *url, int viewport_width,
         return -1;
     char *te = json_escape(r->opener_token ? r->opener_token : "");
     char *oe = json_escape(r->opener_origin ? r->opener_origin : "");
+    char *he = html ? json_escape(html) : NULL;
     char *json = NULL;
     int dpr = device_pixel_ratio_milli(r);
     int jn = asprintf(&json,
@@ -598,15 +599,18 @@ rproc_open(ns_rproc_http *r, const char *url, int viewport_width,
                       "\"settle_ms\":%d,\"history\":%d,"
                       "\"user_activated\":%d,\"reload\":%d,"
                       "\"dpr\":%d.%03d,\"popups\":%d,\"webauthn\":%d,"
-                      "\"opener_token\":\"%s\",\"opener_origin\":\"%s\"}",
+                      "\"opener_token\":\"%s\",\"opener_origin\":\"%s\"%s%s%s}",
                       ue, viewport_width, viewport_height, settle_ms,
                       history ? 1 : 0, user_activated ? 1 : 0,
                       reload ? 1 : 0, dpr / 1000, dpr % 1000, r->popups,
                       r->webauthn,
-                      te ? te : "", oe ? oe : "");
+                      te ? te : "", oe ? oe : "",
+                      he ? ",\"html\":\"" : "", he ? he : "",
+                      he ? "\"" : "");
     free(ue);
     free(te);
     free(oe);
+    free(he);
     if (jn < 0)
         return -1;
     int rc = http_write_request(r->wfd, "POST", "/open", "application/json",
@@ -660,7 +664,17 @@ ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
                       int viewport_height, int settle_ms, int history,
                       int user_activated, ns_rproc_http_page *out)
 {
-    return rproc_open(r, url, viewport_width, viewport_height, settle_ms,
+    return rproc_open(r, url, NULL, viewport_width, viewport_height, settle_ms,
+                      history, user_activated, 0, out);
+}
+
+int
+ns_rproc_http_open_html(ns_rproc_http *r, const char *url, const char *html,
+                        int viewport_width, int viewport_height, int settle_ms,
+                        int history, int user_activated,
+                        ns_rproc_http_page *out)
+{
+    return rproc_open(r, url, html, viewport_width, viewport_height, settle_ms,
                       history, user_activated, 0, out);
 }
 
@@ -669,7 +683,8 @@ ns_rproc_http_reload(ns_rproc_http *r, const char *url, int viewport_width,
                      int viewport_height, int settle_ms,
                      ns_rproc_http_page *out)
 {
-    return rproc_open(r, url, viewport_width, viewport_height, settle_ms, 0,
+    return rproc_open(r, url, NULL, viewport_width, viewport_height, settle_ms,
+                      0,
                       1, 1, out);
 }
 
@@ -744,6 +759,7 @@ frame_fill_from_head(ns_rproc_http_frame *out, const http_head *head)
     out->window_action = head_field_dup(head->x_window_action);
     out->popup = head->x_popup != 0;
     out->webauthn = head->x_webauthn != 0;
+    out->history_clear = head->x_history_clear != 0;
     out->pointer_lock = head->x_pointer_lock != 0;
     out->session_gen = head->x_session_gen;
     out->clipboard = head->x_clipboard > 0;
@@ -1090,6 +1106,9 @@ ns_rproc_http_tick_page(ns_rproc_http *r, ns_rproc_http_tick *out)
     long session_gen = 0;
     json_get_long(body, "session_gen", &session_gen);
     out->session_gen = session_gen > 0 ? (unsigned long)session_gen : 0;
+    long history_clear = 0;
+    json_get_long(body, "history_clear", &history_clear);
+    out->history_clear = history_clear != 0;
     out->title = json_get_str(body, "title");
     out->url = json_get_str(body, "url");
     long url_pushed = 0;

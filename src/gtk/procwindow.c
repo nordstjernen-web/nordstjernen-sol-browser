@@ -1860,6 +1860,9 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
             gtk_widget_set_sensitive(pw->forward, ns_proc_view_can_forward(v));
         }
         break;
+    case NS_PROC_EVT_HISTORY_CLEAR:
+        ns_history_clear();
+        break;
     case NS_PROC_EVT_NEWTAB:
         if (text && *text)
             proc_window_add_tab_full(pw, text, FALSE,

@@ -32,6 +32,7 @@ typedef struct {
     long  x_popup;
     long  x_webauthn;
     long  x_pointer_lock;
+    long  x_history_clear;
     unsigned long x_session_gen;
     char  x_nav[2048];
     char  x_webgl[2048];

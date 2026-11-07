@@ -9,6 +9,7 @@
 
 #include "proc_limits.h"
 #include "libnordstjernen.h"
+#include "history.h"
 #include "netutil.h"
 #include "print_setup.h"
 #include "rproc_http.h"
@@ -84,6 +85,7 @@ typedef struct {
     ReqType type;
     int     seq;
     char   *url;
+    char   *html;
     int     vw;
     int     vh;
     int     w, h, sx, sy;
@@ -188,6 +190,7 @@ typedef struct {
     int              favicon_w, favicon_h, favicon_stride;
     int              dump_tab;
     gboolean         inspect;
+    gboolean         history_clear;
     GPtrArray       *print_pages;
     ns_print_setup   print_setup;
     double           print_scale;
@@ -1142,6 +1145,7 @@ static void
 req_free(Req *req)
 {
     g_free(req->url);
+    g_free(req->html);
     g_free(req->key);
     g_free(req->code);
     g_free(req->query);
@@ -1181,6 +1185,10 @@ pv_open(NsProcView *v, const Req *req, int settle, ns_rproc_http_page *pg)
     if (req->reload)
         return ns_rproc_http_reload(v->proc, req->url, req->vw, req->vh,
                                     settle, pg);
+    if (req->html)
+        return ns_rproc_http_open_html(v->proc, req->url, req->html, req->vw,
+                                       req->vh, settle, req->history,
+                                       req->user_activated, pg);
     return ns_rproc_http_open_ex(v->proc, req->url, req->vw, req->vh, settle,
                                  req->history, req->user_activated, pg);
 }
@@ -1325,6 +1333,7 @@ worker_main(gpointer data)
                 res->popup = fr.popup ? TRUE : FALSE;
                 res->webauthn = fr.webauthn ? TRUE : FALSE;
                 res->pointer_lock = fr.pointer_lock ? TRUE : FALSE;
+                res->history_clear = fr.history_clear ? TRUE : FALSE;
                 res->session_gen = fr.session_gen;
                 if (fr.clipboard && v->proc)
                     res->clipboard = ns_rproc_http_clipboard(v->proc);
@@ -1361,6 +1370,7 @@ worker_main(gpointer data)
                 res->popup = tick.popup ? TRUE : FALSE;
                 res->webauthn = tick.webauthn ? TRUE : FALSE;
                 res->pointer_lock = tick.pointer_lock ? TRUE : FALSE;
+                res->history_clear = tick.history_clear ? TRUE : FALSE;
                 res->session_gen = tick.session_gen;
                 ns_rproc_http_tick_clear(&tick);
             }
@@ -2918,6 +2928,15 @@ drop_stale_requests(NsProcView *v)
     g_async_queue_unlock(v->queue);
 }
 
+static gboolean
+pv_url_is_history(const char *url)
+{
+    if (!url || !g_str_has_prefix(url, "about:history"))
+        return FALSE;
+    char c = url[strlen("about:history")];
+    return c == '\0' || c == '?' || c == '#';
+}
+
 static void
 do_load_full(NsProcView *v, const char *url, gboolean record,
              gboolean history, gboolean user_activated, gboolean reload)
@@ -2993,6 +3012,8 @@ do_load_full(NsProcView *v, const char *url, gboolean record,
     req->type = REQ_LOAD;
     req->seq = seq;
     req->url = g_strdup(url);
+    if (pv_url_is_history(url))
+        req->html = ns_history_html_page();
     req->vw = v->last_vp_w;
     req->vh = v->last_vp_h;
     req->dpr = v->last_vp_dpr;
@@ -3613,6 +3634,9 @@ on_result(gpointer data)
 {
     Res *res = data;
     NsProcView *v = res->view;
+
+    if (res->history_clear && !v->closed)
+        post_emit(v, NS_PROC_EVT_HISTORY_CLEAR, NULL);
 
     if (res->type == RES_EVAL && res->remote_cb) {
         res->remote_cb(v->closed ? NULL : res->href, res->remote_ud);

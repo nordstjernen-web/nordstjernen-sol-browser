@@ -54,6 +54,7 @@ typedef struct {
     int                  popup;
     int                  webauthn;
     int                  pointer_lock;
+    int                  history_clear;
     unsigned long        session_gen;
     char                *tiles;
 } ns_rproc_http_frame;
@@ -79,6 +80,7 @@ typedef struct {
     int   popup;
     int   webauthn;
     int   pointer_lock;
+    int   history_clear;
     unsigned long session_gen;
 } ns_rproc_http_tick;
 
@@ -112,6 +114,10 @@ int  ns_rproc_http_open_ex(ns_rproc_http *r, const char *url,
                            int viewport_width, int viewport_height,
                            int settle_ms, int history, int user_activated,
                            ns_rproc_http_page *out);
+int  ns_rproc_http_open_html(ns_rproc_http *r, const char *url,
+                             const char *html, int viewport_width,
+                             int viewport_height, int settle_ms, int history,
+                             int user_activated, ns_rproc_http_page *out);
 int  ns_rproc_http_reload(ns_rproc_http *r, const char *url,
                           int viewport_width, int viewport_height,
                           int settle_ms, ns_rproc_http_page *out);
