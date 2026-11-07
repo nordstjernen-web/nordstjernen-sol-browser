@@ -436,7 +436,11 @@ install_chrome_css(void)
         "  color: #ff8a8a;"
         "}"
         ".ns-toolbar entry.ns-address > text > placeholder {"
-        "  color: alpha(currentColor, 0.62);"
+        "  opacity: 1;"
+        "  color: #5f6673;"
+        "}"
+        "window.ns-dark .ns-toolbar entry.ns-address > text > placeholder {"
+        "  color: #9aa3b3;"
         "}"
         ".ns-toolbar entry.ns-address > text {"
         "  min-height: 0;"
@@ -760,9 +764,11 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
         chip = ns_i18n("Not secure");
         break;
     case NS_SEC_PLAIN:
-        icon_name = "nordstjernen-lock-open-symbolic";
+        icon_name = "nordstjernen-warning-symbolic";
         label = ns_i18n("Not secure: the connection is not encrypted");
-        if (!url_is_loopback(url))
+        if (url_is_loopback(url))
+            icon_name = NULL;
+        else
             chip = ns_i18n("Not secure");
         break;
     case NS_SEC_DANGEROUS:
@@ -1664,7 +1670,7 @@ refresh_tab_icon(GtkWidget *page, NsProcView *v)
     GdkPaintable *fav = ns_proc_view_favicon(v);
     gboolean internal = url && g_str_has_prefix(url, "about:") &&
                         !g_str_equal(url, "about:blank");
-    if (fav && !(url && g_str_equal(url, "about:start")))
+    if (fav)
         gtk_image_set_from_paintable(GTK_IMAGE(icon), fav);
     else if (internal)
         ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen-symbolic");

@@ -3404,7 +3404,7 @@ about_security_html(void)
     const ns_config *cfg = ns_config_get();
     GString *s = g_string_new("<div class=\"diag\">");
 
-    g_string_append(s, "<h3>Process sandbox</h3>");
+
 #if defined(__linux__)
     if (st.landlock_abi > 0) {
         char *abi = g_strdup_printf("Supported (ABI v%d)", st.landlock_abi);
@@ -3442,12 +3442,10 @@ about_security_html(void)
                st.no_new_privs ? "Set" : "Not set");
 #elif defined(__APPLE__)
     if (st.sandbox_disabled)
-        diag_state(s, "Filesystem sandbox (Seatbelt)", FALSE,
-                   "Disabled by NS_NO_SANDBOX");
+        diag_state(s, "Page sandbox", FALSE, "Off (NS_NO_SANDBOX)");
     else
-        diag_state(s, "Filesystem sandbox (Seatbelt)", st.seatbelt_enforced,
-                   st.seatbelt_enforced ? "Write-confined"
-                                        : "Not enforced in this process");
+        diag_state(s, "Page sandbox", st.seatbelt_enforced,
+                   st.seatbelt_enforced ? "On" : "Off");
 #elif defined(G_OS_WIN32)
     diag_state(s, "Process mitigations", st.win32_mitigations,
                st.win32_mitigations
@@ -3459,8 +3457,8 @@ about_security_html(void)
 #endif
 #if defined(__linux__) || defined(__APPLE__)
     gboolean root = geteuid() == 0 || getuid() == 0;
-    diag_state(s, "Running as root", !root,
-               root ? "Yes (NS_ALLOW_ROOT)" : "No");
+    diag_state(s, "Administrator rights", !root,
+               root ? "In use (NS_ALLOW_ROOT)" : "Not used");
 #endif
 #ifdef __GLIBC__
     diag_state(s, "Hardened allocator", st.allocator_hardened,
@@ -3480,11 +3478,11 @@ about_security_html(void)
         "<div class=\"drow\"><span class=\"dk\">JavaScript</span>"
         "<span class=\"dv plain\">%s</span></div>", js_on ? "On" : "Off");
     gboolean gpc = cfg && cfg->global_privacy_control;
-    diag_state(s, "Global Privacy Control", gpc, gpc ? "Sent" : "Off");
+    diag_state(s, "Send Global Privacy Control", gpc, gpc ? "On" : "Off");
     gboolean dnt = cfg && cfg->do_not_track;
-    diag_state(s, "Do Not Track", dnt, dnt ? "Sent" : "Off");
+    diag_state(s, "Send Do Not Track", dnt, dnt ? "On" : "Off");
     gboolean strip = cfg && cfg->strip_tracking_params;
-    diag_state(s, "Tracking parameter removal", strip, strip ? "On" : "Off");
+    diag_state(s, "Strip tracking parameters", strip, strip ? "On" : "Off");
     diag_state(s, "Telemetry", TRUE, "None");
 
     g_string_append(s, "</div>");
@@ -3985,6 +3983,9 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         "line-height:1.25}"
         "p.summary{margin:0 0 20px;color:var(--muted);font-size:15.5px}"
         ".actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}"
+        ".host{margin:0 0 22px;padding:10px 14px;border-radius:12px;"
+        "background:var(--field);font-family:var(--mono);font-size:13px;"
+        "font-weight:600;overflow-wrap:anywhere}"
         ".tips{margin-top:26px;padding-top:20px;"
         "border-top:1px solid var(--line);"
         "color:var(--muted);font-size:13.5px}"
@@ -4005,6 +4006,15 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         "<p class=\"summary\">");
     g_string_append(out, esc_summary);
     g_string_append(out, "</p>");
+    char *host = url && *url && !is_file_url ? ns_url_host_from(url) : NULL;
+    if (host && *host) {
+        char *esc_host = ns_html_escape_text(host);
+        g_string_append(out, "<p class=\"host\">");
+        g_string_append(out, esc_host);
+        g_string_append(out, "</p>");
+        g_free(esc_host);
+    }
+    g_free(host);
     g_string_append(out, "<div class=\"actions\">");
     if (can_retry) {
         g_string_append(out, "<a class=\"btn primary\" href=\"");
@@ -4014,7 +4024,7 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
     g_string_append(out,
         "<button class=\"btn\" "
         "onclick=\"history.back()\">Go back</button>"
-        "<a class=\"btn\" href=\"about:start\">New Tab</a>"
+        "<a class=\"btn\" href=\"about:start\">New tab</a>"
         "</div>"
         "<div class=\"tips\">"
         "<strong>What to try</strong>"
@@ -4027,8 +4037,8 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
     } else {
         g_string_append(out,
             "<li>Double-check the address bar for typos.</li>"
-            "<li>Make sure your internet connection is working.</li>"
-            "<li>Reload the page in a moment.</li>");
+            "<li>Make sure your internet connection is working.</li>");
+
     }
     g_string_append(out, "</ul>");
     g_string_append(out, "<details><summary>Details</summary>"
@@ -4975,7 +4985,7 @@ static const char k_about_start_template[] =
     "<meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "<meta name=\"color-scheme\" content=\"light dark\">"
-    "<title>New Tab</title>"
+    "<title>New Tab</title>" NS_ABOUT_ICON_START
     "<style>\n" NS_ABOUT_BASE_CSS
     "html,body{height:100%}\n"
     ".ntp{max-width:720px;min-height:100vh;margin:0 auto;"
@@ -4985,8 +4995,10 @@ static const char k_about_start_template[] =
     "gap:12px;margin-bottom:32px}\n"
     ".mark-img{display:block;width:56px;height:56px;border-radius:15px;"
     "box-shadow:0 8px 22px rgba(20,40,110,.24)}\n"
-    ".brand h1{margin:0;font-size:26px;font-weight:700;"
-    "letter-spacing:-.02em;line-height:1.15;text-align:center}\n"
+    ".brand h1{margin:0;font-size:20px;font-weight:600;"
+    "letter-spacing:-.01em;line-height:1.2;text-align:center}\n"
+    "@media (prefers-color-scheme:dark){.mark-img{box-shadow:"
+    "0 0 0 1px rgba(255,255,255,.1),0 8px 24px rgba(0,0,0,.5)}}\n"
 
     ".search{display:flex;align-items:center;gap:12px;width:100%;"
     "height:58px;padding:0 7px 0 22px;border-radius:999px;"
@@ -5028,8 +5040,7 @@ static const char k_about_start_template[] =
     ".links a:hover{background:var(--field);color:var(--text);"
     "text-decoration:none}\n"
     ".links svg{width:16px;height:16px;color:var(--accent)}\n"
-    ".foot{margin-top:22px;font-size:12.5px}\n"
-    ".foot a{color:var(--muted);margin:0 8px}\n"
+
 
 
     "@media (max-width:560px){.ntp{padding-top:7vh}"
@@ -5070,14 +5081,12 @@ static const char k_about_start_template[] =
     "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/><path d=\"M8 7.25v3.5\"/>"
     "<circle cx=\"8\" cy=\"5.1\" r=\".4\" fill=\"currentColor\"/>"
     "</svg>About</a>"
-    "<a href=\"https://nordstjernen.org\">"
+    "<a href=\"https://nordstjernen.org/privacy\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
-    " stroke=\"currentColor\" stroke-width=\"1.5\"><circle cx=\"8\" cy=\"8\""
-    " r=\"5.75\"/><ellipse cx=\"8\" cy=\"8\" rx=\"2.4\" ry=\"5.75\"/>"
-    "<path d=\"M2.5 8h11\"/></svg>nordstjernen.org</a>"
+    " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linejoin=\"round\">"
+    "<path d=\"M8 1.75 13.25 3.75v4c0 3.25-2.25 5.5-5.25 6.5-3-1-5.25-3.25"
+    "-5.25-6.5v-4z\"/></svg>Privacy</a>"
     "</nav>"
-    "<p class=\"foot\"><a href=\"about:license\">License</a>"
-    "<a href=\"https://nordstjernen.org/privacy\">Privacy</a></p>"
     "</main>"
     "<script>\n"
     "var searchUrl='__ND_SEARCH_URL__';\n"
@@ -5120,6 +5129,8 @@ static const char k_about_nordstjernen_template[] =
     ".head{display:flex;align-items:center;gap:18px;margin:0 4px 26px}\n"
     ".mark-img{display:block;width:64px;height:64px;border-radius:17px;"
     "box-shadow:0 8px 24px rgba(20,40,110,.25)}\n"
+    "@media (prefers-color-scheme:dark){.mark-img{box-shadow:"
+    "0 0 0 1px rgba(255,255,255,.1),0 8px 24px rgba(0,0,0,.5)}}\n"
     ".head h1{margin:0;font-size:30px;font-weight:700;letter-spacing:-.02em;"
     "line-height:1.15}\n"
     ".head p{margin:2px 0 0;color:var(--muted)}\n"
@@ -5136,12 +5147,13 @@ static const char k_about_nordstjernen_template[] =
     ".drow{display:flex;justify-content:space-between;gap:20px;"
     "padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px}\n"
     ".drow:last-child{border-bottom:0}\n"
-    ".dk{color:var(--muted);flex:0 0 auto}\n"
+    ".dk{color:var(--text);flex:0 0 auto}\n"
     ".dv{color:var(--text);text-align:right;word-break:break-word;"
     "font-size:13px;font-variant-numeric:tabular-nums}\n"
     ".dv.on,.dv.off{font-family:var(--font);font-weight:600;font-size:12px;"
     "padding:1px 10px;border-radius:999px}\n"
     ".dv.on{color:var(--ok);background:rgba(19,128,74,.1)}\n"
+    ".dv.on::before{content:\"\\2713\\00a0\"}\n"
     ".dv.off{color:var(--muted);background:var(--field)}\n"
     ".dv.plain{font-weight:600;font-size:12px;padding:1px 10px;"
     "border-radius:999px;color:var(--muted);background:var(--field)}\n"
@@ -5217,7 +5229,7 @@ static const char k_about_settings_html[] =
 "text-decoration:none}\n"
 ".side a.on{background:var(--accent-soft);color:var(--accent)}\n"
 ".side svg{color:currentColor}\n"
-"main{flex:1 1 auto;min-width:0}\n"
+"main{flex:1 1 auto;min-width:0;padding-top:8px}\n"
 "section{margin:0 0 26px}\n"
 ".card{padding:6px 20px}\n"
 ".row{display:flex;align-items:center;justify-content:space-between;"

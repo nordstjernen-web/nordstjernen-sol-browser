@@ -48,13 +48,13 @@
     "padding:0 14px;border-radius:999px;background:var(--field);" \
     "color:var(--muted);font-size:13px;font-weight:600}\n" \
     ".crumb:hover{color:var(--text);text-decoration:none}\n" \
-    "details > summary{display:inline-flex;align-items:center;gap:6px;" \
-    "min-height:32px;padding:0 10px 0 6px;margin-left:-6px;" \
+    "details > summary{display:inline-flex;align-items:center;gap:8px;" \
+    "min-height:32px;padding:0 10px 0 0;" \
     "border-radius:999px;cursor:pointer;color:var(--text);" \
     "font-size:13.5px;font-weight:600}\n" \
     "details > summary:hover{background:var(--field)}\n" \
     "details > summary::before{content:\"\";width:7px;height:7px;" \
-    "margin:0 4px 0 6px;border-right:1.6px solid currentColor;" \
+    "margin:0 2px 0 1px;border-right:1.6px solid currentColor;" \
     "border-bottom:1.6px solid currentColor;transform:rotate(-45deg)}\n" \
     "details[open] > summary::before{transform:rotate(45deg)}\n"
 
@@ -84,6 +84,8 @@
 #define NS_ABOUT_ICON_BLUE "%234a86f0"
 #define NS_ABOUT_ICON_HISTORY NS_ABOUT_ICON_LINK(NS_ABOUT_ICON_BLUE, \
     "%3Ccircle cx='8' cy='8' r='5.75'/%3E%3Cpath d='M8 4.75V8l2.25 1.5'/%3E")
+#define NS_ABOUT_ICON_START NS_ABOUT_ICON_LINK(NS_ABOUT_ICON_BLUE, \
+    "%3Cpath d='M4 13V3l8 10V3'/%3E")
 #define NS_ABOUT_ICON_SETTINGS NS_ABOUT_ICON_LINK(NS_ABOUT_ICON_BLUE, \
     "%3Cpath d='M2.75 4.5h6.5M12.25 4.5h1M2.75 11.5h1M6.75 11.5h6.5'/%3E" \
     "%3Ccircle cx='10.75' cy='4.5' r='1.5'/%3E" \

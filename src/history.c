@@ -368,6 +368,7 @@ ns_history_top_sites_html(int max_sites)
     GString *s = g_string_new(NULL);
     GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, NULL);
+    guint tints[64];
     int count = 0;
     g_mutex_lock(&g_history_mutex);
     sqlite3_stmt *st = NULL;
@@ -385,6 +386,14 @@ ns_history_top_sites_html(int max_sites)
             char *host = history_host(url);
             char initial[8];
             guint tint = history_initial(host, initial);
+            for (int tries = 0; tries < 8; tries++) {
+                gboolean clash =
+                    (count % 4 > 0 && tints[count - 1] == tint) ||
+                    (count >= 4 && tints[count - 4] == tint);
+                if (!clash)
+                    break;
+                tint = (tint + 1) % 8;
+            }
             char *site = history_site(host);
             if (g_hash_table_contains(seen, site)) {
                 g_free(site);
@@ -407,6 +416,8 @@ ns_history_top_sites_html(int max_sites)
                 "<span class=\"av h%u\">%s</span>"
                 "<span class=\"nm\">%s</span></a>",
                 e_url, e_title, tint, e_init, e_site);
+            if (count < (int)G_N_ELEMENTS(tints))
+                tints[count] = tint;
             count++;
             g_free(e_site);
             g_free(e_url);
