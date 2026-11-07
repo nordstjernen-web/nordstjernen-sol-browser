@@ -428,8 +428,15 @@ install_chrome_css(void)
         "  background-color: alpha(currentColor, 0.14);"
         "}"
         ".ns-toolbar button.ns-security-chip.ns-danger {"
-        "  background-color: alpha(@error_color, 0.14);"
-        "  color: @error_color;"
+        "  background-color: alpha(#e5484d, 0.12);"
+        "  color: #b42318;"
+        "}"
+        "window.ns-dark .ns-toolbar button.ns-security-chip.ns-danger {"
+        "  background-color: alpha(#ff5a5a, 0.16);"
+        "  color: #ff8a8a;"
+        "}"
+        ".ns-toolbar entry.ns-address > text > placeholder {"
+        "  color: alpha(currentColor, 0.62);"
         "}"
         ".ns-toolbar entry.ns-address > text {"
         "  min-height: 0;"
@@ -703,6 +710,19 @@ set_address_text(ProcWindow *pw, const char *url)
     g_free(shown);
 }
 
+static gboolean
+url_is_loopback(const char *url)
+{
+    char *host = url ? ns_proc_url_host(url) : NULL;
+    gboolean loopback = host &&
+        (g_ascii_strcasecmp(host, "localhost") == 0 ||
+         g_str_has_suffix(host, ".localhost") ||
+         g_str_has_prefix(host, "127.") || g_str_equal(host, "[::1]") ||
+         g_str_equal(host, "::1"));
+    g_free(host);
+    return loopback;
+}
+
 static void
 set_security_chip(ProcWindow *pw, const char *icon, const char *text,
                   gboolean danger, const char *tooltip)
@@ -742,7 +762,8 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
     case NS_SEC_PLAIN:
         icon_name = "nordstjernen-lock-open-symbolic";
         label = ns_i18n("Not secure: the connection is not encrypted");
-        chip = ns_i18n("Not secure");
+        if (!url_is_loopback(url))
+            chip = ns_i18n("Not secure");
         break;
     case NS_SEC_DANGEROUS:
         icon_name = "nordstjernen-warning-symbolic";
@@ -758,7 +779,7 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
         set_security_chip(pw, NULL, NULL, FALSE, NULL);
         gboolean internal = url && g_str_has_prefix(url, "about:");
         gboolean local = url && g_str_has_prefix(url, "file:");
-        const char *page_icon = internal ? "nordstjernen"
+        const char *page_icon = internal ? "nordstjernen-symbolic"
                               : local ? "nordstjernen-page-symbolic"
                                       : "nordstjernen-globe-symbolic";
         ns_icon_entry_set(entry, GTK_ENTRY_ICON_PRIMARY, page_icon);
@@ -1569,6 +1590,70 @@ pw_leave_element_fullscreen(ProcWindow *pw)
     if (v) ns_proc_view_exit_fullscreen(v);
 }
 
+#define NS_TAB_MAX_WIDTH 220
+
+static void
+tabbox_measure(GtkWidget *box, GtkOrientation orientation, int for_size,
+               int *minimum, int *natural, int *minimum_baseline,
+               int *natural_baseline)
+{
+    (void)for_size;
+    (void)minimum_baseline;
+    (void)natural_baseline;
+    int count = 0, widest_min = 0;
+    *minimum = *natural = 0;
+    for (GtkWidget *c = gtk_widget_get_first_child(box); c;
+         c = gtk_widget_get_next_sibling(c)) {
+        if (!gtk_widget_should_layout(c))
+            continue;
+        int min = 0, nat = 0;
+        gtk_widget_measure(c, orientation, -1, &min, &nat, NULL, NULL);
+        if (orientation == GTK_ORIENTATION_VERTICAL) {
+            *minimum = MAX(*minimum, min);
+            *natural = MAX(*natural, nat);
+        } else {
+            widest_min = MAX(widest_min, min);
+        }
+        count++;
+    }
+    if (orientation == GTK_ORIENTATION_HORIZONTAL) {
+        *minimum = count * widest_min;
+        *natural = count * MAX(widest_min, NS_TAB_MAX_WIDTH);
+    }
+}
+
+static void
+tabbox_allocate(GtkWidget *box, int width, int height, int baseline)
+{
+    (void)baseline;
+    int count = 0, widest_min = 0;
+    for (GtkWidget *c = gtk_widget_get_first_child(box); c;
+         c = gtk_widget_get_next_sibling(c)) {
+        if (!gtk_widget_should_layout(c))
+            continue;
+        int min = 0;
+        gtk_widget_measure(c, GTK_ORIENTATION_HORIZONTAL, -1, &min, NULL,
+                           NULL, NULL);
+        widest_min = MAX(widest_min, min);
+        count++;
+    }
+    if (count == 0)
+        return;
+    int each = CLAMP(width / count, widest_min,
+                     MAX(widest_min, NS_TAB_MAX_WIDTH));
+    gboolean rtl = gtk_widget_get_direction(box) == GTK_TEXT_DIR_RTL;
+    int x = 0;
+    for (GtkWidget *c = gtk_widget_get_first_child(box); c;
+         c = gtk_widget_get_next_sibling(c)) {
+        if (!gtk_widget_should_layout(c))
+            continue;
+        int cx = rtl ? width - x - each : x;
+        gtk_widget_size_allocate(c, &(GtkAllocation){ cx, 0, each, height },
+                                 -1);
+        x += each;
+    }
+}
+
 static void
 refresh_tab_icon(GtkWidget *page, NsProcView *v)
 {
@@ -1582,7 +1667,7 @@ refresh_tab_icon(GtkWidget *page, NsProcView *v)
     if (fav && !(url && g_str_equal(url, "about:start")))
         gtk_image_set_from_paintable(GTK_IMAGE(icon), fav);
     else if (internal)
-        ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen");
+        ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen-symbolic");
     else
         ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen-page-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
@@ -1763,7 +1848,7 @@ update_active_tab(ProcWindow *pw)
     int idx = gtk_notebook_get_current_page(GTK_NOTEBOOK(pw->notebook));
     if (idx >= 0)
         current = gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);
-    gboolean closable =
+    gboolean several =
         gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook)) > 1;
     gboolean after_active = TRUE;
     for (GtkWidget *w = gtk_widget_get_first_child(pw->tabbox);
@@ -1776,7 +1861,7 @@ update_active_tab(ProcWindow *pw)
         after_active = page == current;
         GtkWidget *close = g_object_get_data(G_OBJECT(w), "ns-tab-close");
         if (close)
-            gtk_widget_set_visible(close, closable);
+            gtk_widget_set_visible(close, several || page == current);
     }
 }
 
@@ -1906,7 +1991,7 @@ proc_window_add_tab_core(ProcWindow *pw, const char *url,
     GtkWidget *label = gtk_label_new(
         private_mode ? ns_i18n("Private tab") : ns_i18n("New Tab"));
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
-    gtk_label_set_width_chars(GTK_LABEL(label), 6);
+    gtk_label_set_width_chars(GTK_LABEL(label), 3);
     gtk_label_set_max_width_chars(GTK_LABEL(label), 24);
     gtk_widget_set_hexpand(label, TRUE);
     gtk_label_set_xalign(GTK_LABEL(label), 0.0);
@@ -1944,6 +2029,8 @@ proc_window_add_tab_core(ProcWindow *pw, const char *url,
     if (foreground)
         gtk_notebook_set_current_page(GTK_NOTEBOOK(pw->notebook), idx);
     update_active_tab(pw);
+    if (foreground && !restore && url && g_str_equal(url, "about:start"))
+        gtk_widget_grab_focus(pw->address);
 
     if (restore) {
         restore_session_tab(v, restore);
@@ -3308,7 +3395,9 @@ proc_window_new(GtkApplication *app)
     pw->tabstrip = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     gtk_widget_add_css_class(pw->tabstrip, "ns-tabstrip");
     pw->tabbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_box_set_homogeneous(GTK_BOX(pw->tabbox), TRUE);
+    gtk_widget_set_layout_manager(
+        pw->tabbox, gtk_custom_layout_new(NULL, tabbox_measure,
+                                          tabbox_allocate));
     gtk_box_append(GTK_BOX(pw->tabstrip), pw->tabbox);
     pw->newtab_btn = ns_icon_button_new("nordstjernen-new-tab-symbolic");
     gtk_button_set_has_frame(GTK_BUTTON(pw->newtab_btn), FALSE);

@@ -171,7 +171,7 @@ ns_safebrowsing_interstitial(const char *url, const char *host)
     char *html = g_strconcat(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"color-scheme\" content=\"light dark\">"
-        "<title>Security warning</title>" NS_ABOUT_ICON_DANGER
+        "<title>Dangerous site</title>" NS_ABOUT_ICON_DANGER
         "<style>" NS_ABOUT_BASE_CSS
         "html,body{background:#a3201a}"
         "body{display:flex;align-items:center;justify-content:center;"
@@ -205,10 +205,10 @@ ns_safebrowsing_interstitial(const char *url, const char *host)
         "stroke-linejoin=\"round\"><path d=\"M8 1.75 13.25 3.75v4c0 "
         "3.25-2.25 5.5-5.25 6.5-3-1-5.25-3.25-5.25-6.5v-4z\"/>"
         "<path d=\"M8 5.25v3.25M8 10.6v.1\"/></svg></div>"
-        "<h1>Deceptive site ahead</h1>"
-        "<p class=\"summary\">This site is on your list of known phishing "
-        "and malware sites. It may try to steal passwords or payment details, "
-        "or install harmful software.</p>"
+        "<h1>Dangerous site ahead</h1>"
+        "<p class=\"summary\">This site is on Nordstjernen\xe2\x80\x99s list "
+        "of known phishing and malware sites. It may try to steal passwords or "
+        "payment details, or install harmful software.</p>"
         "<p class=\"host\">", esc_host, "</p>"
         "<div class=\"actions\">"
         "<a class=\"btn primary\" href=\"about:start\">Back to safety</a>"

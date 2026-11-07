@@ -3470,11 +3470,15 @@ about_security_html(void)
     diag_state(s, "Memory-safe message parser", TRUE, "On");
 #endif
 
-    g_string_append(s, "<h3>Privacy</h3>");
+    g_string_append(s, "</div></section>"
+                       "<h2 class=\"group-label\">Privacy</h2>"
+                       "<section class=\"card\"><div class=\"diag\">");
     gboolean https_first = cfg && cfg->https_first;
     diag_state(s, "HTTPS-First", https_first, https_first ? "On" : "Off");
     gboolean js_on = !cfg || cfg->javascript_enabled;
-    diag_kv(s, "JavaScript", js_on ? "On" : "Off");
+    g_string_append_printf(s,
+        "<div class=\"drow\"><span class=\"dk\">JavaScript</span>"
+        "<span class=\"dv plain\">%s</span></div>", js_on ? "On" : "Off");
     gboolean gpc = cfg && cfg->global_privacy_control;
     diag_state(s, "Global Privacy Control", gpc, gpc ? "Sent" : "Off");
     gboolean dnt = cfg && cfg->do_not_track;
@@ -3517,8 +3521,9 @@ about_diagnostics_html(void)
     char *os = g_get_os_info(G_OS_INFO_KEY_PRETTY_NAME);
     if (!os) os = g_get_os_info(G_OS_INFO_KEY_NAME);
     diag_kv(s, "Operating system", os ? os : platform);
+    if (os && g_strcmp0(os, platform) != 0)
+        diag_kv(s, "Platform", platform);
     g_free(os);
-    diag_kv(s, "Platform", platform);
     diag_kv(s, "Architecture", arch);
     char *cores = g_strdup_printf("%u", g_get_num_processors());
     diag_kv(s, "Logical CPUs", cores);
@@ -4023,7 +4028,7 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         g_string_append(out,
             "<li>Double-check the address bar for typos.</li>"
             "<li>Make sure your internet connection is working.</li>"
-            "<li>Reload the page in a moment. Short outages happen.</li>");
+            "<li>Reload the page in a moment.</li>");
     }
     g_string_append(out, "</ul>");
     g_string_append(out, "<details><summary>Details</summary>"
@@ -4448,7 +4453,7 @@ dir_listing_begin(const char *title, const char *parent_uri)
         "table{width:100%;border-collapse:collapse;font-size:14px}"
         "th{padding:12px 12px 10px;text-align:left;font-size:12.5px;"
         "font-weight:600;color:var(--muted);border-bottom:1px solid var(--line)}"
-        "td{height:38px;padding:0 12px;border-bottom:1px solid var(--line)}"
+        "td{height:32px;padding:0 12px;border-bottom:1px solid var(--line)}"
         "tbody tr:last-child td{border-bottom:0}"
         "td.name{width:100%;overflow-wrap:anywhere}"
         "td.name a{display:flex;align-items:center;gap:10px;"
@@ -4456,7 +4461,7 @@ dir_listing_begin(const char *title, const char *parent_uri)
         "td.name a:hover{color:var(--accent);text-decoration:none}"
         ".size,.date{white-space:nowrap;color:var(--muted);"
         "font-variant-numeric:tabular-nums}"
-        "th.size,td.size{text-align:right}"
+        "th.size,td.size,th.date,td.date{text-align:right}"
         ".ic{flex:0 0 auto;display:flex;color:var(--faint)}"
         ".dir .ic,.up .ic{color:var(--accent)}"
         "</style></head><body><main class=\"wrap\"><h1>");
@@ -4973,8 +4978,9 @@ static const char k_about_start_template[] =
     "<title>New Tab</title>"
     "<style>\n" NS_ABOUT_BASE_CSS
     "html,body{height:100%}\n"
-    ".ntp{max-width:720px;margin:0 auto;padding:12vh 24px 64px;"
-    "display:flex;flex-direction:column;align-items:center}\n"
+    ".ntp{max-width:720px;min-height:100vh;margin:0 auto;"
+    "padding:48px 24px 10vh;display:flex;flex-direction:column;"
+    "align-items:center;justify-content:center}\n"
     ".brand{display:flex;flex-direction:column;align-items:center;"
     "gap:12px;margin-bottom:32px}\n"
     ".mark-img{display:block;width:56px;height:56px;border-radius:15px;"
@@ -5002,7 +5008,7 @@ static const char k_about_start_template[] =
     "font-size:13px;text-align:center}\n"
     ".hint kbd{padding:1px 6px;border:1px solid var(--line);"
     "border-radius:5px;font:inherit;font-size:12px;color:var(--muted)}\n"
-    ".sites{display:grid;grid-template-columns:repeat(4,112px);gap:6px 14px;"
+    ".sites{display:grid;grid-template-columns:repeat(4,124px);gap:6px 10px;"
     "justify-content:center;margin-top:22px}\n"
     ".site{display:flex;flex-direction:column;align-items:center;gap:9px;"
     "min-width:0;padding:14px 6px 10px;border-radius:16px;color:var(--text)}\n"
@@ -5110,7 +5116,7 @@ static const char k_about_nordstjernen_template[] =
     "<meta name=\"color-scheme\" content=\"light dark\">"
     "<title>About Nordstjernen</title>" NS_ABOUT_ICON_INFO
     "<style>\n" NS_ABOUT_BASE_CSS
-    ".wrap{max-width:760px;margin:0 auto;padding:36px 24px 48px}\n"
+    ".wrap{max-width:860px;margin:0 auto;padding:36px 24px 48px}\n"
     ".head{display:flex;align-items:center;gap:18px;margin:0 4px 26px}\n"
     ".mark-img{display:block;width:64px;height:64px;border-radius:17px;"
     "box-shadow:0 8px 24px rgba(20,40,110,.25)}\n"
@@ -5136,7 +5142,9 @@ static const char k_about_nordstjernen_template[] =
     ".dv.on,.dv.off{font-family:var(--font);font-weight:600;font-size:12px;"
     "padding:1px 10px;border-radius:999px}\n"
     ".dv.on{color:var(--ok);background:rgba(19,128,74,.1)}\n"
-    ".dv.off{color:var(--faint);background:var(--field)}\n"
+    ".dv.off{color:var(--muted);background:var(--field)}\n"
+    ".dv.plain{font-weight:600;font-size:12px;padding:1px 10px;"
+    "border-radius:999px;color:var(--muted);background:var(--field)}\n"
     ".foot{display:flex;flex-wrap:wrap;justify-content:space-between;"
     "gap:12px;margin-top:26px;color:var(--faint);font-size:13px}\n"
     ".foot a{color:var(--muted);margin-left:14px}\n"

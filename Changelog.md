@@ -23,10 +23,12 @@ Changelog:
   pages), and the New Tab address bar is empty. On macOS the window buttons
   sit on the left as traffic lights at native spacing, page scrollbars
   overlay the page and fade when idle, and the tab strip carries no title;
-  the toolbar's Nordstjernen button moved into the menu. Tabs share the
-  strip at equal widths with separators. The address bar shows a "Not
+  the toolbar's Nordstjernen button moved into the menu. Tabs are 220 px
+  wide and shrink evenly, with separators, and the active tab keeps its
+  close button when it is the only one. A new tab focuses the address bar. The address bar shows a "Not
   secure" chip on plain HTTP and invalid certificates and a red
-  "Dangerous" chip on a Safe Browsing block, and both search fields name
+  "Dangerous" chip on a Safe Browsing block (loopback addresses get no
+  chip), built-in pages use a monochrome star glyph, and both search fields name
   the search engine. The
   file:// folder listing and the Safe Browsing warning use the shared page
   style with a dark variant. New Tab lists the most visited sites (not in
