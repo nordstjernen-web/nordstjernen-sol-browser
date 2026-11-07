@@ -12,7 +12,9 @@ Changelog:
   switched off with Settings → Privacy → "Block dangerous sites". The API key
   is read from `NS_SAFE_BROWSING_API_KEY` at build time, which the release
   workflows take from a repository secret; a build without a key keeps the
-  local blocklist only.
+  local blocklist only. about:nordstjernen gains a Safe Browsing section with
+  the status, each list's size and update times, and the tab's check, lookup
+  and block counts.
 * Forms: a `<select>` styled with its own background or border draws its
   arrow inside its padding box. With an explicit `width` the arrow was
   placed from the start of the text plus the CSS width, so padding and
