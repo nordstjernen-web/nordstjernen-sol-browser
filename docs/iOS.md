@@ -78,8 +78,12 @@ openssl, nghttp2, brotli), sqlite3, uchardet, libpsl and libwebp for iOS —
 This mirrors the Android sysroot exactly, and is produced the same way: the
 [`nordstjernen-dependencies-build`](https://github.com/nordstjernen-web/nordstjernen-dependencies-build)
 repo's `build-ios-deps` workflow cross-compiles the whole stack on a macOS
-runner and publishes it as the rolling `ios-sysroot-latest` release, which
-`fetch-prebuilt-deps.sh` downloads and verifies.
+runner and publishes it as the rolling `ios-sysroot-latest` release (plus an
+immutable per-commit `ios-sysroot-<date>-<sha>` release, pinnable with
+`--tag`), which `fetch-prebuilt-deps.sh` downloads, verifies against
+`SHA256SUMS` and, when the `gh` CLI is installed, against its GitHub
+build-provenance attestation (`NORDSTJERNEN_REQUIRE_ATTESTATION=1` makes that
+mandatory).
 
 ## CI
 

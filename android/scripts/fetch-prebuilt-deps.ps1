@@ -1,4 +1,9 @@
 # Nordstjernen - fetch Android prebuilt dependency sysroots.
+#
+# Verifies each asset against SHA256SUMS and, when the gh CLI is installed,
+# against its GitHub build-provenance attestation (set
+# NORDSTJERNEN_REQUIRE_ATTESTATION=1 to refuse to install without gh).
+# Pass -Tag sysroot-<date>-<sha> (an immutable per-commit release) to pin.
 
 param(
     [string]$Sysroot = "$env:USERPROFILE\.cache\nordstjernen-android-sysroot",
@@ -12,6 +17,22 @@ $ErrorActionPreference = "Stop"
 
 function Write-Step($Message) {
     Write-Host "[deps] $Message"
+}
+
+function Test-BuildProvenance($File) {
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    if (-not $gh) {
+        if ($env:NORDSTJERNEN_REQUIRE_ATTESTATION -and $env:NORDSTJERNEN_REQUIRE_ATTESTATION -ne "0") {
+            throw "gh CLI not found but NORDSTJERNEN_REQUIRE_ATTESTATION is set; install gh to verify $([System.IO.Path]::GetFileName($File))"
+        }
+        Write-Step "gh CLI not found; skipping provenance verification of $([System.IO.Path]::GetFileName($File))"
+        return
+    }
+    & $gh.Source attestation verify $File --repo $Repo | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "provenance attestation check FAILED for $([System.IO.Path]::GetFileName($File)) (repo $Repo); refusing to install"
+    }
+    Write-Step "verified build provenance of $([System.IO.Path]::GetFileName($File))"
 }
 
 function Invoke-GitHubDownload($Url, $OutFile) {
@@ -71,6 +92,7 @@ try {
         if ($actual -ne $expected) {
             throw "checksum mismatch for $asset"
         }
+        Test-BuildProvenance $archive
 
         New-Item -ItemType Directory -Force -Path $unpack | Out-Null
         tar -xzf $archive -C $unpack

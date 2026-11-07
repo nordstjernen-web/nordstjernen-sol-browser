@@ -76,8 +76,10 @@ additionally need a signing identity + provisioning profile.
 
 The **dependency sysroot** (glib/cairo/pango/curl/sqlite/… cross-compiled for
 iOS) is produced and published by the `nordstjernen-dependencies-build` repo's
-`build-ios-deps` workflow (`ios-sysroot-latest` release), mirroring how the
-Android sysroot is produced. Building that sysroot is the bulk of the porting
+`build-ios-deps` workflow (`ios-sysroot-latest` release, plus an immutable
+`ios-sysroot-<date>-<sha>` release per commit; `fetch-prebuilt-deps.sh` verifies
+the checksums and, with `gh` installed, the build-provenance attestation),
+mirroring how the Android sysroot is produced. Building that sysroot is the bulk of the porting
 work; `build-engine.sh` and the app consume it.
 
 ## CI
