@@ -892,17 +892,6 @@ browser_js_log(const char *line, gpointer ud)
 static void browser_js_mutated(gpointer ud) { ns_browser *b = ud; if (b) b->dirty = TRUE; }
 
 static gboolean
-browser_url_is_chrome_page(const char *url)
-{
-    if (!url || g_ascii_strncasecmp(url, "about:", 6) != 0) return FALSE;
-    const char *page = url + 6;
-    gsize len = strcspn(page, "?#");
-    if (len == 5 && g_ascii_strncasecmp(page, "blank", 5) == 0) return FALSE;
-    if (len == 6 && g_ascii_strncasecmp(page, "srcdoc", 6) == 0) return FALSE;
-    return TRUE;
-}
-
-static gboolean
 browser_url_is_privileged_page(const char *url)
 {
     if (!url) return FALSE;
@@ -940,7 +929,7 @@ browser_allows_navigation_from(const char *from, const char *url)
     if (g_ascii_strncasecmp(url, "file:", 5) == 0)
         return from && g_ascii_strncasecmp(from, "file:", 5) == 0;
     if (browser_url_is_privileged_page(url))
-        return browser_url_is_chrome_page(from);
+        return ns_net_url_is_chrome_page(from);
     if (g_str_has_prefix(url, NS_UNSAFE_CONTINUE_SCHEME))
         return browser_url_continues_interstitial(url, from);
     return TRUE;
