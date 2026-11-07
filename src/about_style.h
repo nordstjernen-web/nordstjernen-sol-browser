@@ -9,8 +9,8 @@
     ":root{color-scheme:light dark;--bg:#f5f7fb;--card:#ffffff;" \
     "--text:#14171f;--muted:#596173;--faint:#6f7787;--switch-off:#878fa0;" \
     "--line:rgba(17,24,39,.08);--field:rgba(17,24,39,.05);" \
-    "--accent:#2f6fed;--accent-ink:#ffffff;" \
-    "--accent-soft:rgba(47,111,237,.11);--ok:#13804a;--danger:#c62f3a;" \
+    "--accent:#2f6fed;--accent-ink:#ffffff;--accent-text:#1d4ed8;" \
+    "--accent-soft:rgba(47,111,237,.11);--ok:#0f6b3e;--danger:#c62f3a;" \
     "--shadow:0 1px 2px rgba(16,24,40,.04),0 8px 28px rgba(16,24,40,.07);" \
     "--radius:18px;" \
     "--font:system-ui,-apple-system,\"Segoe UI\",\"Noto Sans\",Cantarell," \
@@ -20,13 +20,14 @@
     "@media (prefers-color-scheme:dark){:root{--bg:#0f1218;--card:#181c24;" \
     "--text:#e8eaf0;--muted:#a4abba;--faint:#808898;--switch-off:#687185;" \
     "--line:rgba(255,255,255,.08);--field:rgba(255,255,255,.06);" \
-    "--accent:#6c9cff;--accent-ink:#0b1020;" \
+    "--accent:#6c9cff;--accent-ink:#0b1020;--accent-text:#8fb3ff;" \
     "--accent-soft:rgba(108,156,255,.16);--ok:#4cc48a;--danger:#ff6b74;" \
     "--shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35)}}\n" \
     "*{box-sizing:border-box}\n" \
     "html,body{margin:0;min-height:100%;background:var(--bg);" \
     "color:var(--text);font-family:var(--font);line-height:1.5}\n" \
     "a{color:var(--accent);text-decoration:none}\n" \
+    "input::placeholder{color:var(--muted);opacity:1}\n" \
     "a:hover{text-decoration:underline}\n" \
     ".card{background:var(--card);border:1px solid var(--line);" \
     "border-radius:var(--radius);box-shadow:var(--shadow)}\n" \
@@ -84,8 +85,12 @@
 #define NS_ABOUT_ICON_BLUE "%234a86f0"
 #define NS_ABOUT_ICON_HISTORY NS_ABOUT_ICON_LINK(NS_ABOUT_ICON_BLUE, \
     "%3Ccircle cx='8' cy='8' r='5.75'/%3E%3Cpath d='M8 4.75V8l2.25 1.5'/%3E")
-#define NS_ABOUT_ICON_START NS_ABOUT_ICON_LINK(NS_ABOUT_ICON_BLUE, \
-    "%3Cpath d='M4 13V3l8 10V3'/%3E")
+#define NS_ABOUT_ICON_START \
+    "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg " \
+    "xmlns='http://www.w3.org/2000/svg' width='32' height='32' " \
+    "viewBox='0 0 16 16'%3E%3Crect x='.5' y='.5' width='15' height='15' " \
+    "rx='4' fill='%232f6fed'/%3E%3Cpath fill='%23fff' d='M4.25 12V4h1.5l4.65 " \
+    "5.6V4h1.35v8h-1.5L5.6 6.4V12z'/%3E%3C/svg%3E\">"
 #define NS_ABOUT_ICON_SETTINGS NS_ABOUT_ICON_LINK(NS_ABOUT_ICON_BLUE, \
     "%3Cpath d='M2.75 4.5h6.5M12.25 4.5h1M2.75 11.5h1M6.75 11.5h6.5'/%3E" \
     "%3Ccircle cx='10.75' cy='4.5' r='1.5'/%3E" \

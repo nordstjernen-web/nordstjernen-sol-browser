@@ -3471,18 +3471,19 @@ about_security_html(void)
     g_string_append(s, "</div></section>"
                        "<h2 class=\"group-label\">Privacy</h2>"
                        "<section class=\"card\"><div class=\"diag\">");
+    gboolean dnt = cfg && cfg->do_not_track;
+    diag_state(s, "Send \xe2\x80\x9c" "Do Not Track\xe2\x80\x9d", dnt,
+               dnt ? "On" : "Off");
+    gboolean gpc = cfg && cfg->global_privacy_control;
+    diag_state(s, "Send Global Privacy Control", gpc, gpc ? "On" : "Off");
+    gboolean strip = cfg && cfg->strip_tracking_params;
+    diag_state(s, "Strip tracking parameters", strip, strip ? "On" : "Off");
     gboolean https_first = cfg && cfg->https_first;
     diag_state(s, "HTTPS-First", https_first, https_first ? "On" : "Off");
     gboolean js_on = !cfg || cfg->javascript_enabled;
     g_string_append_printf(s,
         "<div class=\"drow\"><span class=\"dk\">JavaScript</span>"
         "<span class=\"dv plain\">%s</span></div>", js_on ? "On" : "Off");
-    gboolean gpc = cfg && cfg->global_privacy_control;
-    diag_state(s, "Send Global Privacy Control", gpc, gpc ? "On" : "Off");
-    gboolean dnt = cfg && cfg->do_not_track;
-    diag_state(s, "Send Do Not Track", dnt, dnt ? "On" : "Off");
-    gboolean strip = cfg && cfg->strip_tracking_params;
-    diag_state(s, "Strip tracking parameters", strip, strip ? "On" : "Off");
     diag_state(s, "Telemetry", TRUE, "None");
 
     g_string_append(s, "</div>");
@@ -3745,6 +3746,44 @@ typedef struct ns_error_info {
     const char *summary;
 } ns_error_info;
 
+static char *
+error_host_port(const char *url)
+{
+    GUri *uri = g_uri_parse(url, G_URI_FLAGS_PARSE_RELAXED, NULL);
+    if (!uri)
+        return NULL;
+    const char *host = g_uri_get_host(uri);
+    int port = g_uri_get_port(uri);
+    char *out = NULL;
+    if (host && *host)
+        out = port > 0 ? g_strdup_printf("%s:%d", host, port) : g_strdup(host);
+    g_uri_unref(uri);
+    return out;
+}
+
+static void
+append_error_favicon(GString *out, const char *icon_svg)
+{
+    GString *svg = g_string_new(icon_svg);
+    g_string_replace(svg, "currentColor", "#4a86f0", 0);
+    g_string_replace(svg, "width=\"30\" height=\"30\"",
+                     "width=\"32\" height=\"32\"", 1);
+    g_string_replace(svg, "<svg ",
+                     "<svg xmlns=\"http://www.w3.org/2000/svg\" ", 1);
+    g_string_append(out, "<link rel=\"icon\" href=\"data:image/svg+xml,");
+    for (const char *p = svg->str; *p; p++) {
+        switch (*p) {
+        case '<': g_string_append(out, "%3C"); break;
+        case '>': g_string_append(out, "%3E"); break;
+        case '#': g_string_append(out, "%23"); break;
+        case '"': g_string_append_c(out, '\''); break;
+        default:  g_string_append_c(out, *p); break;
+        }
+    }
+    g_string_append(out, "\">");
+    g_string_free(svg, TRUE);
+}
+
 static const ns_error_info *
 classify_error(long status, const char *transport_error, gboolean is_file_url)
 {
@@ -3970,7 +4009,9 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         "<!doctype html><html><head><meta charset=\"utf-8\">"
         "<title>");
     g_string_append(out, esc_title);
-    g_string_append(out, "</title>" NS_ABOUT_ICON_ERROR
+    g_string_append(out, "</title>");
+    append_error_favicon(out, info->icon);
+    g_string_append(out,
         "<meta name=\"color-scheme\" content=\"light dark\">"
         "<style>" NS_ABOUT_BASE_CSS
         "body{display:flex;align-items:center;justify-content:center;"
@@ -3983,9 +4024,9 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         "line-height:1.25}"
         "p.summary{margin:0 0 20px;color:var(--muted);font-size:15.5px}"
         ".actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}"
-        ".host{margin:0 0 22px;padding:10px 14px;border-radius:12px;"
-        "background:var(--field);font-family:var(--mono);font-size:13px;"
-        "font-weight:600;overflow-wrap:anywhere}"
+        ".host{display:inline-block;margin:0 0 22px;padding:6px 12px;"
+        "border-radius:8px;background:var(--field);font-family:var(--mono);"
+        "font-size:13px;overflow-wrap:anywhere}"
         ".tips{margin-top:26px;padding-top:20px;"
         "border-top:1px solid var(--line);"
         "color:var(--muted);font-size:13.5px}"
@@ -4006,7 +4047,7 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
         "<p class=\"summary\">");
     g_string_append(out, esc_summary);
     g_string_append(out, "</p>");
-    char *host = url && *url && !is_file_url ? ns_url_host_from(url) : NULL;
+    char *host = url && *url && !is_file_url ? error_host_port(url) : NULL;
     if (host && *host) {
         char *esc_host = ns_html_escape_text(host);
         g_string_append(out, "<p class=\"host\">");
@@ -4024,7 +4065,6 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
     g_string_append(out,
         "<button class=\"btn\" "
         "onclick=\"history.back()\">Go back</button>"
-        "<a class=\"btn\" href=\"about:start\">New tab</a>"
         "</div>"
         "<div class=\"tips\">"
         "<strong>What to try</strong>"
@@ -4036,8 +4076,14 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
             "<li>Open the enclosing folder to browse what is there.</li>");
     } else {
         g_string_append(out,
-            "<li>Double-check the address bar for typos.</li>"
-            "<li>Make sure your internet connection is working.</li>");
+            "<li>Double-check the address bar for typos.</li>");
+        if (strcmp(info->icon, ERROR_ICON_OFFLINE) == 0 ||
+            strcmp(info->icon, ERROR_ICON_SEARCH) == 0)
+            g_string_append(out,
+                "<li>Make sure your internet connection is working.</li>");
+        else
+            g_string_append(out,
+                "<li>Check that the server at this address is running.</li>");
 
     }
     g_string_append(out, "</ul>");
@@ -5055,7 +5101,7 @@ static const char k_about_start_template[] =
     "<circle cx=\"7\" cy=\"7\" r=\"4.6\"/><path d=\"M10.4 10.4 14 14\"/></svg>"
     "<input id=\"sq\" name=\"q\" autocomplete=\"off\" dir=\"auto\""
     " aria-label=\"Search the web or enter an address\""
-    " placeholder=\"Search with __ND_SEARCH_NAME__ or enter an address\">"
+    " placeholder=\"Search with __ND_SEARCH_NAME__\">"
     "<button type=\"submit\" aria-label=\"Search\">"
     "<svg width=\"18\" height=\"18\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\""
@@ -5081,11 +5127,6 @@ static const char k_about_start_template[] =
     "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/><path d=\"M8 7.25v3.5\"/>"
     "<circle cx=\"8\" cy=\"5.1\" r=\".4\" fill=\"currentColor\"/>"
     "</svg>About</a>"
-    "<a href=\"https://nordstjernen.org/privacy\">"
-    "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
-    " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linejoin=\"round\">"
-    "<path d=\"M8 1.75 13.25 3.75v4c0 3.25-2.25 5.5-5.25 6.5-3-1-5.25-3.25"
-    "-5.25-6.5v-4z\"/></svg>Privacy</a>"
     "</nav>"
     "</main>"
     "<script>\n"
@@ -5135,7 +5176,7 @@ static const char k_about_nordstjernen_template[] =
     "line-height:1.15}\n"
     ".head p{margin:2px 0 0;color:var(--muted)}\n"
     ".ver{display:inline-block;margin-left:10px;padding:3px 10px;"
-    "border-radius:999px;background:var(--accent-soft);color:var(--accent);"
+    "border-radius:999px;background:var(--accent-soft);color:var(--accent-text);"
     "font-size:13px;font-weight:700;vertical-align:middle;letter-spacing:0}\n"
     ".card{padding:20px;margin-bottom:26px}\n"
     ".card p{margin:0 0 10px;color:var(--muted);font-size:14px}\n"
@@ -5150,13 +5191,13 @@ static const char k_about_nordstjernen_template[] =
     ".dk{color:var(--text);flex:0 0 auto}\n"
     ".dv{color:var(--text);text-align:right;word-break:break-word;"
     "font-size:13px;font-variant-numeric:tabular-nums}\n"
-    ".dv.on,.dv.off{font-family:var(--font);font-weight:600;font-size:12px;"
+    ".dv.on,.dv.off,.dv.plain{min-width:72px;text-align:center;"
+    "font-family:var(--font);font-weight:600;font-size:12px;"
     "padding:1px 10px;border-radius:999px}\n"
     ".dv.on{color:var(--ok);background:rgba(19,128,74,.1)}\n"
     ".dv.on::before{content:\"\\2713\\00a0\"}\n"
     ".dv.off{color:var(--muted);background:var(--field)}\n"
-    ".dv.plain{font-weight:600;font-size:12px;padding:1px 10px;"
-    "border-radius:999px;color:var(--muted);background:var(--field)}\n"
+    ".dv.plain{color:var(--muted);background:var(--field)}\n"
     ".foot{display:flex;flex-wrap:wrap;justify-content:space-between;"
     "gap:12px;margin-top:26px;color:var(--faint);font-size:13px}\n"
     ".foot a{color:var(--muted);margin-left:14px}\n"
@@ -5233,7 +5274,7 @@ static const char k_about_settings_html[] =
 "section{margin:0 0 26px}\n"
 ".card{padding:6px 20px}\n"
 ".row{display:flex;align-items:center;justify-content:space-between;"
-"gap:20px;padding:14px 0;cursor:pointer}\n"
+"gap:20px;padding:12px 0;cursor:pointer}\n"
 ".card > * + *{border-top:1px solid var(--line)}\n"
 ".txt{display:flex;flex-direction:column;gap:2px;min-width:0}\n"
 ".lbl{font-size:14.5px;font-weight:500}\n"
@@ -5376,9 +5417,9 @@ SETTINGS_SWITCH("cache_enabled",
 "<section id=\"data\"><h2 class=\"group-label\">Browsing data</h2>"
 "<div class=\"card\">"
 "<div class=\"danger-row\"><span class=\"txt\"><span class=\"lbl\">"
-"Clear all browsing data</span><span class=\"desc\">History, cookies, "
+"Clear browsing data</span><span class=\"desc\">History, cookies, "
 "cache and site storage on this device.</span></span>"
-"<button id=\"clear\" class=\"btn danger\">Clear data</button></div>"
+"<button id=\"clear\" class=\"btn danger\">Clear</button></div>"
 "</div></section>\n"
 "</main></div></div>\n"
 "<div class=\"toast\" id=\"status\" role=\"status\"></div>\n"

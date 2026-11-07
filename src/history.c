@@ -153,10 +153,11 @@ ns_history_clear(void)
 static const char k_history_style[] =
     "<style>" NS_ABOUT_BASE_CSS
     ".wrap{max-width:860px;margin:0 auto;padding:36px 24px 56px}\n"
-    ".top{display:flex;align-items:center;justify-content:space-between;"
+    ".top{display:flex;align-items:flex-start;justify-content:space-between;"
     "gap:16px;min-height:42px;margin:0 0 22px}\n"
     "h1{margin:0;font-size:28px;letter-spacing:-.02em}\n"
-    ".tools{display:flex;align-items:center;gap:10px;flex:0 1 auto}\n"
+    ".tools{display:flex;align-items:center;gap:10px;flex:0 1 auto;"
+    "margin-top:-4px}\n"
     ".tools .btn{flex:0 0 auto;white-space:nowrap}\n"
     ".filter{flex:0 1 300px;display:flex;align-items:center;gap:10px;"
     "height:42px;padding:0 16px;border-radius:999px;background:var(--card);"
@@ -166,7 +167,7 @@ static const char k_history_style[] =
     "box-shadow:0 0 0 3px var(--accent-soft)}\n"
     ".filter input{flex:1 1 auto;min-width:0;border:0;outline:0;"
     "background:transparent;color:var(--text);font:inherit;font-size:14px}\n"
-    ".day{margin:0 0 18px}\n"
+    ".day{margin:0 0 30px}\n"
     ".day h2{margin:0 0 10px 20px;font-size:15px;font-weight:600;"
     "color:var(--text)}\n"
     ".day ul{list-style:none;margin:0;padding:6px;}\n"
@@ -368,7 +369,6 @@ ns_history_top_sites_html(int max_sites)
     GString *s = g_string_new(NULL);
     GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, NULL);
-    guint tints[64];
     int count = 0;
     g_mutex_lock(&g_history_mutex);
     sqlite3_stmt *st = NULL;
@@ -386,14 +386,6 @@ ns_history_top_sites_html(int max_sites)
             char *host = history_host(url);
             char initial[8];
             guint tint = history_initial(host, initial);
-            for (int tries = 0; tries < 8; tries++) {
-                gboolean clash =
-                    (count % 4 > 0 && tints[count - 1] == tint) ||
-                    (count >= 4 && tints[count - 4] == tint);
-                if (!clash)
-                    break;
-                tint = (tint + 1) % 8;
-            }
             char *site = history_site(host);
             if (g_hash_table_contains(seen, site)) {
                 g_free(site);
@@ -416,8 +408,6 @@ ns_history_top_sites_html(int max_sites)
                 "<span class=\"av h%u\">%s</span>"
                 "<span class=\"nm\">%s</span></a>",
                 e_url, e_title, tint, e_init, e_site);
-            if (count < (int)G_N_ELEMENTS(tints))
-                tints[count] = tint;
             count++;
             g_free(e_site);
             g_free(e_url);
@@ -455,7 +445,7 @@ ns_history_html_page(void)
         "<input id=\"hq\" type=\"search\" placeholder=\"Search history\""
         " aria-label=\"Search history\" autocomplete=\"off\"></label>"
         "<a class=\"btn\" href=\"about:settings#data\">"
-        "Clear browsing data\xe2\x80\xa6</a></div></div>");
+        "Clear browsing data</a></div></div>");
     if (!history_append_visits(s))
         g_string_append(s, "<style>#tools{display:none}</style>"
             "<div class=\"card empty\"><span class=\"ic\">"

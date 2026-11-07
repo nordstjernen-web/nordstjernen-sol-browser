@@ -157,7 +157,7 @@ install_macos_window_controls(GdkDisplay *display)
     GtkCssProvider *p = gtk_css_provider_new();
     gtk_css_provider_load_from_string(
         p,
-        "headerbar windowcontrols.start { margin-left: 0; }"
+        "headerbar windowcontrols.start { margin-left: 0; border-spacing: 0; }"
         "headerbar windowcontrols.start button,"
         "headerbar windowcontrols.start button:hover {"
         "  min-width: 12px;"
@@ -291,7 +291,7 @@ install_chrome_css(void)
         "  border: none;"
         "  background: none;"
         "  box-shadow: none;"
-        "  color: alpha(currentColor, 0.7);"
+        "  color: alpha(currentColor, 0.8);"
         "  font-size: 13px;"
         "}"
         ".ns-tab:hover > button.ns-tab-label,"
@@ -314,7 +314,7 @@ install_chrome_css(void)
         "  background: none;"
         "  box-shadow: none;"
         "  -gtk-icon-size: 16px;"
-        "  opacity: 0.5;"
+        "  opacity: 0.7;"
         "  transition: opacity 120ms ease-out, background-color 120ms ease-out;"
         "}"
         ".ns-tab:hover > button.ns-tab-close,"
@@ -375,7 +375,7 @@ install_chrome_css(void)
 
         ".ns-toolbar button.ns-nav-button:disabled {"
         "  background: none;"
-        "  color: alpha(currentColor, 0.3);"
+        "  color: alpha(currentColor, 0.4);"
         "}"
         ".ns-toolbar box.ns-address-box {"
         "  min-height: 34px;"
@@ -772,7 +772,7 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
             chip = ns_i18n("Not secure");
         break;
     case NS_SEC_DANGEROUS:
-        icon_name = "nordstjernen-warning-symbolic";
+        icon_name = "nordstjernen-shield-symbolic";
         label = ns_i18n("Dangerous: this site is on the blocklist");
         chip = ns_i18n("Dangerous");
         break;
@@ -782,10 +782,19 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
     toggle_css_class(pw->address, "ns-insecure",
                      url && *url && sec == NS_SEC_INVALID);
     if (!icon_name || !url || !*url) {
+        gboolean internal = url && g_str_has_prefix(url, "about:") &&
+                            !g_str_equal(url, "about:blank");
+        gboolean start = url && g_str_equal(url, "about:start");
+        if (internal && !start) {
+            set_security_chip(pw, "nordstjernen-badge", ns_i18n("Nordstjernen"),
+                              FALSE, ns_i18n("A page built into Nordstjernen"));
+            gtk_entry_set_icon_from_paintable(entry, GTK_ENTRY_ICON_PRIMARY,
+                                              NULL);
+            return;
+        }
         set_security_chip(pw, NULL, NULL, FALSE, NULL);
-        gboolean internal = url && g_str_has_prefix(url, "about:");
         gboolean local = url && g_str_has_prefix(url, "file:");
-        const char *page_icon = internal ? "nordstjernen-symbolic"
+        const char *page_icon = internal ? "nordstjernen-badge"
                               : local ? "nordstjernen-page-symbolic"
                                       : "nordstjernen-globe-symbolic";
         ns_icon_entry_set(entry, GTK_ENTRY_ICON_PRIMARY, page_icon);
@@ -1673,7 +1682,7 @@ refresh_tab_icon(GtkWidget *page, NsProcView *v)
     if (fav)
         gtk_image_set_from_paintable(GTK_IMAGE(icon), fav);
     else if (internal)
-        ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen-symbolic");
+        ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen-badge");
     else
         ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen-page-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
