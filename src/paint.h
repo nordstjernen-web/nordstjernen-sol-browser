@@ -134,6 +134,7 @@ void ns_paint_apply_font_features(NsPangoAttrList *attrs, const ns_style *style,
                                   guint start, guint end);
 NsPangoAttribute *ns_paint_font_features_attr_from_values(int kerning,
                                                         const char *ligatures,
+                                                        const char *numeric,
                                                         const char *settings);
 NsPangoAttribute *ns_paint_font_variations_attr_from_values(const char *settings);
 

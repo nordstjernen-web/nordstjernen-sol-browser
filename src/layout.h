@@ -90,6 +90,7 @@ typedef struct ns_inline_attr {
     int font_stretch;
     int font_kerning;
     const char *font_ligatures;
+    const char *font_numeric;
     const char *font_features;
     const char *font_variations;
     double box_w, box_h;

@@ -3097,6 +3097,14 @@ font_ligatures_from_style(const ns_style *s)
 }
 
 static const char *
+font_numeric_from_style(const ns_style *s)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_FONT_VARIANT_NUMERIC] : NULL;
+    return v && v->kind == NS_CSS_V_KEYWORD &&
+           strcmp(v->u.keyword, "normal") != 0 ? v->u.keyword : NULL;
+}
+
+static const char *
 font_feature_settings_from_style(const ns_style *s)
 {
     const ns_css_value *v = s ? s->values[NS_CSS_FONT_FEATURE_SETTINGS] : NULL;
@@ -3113,14 +3121,16 @@ font_variation_settings_from_style(const ns_style *s)
 static void
 emit_font_features_attr(GArray *attrs, gsize start, gsize end,
                         int font_kerning, const char *font_ligatures,
-                        const char *font_features)
+                        const char *font_numeric, const char *font_features)
 {
     if (end <= start ||
-        (font_kerning < 0 && !font_ligatures && !font_features))
+        (font_kerning < 0 && !font_ligatures && !font_numeric &&
+         !font_features))
         return;
     ns_inline_attr a = { .kind = NS_INLINE_FONT_FEATURES, .start = start,
                          .len = end - start, .font_kerning = font_kerning,
                          .font_ligatures = font_ligatures,
+                         .font_numeric = font_numeric,
                          .font_features = font_features };
     g_array_append_val(attrs, a);
 }
@@ -4481,10 +4491,11 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     gsize stretch_start = ctx->out->len;
     int font_kerning_self = font_kerning_int_from_style(s);
     const char *font_ligatures_self = font_ligatures_from_style(s);
+    const char *font_numeric_self = font_numeric_from_style(s);
     const char *font_features_self = font_feature_settings_from_style(s);
     gboolean font_features_active =
         font_kerning_self >= 0 || font_ligatures_self != NULL ||
-        font_features_self != NULL;
+        font_numeric_self != NULL || font_features_self != NULL;
     gsize features_start = ctx->out->len;
     const char *font_variations_self = font_variation_settings_from_style(s);
     gsize variations_start = ctx->out->len;
@@ -4592,7 +4603,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     if (font_features_active && ctx->out->len > features_start)
         emit_font_features_attr(ctx->attrs, features_start, ctx->out->len,
                                 font_kerning_self, font_ligatures_self,
-                                font_features_self);
+                                font_numeric_self, font_features_self);
     if (font_variations_self && ctx->out->len > variations_start)
         emit_font_variations_attr(ctx->attrs, variations_start, ctx->out->len,
                                   font_variations_self);
@@ -4982,13 +4993,15 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
                 }
                 int fk = font_kerning_int_from_style(fl);
                 const char *flig = font_ligatures_from_style(fl);
+                const char *fnum = font_numeric_from_style(fl);
                 const char *ffea = font_feature_settings_from_style(fl);
-                if (fk >= 0 || flig || ffea) {
+                if (fk >= 0 || flig || fnum || ffea) {
                     ns_inline_attr a = {
                         .kind = NS_INLINE_FONT_FEATURES,
                         .start = fl_start, .len = fl_len,
                         .font_kerning = fk,
                         .font_ligatures = flig,
+                        .font_numeric = fnum,
                         .font_features = ffea,
                     };
                     g_array_append_val(box->attrs, a);
@@ -5768,13 +5781,15 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host,
     }
     int fk = font_kerning_int_from_style(ps);
     const char *flig = font_ligatures_from_style(ps);
+    const char *fnum = font_numeric_from_style(ps);
     const char *ffea = font_feature_settings_from_style(ps);
-    if (fk >= 0 || flig || ffea) {
+    if (fk >= 0 || flig || fnum || ffea) {
         ns_inline_attr a = {
             .kind = NS_INLINE_FONT_FEATURES,
             .start = 0, .len = tlen,
             .font_kerning = fk,
             .font_ligatures = flig,
+            .font_numeric = fnum,
             .font_features = ffea,
         };
         g_array_append_val(box->attrs, a);

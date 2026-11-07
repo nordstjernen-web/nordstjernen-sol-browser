@@ -188,7 +188,8 @@ ns_paint_inline_font_attr(const ns_inline_attr *r)
             ns_pango_stretch_from_css(r->font_stretch));
     case NS_INLINE_FONT_FEATURES:
         return ns_paint_font_features_attr_from_values(
-            r->font_kerning, r->font_ligatures, r->font_features);
+            r->font_kerning, r->font_ligatures, r->font_numeric,
+            r->font_features);
     case NS_INLINE_FONT_VARIATIONS:
         return ns_paint_font_variations_attr_from_values(r->font_variations);
     case NS_INLINE_ITALIC:
@@ -3449,6 +3450,26 @@ append_font_ligature_features(GString *out, const char *ligatures)
     g_strfreev(tokens);
 }
 
+static void
+append_font_numeric_features(GString *out, const char *numeric)
+{
+    static const struct { const char *token, *feature; } map[] = {
+        { "lining-nums", "lnum=1" },       { "oldstyle-nums", "onum=1" },
+        { "proportional-nums", "pnum=1" }, { "tabular-nums", "tnum=1" },
+        { "diagonal-fractions", "frac=1" }, { "stacked-fractions", "afrc=1" },
+        { "ordinal", "ordn=1" },           { "slashed-zero", "zero=1" },
+    };
+    if (!numeric || !*numeric) return;
+    char **tokens = g_strsplit_set(numeric, " \t\r\n\f", -1);
+    for (int i = 0; tokens[i]; i++) {
+        for (gsize m = 0; m < G_N_ELEMENTS(map); m++) {
+            if (strcmp(tokens[i], map[m].token) == 0)
+                append_font_feature(out, map[m].feature);
+        }
+    }
+    g_strfreev(tokens);
+}
+
 static const char *
 paint_font_feature_skip_ws(const char *p)
 {
@@ -3565,6 +3586,7 @@ paint_font_variations_from_css(const char *settings)
 
 NsPangoAttribute *
 ns_paint_font_features_attr_from_values(int kerning, const char *ligatures,
+                                        const char *numeric,
                                         const char *settings)
 {
     GString *s = g_string_new(NULL);
@@ -3573,6 +3595,7 @@ ns_paint_font_features_attr_from_values(int kerning, const char *ligatures,
     else if (kerning > 0)
         append_font_feature(s, "kern=1");
     append_font_ligature_features(s, ligatures);
+    append_font_numeric_features(s, numeric);
     append_font_feature_settings_features(s, settings);
     if (s->len == 0) {
         g_string_free(s, TRUE);
@@ -3607,6 +3630,9 @@ ns_paint_apply_font_features(NsPangoAttrList *attrs, const ns_style *s,
     const ns_css_value *lig = s->values[NS_CSS_FONT_VARIANT_LIGATURES];
     if (lig && lig->kind == NS_CSS_V_KEYWORD)
         append_font_ligature_features(features, lig->u.keyword);
+    const ns_css_value *num = s->values[NS_CSS_FONT_VARIANT_NUMERIC];
+    if (num && num->kind == NS_CSS_V_KEYWORD)
+        append_font_numeric_features(features, num->u.keyword);
     const ns_css_value *settings = s->values[NS_CSS_FONT_FEATURE_SETTINGS];
     if (settings && settings->kind == NS_CSS_V_KEYWORD)
         append_font_feature_settings_features(features, settings->u.keyword);

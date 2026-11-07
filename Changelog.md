@@ -3,6 +3,10 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Text: `font-variant-numeric` reaches the shaper as OpenType features
+  (`tnum`, `pnum`, `lnum`, `onum`, `frac`, `afrc`, `ordn`, `zero`). It was
+  parsed but ignored, so `tabular-nums` columns of times and prices kept
+  proportional digits and did not line up.
 * UI: the window chrome turns dark with the dark colour scheme, the status
   pill no longer shows "Done" after every load, built-in pages show the
   Nordstjernen icon in their tab, and the New Tab address bar is empty.
