@@ -3,6 +3,11 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Paint: a rounded border whose sides differ in width or colour splits
+  its corners within the corner area. Each side was clipped to a triangle
+  reaching the point where two corner diagonals meet, which for a thick top
+  border lies past the bottom of the box, so the top colour drew a strip
+  along the bottom edge and the bottom colour covered the middle of the top.
 * Text: `font-variant-numeric` reaches the shaper as OpenType features
   (`tnum`, `pnum`, `lnum`, `onum`, `frac`, `afrc`, `ordn`, `zero`). It was
   parsed but ignored, so `tabular-nums` columns of times and prices kept

@@ -1051,21 +1051,18 @@ paint_double_border_side(cairo_t *cr, int side, double width, rgba c,
 }
 
 static void
-border_wedge_apex(const double a0[2], const double a1[2],
-                  const double b0[2], const double b1[2],
-                  double cx, double cy, double *out_x, double *out_y)
+border_corner_split(const double outer[2], const double inner[2],
+                    double rx, double ry, double max_x, double max_y,
+                    double out[2])
 {
-    double dax = a1[0] - a0[0], day = a1[1] - a0[1];
-    double dbx = b1[0] - b0[0], dby = b1[1] - b0[1];
-    double den = dax * dby - day * dbx;
-    if (fabs(den) < 1e-9) {
-        *out_x = cx;
-        *out_y = cy;
-        return;
-    }
-    double t = ((b0[0] - a0[0]) * dby - (b0[1] - a0[1]) * dbx) / den;
-    *out_x = a0[0] + t * dax;
-    *out_y = a0[1] + t * day;
+    double dx = fabs(inner[0] - outer[0]), dy = fabs(inner[1] - outer[1]);
+    double kx = dx > 0 ? MIN(MAX(rx, dx), max_x) / dx : INFINITY;
+    double ky = dy > 0 ? MIN(MAX(ry, dy), max_y) / dy : INFINITY;
+    double k = MIN(kx, ky);
+    if (!isfinite(k) || k < 1.0)
+        k = 1.0;
+    out[0] = outer[0] + k * (inner[0] - outer[0]);
+    out[1] = outer[1] + k * (inner[1] - outer[1]);
 }
 
 static double
@@ -1142,6 +1139,12 @@ paint_rounded_mixed_border(cairo_t *cr, const ns_box *b, const ns_style *s,
     corner_radii inner = corner_radii_inset(outer, bw[0], bw[1], bw[2], bw[3]);
     const double oc[4][2] = { { x, y }, { x + w, y }, { x + w, y + h }, { x, y + h } };
     const double ic[4][2] = { { ix, iy }, { ix + iw, iy }, { ix + iw, iy + ih }, { ix, iy + ih } };
+    const double crx[4] = { outer.tl, outer.tr, outer.br, outer.bl };
+    const double cry[4] = { outer.tlv, outer.trv, outer.brv, outer.blv };
+    double split[4][2];
+    for (int i = 0; i < 4; i++)
+        border_corner_split(oc[i], ic[i], crx[i], cry[i], w / 2.0, h / 2.0,
+                            split[i]);
     for (int i = 0; i < 4; i++) {
         if (bw[i] <= 0) continue;
         rgba c = rgba_of(s->values[color_props[i]] ? s->values[color_props[i]]
@@ -1151,12 +1154,10 @@ paint_rounded_mixed_border(cairo_t *cr, const ns_box *b, const ns_style *s,
         cairo_save(cr);
         cairo_new_path(cr);
         int a = i, bidx = (i + 1) % 4;
-        double apex_x, apex_y;
-        border_wedge_apex(oc[a], ic[a], oc[bidx], ic[bidx],
-                          x + w / 2.0, y + h / 2.0, &apex_x, &apex_y);
         cairo_move_to(cr, oc[a][0], oc[a][1]);
         cairo_line_to(cr, oc[bidx][0], oc[bidx][1]);
-        cairo_line_to(cr, apex_x, apex_y);
+        cairo_line_to(cr, split[bidx][0], split[bidx][1]);
+        cairo_line_to(cr, split[a][0], split[a][1]);
         cairo_close_path(cr);
         cairo_clip(cr);
         cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
