@@ -1206,6 +1206,7 @@ ns_browser_sandbox(const char *self_exe)
     if (ns_config_get()->webgl_enabled || ns_config_get()->webgpu_enabled)
         ns_security_allow_gpu_devices();
     ns_security_runtime_dir_read_only();
+    ns_security_deny_process_exec();
     ns_security_landlock_scope_abstract_sockets();
     ns_security_sandbox_init(self_exe);
     if (ns_config_get()->webgl_enabled)
