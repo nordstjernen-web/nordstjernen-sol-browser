@@ -1324,11 +1324,14 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
 
     if (strcmp(head->path, "/download-start") == 0) {
         char *url = json_get_str(body, "url");
-        long id = url && *url ? ns_download_start(url, url) : 0;
+        char *top = s->cur ? ns_browser_url(s->cur) : NULL;
+        long id = url && *url
+            ? ns_download_start(url, top && *top ? top : url) : 0;
         char json[48];
         int n = snprintf(json, sizeof json, "{\"id\":%ld}", id);
         http_write_response(ctrl_w, 200, "application/json", NULL, json,
                             (size_t)n);
+        free(top);
         free(url);
         return 0;
     }
