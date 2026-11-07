@@ -69455,6 +69455,19 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         return;
     }
     if (src) {
+        if ((g_str_has_prefix(src, "data:") || g_str_has_prefix(src, "blob:")) &&
+            ns_js_node_csp(js, n) &&
+            !ns_csp_allows_with_nonce(ns_js_node_csp(js, n), NS_CSP_SCRIPT,
+                                      src, origin, nonce,
+                                      !(n->flags & NS_NODE_NOT_PARSER_INSERTED))) {
+            if (js->log_cb) {
+                char *line = g_strdup_printf("CSP blocked: script %s", src);
+                js->log_cb(line, js->log_user_data);
+                g_free(line);
+            }
+            ns_js_dispatch_resource_event(js, n, "error");
+            return;
+        }
         if (g_str_has_prefix(src, "data:")) {
             gsize blen = 0;
             char *body = ns_js_decode_data_url(src, &blen);
