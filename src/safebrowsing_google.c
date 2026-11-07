@@ -27,7 +27,7 @@
 #define O_BINARY 0
 #endif
 
-#define SBG_API_BASE        "https://safebrowsing.googleapis.com/v5/"
+#define SBG_API_BASE        "https://safebrowsing.googleapis.com/" NS_SBG_API_VERSION "/"
 #define SBG_DB_MAGIC        0x31425353u
 #define SBG_MAX_ENTRIES     (1u << 25)
 #define SBG_MAX_LIST_BYTES  (64u << 20)

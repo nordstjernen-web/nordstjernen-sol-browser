@@ -16,6 +16,7 @@
 #include "html.h"
 #include "image.h"
 #include "safebrowsing.h"
+#include "safebrowsing_google.h"
 #include "security.h"
 #include "about_logo_gif.h"
 #include "cookies.h"
@@ -3451,6 +3452,9 @@ about_safe_browsing_rows(GString *s)
                !st.enabled ? "Off in Settings"
                : !st.have_key ? "No API key in this build (local list only)"
                : "On");
+    if (google)
+        diag_kv(s, "API", "Google Safe Browsing " NS_SBG_API_VERSION ", "
+                NS_SBG_API_MODE);
     char *hosts = diag_count(st.local_hosts);
     char *local = g_strdup_printf("%s %s", hosts,
                                   st.local_hosts == 1 ? "host" : "hosts");

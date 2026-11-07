@@ -7,6 +7,9 @@
 
 G_BEGIN_DECLS
 
+#define NS_SBG_API_VERSION "v5"
+#define NS_SBG_API_MODE    "local-list mode"
+
 gboolean      ns_sbg_available(void);
 void          ns_sbg_start(void);
 ns_sb_verdict ns_sbg_check_url(const char *url);
