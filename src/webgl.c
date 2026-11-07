@@ -687,6 +687,8 @@ view_bytes(JSContext *ctx, JSValueConst v, size_t *out_len, JSValue *hold)
     if (JS_IsArrayBuffer(v)) {
         size_t n = 0;
         uint8_t *p = JS_GetArrayBuffer(ctx, &n, v);
+        if (!p) return NULL;
+        *hold = JS_DupValue(ctx, v);
         *out_len = n;
         return p;
     }
