@@ -4,12 +4,15 @@
 # (GH_TOKEN on CI), against its GitHub build-provenance attestation. A missing
 # gh, missing auth or a missing attestation (Sigstore outage at publish time)
 # only warns unless NORDSTJERNEN_REQUIRE_ATTESTATION=1; an invalid one is fatal.
-# Pass -Tag sysroot-<date>-<sha> (an immutable per-commit release) to pin.
+# Which release is fetched is pinned by android/sysroot.lock (an immutable
+# per-commit tag plus the sha256 of that release's SHA256SUMS); the downloaded
+# SHA256SUMS must hash to the locked value. -Tag overrides the lock (for example
+# -Tag sysroot-latest for bleeding edge) and skips that check.
 
 param(
     [string]$Sysroot = "$env:USERPROFILE\.cache\nordstjernen-android-sysroot",
     [string]$Repo = "nordstjernen-web/nordstjernen-dependencies-build",
-    [string]$Tag = "sysroot-latest",
+    [string]$Tag = "",
     [string[]]$Abi = @("arm64-v8a", "x86_64"),
     [string]$Token = ""
 )
@@ -32,8 +35,11 @@ function Test-BuildProvenance($File, $Digest) {
     if (-not $gh) { & $softFail "gh CLI not found"; return }
     & $gh.Source auth status 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { & $softFail "gh CLI is not authenticated (set GH_TOKEN)"; return }
-    $count = & $gh.Source api "repos/$Repo/attestations/sha256:$Digest" --jq ".attestations | length" 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $count) { & $softFail "could not query the attestations API for $name"; return }
+    $apiOut = & $gh.Source api "repos/$Repo/attestations/sha256:$Digest" --jq ".attestations | length" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        if ("$apiOut" -match "Not Found|HTTP 404") { $count = 0 }
+        else { & $softFail "could not query the attestations API for $name"; return }
+    } else { $count = "$apiOut".Trim() }
     if ([int]$count -eq 0) { & $softFail "no build-provenance attestation is published for $name"; return }
     & $gh.Source attestation verify $File --repo $Repo | Out-Null
     if ($LASTEXITCODE -ne 0) {
@@ -50,6 +56,22 @@ function Invoke-GitHubDownload($Url, $OutFile) {
         $headers["Authorization"] = "Bearer $Token"
     }
     Invoke-WebRequest -Headers $headers -MaximumRedirection 5 -Uri $Url -OutFile $OutFile
+}
+
+$lockFile = Join-Path (Resolve-Path "$PSScriptRoot\..") "sysroot.lock"
+$lockedSumsSha256 = ""
+if (-not $Tag) {
+    if (-not (Test-Path $lockFile)) { throw "no -Tag given and no lock file at $lockFile" }
+    $lock = @{}
+    foreach ($line in Get-Content $lockFile) {
+        if ($line -match '^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$') { $lock[$matches[1]] = $matches[2] }
+    }
+    if (-not $lock["tag"]) { throw "no tag in $lockFile" }
+    $Tag = $lock["tag"]
+    $lockedSumsSha256 = ($lock["sha256sums"] | ForEach-Object { "$_" }).ToLowerInvariant()
+    Write-Step "using pinned release $Tag from android/sysroot.lock"
+} else {
+    Write-Step "using release $Tag from -Tag (bypasses android/sysroot.lock; SHA256SUMS not checked against the lock)"
 }
 
 $Abi = @($Abi | ForEach-Object { $_ -split "," } | Where-Object { $_ })
@@ -81,6 +103,13 @@ try {
     $baseUrl = "https://github.com/$Repo/releases/download/$Tag"
     $shaFile = Join-Path $tmp "SHA256SUMS"
     Invoke-GitHubDownload "$baseUrl/SHA256SUMS" $shaFile
+    if ($lockedSumsSha256) {
+        $sumsHash = (Get-FileHash -Algorithm SHA256 $shaFile).Hash.ToLowerInvariant()
+        if ($sumsHash -ne $lockedSumsSha256) {
+            throw "SHA256SUMS of release $Tag hashes to $sumsHash, but android/sysroot.lock pins $lockedSumsSha256; the release was changed after it was locked, refusing"
+        }
+        Write-Step "SHA256SUMS matches android/sysroot.lock"
+    }
     $shaLines = Get-Content $shaFile
 
     foreach ($item in $Abi) {

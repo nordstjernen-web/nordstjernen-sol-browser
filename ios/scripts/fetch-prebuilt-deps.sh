@@ -21,14 +21,25 @@
 #   $SYSROOT/device/{include,lib,lib/pkgconfig}
 #   $SYSROOT/simulator/...
 #
+# Which release is fetched is pinned by ios/sysroot.lock (an immutable
+# per-commit tag plus the sha256 of that release's SHA256SUMS). The downloaded
+# SHA256SUMS must hash to the locked value, so a tampered release cannot change
+# what gets built without a reviewed change to the lock. --tag overrides the
+# lock (e.g. --tag ios-sysroot-latest for bleeding edge) and skips that check.
+#
 # Usage:
 #   fetch-prebuilt-deps.sh [--sysroot DIR] [--platform device|simulator]
 #                          [--repo OWNER/REPO] [--tag TAG]
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCK_FILE="${SCRIPT_DIR}/../sysroot.lock"
+lock_get() { sed -n "s/^$1=//p" "${LOCK_FILE}" 2>/dev/null | head -1; }
+
 REPO="nordstjernen-web/nordstjernen-dependencies-build"
-TAG="ios-sysroot-latest"
+TAG=""
+LOCKED_SUMS_SHA256=""
 SYSROOT_BASE="${NORDSTJERNEN_IOS_SYSROOT:-$HOME/.cache/nordstjernen-ios-sysroot}"
 PLATFORMS=(device simulator)
 
@@ -42,6 +53,15 @@ while [ "$#" -gt 0 ]; do
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+if [ -z "${TAG}" ]; then
+  TAG="$(lock_get tag)"
+  LOCKED_SUMS_SHA256="$(lock_get sha256sums)"
+  [ -n "${TAG}" ] || { echo "no --tag given and no tag in ${LOCK_FILE}" >&2; exit 2; }
+  echo "Using pinned release ${TAG} from ios/sysroot.lock"
+else
+  echo "Using release ${TAG} from --tag (bypasses ios/sysroot.lock; its SHA256SUMS is not checked against the lock)" >&2
+fi
 
 command -v curl      >/dev/null 2>&1 || { echo "curl is required" >&2; exit 2; }
 command -v sha256sum >/dev/null 2>&1 || { echo "sha256sum is required" >&2; exit 2; }
@@ -66,8 +86,14 @@ verify_attestation() {
   if ! gh auth status >/dev/null 2>&1; then soft_fail "gh CLI is not authenticated (set GH_TOKEN)"; return 0; fi
   local digest count
   digest="$(sha256sum "${file}" | awk '{print $1}')"
-  count="$(gh api "repos/${REPO}/attestations/sha256:${digest}" --jq '.attestations | length' 2>/dev/null || echo "")"
-  if [ -z "${count}" ]; then soft_fail "could not query the attestations API for ${name}"; return 0; fi
+  local api_out
+  if api_out="$(gh api "repos/${REPO}/attestations/sha256:${digest}" --jq '.attestations | length' 2>&1)"; then
+    count="${api_out}"
+  elif printf '%s' "${api_out}" | grep -qiE 'not found|HTTP 404'; then
+    count=0
+  else
+    soft_fail "could not query the attestations API for ${name}"; return 0
+  fi
   if [ "${count}" = "0" ]; then soft_fail "no build-provenance attestation is published for ${name}"; return 0; fi
   gh attestation verify "${file}" --repo "${REPO}" >/dev/null 2>&1 \
     || { echo "provenance attestation check FAILED for ${name} (repo ${REPO}); refusing to install" >&2; exit 1; }
@@ -106,6 +132,12 @@ PY
 echo "Downloading checksum manifest from ${TAG}"
 dl "${BASE_URL}/SHA256SUMS" "${tmp}/SHA256SUMS" \
   || { echo "could not fetch SHA256SUMS from release '${TAG}' (does it exist yet?)" >&2; exit 1; }
+if [ -n "${LOCKED_SUMS_SHA256}" ]; then
+  got="$(sha256sum "${tmp}/SHA256SUMS" | awk '{print $1}')"
+  [ "${got}" = "${LOCKED_SUMS_SHA256}" ] \
+    || { echo "SHA256SUMS of release ${TAG} hashes to ${got}, but ios/sysroot.lock pins ${LOCKED_SUMS_SHA256}; the release was changed after it was locked, refusing" >&2; exit 1; }
+  echo "SHA256SUMS matches ios/sysroot.lock"
+fi
 
 for platform in "${PLATFORMS[@]}"; do
   case "${platform}" in device|simulator) ;; *) echo "invalid platform: ${platform}" >&2; exit 2 ;; esac
