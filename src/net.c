@@ -5394,6 +5394,9 @@ SETTINGS_SWITCH("global_privacy_control",
 SETTINGS_SWITCH("strip_tracking_params",
     "Strip tracking parameters",
     "Remove tracking codes from the links you open.")
+SETTINGS_SWITCH("safe_browsing",
+    "Block dangerous sites",
+    "Warn before opening known phishing and malware sites, using Google Safe Browsing and a local list.")
 SETTINGS_SWITCH("https_first",
     "HTTPS-First",
     "Try a secure connection before plain HTTP on every site.")
@@ -5451,7 +5454,7 @@ SETTINGS_SWITCH("cache_enabled",
 "{n:'Bing',u:'https://www.bing.com/search?q=%s'},"
 "{n:'Brave',u:'https://search.brave.com/search?q=%s'},"
 "{n:'Wikipedia',u:'https://en.wikipedia.org/w/index.php?search=%s'}];\n"
-"var toggles=['do_not_track','global_privacy_control',"
+"var toggles=['do_not_track','global_privacy_control','safe_browsing',"
 "'strip_tracking_params','https_first','remote_control','images_enabled',"
 "'javascript_enabled','webgl_enabled','webgpu_enabled','local_storage_enabled',"
 "'cache_enabled'];\n"
@@ -5579,6 +5582,7 @@ about_settings_json(void)
     char *json = g_strdup_printf(
         "{\"home_url\":\"%s\",\"search_engine\":\"%s\",\"cookie_policy\":%d,"
         "\"do_not_track\":%s,\"global_privacy_control\":%s,"
+        "\"safe_browsing\":%s,"
         "\"strip_tracking_params\":%s,\"https_first\":%s,"
         "\"images_enabled\":%s,\"javascript_enabled\":%s,"
         "\"webgl_enabled\":%s,\"webgpu_enabled\":%s,"
@@ -5587,6 +5591,7 @@ about_settings_json(void)
         home, eng, c ? (int)c->cookie_policy : 1,
         (c && c->do_not_track) ? "true" : "false",
         (c && c->global_privacy_control) ? "true" : "false",
+        (c && c->safe_browsing) ? "true" : "false",
         (c && c->strip_tracking_params) ? "true" : "false",
         (c && c->https_first) ? "true" : "false",
         (c && c->images_enabled) ? "true" : "false",
@@ -5623,6 +5628,8 @@ about_settings_save(const char *form)
         c->cookie_policy = (ns_cookie_policy)atoi(v);
     if ((v = g_hash_table_lookup(q, "do_not_track")))
         c->do_not_track = atoi(v) != 0;
+    if ((v = g_hash_table_lookup(q, "safe_browsing")))
+        c->safe_browsing = atoi(v) != 0;
     if ((v = g_hash_table_lookup(q, "global_privacy_control")))
         c->global_privacy_control = atoi(v) != 0;
     if ((v = g_hash_table_lookup(q, "strip_tracking_params")))
@@ -7425,8 +7432,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
 static gboolean
 ns_net_safebrowsing_blocks(const char *url)
 {
-    g_autofree char *host = ns_url_host_from(url);
-    return host && ns_safebrowsing_blocked(host);
+    return ns_safebrowsing_check_url(url) != NS_SB_SAFE;
 }
 
 static gboolean

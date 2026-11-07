@@ -97,6 +97,44 @@ one person to read and audit end to end.
 [docs/Software-Architecture.md](docs/Software-Architecture.md) maps the whole
 system.
 
+## Google Safe Browsing
+
+Nordstjernen warns before it opens a site that
+[Google Safe Browsing](https://safebrowsing.google.com/) lists as phishing,
+malware or unwanted software. Every navigation and every redirect is checked
+before the page loads, so a link in an email, a search result or an ad that
+leads to a known attack site stops at a red warning page instead. The warning
+names the kind of threat, and you can still go on to the site at your own
+risk.
+
+The check protects without sending your browsing to Google:
+
+- **The lists live on your device.** In the background the browser downloads
+  Google's lists of 4-byte hash prefixes for phishing (`se-4b`), malware
+  (`mw-4b`) and unwanted software (`uws-4b`), and keeps them current at the
+  pace Google asks for, about every 30 minutes. Each list is verified against
+  Google's SHA-256 checksum before it is used.
+- **Addresses are hashed locally.** The browser normalises the address,
+  hashes its host and path combinations with SHA-256, and looks the prefixes
+  up in the local lists.
+- **Only a matching prefix leaves the device.** On a match, which is rare, the
+  browser sends that 4-byte prefix to Google and compares the full hashes that
+  come back. The address itself is never sent, and the request carries no
+  cookies or account.
+- **It fails safe for privacy, and open for availability.** When Google cannot
+  be reached the page loads normally, and the local blocklist still applies.
+
+A small built-in blocklist works alongside Google's, and you can add your own
+hosts in `~/.config/nordstjernen/safebrowsing.list`. Safe browsing is on by
+default and is switched off under Settings → Privacy → "Block dangerous
+sites", which turns off both lists.
+
+Builds need a Safe Browsing API key, read from the `NS_SAFE_BROWSING_API_KEY`
+environment variable when the browser is compiled; the official release
+builds include one. A build without a key uses only the local blocklist.
+Google Safe Browsing is offered for non-commercial use; see Google's
+[terms](https://developers.google.com/safe-browsing/terms).
+
 ## Browser variants
 
 | Browser | What it is | Downloads |
@@ -178,9 +216,9 @@ system.
 - **Privacy** — no telemetry or update pings. HTTPS-First, stripping of
   tracking parameters (`utm_*`, `gclid`, `fbclid`, …) and blocking of
   third-party cookies are on by default; Do Not Track and Global Privacy
-  Control are opt-in. Safe browsing checks each top-level navigation's host
-  against a local SHA-256 blocklist, entirely on-device (add hosts in
-  `~/.config/nordstjernen/safebrowsing.list`). Private tabs (`Ctrl+Alt+P`)
+  Control are opt-in. Safe browsing blocks known phishing and malware sites
+  with Google Safe Browsing and a local blocklist (see
+  [Google Safe Browsing](#google-safe-browsing)). Private tabs (`Ctrl+Alt+P`)
   and `--private` windows leave no cookies, HTTP cache or IndexedDB data
   behind ([docs/privacy-policy.md](docs/privacy-policy.md)).
 - **UI** — tabs, bookmarks, history, downloads, find-in-page, zoom, full

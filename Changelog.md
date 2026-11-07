@@ -3,6 +3,16 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Security: Google Safe Browsing. Every navigation and redirect is checked
+  against Google's phishing, malware and unwanted-software lists (Safe
+  Browsing v5, local-list mode) as well as the local blocklist, and a match
+  shows a warning page that names the threat. The hash-prefix lists are kept
+  on the device and verified against Google's checksum; only a 4-byte prefix
+  is sent to Google, and only when an address matches one. On by default,
+  switched off with Settings → Privacy → "Block dangerous sites". The API key
+  is read from `NS_SAFE_BROWSING_API_KEY` at build time, which the release
+  workflows take from a repository secret; a build without a key keeps the
+  local blocklist only.
 * Forms: a `<select>` styled with its own background or border draws its
   arrow inside its padding box. With an explicit `width` the arrow was
   placed from the start of the text plus the CSS width, so padding and

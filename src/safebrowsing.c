@@ -1,7 +1,9 @@
-/* Nordstjernen — local phishing/malware blocklist and warning interstitial. */
+/* Nordstjernen — phishing/malware checks (local list and Google Safe Browsing) and warning interstitial. */
 
 #define _GNU_SOURCE 1
 #include "safebrowsing.h"
+#include "safebrowsing_google.h"
+#include "config.h"
 #include "net.h"
 #include "about_style.h"
 
@@ -125,12 +127,41 @@ ns_safebrowsing_allow_host(const char *host)
 gboolean
 ns_safebrowsing_blocked(const char *host)
 {
-    if (!host || !*host)
+    const ns_config *cfg = ns_config_get();
+    if (!host || !*host || (cfg && !cfg->safe_browsing))
         return FALSE;
     g_mutex_lock(&g_lock);
     gboolean hit = ns_safebrowsing_blocked_locked(host);
     g_mutex_unlock(&g_lock);
     return hit;
+}
+
+static gboolean
+ns_safebrowsing_host_allowed(const char *host)
+{
+    char *low = g_ascii_strdown(host, -1);
+    for (gsize ln = strlen(low); ln > 0 && low[ln - 1] == '.'; ln--)
+        low[ln - 1] = '\0';
+    g_mutex_lock(&g_lock);
+    ensure_loaded();
+    gboolean allowed = g_hash_table_contains(g_allow, low);
+    g_mutex_unlock(&g_lock);
+    g_free(low);
+    return allowed;
+}
+
+ns_sb_verdict
+ns_safebrowsing_check_url(const char *url)
+{
+    const ns_config *cfg = ns_config_get();
+    if (!url || (cfg && !cfg->safe_browsing))
+        return NS_SB_SAFE;
+    g_autofree char *host = ns_url_host_from(url);
+    if (!host || !*host || ns_safebrowsing_host_allowed(host))
+        return NS_SB_SAFE;
+    if (ns_safebrowsing_blocked(host))
+        return NS_SB_LOCAL_LIST;
+    return ns_sbg_check_url(url);
 }
 
 static gboolean
@@ -159,8 +190,59 @@ ns_safebrowsing_blocked_locked(const char *host)
     return hit;
 }
 
+static const char *
+interstitial_heading(ns_sb_verdict verdict)
+{
+    switch (verdict) {
+    case NS_SB_SOCIAL_ENGINEERING:
+        return "Deceptive site ahead";
+    case NS_SB_UNWANTED_SOFTWARE:
+        return "Site ahead offers harmful programs";
+    default:
+        return "Dangerous site ahead";
+    }
+}
+
+static const char *
+interstitial_summary(ns_sb_verdict verdict)
+{
+    switch (verdict) {
+    case NS_SB_SOCIAL_ENGINEERING:
+        return "This site is known for phishing. It may pretend to be a site "
+               "you trust to get your passwords, payment details or other "
+               "personal information.";
+    case NS_SB_MALWARE:
+        return "This site is known to spread malware. Visiting it may install "
+               "programs that steal or damage the information on your device.";
+    case NS_SB_UNWANTED_SOFTWARE:
+        return "This site is known to push unwanted software. It may try to "
+               "get you to install programs that change your browser or slow "
+               "down your device.";
+    default:
+        return "This site is on Nordstjernen\xe2\x80\x99s list of known "
+               "phishing and malware sites. It may try to steal passwords or "
+               "payment details, or install harmful software.";
+    }
+}
+
+static const char *
+interstitial_details(ns_sb_verdict verdict)
+{
+    if (verdict == NS_SB_LOCAL_LIST)
+        return "<p>This check runs on your device against a local list. "
+               "Nothing about this page was sent anywhere.</p>";
+    return "<p>Google Safe Browsing lists this site as unsafe. Nordstjernen "
+           "checks addresses against a list kept on your device and only asks "
+           "Google about a short, anonymous fragment of a hash of the address, "
+           "never the address itself.</p>"
+           "<p>Advisory provided by Google. <a href=\""
+           "https://developers.google.com/safe-browsing/v4/advisory\">"
+           "About Safe Browsing advisories</a></p>";
+}
+
 char *
-ns_safebrowsing_interstitial(const char *url, const char *host)
+ns_safebrowsing_interstitial(const char *url, const char *host,
+                             ns_sb_verdict verdict)
 {
     char *esc_host = g_markup_escape_text(host && *host ? host : "", -1);
     char *continue_href = g_strconcat(NS_UNSAFE_CONTINUE_SCHEME,
@@ -205,17 +287,14 @@ ns_safebrowsing_interstitial(const char *url, const char *host)
         "stroke-linejoin=\"round\"><path d=\"M8 1.75 13.25 3.75v4c0 "
         "3.25-2.25 5.5-5.25 6.5-3-1-5.25-3.25-5.25-6.5v-4z\"/>"
         "<path d=\"M8 5.25v3.25M8 10.6v.1\"/></svg></div>"
-        "<h1>Dangerous site ahead</h1>"
-        "<p class=\"summary\">This site is on Nordstjernen\xe2\x80\x99s list "
-        "of known phishing and malware sites. It may try to steal passwords or "
-        "payment details, or install harmful software.</p>"
+        "<h1>", interstitial_heading(verdict), "</h1>"
+        "<p class=\"summary\">", interstitial_summary(verdict), "</p>"
         "<p class=\"host\">", esc_host, "</p>"
         "<div class=\"actions\">"
         "<a class=\"btn primary\" href=\"about:start\">Back to safety</a>"
         "</div>"
-        "<details><summary>Details</summary>"
-        "<p>This check runs on your device against a local list. Nothing "
-        "about this page was sent anywhere.</p>"
+        "<details><summary>Details</summary>",
+        interstitial_details(verdict),
         "<a class=\"btn danger\" href=\"", esc_continue,
         "\">Visit this unsafe site</a>"
         "</details>"

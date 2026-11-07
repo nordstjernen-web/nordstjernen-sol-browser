@@ -22,6 +22,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  NS_SAFE_BROWSING_API_KEY: ${{ secrets.NS_SAFE_BROWSING_API_KEY }}
+
 jobs:
   build:
     name: msys2/ucrt64 on windows-${{ matrix.windows }}

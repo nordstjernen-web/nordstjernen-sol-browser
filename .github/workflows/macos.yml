@@ -32,6 +32,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  NS_SAFE_BROWSING_API_KEY: ${{ secrets.NS_SAFE_BROWSING_API_KEY }}
+
 jobs:
   build:
     name: ${{ matrix.compiler }} on macos-${{ matrix.macos }}
