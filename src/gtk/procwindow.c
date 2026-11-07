@@ -1132,6 +1132,41 @@ download_staging_path_ok(const char *tmp_path)
     return type == G_FILE_TYPE_REGULAR;
 }
 
+#ifndef _WIN32
+static gboolean
+download_move_posix(NsDownload *d, const char *tmp_path, const char *final_url)
+{
+    g_autofree char *staging = g_build_filename(g_get_user_cache_dir(),
+                                                "nordstjernen", "downloads",
+                                                NULL);
+    g_autofree char *leaf = g_path_get_basename(tmp_path);
+    g_autofree char *parent = g_path_get_dirname(tmp_path);
+    g_autofree char *staging_canon = g_canonicalize_filename(staging, NULL);
+    g_autofree char *parent_canon = g_canonicalize_filename(parent, NULL);
+    if (g_strcmp0(parent_canon, staging_canon) != 0 ||
+        strchr(leaf, '/') || !strcmp(leaf, ".") || !strcmp(leaf, ".."))
+        return FALSE;
+    int dfd = open(staging, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (dfd < 0)
+        return FALSE;
+    struct stat st;
+    gboolean ok = fstatat(dfd, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0 &&
+                  S_ISREG(st.st_mode) &&
+                  renameat(dfd, leaf, AT_FDCWD, d->path) == 0;
+    if (!ok)
+        unlinkat(dfd, leaf, 0);
+    close(dfd);
+    if (ok && g_lstat(d->path, &st) == 0 && S_ISLNK(st.st_mode)) {
+        g_unlink(d->path);
+        ok = FALSE;
+    }
+    if (ok)
+        ns_security_mark_download_origin(
+            d->path, final_url && *final_url ? final_url : d->url);
+    return ok;
+}
+#endif
+
 static gboolean
 download_move_into_place(NsDownload *d, const char *tmp_path,
                          const char *final_url)
@@ -1141,6 +1176,15 @@ download_move_into_place(NsDownload *d, const char *tmp_path,
                   "directory, refusing to move it");
         return FALSE;
     }
+#ifndef _WIN32
+    if (!download_move_posix(d, tmp_path, final_url)) {
+        g_warning("download: refusing to move %s (not a regular file in the "
+                  "staging directory)", tmp_path);
+        g_unlink(tmp_path);
+        return FALSE;
+    }
+    return TRUE;
+#else
     GFile *src = g_file_new_for_path(tmp_path);
     GFile *dst = g_file_new_for_path(d->path);
     GError *err = NULL;
@@ -1158,6 +1202,7 @@ download_move_into_place(NsDownload *d, const char *tmp_path,
     g_object_unref(src);
     g_object_unref(dst);
     return ok;
+#endif
 }
 
 static gboolean download_poll_tick(gpointer ud);

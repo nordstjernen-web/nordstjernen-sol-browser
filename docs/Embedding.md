@@ -12,8 +12,8 @@ build installs a shared library (`libnordstjernen.so` / `.dll` /
 `.dylib`). The header is plain C with no GLib or GTK types, so a consumer
 only needs the header and the link flag. No pkg-config file is generated.
 
-The same API drives the Android and iOS shells (see
-[`Android.md`](Android.md) and [`iOS.md`](iOS.md)). For the JVM, the Java
+The same API drives the Android shell (see [`Android.md`](Android.md)).
+For the JVM, the Java
 binding in `java/` wraps it through a JNI bridge
 (`org.nordstjernen.Nordstjernen`, JDK 21) — see
 [`java/README.md`](../java/README.md).

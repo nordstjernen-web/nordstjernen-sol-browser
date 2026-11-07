@@ -67,7 +67,7 @@ Remaining work, in order:
    (`src/gtk/icons.c` is the last engine-header user in the shell).
 2. Make the side channels (`X-*` reply headers) a documented, enumerated
    event list instead of ad hoc headers, so a second engine can produce them.
-3. Give the JVM, Android and iOS shells the same handshake.
+3. Give the JVM and Android shells the same handshake.
 
 ### B. Capabilities: granted, suspended, revocable
 

@@ -36,11 +36,6 @@
 /release-build/
 /build-*/
 
-# iOS build artifacts: the cross-compile staging + generated Xcode project.
-/ios/.build/
-/ios/App/vendor/
-/ios/App/Nordstjernen.xcodeproj/
-/ios/sysroot/
 # Downloaded wgpu-native release blobs (headers are vendored; the library is fetched)
 /third_party/wgpu-native/dl/
 .ninja_deps

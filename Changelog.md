@@ -42,17 +42,32 @@ Changelog:
   claiming the device is offline, with the address and the libcurl message
   under Details. Settings saves the home page on change (New Tab page or a
   custom address) without a Save button; About lists Security first.
+* macOS: the renderer's Seatbelt profile denies starting programs and
+  sending Apple Events. Only the renderer opts in, so the browser window
+  and the headless driver can still launch their renderer.
+* The iOS port is removed: the `ios/` UIKit shell, its cross-compile and
+  sysroot scripts, the `-Dios` meson option, `docs/iOS.md` and the
+  `TARGET_OS_IPHONE` guards in the engine are gone. iOS is not supported;
+  Android keeps the GTK-free engine build.
+* Android: the prebuilt dependency sysroot is pinned by
+  `android/sysroot.lock` (an immutable per-commit release tag plus the
+  sha256 of its `SHA256SUMS`) instead of following the rolling `latest`
+  release. The fetch script refuses a release whose
+  `SHA256SUMS` no longer hashes to the locked value, CI verifies the
+  build-provenance attestation when one is present (required once an
+  attested release is locked), and the new `sysroot-bump` workflow opens a
+  pull request with the dependency manifest diff whenever a newer attested
+  sysroot release is published.
 * Network: the libcurl protocol allow-list is built from the protocols the
   linked libcurl provides, so an `ftp`-less libcurl (the mobile dependency
   sysroots now compile in only HTTP(S), FTP(S) and WebSocket, after the
   dependency repository's security review) no longer makes the
   `CURLOPT_PROTOCOLS_STR` call fail and fall back to libcurl's defaults.
-* Android/iOS: `fetch-prebuilt-deps` verifies each sysroot asset's GitHub
+* Android: `fetch-prebuilt-deps` verifies each sysroot asset's GitHub
   build-provenance attestation when an authenticated `gh` CLI is available
   (`NORDSTJERNEN_REQUIRE_ATTESTATION=1` makes it mandatory; a missing
-  attestation, as after a Sigstore outage, only warns), the iOS script
-  pins its downloads to HTTPS across redirects, and both accept the new
-  immutable per-commit release tags for pinning. The sysroots themselves pick
+  attestation, as after a Sigstore outage, only warns) and accepts the new
+  immutable per-commit release tags for pinning. The sysroot itself picks
   up brotli 1.2.1 (CVE-2026-111497), curl 8.23.0, expat 2.10.0, freetype
   2.15.0 and sqlite 3.54.1.
 * CI: the Android workflows hand `gh` the job token, so the attestation check
@@ -106,10 +121,6 @@ Changelog:
   it and replaced `window.fetch`. On mail.ru that assignment threw,
   because the page makes `fetch` read-only, and stopped its start-up: the
   news list, weather and calendar stayed grey placeholders.
-* Docs: `docs/security-review-2026-11.md` reports a security review of
-  the engine: the Critical and High findings fixed in this release, the
-  Medium and Low findings still open, and what LWN's article on the
-  sibling Northstar project means for this tree.
 * Security: an animated WebGL canvas that shrinks no longer overflows its
   picture. On Windows and macOS an animated canvas is copied out through
   two pixel buffers sized for the frame; resizing the canvas replaced
@@ -1138,15 +1149,6 @@ Changelog:
   does), and a navigation's cookie partition is its own destination
   rather than the referrer's. `Sec-Fetch-Site` reports `cross-site` on
   such hops too.
-* Cookies: `docs/cookies-security-report.md` is a source review of the
-  cookie store and its callers. It records one high finding (SameSite is
-  not enforced on a navigation that reaches a cross-site target through a
-  redirect, because the redirect loop drops the top URL without carrying
-  an initiator), three medium ones (any hostname starting with `127.` is
-  a secure context; WebSocket and EventSource cookies are keyed by the
-  frame origin rather than the top-level site; a sandboxed iframe can
-  list its origin's cookies through `cookieStore`), and the low and
-  informational items, each with the code path and a suggested fix.
 * CSS Grid: a line number or span written with `calc()`
   (`grid-column: 2 / span calc(5)`) is now evaluated to its integer;
   layout read it as `span 1`, collapsing such grids into one narrow track

@@ -128,10 +128,13 @@ the engine via `-Wl,-z,max-page-size=16384` in the `build-deps.sh` cross-file.
 
 The Android dependency sysroot is produced by
 `nordstjernen-web/nordstjernen-dependencies-build` and published on the public
-`sysroot-latest` release (and an immutable `sysroot-<date>-<sha>` release per
-commit, pinnable with `-Tag`). The fetch script verifies `SHA256SUMS` and, when
-`gh` is installed, the GitHub build-provenance attestation of each asset. Fetch
-the prebuilt sysroot and then build the engine for the emulator ABI:
+`sysroot-latest` release and as an immutable `sysroot-<date>-<sha>-r<run>`
+release per commit. `android/sysroot.lock` pins the immutable tag and the hash
+of its `SHA256SUMS`; the fetch script follows the lock, refuses a changed
+`SHA256SUMS`, and verifies each asset's GitHub build-provenance attestation
+when an authenticated `gh` is available (`-Tag sysroot-latest` bypasses the
+lock). Fetch the prebuilt sysroot and then build the engine for the emulator
+ABI:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File android\scripts\fetch-prebuilt-deps.ps1 `
@@ -172,8 +175,10 @@ Kotlin loads `libnordstjernen_jni.so` and the linker resolves the rest from
   (history, reload, link following, fling, intent handling, mobile-width
   rendering, title), and the CMake auto-detect/stub wiring.
 * **Wired, CI-built with the prebuilt sysroot:** the Android workflow fetches
-  `sysroot-latest`, cross-compiles the engine, and assembles an APK on every
-  push via `.github/workflows/android.yml`.
+  the sysroot pinned in `android/sysroot.lock` (attestation verified),
+  cross-compiles the engine, and assembles an APK on every push via
+  `.github/workflows/android.yml`; `.github/workflows/sysroot-bump.yml` opens a
+  PR when a newer attested sysroot release exists.
 * **Done & verified on desktop (dependency shrink):** the engine no longer
   needs GTK 4 — `GdkTexture` is abstracted behind `ns_texture`
   (`src/texture.c`; a GDK wrapper on desktop, a BGRA buffer on Android). The

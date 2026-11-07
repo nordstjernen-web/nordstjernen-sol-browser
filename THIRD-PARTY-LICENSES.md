@@ -161,7 +161,7 @@ Nordstjernen against your modified copy: write to the address in
 any data and utility programs needed, so that you can produce a modified
 executable. Because the complete Nordstjernen source is published as well,
 you can also rebuild the browser from source with your modified
-`src/web-text-lib/`. Android and iOS builds do not include web-text-lib;
+`src/web-text-lib/`. Android builds do not include web-text-lib;
 they link the system Pango dynamically as before.
 
 ## Dynamically linked

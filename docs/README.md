@@ -24,7 +24,6 @@ reporting in [SECURITY.md](../SECURITY.md), and licensing in
 - [Windows.md](Windows.md) · [windows-store.md](windows-store.md) — Windows build and the Microsoft Store package.
 - [macOS.md](macOS.md) — macOS install (first-launch quarantine step, troubleshooting), build, `.app`/`.dmg`, and distribution (Developer ID notarisation, Mac App Store).
 - [Android.md](Android.md) — Android build and Google Play release.
-- [iOS.md](iOS.md) — the iOS port: structure, build, and what remains.
 - [Debian.md](Debian.md) ([inclusion tracker](Debian-inclusion.md)) · [Ubuntu.md](Ubuntu.md) · [opensuse.md](opensuse.md) · [Arch.md](Arch.md) · [Alpine.md](Alpine.md) — per-distro packaging.
 - [Nightly.md](Nightly.md) — the nightly build server and artifact matrix.
 - [Embedding.md](Embedding.md) — embedding the engine in a C application.

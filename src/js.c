@@ -34904,6 +34904,7 @@ ns_fire_inline_on_handler(ns_js *js, const ns_node *target, const char *type,
                           JSValue event)
 {
     if (!js || !target || target->kind != NS_NODE_ELEMENT || !type) return FALSE;
+    if (ns_node_sandbox_blocks_scripts(target)) return FALSE;
     ns_node *target_doc = target->parent;
     while (target_doc && target_doc->kind != NS_NODE_DOCUMENT)
         target_doc = target_doc->parent;
@@ -50183,7 +50184,11 @@ ns_js_run_javascript_url(ns_js *js, const ns_node *anchor, const char *body)
     if (!ns_csp_inline_event_handler_allowed(ns_js_node_csp(js, anchor)))
         return;
     JSContext *realm = ns_js_node_realm_context(js, anchor);
-    if (!realm) realm = js->main_realm_ctx;
+    if (!realm) {
+        const ns_node *frame = ns_js_node_frame(anchor);
+        if (frame && ns_iframe_is_cross_origin(js, frame)) return;
+        realm = js->main_realm_ctx;
+    }
     ns_realm_scope scope;
     ns_js_realm_scope_enter(js, realm, &scope);
     char *code = g_uri_unescape_string(body, NULL);
@@ -69450,6 +69455,19 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         return;
     }
     if (src) {
+        if ((g_str_has_prefix(src, "data:") || g_str_has_prefix(src, "blob:")) &&
+            ns_js_node_csp(js, n) &&
+            !ns_csp_allows_with_nonce(ns_js_node_csp(js, n), NS_CSP_SCRIPT,
+                                      src, origin, nonce,
+                                      !(n->flags & NS_NODE_NOT_PARSER_INSERTED))) {
+            if (js->log_cb) {
+                char *line = g_strdup_printf("CSP blocked: script %s", src);
+                js->log_cb(line, js->log_user_data);
+                g_free(line);
+            }
+            ns_js_dispatch_resource_event(js, n, "error");
+            return;
+        }
         if (g_str_has_prefix(src, "data:")) {
             gsize blen = 0;
             char *body = ns_js_decode_data_url(src, &blen);

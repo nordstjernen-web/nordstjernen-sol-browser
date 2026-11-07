@@ -145,12 +145,18 @@ cross-built at the same API level (`<= 34`) for the app to run on Android 14.
 
 The dependency sysroot is built by
 `nordstjernen-web/nordstjernen-dependencies-build` and published as the public
-`sysroot-latest` release, plus an immutable per-commit copy
-(`sysroot-<date>-<sha>`) that can be pinned with `-Tag`.
-`android/scripts/fetch-prebuilt-deps.ps1` downloads those release assets,
-verifies them against `SHA256SUMS` and, when the `gh` CLI is installed, against
-their GitHub build-provenance attestation (`gh attestation verify`); set
-`NORDSTJERNEN_REQUIRE_ATTESTATION=1` to make that mandatory.
+`sysroot-latest` release plus an immutable per-commit copy
+(`sysroot-<date>-<sha>-r<run>`). The engine does **not** follow `latest`:
+[`android/sysroot.lock`](../android/sysroot.lock) pins the immutable tag and the
+sha256 of that release's `SHA256SUMS`, and `android/scripts/fetch-prebuilt-deps.ps1`
+refuses the download if the fetched `SHA256SUMS` hashes differently. It also
+verifies each tarball's GitHub build-provenance attestation when an
+authenticated `gh` is available; set `NORDSTJERNEN_REQUIRE_ATTESTATION=1`
+(planned for CI once the locked release is attested) so an unattested sysroot
+fails the build. `-Tag sysroot-latest` bypasses the
+lock for local experiments. The `sysroot-bump` workflow opens a pull request
+with the dependency manifest diff whenever a newer attested release exists, so
+a sysroot update is reviewed like any other dependency bump.
 
 ## Signing
 
@@ -282,4 +288,3 @@ Console internal track by hand.
 
 - **F-Droid** — separate track; reproducible builds are the only twist.
 - **Samsung / Huawei / Amazon stores** — year-two store-listing ports.
-- **iOS** — see [`iOS.md`](iOS.md); much worse cost/benefit.
