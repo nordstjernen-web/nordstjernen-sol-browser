@@ -1,8 +1,9 @@
 # Nordstjernen - fetch Android prebuilt dependency sysroots.
 #
-# Verifies each asset against SHA256SUMS and, when the gh CLI is installed,
-# against its GitHub build-provenance attestation (set
-# NORDSTJERNEN_REQUIRE_ATTESTATION=1 to refuse to install without gh).
+# Verifies each asset against SHA256SUMS and, with an authenticated gh CLI
+# (GH_TOKEN on CI), against its GitHub build-provenance attestation. A missing
+# gh, missing auth or a missing attestation (Sigstore outage at publish time)
+# only warns unless NORDSTJERNEN_REQUIRE_ATTESTATION=1; an invalid one is fatal.
 # Pass -Tag sysroot-<date>-<sha> (an immutable per-commit release) to pin.
 
 param(
@@ -19,20 +20,26 @@ function Write-Step($Message) {
     Write-Host "[deps] $Message"
 }
 
-function Test-BuildProvenance($File) {
-    $gh = Get-Command gh -ErrorAction SilentlyContinue
-    if (-not $gh) {
-        if ($env:NORDSTJERNEN_REQUIRE_ATTESTATION -and $env:NORDSTJERNEN_REQUIRE_ATTESTATION -ne "0") {
-            throw "gh CLI not found but NORDSTJERNEN_REQUIRE_ATTESTATION is set; install gh to verify $([System.IO.Path]::GetFileName($File))"
-        }
-        Write-Step "gh CLI not found; skipping provenance verification of $([System.IO.Path]::GetFileName($File))"
-        return
+function Test-BuildProvenance($File, $Digest) {
+    $name = [System.IO.Path]::GetFileName($File)
+    $required = $env:NORDSTJERNEN_REQUIRE_ATTESTATION -and $env:NORDSTJERNEN_REQUIRE_ATTESTATION -ne "0"
+    $softFail = {
+        param($Reason)
+        if ($required) { throw "$Reason (NORDSTJERNEN_REQUIRE_ATTESTATION is set)" }
+        Write-Step "$Reason; skipping provenance verification of $name"
     }
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    if (-not $gh) { & $softFail "gh CLI not found"; return }
+    & $gh.Source auth status 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { & $softFail "gh CLI is not authenticated (set GH_TOKEN)"; return }
+    $count = & $gh.Source api "repos/$Repo/attestations/sha256:$Digest" --jq ".attestations | length" 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $count) { & $softFail "could not query the attestations API for $name"; return }
+    if ([int]$count -eq 0) { & $softFail "no build-provenance attestation is published for $name"; return }
     & $gh.Source attestation verify $File --repo $Repo | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw "provenance attestation check FAILED for $([System.IO.Path]::GetFileName($File)) (repo $Repo); refusing to install"
+        throw "provenance attestation check FAILED for $name (repo $Repo); refusing to install"
     }
-    Write-Step "verified build provenance of $([System.IO.Path]::GetFileName($File))"
+    Write-Step "verified build provenance of $name"
 }
 
 function Invoke-GitHubDownload($Url, $OutFile) {
@@ -92,7 +99,7 @@ try {
         if ($actual -ne $expected) {
             throw "checksum mismatch for $asset"
         }
-        Test-BuildProvenance $archive
+        Test-BuildProvenance $archive $actual
 
         New-Item -ItemType Directory -Force -Path $unpack | Out-Null
         tar -xzf $archive -C $unpack

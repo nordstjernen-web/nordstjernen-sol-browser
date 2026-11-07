@@ -9,9 +9,10 @@
 #   nordstjernen-ios-sysroot-<platform>.tar.gz   # each contains a top-level <platform>/
 #   SHA256SUMS
 #
-# Each asset also carries a GitHub build-provenance attestation. When the `gh`
-# CLI is installed it is verified (`gh attestation verify`); set
-# NORDSTJERNEN_REQUIRE_ATTESTATION=1 to refuse to install without it. Pass
+# Each asset normally carries a GitHub build-provenance attestation. With an
+# authenticated `gh` CLI (GH_TOKEN on CI) it is verified; a missing gh, missing
+# auth or a missing attestation (Sigstore outage at publish time) only warns
+# unless NORDSTJERNEN_REQUIRE_ATTESTATION=1, while an invalid one is fatal. Pass
 # --tag ios-sysroot-<date>-<sha> (an immutable per-commit release) to pin.
 #
 # platform is 'device' (arm64 iphoneos) or 'simulator' (arm64 iphonesimulator).
@@ -55,18 +56,22 @@ UA="nordstjernen-ios-deps/1.0 (+https://github.com/${REPO})"
 dl() { curl -fsSL --proto '=https' --proto-redir '=https' --retry 4 --retry-delay 2 -A "${UA}" -o "$2" "$1"; }
 
 verify_attestation() {
-  local file="$1"
-  if ! command -v gh >/dev/null 2>&1; then
-    if [ "${NORDSTJERNEN_REQUIRE_ATTESTATION:-0}" != "0" ]; then
-      echo "gh CLI not found but NORDSTJERNEN_REQUIRE_ATTESTATION is set; install gh to verify ${file##*/}" >&2
-      exit 1
-    fi
-    echo "gh CLI not found; skipping provenance verification of ${file##*/}" >&2
-    return 0
-  fi
+  local file="$1" name="${1##*/}"
+  local required="${NORDSTJERNEN_REQUIRE_ATTESTATION:-0}"
+  soft_fail() {
+    if [ "${required}" != "0" ]; then echo "$1 (NORDSTJERNEN_REQUIRE_ATTESTATION is set)" >&2; exit 1; fi
+    echo "$1; skipping provenance verification of ${name} (set NORDSTJERNEN_REQUIRE_ATTESTATION=1 to require it)" >&2
+  }
+  if ! command -v gh >/dev/null 2>&1; then soft_fail "gh CLI not found"; return 0; fi
+  if ! gh auth status >/dev/null 2>&1; then soft_fail "gh CLI is not authenticated (set GH_TOKEN)"; return 0; fi
+  local digest count
+  digest="$(sha256sum "${file}" | awk '{print $1}')"
+  count="$(gh api "repos/${REPO}/attestations/sha256:${digest}" --jq '.attestations | length' 2>/dev/null || echo "")"
+  if [ -z "${count}" ]; then soft_fail "could not query the attestations API for ${name}"; return 0; fi
+  if [ "${count}" = "0" ]; then soft_fail "no build-provenance attestation is published for ${name}"; return 0; fi
   gh attestation verify "${file}" --repo "${REPO}" >/dev/null 2>&1 \
-    || { echo "provenance attestation check FAILED for ${file##*/} (repo ${REPO}); refusing to install" >&2; exit 1; }
-  echo "verified build provenance of ${file##*/}"
+    || { echo "provenance attestation check FAILED for ${name} (repo ${REPO}); refusing to install" >&2; exit 1; }
+  echo "verified build provenance of ${name}"
 }
 
 # The published sysroot's pkg-config files bake in the dependency-build repo's
