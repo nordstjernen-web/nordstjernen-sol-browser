@@ -17,8 +17,13 @@ Changelog:
   "Done" after every load, built-in pages declare their own favicons
   (History, Settings, About, folder listing, error and Safe Browsing
   pages), and the New Tab address bar is empty. On macOS the window buttons
-  sit on the left as traffic lights and the tab strip carries no title;
-  the toolbar's Nordstjernen button moved into the menu. The
+  sit on the left as traffic lights at native spacing, page scrollbars
+  overlay the page and fade when idle, and the tab strip carries no title;
+  the toolbar's Nordstjernen button moved into the menu. Tabs share the
+  strip at equal widths with separators. The address bar shows a "Not
+  secure" chip on plain HTTP and invalid certificates and a red
+  "Dangerous" chip on a Safe Browsing block, and both search fields name
+  the search engine. The
   file:// folder listing and the Safe Browsing warning use the shared page
   style with a dark variant. New Tab lists the most visited sites (not in
   private windows). Settings marks the current section, puts Cookies

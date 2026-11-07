@@ -206,6 +206,7 @@ struct NsProcView {
     GtkWidget     *root;
     GtkWidget     *area;
     GtkWidget     *hscroll;
+    guint          scrollbar_idle_id;
     GtkWidget     *vscroll;
     GtkIMContext  *im;
     GtkAdjustment *hadj;
@@ -1747,6 +1748,34 @@ configure_adjustments(NsProcView *v)
     v->scroll_x = (int)gtk_adjustment_get_value(v->hadj);
     v->scroll_y = (int)gtk_adjustment_get_value(v->vadj);
 }
+
+#ifdef __APPLE__
+static gboolean
+scrollbars_go_idle(gpointer data)
+{
+    NsProcView *v = data;
+    v->scrollbar_idle_id = 0;
+    GtkWidget *bars[] = { v->vscroll, v->hscroll };
+    for (guint i = 0; i < G_N_ELEMENTS(bars); i++) {
+        gtk_widget_add_css_class(bars[i], "ns-idle");
+        gtk_widget_set_can_target(bars[i], FALSE);
+    }
+    return G_SOURCE_REMOVE;
+}
+
+static void
+scrollbars_wake(NsProcView *v)
+{
+    GtkWidget *bars[] = { v->vscroll, v->hscroll };
+    for (guint i = 0; i < G_N_ELEMENTS(bars); i++) {
+        gtk_widget_remove_css_class(bars[i], "ns-idle");
+        gtk_widget_set_can_target(bars[i], TRUE);
+    }
+    if (v->scrollbar_idle_id)
+        g_source_remove(v->scrollbar_idle_id);
+    v->scrollbar_idle_id = g_timeout_add(1200, scrollbars_go_idle, v);
+}
+#endif
 
 static void
 on_adj_changed(GtkAdjustment *adj, gpointer data)
@@ -5133,6 +5162,10 @@ on_area_destroy(GtkWidget *widget, gpointer data)
         g_source_remove(v->hover_after_scroll_id);
         v->hover_after_scroll_id = 0;
     }
+    if (v->scrollbar_idle_id) {
+        g_source_remove(v->scrollbar_idle_id);
+        v->scrollbar_idle_id = 0;
+    }
     if (v->console_poll_id) {
         g_source_remove(v->console_poll_id);
         v->console_poll_id = 0;
@@ -5619,13 +5652,28 @@ ns_proc_view_new(void)
     v->hscroll =
         gtk_scrollbar_new(GTK_ORIENTATION_HORIZONTAL, v->hadj);
     gtk_grid_attach(GTK_GRID(grid), v->area, 0, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), v->vscroll, 1, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), v->hscroll, 0, 1, 1, 1);
     gtk_widget_set_visible(v->vscroll, FALSE);
     gtk_widget_set_visible(v->hscroll, FALSE);
 
     v->overlay = gtk_overlay_new();
     gtk_overlay_set_child(GTK_OVERLAY(v->overlay), grid);
+#ifdef __APPLE__
+    gtk_widget_set_halign(v->vscroll, GTK_ALIGN_END);
+    gtk_widget_set_halign(v->hscroll, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(v->hscroll, GTK_ALIGN_END);
+    gtk_widget_add_css_class(v->vscroll, "ns-overlay-scrollbar");
+    gtk_widget_add_css_class(v->hscroll, "ns-overlay-scrollbar");
+    gtk_overlay_add_overlay(GTK_OVERLAY(v->overlay), v->vscroll);
+    gtk_overlay_add_overlay(GTK_OVERLAY(v->overlay), v->hscroll);
+    scrollbars_go_idle(v);
+    g_signal_connect_swapped(v->hadj, "value-changed",
+                             G_CALLBACK(scrollbars_wake), v);
+    g_signal_connect_swapped(v->vadj, "value-changed",
+                             G_CALLBACK(scrollbars_wake), v);
+#else
+    gtk_grid_attach(GTK_GRID(grid), v->vscroll, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), v->hscroll, 0, 1, 1, 1);
+#endif
     v->plock = ns_pointer_lock_new(v->area, v->overlay);
     v->webauthn = ns_webauthn_new(v->area, pv_webauthn_deliver, v);
     gtk_widget_set_vexpand(v->overlay, TRUE);

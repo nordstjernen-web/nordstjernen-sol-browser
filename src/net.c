@@ -3369,7 +3369,7 @@ about_substitute(const char *template_text,
 static void
 diag_kv(GString *s, const char *key, const char *value)
 {
-    char *ev = g_markup_escape_text((value && *value) ? value : "\xe2\x80\x94",
+    char *ev = g_markup_escape_text((value && *value) ? value : "Unknown",
                                     -1);
     g_string_append_printf(s,
         "<div class=\"drow\"><span class=\"dk\">%s</span>"
@@ -3468,15 +3468,13 @@ about_security_html(void)
 #endif
 #ifdef NS_IPC_RUST
     diag_state(s, "Memory-safe message parser", TRUE, "On");
-#else
-    diag_state(s, "Memory-safe message parser", FALSE, "Off");
 #endif
 
-    g_string_append(s, "<h3>Browsing</h3>");
+    g_string_append(s, "<h3>Privacy</h3>");
     gboolean https_first = cfg && cfg->https_first;
     diag_state(s, "HTTPS-First", https_first, https_first ? "On" : "Off");
     gboolean js_on = !cfg || cfg->javascript_enabled;
-    diag_state(s, "JavaScript", js_on, js_on ? "On" : "Off");
+    diag_kv(s, "JavaScript", js_on ? "On" : "Off");
     gboolean gpc = cfg && cfg->global_privacy_control;
     diag_state(s, "Global Privacy Control", gpc, gpc ? "Sent" : "Off");
     gboolean dnt = cfg && cfg->do_not_track;
@@ -3516,8 +3514,6 @@ about_diagnostics_html(void)
 #endif
 
     GString *s = g_string_new("<div class=\"diag\">");
-
-    g_string_append(s, "<h3>System</h3>");
     char *os = g_get_os_info(G_OS_INFO_KEY_PRETTY_NAME);
     if (!os) os = g_get_os_info(G_OS_INFO_KEY_NAME);
     diag_kv(s, "Operating system", os ? os : platform);
@@ -4013,10 +4009,10 @@ ns_build_error_page(const char *url, long status, const char *transport_error)
     g_string_append(out,
         "<button class=\"btn\" "
         "onclick=\"history.back()\">Go back</button>"
-        "<a class=\"btn\" href=\"about:start\">New tab</a>"
+        "<a class=\"btn\" href=\"about:start\">New Tab</a>"
         "</div>"
         "<div class=\"tips\">"
-        "<strong>What to try:</strong>"
+        "<strong>What to try</strong>"
         "<ul>");
     if (is_file_url) {
         g_string_append(out,
@@ -4976,7 +4972,7 @@ static const char k_about_start_template[] =
     "<meta name=\"color-scheme\" content=\"light dark\">"
     "<title>New Tab</title>"
     "<style>\n" NS_ABOUT_BASE_CSS
-    "html,body{height:100%;background:#fff}\n"
+    "html,body{height:100%}\n"
     ".ntp{max-width:720px;margin:0 auto;padding:12vh 24px 64px;"
     "display:flex;flex-direction:column;align-items:center}\n"
     ".brand{display:flex;flex-direction:column;align-items:center;"
@@ -5026,8 +5022,10 @@ static const char k_about_start_template[] =
     ".links a:hover{background:var(--field);color:var(--text);"
     "text-decoration:none}\n"
     ".links svg{width:16px;height:16px;color:var(--accent)}\n"
+    ".foot{margin-top:22px;font-size:12.5px}\n"
+    ".foot a{color:var(--muted);margin:0 8px}\n"
 
-    "@media (prefers-color-scheme:dark){html,body{background:var(--bg)}}\n"
+
     "@media (max-width:560px){.ntp{padding-top:7vh}"
     ".brand h1{font-size:26px}"
     ".sites{grid-template-columns:repeat(4,minmax(0,1fr))}}\n"
@@ -5040,7 +5038,7 @@ static const char k_about_start_template[] =
     "<circle cx=\"7\" cy=\"7\" r=\"4.6\"/><path d=\"M10.4 10.4 14 14\"/></svg>"
     "<input id=\"sq\" name=\"q\" autocomplete=\"off\" dir=\"auto\""
     " aria-label=\"Search the web or enter an address\""
-    " placeholder=\"Search or enter an address\">"
+    " placeholder=\"Search with __ND_SEARCH_NAME__ or enter an address\">"
     "<button type=\"submit\" aria-label=\"Search\">"
     "<svg width=\"18\" height=\"18\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\""
@@ -5072,6 +5070,8 @@ static const char k_about_start_template[] =
     " r=\"5.75\"/><ellipse cx=\"8\" cy=\"8\" rx=\"2.4\" ry=\"5.75\"/>"
     "<path d=\"M2.5 8h11\"/></svg>nordstjernen.org</a>"
     "</nav>"
+    "<p class=\"foot\"><a href=\"about:license\">License</a>"
+    "<a href=\"https://nordstjernen.org/privacy\">Privacy</a></p>"
     "</main>"
     "<script>\n"
     "var searchUrl='__ND_SEARCH_URL__';\n"
@@ -5120,8 +5120,7 @@ static const char k_about_nordstjernen_template[] =
     ".ver{display:inline-block;margin-left:10px;padding:3px 10px;"
     "border-radius:999px;background:var(--accent-soft);color:var(--accent);"
     "font-size:13px;font-weight:700;vertical-align:middle;letter-spacing:0}\n"
-    ".card{padding:22px 24px;margin-bottom:16px}\n"
-    ".card h2{margin:0 0 8px;font-size:17px}\n"
+    ".card{padding:20px;margin-bottom:26px}\n"
     ".card p{margin:0 0 10px;color:var(--muted);font-size:14px}\n"
     ".card p b{color:var(--text)}\n"
     ".actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}\n"
@@ -5133,7 +5132,7 @@ static const char k_about_nordstjernen_template[] =
     ".drow:last-child{border-bottom:0}\n"
     ".dk{color:var(--muted);flex:0 0 auto}\n"
     ".dv{color:var(--text);text-align:right;word-break:break-word;"
-    "font-family:var(--mono);font-size:12.5px}\n"
+    "font-size:13px;font-variant-numeric:tabular-nums}\n"
     ".dv.on,.dv.off{font-family:var(--font);font-weight:600;font-size:12px;"
     "padding:1px 10px;border-radius:999px}\n"
     ".dv.on{color:var(--ok);background:rgba(19,128,74,.1)}\n"
@@ -5147,11 +5146,13 @@ static const char k_about_nordstjernen_template[] =
     "<body><main class=\"wrap\">"
     "<div class=\"head\">__ND_LOGO_MARK__<div>"
     "<h1>Nordstjernen Web Browser<span class=\"ver\">" NS_VERSION "</span></h1>"
-    "<p>A web browser implemented in C.</p></div></div>"
-    "<section class=\"card\"><h2>Security</h2>__ND_SECURITY__</section>"
+    "<p>An independent web browser, built from scratch.</p></div></div>"
+    "<h2 class=\"group-label\">Security</h2>"
+    "<section class=\"card\">__ND_SECURITY__</section>"
+    "<h2 class=\"group-label\">System</h2>"
     "<section class=\"card\">__ND_DIAG__</section>"
+    "<h2 class=\"group-label\">License</h2>"
     "<section class=\"card\">"
-    "<h2>License</h2>"
     "<p>Nordstjernen is \xc2\xa9 2026 Andreas R\xc3\xb8sdal and dual-licensed: "
     "you may use, modify and redistribute it under either the "
     "<b>Nordstjernen Source License v1.0 (NSL-1.0)</b> or the "
@@ -5210,14 +5211,13 @@ static const char k_about_settings_html[] =
 ".side svg{color:currentColor}\n"
 "main{flex:1 1 auto;min-width:0}\n"
 "section{margin:0 0 26px}\n"
-"section h2{margin:0 0 10px 6px;font-size:14px;font-weight:600;"
-"color:var(--muted)}\n"
-".card{padding:6px 22px}\n"
+".card{padding:6px 20px}\n"
 ".row{display:flex;align-items:center;justify-content:space-between;"
 "gap:20px;padding:14px 0;cursor:pointer}\n"
 ".card > * + *{border-top:1px solid var(--line)}\n"
 ".txt{display:flex;flex-direction:column;gap:2px;min-width:0}\n"
-".lbl{font-size:14.5px;font-weight:600}\n"
+".lbl{font-size:14.5px;font-weight:500}\n"
+".row select{flex:0 0 220px;width:220px}\n"
 ".desc{font-size:13px;color:var(--muted)}\n"
 ".field{display:flex;flex-direction:column;gap:8px;padding:14px 0}\n"
 "input[type=text],select{width:100%;padding:9px 12px;"
@@ -5272,32 +5272,41 @@ static const char k_about_settings_html[] =
     "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/>"
     "<circle cx=\"6\" cy=\"6.5\" r=\".6\"/><circle cx=\"9.5\" cy=\"9.5\" r=\".6\"/>"
     "<circle cx=\"6.5\" cy=\"10\" r=\".6\"/>")
-    "Cookies</a>"
+    "Site data</a>"
 "<a href=\"#data\">" SETTINGS_NAV_ICON(
     "<path d=\"M3.25 4.5h9.5M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.75h5.8l.6-8.75\"/>")
     "Browsing data</a></nav>\n"
 "<main>\n"
-"<section id=\"general\"><h2>General</h2><div class=\"card\">"
-"<label class=\"field\"><span class=\"lbl\">Home page</span>"
-"<select id=\"home_pick\"><option value=\"start\">New Tab page</option>"
-"<option value=\"custom\">Custom address\xe2\x80\xa6</option></select></label>"
+"<section id=\"general\"><h2 class=\"group-label\">General</h2>"
+"<div class=\"card\">"
+"<div class=\"row\"><span class=\"txt\"><span class=\"lbl\">Home page"
+"</span><span class=\"desc\">Opens with the Home button and in new "
+"windows.</span></span>"
+"<select id=\"home_pick\" aria-label=\"Home page\">"
+"<option value=\"start\">New Tab page</option>"
+"<option value=\"custom\">Custom address\xe2\x80\xa6</option></select></div>"
 "<label class=\"field\" id=\"home_wrap\"><span class=\"lbl\">"
 "Home page address</span>"
 "<input id=\"home_url\" type=\"text\" spellcheck=\"false\" "
 "placeholder=\"https://example.com\"></label>"
-"<label class=\"field\"><span class=\"lbl\">Search engine</span>"
-"<select id=\"search_pick\"></select></label>"
+"<div class=\"row\"><span class=\"txt\"><span class=\"lbl\">Search engine"
+"</span><span class=\"desc\">Used for searches from the address bar."
+"</span></span>"
+"<select id=\"search_pick\" aria-label=\"Search engine\"></select></div>"
 "<label class=\"field\" id=\"custom_wrap\"><span class=\"lbl\">"
 "Custom search URL</span>"
 "<input id=\"search_engine\" type=\"text\" spellcheck=\"false\" "
 "placeholder=\"https://example.com/?q=%s\"></label>"
 "</div></section>\n"
-"<section id=\"privacy\"><h2>Privacy</h2><div class=\"card\">"
-"<label class=\"field\"><span class=\"lbl\">Cookies</span>"
-"<select id=\"cookie_policy\">"
-"<option value=\"0\">Accept all cookies</option>"
-"<option value=\"1\">Block third-party cookies</option>"
-"<option value=\"2\">Block all cookies</option></select></label>\n"
+"<section id=\"privacy\"><h2 class=\"group-label\">Privacy</h2>"
+"<div class=\"card\">"
+"<div class=\"row\"><span class=\"txt\"><span class=\"lbl\">Cookies"
+"</span><span class=\"desc\">Which sites may store cookies on this "
+"device.</span></span>"
+"<select id=\"cookie_policy\" aria-label=\"Cookies\">"
+"<option value=\"0\">Allow all</option>"
+"<option value=\"1\">Block third-party</option>"
+"<option value=\"2\">Block all</option></select></div>\n"
 SETTINGS_SWITCH("do_not_track",
     "Send \xe2\x80\x9c" "Do Not Track\xe2\x80\x9d",
     "Ask every site not to track you.")
@@ -5315,7 +5324,8 @@ SETTINGS_SWITCH("remote_control",
     "Let automation tools on this computer control the browser. "
     "Other devices can\xe2\x80\x99t connect.")
 "</div></section>\n"
-"<section id=\"content\"><h2>Content</h2><div class=\"card\">\n"
+"<section id=\"content\"><h2 class=\"group-label\">Content</h2>"
+"<div class=\"card\">\n"
 SETTINGS_SWITCH("images_enabled",
     "Load images",
     "Show pictures on web pages.")
@@ -5327,7 +5337,7 @@ SETTINGS_SWITCH("webgl_enabled",
     "Let pages draw 3D graphics.")
 SETTINGS_SWITCH("webgpu_enabled",
     "WebGPU",
-    "Allow pages to use the graphics card directly for 3D and compute work.")
+    "Let pages use the graphics card directly for 3D and compute work.")
 SETTINGS_SWITCH("local_storage_enabled",
     "Local storage",
     "Let sites keep data on this device.")
@@ -5335,14 +5345,16 @@ SETTINGS_SWITCH("cache_enabled",
     "Cache",
     "Keep copies of pages and files to load them faster.")
 "</div></section>\n"
-"<section id=\"cookies\"><h2>Cookies</h2><div class=\"card\">"
+"<section id=\"cookies\"><h2 class=\"group-label\">Site data</h2>"
+"<div class=\"card\">"
 "<div class=\"danger-row\"><span class=\"txt\"><span class=\"lbl\">"
 "Cookies by site</span><span class=\"desc\">Remove the cookies of one "
 "site, or of all sites.</span>"
 "</span><button id=\"cookies_clear\" class=\"btn danger\">Remove all"
 "</button></div><div id=\"cookie_sites\"></div>"
 "</div></section>\n"
-"<section id=\"data\"><h2>Browsing data</h2><div class=\"card\">"
+"<section id=\"data\"><h2 class=\"group-label\">Browsing data</h2>"
+"<div class=\"card\">"
 "<div class=\"danger-row\"><span class=\"txt\"><span class=\"lbl\">"
 "Clear all browsing data</span><span class=\"desc\">History, cookies, "
 "cache and site storage on this device.</span></span>"
@@ -5428,7 +5440,8 @@ SETTINGS_SWITCH("cache_enabled",
 "var navLinks=document.querySelectorAll('.side a');\n"
 "function markNav(){var cur=navLinks[0];for(var i=0;i<navLinks.length;i++){"
 "var sec=$(navLinks[i].getAttribute('href').slice(1));"
-"if(sec&&sec.getBoundingClientRect().top<=120)cur=navLinks[i];}"
+"if(sec&&sec.getBoundingClientRect().top<=window.innerHeight/3)"
+"cur=navLinks[i];}"
 "if(window.innerHeight+window.scrollY>=document.documentElement.scrollHeight-2)"
 "cur=navLinks[navLinks.length-1];"
 "for(var j=0;j<navLinks.length;j++)"
@@ -5631,18 +5644,8 @@ synthesize_about_response(const char *url, const char *top_url,
             else
                 g_string_append_c(esc_engine, *p);
         }
-        char *engine_host = ns_url_host_from(engine);
-        const char *search_name = "the web";
-        g_autofree char *engine_host_lower = NULL;
-        if (engine_host && *engine_host) {
-            engine_host_lower = g_ascii_strdown(engine_host, -1);
-            const psl_ctx_t *psl = psl_builtin();
-            const char *reg =
-                psl ? psl_registrable_domain(psl, engine_host_lower) : NULL;
-            search_name = (reg && *reg) ? reg
-                : (g_str_has_prefix(engine_host, "www.") ? engine_host + 4
-                                                         : engine_host);
-        }
+        char *engine_name = ns_search_engine_name();
+        const char *search_name = engine_name ? engine_name : "the web";
         char *with_search = about_substitute(k_about_start_template,
                                              "__ND_SEARCH_URL__",
                                              esc_engine->str);
@@ -5653,7 +5656,7 @@ synthesize_about_response(const char *url, const char *top_url,
         g_free(esc_name);
         g_free(with_search);
         g_string_free(esc_engine, TRUE);
-        g_free(engine_host);
+        g_free(engine_name);
         char *logo_markup = about_logo_markup();
         char *with_logo = about_substitute(with_name, "__ND_LOGO_MARK__",
                                            logo_markup);

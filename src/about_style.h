@@ -40,6 +40,8 @@
     "color:var(--danger)}\n" \
     ".btn:disabled{opacity:.55;cursor:default}\n" \
     ".btn[hidden]{display:none}\n" \
+    ".group-label{margin:0 0 10px 20px;font-size:15px;font-weight:600;" \
+    "color:var(--text)}\n" \
     ".kicker{margin:0 0 10px;font-size:12px;font-weight:700;" \
     "letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}\n" \
     ".crumb{display:inline-flex;align-items:center;gap:6px;height:32px;" \
