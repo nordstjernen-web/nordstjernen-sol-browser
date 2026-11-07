@@ -141,6 +141,62 @@ install_icon_search_paths(void)
     g_free(dir);
 }
 
+#ifdef __APPLE__
+static void
+install_macos_window_controls(GdkDisplay *display)
+{
+    GtkSettings *settings = gtk_settings_get_for_display(display);
+    if (settings)
+        g_object_set(settings, "gtk-decoration-layout",
+                     "close,minimize,maximize:", NULL);
+    GtkCssProvider *p = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(
+        p,
+        "headerbar windowcontrols.start { margin-left: 6px; }"
+        "headerbar windowcontrols.start button,"
+        "headerbar windowcontrols.start button:hover {"
+        "  min-width: 12px;"
+        "  min-height: 12px;"
+        "  margin: 15px 4px;"
+        "  padding: 0;"
+        "  border: 1px solid alpha(black, 0.12);"
+        "  border-radius: 999px;"
+        "  box-shadow: none;"
+        "  -gtk-icon-size: 8px;"
+        "  color: alpha(black, 0.55);"
+        "}"
+        "headerbar windowcontrols.start button > image,"
+        "headerbar windowcontrols.start button:hover > image {"
+        "  min-width: 0;"
+        "  min-height: 0;"
+        "  margin: 0;"
+        "  padding: 0;"
+        "  background: none;"
+        "  box-shadow: none;"
+        "  -gtk-icon-size: 8px;"
+        "  opacity: 0;"
+        "}"
+        "headerbar windowcontrols.start:hover button > image { opacity: 1; }"
+        "headerbar windowcontrols.start button.close {"
+        "  background-color: #ff5f57;"
+        "}"
+        "headerbar windowcontrols.start button.minimize {"
+        "  background-color: #febc2e;"
+        "}"
+        "headerbar windowcontrols.start button.maximize {"
+        "  background-color: #28c840;"
+        "}"
+        "headerbar:backdrop windowcontrols.start button {"
+        "  background-color: alpha(currentColor, 0.18);"
+        "  border-color: transparent;"
+        "}");
+    gtk_style_context_add_provider_for_display(
+        display, GTK_STYLE_PROVIDER(p),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+    g_object_unref(p);
+}
+#endif
+
 static void
 install_chrome_css(void)
 {
@@ -426,6 +482,9 @@ install_chrome_css(void)
         display, GTK_STYLE_PROVIDER(p),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(p);
+#ifdef __APPLE__
+    install_macos_window_controls(display);
+#endif
 }
 
 static void
@@ -540,7 +599,8 @@ address_display_url(const char *url)
 static void
 set_address_text(ProcWindow *pw, const char *url)
 {
-    char *shown = address_display_url(url);
+    char *shown = address_display_url(
+        url && g_str_equal(url, "about:start") ? "" : url);
     gtk_editable_set_text(GTK_EDITABLE(pw->address), shown);
     g_free(shown);
 }
@@ -558,15 +618,15 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
     switch (sec) {
     case NS_SEC_SECURE:
         icon_name = "nordstjernen-lock-symbolic";
-        label = ns_i18n("Secure — the certificate is valid");
+        label = ns_i18n("Secure: the certificate is valid");
         break;
     case NS_SEC_INVALID:
         icon_name = "nordstjernen-warning-symbolic";
-        label = ns_i18n("Not secure — the certificate is not trusted");
+        label = ns_i18n("Not secure: the certificate is not trusted");
         break;
     case NS_SEC_PLAIN:
         icon_name = "nordstjernen-lock-open-symbolic";
-        label = ns_i18n("Not secure — the connection is not encrypted");
+        label = ns_i18n("Not secure: the connection is not encrypted");
         break;
     default:
         break;
@@ -609,9 +669,30 @@ desktop_prefers_dark(GtkWidget *styled)
 }
 
 static void
+sync_gtk_dark_preference(ns_color_scheme_pref pref)
+{
+    static int desktop_value = -1;
+    GtkSettings *settings = gtk_settings_get_default();
+    if (!settings)
+        return;
+    gboolean have = FALSE;
+    g_object_get(settings, "gtk-application-prefer-dark-theme", &have, NULL);
+    if (desktop_value < 0)
+        desktop_value = have;
+    gboolean want = pref == NS_COLOR_SCHEME_PREF_DARK ? TRUE
+                  : pref == NS_COLOR_SCHEME_PREF_LIGHT ? FALSE
+                  : (gboolean)desktop_value;
+    if (want != have)
+        g_object_set(settings, "gtk-application-prefer-dark-theme", want,
+                     NULL);
+}
+
+static void
 apply_color_scheme(ProcWindow *pw)
 {
     const ns_config *cfg = ns_config_get();
+    sync_gtk_dark_preference(cfg ? cfg->color_scheme
+                                 : NS_COLOR_SCHEME_PREF_AUTO);
     gboolean dark;
     switch (cfg ? cfg->color_scheme : NS_COLOR_SCHEME_PREF_AUTO) {
     case NS_COLOR_SCHEME_PREF_LIGHT: dark = FALSE; break;
@@ -715,7 +796,7 @@ update_chrome(ProcWindow *pw)
     const char *title = ns_proc_view_title(v);
     set_address_text(pw, ns_proc_view_display_url(v));
     const char *brand = ns_brand_versioned();
-    char *wt = title && *title ? g_strdup_printf("%s — %s", title, brand)
+    char *wt = title && *title ? g_strdup_printf("%s - %s", title, brand)
                                : g_strdup(brand);
     gtk_window_set_title(GTK_WINDOW(pw->window), wt);
     g_free(wt);
@@ -1355,6 +1436,24 @@ pw_leave_element_fullscreen(ProcWindow *pw)
 }
 
 static void
+refresh_tab_icon(GtkWidget *page, NsProcView *v)
+{
+    GtkWidget *icon = g_object_get_data(G_OBJECT(page), "ns-tab-icon");
+    if (!icon || ns_proc_view_is_private(v))
+        return;
+    const char *url = ns_proc_view_url(v);
+    GdkPaintable *fav = ns_proc_view_favicon(v);
+    if (url && g_str_has_prefix(url, "about:") &&
+        !g_str_equal(url, "about:blank"))
+        ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen");
+    else if (fav)
+        gtk_image_set_from_paintable(GTK_IMAGE(icon), fav);
+    else
+        ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen-page-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
+}
+
+static void
 set_tab_loading(GtkWidget *page, gboolean loading)
 {
     GtkWidget *icon = g_object_get_data(G_OBJECT(page), "ns-tab-icon");
@@ -1435,6 +1534,9 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
     case NS_PROC_EVT_URL:
         if (pw->element_fullscreen && v == pw->fullscreen_view)
             pw_set_element_fullscreen(pw, FALSE);
+        if (idx >= 0)
+            refresh_tab_icon(
+                gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx), v);
         if (is_current) {
             set_address_text(pw, text);
             pw_set_status_persistent(pw, NULL);
@@ -1476,7 +1578,7 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
             gboolean was_loading = pw->loading;
             set_loading_ui(pw, loading);
             if (was_loading && !loading)
-                pw_set_status(pw, ns_i18n("Done"));
+                pw_set_status(pw, NULL);
         }
         break;
     }
@@ -1512,19 +1614,9 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         }
         break;
     case NS_PROC_EVT_FAVICON:
-        if (idx >= 0 && !ns_proc_view_is_private(v)) {
-            GtkWidget *p =
-                gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);
-            GtkWidget *icon = g_object_get_data(G_OBJECT(p), "ns-tab-icon");
-            GdkPaintable *fav = ns_proc_view_favicon(v);
-            if (icon && fav)
-                gtk_image_set_from_paintable(GTK_IMAGE(icon), fav);
-            else if (icon)
-                ns_icon_image_set(GTK_IMAGE(icon),
-                                  "nordstjernen-page-symbolic");
-            if (icon)
-                gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
-        }
+        if (idx >= 0)
+            refresh_tab_icon(
+                gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx), v);
         break;
     }
 }

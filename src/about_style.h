@@ -7,7 +7,7 @@
 
 #define NS_ABOUT_BASE_CSS \
     ":root{color-scheme:light dark;--bg:#f5f7fb;--card:#ffffff;" \
-    "--text:#14171f;--muted:#596173;--faint:#8a92a2;" \
+    "--text:#14171f;--muted:#596173;--faint:#6f7787;--switch-off:#878fa0;" \
     "--line:rgba(17,24,39,.08);--field:rgba(17,24,39,.05);" \
     "--accent:#2f6fed;--accent-ink:#ffffff;" \
     "--accent-soft:rgba(47,111,237,.11);--ok:#13804a;--danger:#c62f3a;" \
@@ -18,7 +18,7 @@
     "--mono:ui-monospace,\"SF Mono\",\"Cascadia Mono\",\"DejaVu Sans Mono\"," \
     "Menlo,Consolas,monospace}\n" \
     "@media (prefers-color-scheme:dark){:root{--bg:#0f1218;--card:#181c24;" \
-    "--text:#e8eaf0;--muted:#a4abba;--faint:#767e8e;" \
+    "--text:#e8eaf0;--muted:#a4abba;--faint:#808898;--switch-off:#687185;" \
     "--line:rgba(255,255,255,.08);--field:rgba(255,255,255,.06);" \
     "--accent:#6c9cff;--accent-ink:#0b1020;" \
     "--accent-soft:rgba(108,156,255,.16);--ok:#4cc48a;--danger:#ff6b74;" \
@@ -45,5 +45,22 @@
     "padding:0 14px;border-radius:999px;background:var(--field);" \
     "color:var(--muted);font-size:13px;font-weight:600}\n" \
     ".crumb:hover{color:var(--text);text-decoration:none}\n"
+
+#define NS_ABOUT_TINT_CSS \
+    ".av.h1{background:rgba(13,148,136,.13);color:#0b7a70}\n" \
+    ".av.h2{background:rgba(22,163,74,.13);color:#15803d}\n" \
+    ".av.h3{background:rgba(217,119,6,.14);color:#b45309}\n" \
+    ".av.h4{background:rgba(220,38,38,.12);color:#c02626}\n" \
+    ".av.h5{background:rgba(219,39,119,.12);color:#be185d}\n" \
+    ".av.h6{background:rgba(124,58,237,.12);color:#6d28d9}\n" \
+    ".av.h7{background:rgba(71,85,105,.13);color:#475569}\n" \
+    "@media (prefers-color-scheme:dark){" \
+    ".av.h1{background:rgba(45,212,191,.16);color:#5eead4}" \
+    ".av.h2{background:rgba(74,222,128,.15);color:#86efac}" \
+    ".av.h3{background:rgba(251,191,36,.15);color:#fcd34d}" \
+    ".av.h4{background:rgba(248,113,113,.16);color:#fca5a5}" \
+    ".av.h5{background:rgba(244,114,182,.16);color:#f9a8d4}" \
+    ".av.h6{background:rgba(167,139,250,.17);color:#c4b5fd}" \
+    ".av.h7{background:rgba(148,163,184,.16);color:#cbd5e1}}\n"
 
 #endif

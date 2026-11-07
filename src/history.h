@@ -18,6 +18,7 @@ void   ns_history_shutdown(void);
 void   ns_history_clear(void);
 
 char  *ns_history_html_page(void);
+char  *ns_history_top_sites_html(int max_sites);
 
 G_END_DECLS
 

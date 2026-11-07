@@ -3,6 +3,18 @@ Changelog:
 
 1.0.45-dev:
 ======
+* UI: the window chrome turns dark with the dark colour scheme, the status
+  pill no longer shows "Done" after every load, built-in pages show the
+  Nordstjernen icon in their tab, and the New Tab address bar is empty.
+  On macOS the window buttons sit on the left as traffic lights. The
+  file:// folder listing and the Safe Browsing warning use the shared page
+  style with a dark variant. New Tab lists the most visited sites (not in
+  private windows). Settings marks the current section, puts Cookies
+  before Browsing data and shows off switches at 3:1 contrast without
+  animating them on load. History day headers are always English, without
+  the double space, and tiles take the letter of the registrable domain.
+  A failed connection reads "This site can't be reached" instead of
+  claiming the device is offline.
 * Network: the libcurl protocol allow-list is built from the protocols the
   linked libcurl provides, so an `ftp`-less libcurl (the mobile dependency
   sysroots now compile in only HTTP(S), FTP(S) and WebSocket, after the
