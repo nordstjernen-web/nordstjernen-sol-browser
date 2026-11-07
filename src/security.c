@@ -1160,6 +1160,10 @@ ns_security_sandbox_init(const char *self_exe)
 
     g_string_append(prof, ")\n");
 
+    g_string_append(prof,
+        "(deny process-exec*)\n"
+        "(deny appleevent-send)\n");
+
     char *err = NULL;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
