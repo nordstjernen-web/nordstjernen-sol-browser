@@ -15,6 +15,10 @@ Changelog:
   immutable per-commit release tags for pinning. The sysroots themselves pick
   up brotli 1.2.1 (CVE-2026-111497), curl 8.23.0, expat 2.10.0, freetype
   2.15.0 and sqlite 3.54.1.
+* CI: the Android workflows hand `gh` the job token, so the attestation check
+  can run instead of failing every Android build, and the FreeBSD and NetBSD
+  builds find glslang under `/usr/local` and `/usr/pkg` (neither ships a
+  `glslang.pc`), which had failed their configure since WebGL began requiring it.
 * Layout: `grid-auto-flow: column` places items pinned to a column
   before the auto-placed ones and adds rows for them, and counts the rows
   that row-placed items span. An item pinned to a full column was pushed

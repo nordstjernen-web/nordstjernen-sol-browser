@@ -200,8 +200,8 @@ endif
 # reaches the GPU driver (src/glsl_validate.c), so WebGL is built only when
 # glslang is present. Its pkg-config file names libraries that no longer
 # exist (MachineIndependent, GenericCodeGen), so it is consulted only for the
-# library and include directories -- which Homebrew keeps off the default
-# search paths -- and the two real libraries are looked up directly.
+# library and include directories -- which Homebrew and the BSD package
+# prefixes keep off the default search paths -- and the two real libraries are looked up directly.
 have_glslang = false
 glslang_deps = []
 if not is_mobile
@@ -219,10 +219,17 @@ if not is_mobile
       if glslang_incdir != ''
         glslang_cflags = ['-I' + glslang_incdir]
       endif
-    elif host_machine.system() == 'darwin'
-      foreach brew_prefix : ['/opt/homebrew', '/usr/local']
-        glslang_lib_dirs += brew_prefix / 'lib'
-        glslang_cflags += '-I' + brew_prefix / 'include'
+    else
+      glslang_prefixes = {
+        'darwin': ['/opt/homebrew', '/usr/local'],
+        'freebsd': ['/usr/local'],
+        'dragonfly': ['/usr/local'],
+        'openbsd': ['/usr/local'],
+        'netbsd': ['/usr/pkg'],
+      }.get(host_machine.system(), [])
+      foreach glslang_prefix : glslang_prefixes
+        glslang_lib_dirs += glslang_prefix / 'lib'
+        glslang_cflags += '-I' + glslang_prefix / 'include'
       endforeach
     endif
     glslang_lib = cc.find_library('glslang', dirs: glslang_lib_dirs,

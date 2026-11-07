@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  attestations: read
 
 jobs:
   bundle:
@@ -57,6 +58,8 @@ jobs:
           gradle-version: '9.8.2'
 
       - name: Fetch prebuilt dependency sysroots
+        env:
+          GH_TOKEN: ${{ github.token }}
         continue-on-error: true
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File android/scripts/fetch-prebuilt-deps.ps1 \
