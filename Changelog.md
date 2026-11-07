@@ -15,6 +15,16 @@ Changelog:
   local blocklist only. about:nordstjernen gains a Safe Browsing section with
   the status, each list's size and update times, and the tab's check, lookup
   and block counts.
+* Security: browsing history is now owned by the shell alone. The
+  `history.sqlite` store moved to the state directory (which sandboxed
+  renderers have no Landlock rule for, as with the remote-control token),
+  renderers no longer open it, and `about:history` is rendered by the
+  shell and handed to the renderer as a page rather than read from the
+  database inside the content process. A compromised renderer can no
+  longer read or tamper with the user's history. Recording and the
+  "Clear browsing data" action run in the shell; the renderer signals a
+  requested clear over the render side-channel. Existing history is moved
+  from the old data-directory location on first start.
 * Forms: a `<select>` styled with its own background or border draws its
   arrow inside its padding box. With an explicit `width` the arrow was
   placed from the start of the text plus the CSS width, so padding and

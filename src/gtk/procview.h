@@ -31,7 +31,8 @@ typedef enum {
     NS_PROC_EVT_FULLSCREEN,
     NS_PROC_EVT_ZOOM,
     NS_PROC_EVT_CONFIG,
-    NS_PROC_EVT_POPUP
+    NS_PROC_EVT_POPUP,
+    NS_PROC_EVT_HISTORY_CLEAR
 } NsProcEvent;
 
 typedef void (*NsProcNotify)(NsProcView *view, NsProcEvent evt,

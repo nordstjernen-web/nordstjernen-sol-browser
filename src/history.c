@@ -74,11 +74,20 @@ ns_history_init(void)
         g_mutex_unlock(&g_history_mutex);
         return;
     }
-    char *dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
+    char *dir = g_build_filename(g_get_user_state_dir(), NS_APP_DIR_NAME, NULL);
     g_mkdir_with_parents(dir, 0700);
     g_chmod(dir, 0700);
     char *path = g_build_filename(dir, "history.sqlite", NULL);
     g_free(dir);
+
+    char *legacy_dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME,
+                                        NULL);
+    char *legacy = g_build_filename(legacy_dir, "history.sqlite", NULL);
+    if (!g_file_test(path, G_FILE_TEST_EXISTS) &&
+        g_file_test(legacy, G_FILE_TEST_EXISTS))
+        g_rename(legacy, path);
+    g_free(legacy);
+    g_free(legacy_dir);
 
     g_history_db = ns_db_open(path, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
                               "history");

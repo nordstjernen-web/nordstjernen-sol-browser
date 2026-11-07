@@ -358,6 +358,8 @@ http_read_head(http_conn *c, http_head *out)
             out->x_webauthn = head_number(val);
         else if (strcasecmp(line, "X-Pointer-Lock") == 0)
             out->x_pointer_lock = head_number(val);
+        else if (strcasecmp(line, "X-History-Clear") == 0)
+            out->x_history_clear = head_number(val);
         else if (strcasecmp(line, "X-Nav") == 0) {
             size_t vlen = strlen(val);
             if (vlen >= sizeof out->x_nav)

@@ -276,6 +276,8 @@ void  ns_net_curl_apply_cookies(void *curl_handle, const char *url,
                                 const char *origin, const char *top_url);
 void  ns_net_site_storage_clear(void);
 
+gboolean ns_net_history_clear_pending(void);
+
 void  ns_net_set_proxy_override(const char *proxy_url);
 void  ns_net_set_allow_file_urls(gboolean allow);
 void  ns_net_set_log_fetches(gboolean on);

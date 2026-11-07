@@ -5768,13 +5768,24 @@ about_settings_cookies_delete(const char *form)
     if (q) g_hash_table_destroy(q);
 }
 
+static gboolean g_history_clear_pending;
+
 static void
 about_settings_clear(void)
 {
     ns_history_clear();
+    g_history_clear_pending = TRUE;
     ns_cache_clear();
     ns_net_cookies_clear();
     ns_net_site_storage_clear();
+}
+
+gboolean
+ns_net_history_clear_pending(void)
+{
+    gboolean pending = g_history_clear_pending;
+    g_history_clear_pending = FALSE;
+    return pending;
 }
 
 gboolean
