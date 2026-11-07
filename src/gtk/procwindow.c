@@ -314,7 +314,7 @@ install_chrome_css(void)
         "  background: none;"
         "  box-shadow: none;"
         "  -gtk-icon-size: 16px;"
-        "  opacity: 0.7;"
+        "  opacity: 0.85;"
         "  transition: opacity 120ms ease-out, background-color 120ms ease-out;"
         "}"
         ".ns-tab:hover > button.ns-tab-close,"
@@ -325,6 +325,7 @@ install_chrome_css(void)
         "  opacity: 1;"
         "  background-color: alpha(currentColor, 0.12);"
         "}"
+        ".ns-tabstrip > button.ns-newtab { color: alpha(currentColor, 0.85); }"
         ".ns-tabstrip > button.ns-newtab {"
         "  min-width: 30px;"
         "  min-height: 30px;"
@@ -542,7 +543,7 @@ install_chrome_css(void)
         "  background-color: alpha(currentColor, 0.09);"
         "}"
         "@define-color ns_dark_strip #0b0e13;"
-        "@define-color ns_dark_surface #181c24;"
+        "@define-color ns_dark_surface #1d222c;"
         "@define-color ns_dark_field #0f1218;"
         "window.ns-dark headerbar,"
         "window.ns-dark headerbar:backdrop {"
@@ -564,6 +565,9 @@ install_chrome_css(void)
         "window.ns-dark .ns-toolbar box.ns-address-box,"
         "window.ns-dark .ns-toolbar box.ns-address-box:focus-within {"
         "  background-color: @ns_dark_field;"
+        "}"
+        "window.ns-dark .ns-toolbar box.ns-address-box {"
+        "  border-color: alpha(white, 0.07);"
         "}"
         "window.ns-dark .ns-toolbar box.ns-address-box:hover {"
         "  background-color: mix(@ns_dark_field, white, 0.03);"
@@ -711,6 +715,7 @@ set_address_text(ProcWindow *pw, const char *url)
     char *shown = address_display_url(
         url && g_str_equal(url, "about:start") ? "" : url);
     gtk_editable_set_text(GTK_EDITABLE(pw->address), shown);
+    gtk_editable_set_position(GTK_EDITABLE(pw->address), -1);
     g_free(shown);
 }
 

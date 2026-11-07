@@ -22,7 +22,7 @@
     "--text:#e8eaf0;--muted:#a4abba;--faint:#808898;--switch-off:#687185;" \
     "--line:rgba(255,255,255,.08);--field:rgba(255,255,255,.06);" \
     "--accent:#6c9cff;--accent-ink:#0b1020;--accent-text:#8fb3ff;" \
-    "--switch-on:#3b6fe0;" \
+    "--switch-on:#6c9cff;" \
     "--accent-soft:rgba(108,156,255,.16);--ok:#4cc48a;--danger:#ff6b74;" \
     "--shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35)}}\n" \
     "*{box-sizing:border-box}\n" \
@@ -43,8 +43,9 @@
     "color:var(--danger)}\n" \
     ".btn:disabled{opacity:.55;cursor:default}\n" \
     ".btn[hidden]{display:none}\n" \
-    ".group-label{margin:0 0 10px 20px;font-size:16px;font-weight:600;" \
-    "color:var(--text)}\n" \
+    ".group-label{display:flex;align-items:baseline;" \
+    "justify-content:space-between;margin:0 0 10px 20px;font-size:16px;" \
+    "font-weight:600;color:var(--text)}\n" \
     ".kicker{margin:0 0 10px;font-size:12px;font-weight:700;" \
     "letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}\n" \
     ".crumb{display:inline-flex;align-items:center;gap:6px;height:32px;" \

@@ -29,7 +29,8 @@ Changelog:
   secure" chip on plain HTTP and invalid certificates and a red
   "Dangerous" chip on a Safe Browsing block (loopback addresses get no
   chip), built-in pages show a "Nordstjernen" chip and file pages a "File"
-  chip, error tabs are titled with the host, and both search fields name
+  chip, error tabs are titled with the host, New Tab tiles carry short
+  site names, and both search fields name
   the search engine. The
   file:// folder listing and the Safe Browsing warning use the shared page
   style with a dark variant. New Tab lists the most visited sites (not in

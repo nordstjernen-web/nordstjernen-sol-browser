@@ -363,6 +363,42 @@ history_append_visits(GString *s)
     return have;
 }
 
+static gboolean
+history_label_fits(const char *s)
+{
+    static const char *const generic[] = { "Home", "Homepage", "Start",
+                                           "Welcome" };
+    if (!s || !*s || g_utf8_strlen(s, -1) > 18)
+        return FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(generic); i++)
+        if (g_ascii_strcasecmp(s, generic[i]) == 0)
+            return FALSE;
+    return TRUE;
+}
+
+static char *
+history_site_label(const char *title, const char *fallback)
+{
+    static const char *const separators[] = {
+        " - ", " | ", " \xe2\x80\x93 ", " \xe2\x80\x94 ", " \xc2\xb7 " };
+    if (!title || !*title)
+        return g_strdup(fallback);
+    GString *joined = g_string_new(title);
+    for (gsize i = 0; i < G_N_ELEMENTS(separators); i++)
+        g_string_replace(joined, separators[i], "\x1f", 0);
+    char **parts = g_strsplit(joined->str, "\x1f", -1);
+    g_string_free(joined, TRUE);
+    guint n = g_strv_length(parts);
+    const char *pick = NULL;
+    if (n > 1 && history_label_fits(g_strstrip(parts[n - 1])))
+        pick = parts[n - 1];
+    else if (history_label_fits(g_strstrip(parts[0])))
+        pick = parts[0];
+    char *out = g_strdup(pick ? pick : fallback);
+    g_strfreev(parts);
+    return out;
+}
+
 char *
 ns_history_top_sites_html(int max_sites)
 {
@@ -399,7 +435,9 @@ ns_history_top_sites_html(int max_sites)
             char *e_url = g_markup_escape_text(url, -1);
             char *e_init = g_markup_escape_text(initial, -1);
             char *e_title = g_markup_escape_text(title, -1);
-            char *e_site = g_markup_escape_text(site, -1);
+            char *label = history_site_label(raw_title ? title : NULL, site);
+            char *e_site = g_markup_escape_text(label, -1);
+            g_free(label);
             if (count == 0)
                 g_string_append(s, "<nav class=\"sites\" "
                                    "aria-label=\"Top sites\">");
@@ -444,7 +482,7 @@ ns_history_html_page(void)
         "<path d=\"M10.4 10.4 14 14\"/></svg>"
         "<input id=\"hq\" type=\"search\" placeholder=\"Search history\""
         " aria-label=\"Search history\" autocomplete=\"off\"></label>"
-        "<a class=\"btn danger\" href=\"about:settings#data\">"
+        "<a class=\"btn\" href=\"about:settings#data\">"
         "Clear browsing data\xe2\x80\xa6</a></div></div>");
     if (!history_append_visits(s))
         g_string_append(s, "<style>#tools{display:none}</style>"
