@@ -58,8 +58,14 @@ jobs:
           gradle-version: '9.8.2'
 
       - name: Fetch prebuilt dependency sysroots
+        # Release tag and SHA256SUMS hash come from android/sysroot.lock. The
+        # sysroot's build-provenance attestation is verified when present (gh needs
+        # GH_TOKEN); set NORDSTJERNEN_REQUIRE_ATTESTATION to '1' once the locked
+        # release is attested (the 2026-11-07 releases were published while
+        # Sigstore's Rekor was down) so an unattested sysroot fails the build.
         env:
           GH_TOKEN: ${{ github.token }}
+          NORDSTJERNEN_REQUIRE_ATTESTATION: '0'
         continue-on-error: true
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File android/scripts/fetch-prebuilt-deps.ps1 \

@@ -3,6 +3,15 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Android/iOS: the prebuilt dependency sysroots are pinned by
+  `android/sysroot.lock` and `ios/sysroot.lock` (an immutable per-commit
+  release tag plus the sha256 of its `SHA256SUMS`) instead of following the
+  rolling `latest` release. The fetch scripts refuse a release whose
+  `SHA256SUMS` no longer hashes to the locked value, CI verifies the
+  build-provenance attestation when one is present (required once an
+  attested release is locked), and the new `sysroot-bump` workflow opens a
+  pull request with the dependency manifest diff whenever a newer attested
+  sysroot release is published.
 * Network: the libcurl protocol allow-list is built from the protocols the
   linked libcurl provides, so an `ftp`-less libcurl (the mobile dependency
   sysroots now compile in only HTTP(S), FTP(S) and WebSocket, after the

@@ -78,12 +78,15 @@ openssl, nghttp2, brotli), sqlite3, uchardet, libpsl and libwebp for iOS —
 This mirrors the Android sysroot exactly, and is produced the same way: the
 [`nordstjernen-dependencies-build`](https://github.com/nordstjernen-web/nordstjernen-dependencies-build)
 repo's `build-ios-deps` workflow cross-compiles the whole stack on a macOS
-runner and publishes it as the rolling `ios-sysroot-latest` release (plus an
-immutable per-commit `ios-sysroot-<date>-<sha>` release, pinnable with
-`--tag`), which `fetch-prebuilt-deps.sh` downloads, verifies against
-`SHA256SUMS` and, when the `gh` CLI is installed, against its GitHub
-build-provenance attestation (`NORDSTJERNEN_REQUIRE_ATTESTATION=1` makes that
-mandatory).
+runner and publishes it as the rolling `ios-sysroot-latest` release plus an
+immutable per-commit `ios-sysroot-<date>-<sha>-r<run>` release.
+[`ios/sysroot.lock`](../ios/sysroot.lock) pins the immutable tag and the sha256
+of its `SHA256SUMS`; `fetch-prebuilt-deps.sh` follows the lock, refuses a
+`SHA256SUMS` that hashes differently, and verifies each tarball's GitHub
+build-provenance attestation when an authenticated `gh` is available
+(`NORDSTJERNEN_REQUIRE_ATTESTATION=1` makes that mandatory). `--tag
+ios-sysroot-latest` bypasses the lock. The `sysroot-bump` workflow opens a pull
+request when a newer attested release exists.
 
 ## CI
 

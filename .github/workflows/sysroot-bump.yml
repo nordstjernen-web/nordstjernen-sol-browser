@@ -1,0 +1,121 @@
+name: sysroot-bump
+
+# Watch nordstjernen-dependencies-build for a newer immutable prebuilt-sysroot
+# release and open a pull request that bumps android/sysroot.lock and
+# ios/sysroot.lock to it. Only releases whose assets carry a verified GitHub
+# build-provenance attestation are proposed. The PR body carries the diff of the
+# dependency manifest between the locked and the proposed release, so a sysroot
+# update is reviewed like any other dependency bump.
+#
+# A pull request opened with the default GITHUB_TOKEN does not trigger the
+# `android` workflow on itself; set the SYSROOT_BUMP_TOKEN secret (a fine-grained
+# PAT with contents + pull-requests write on this repository) to get CI on the
+# bump PR, or re-run the android workflow on it by hand.
+
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  DEPS_REPO: nordstjernen-web/nordstjernen-dependencies-build
+  BUMP_BRANCH: bump/prebuilt-sysroots
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Find the newest attested release per platform
+        id: find
+        env:
+          GH_TOKEN: ${{ secrets.SYSROOT_BUMP_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .bump
+          changed=0
+          : > .bump/body.md
+          for spec in android:sysroot ios:ios-sysroot; do
+            platform="${spec%%:*}"; prefix="${spec##*:}"
+            lock="${platform}/sysroot.lock"
+            current="$(sed -n 's/^tag=//p' "${lock}" | head -1)"
+            # Newest immutable release of this platform: <prefix>-<date>-<sha9>[-r<run>].
+            candidates="$(gh api "repos/${DEPS_REPO}/releases?per_page=100" --paginate \
+              --jq '.[] | select(.draft == false and .prerelease == false) | [.created_at, .tag_name] | @tsv' \
+              | grep -E "	${prefix}-[0-9]{8}-[0-9a-f]{9}(-r[0-9]+)?$" | sort -r | cut -f2)"
+            chosen=""
+            for tag in ${candidates}; do
+              [ "${tag}" != "${current}" ] || break
+              # Every tarball of the candidate must carry a verifiable attestation.
+              tmp="$(mktemp -d)"
+              gh release download "${tag}" --repo "${DEPS_REPO}" --pattern 'SHA256SUMS' --dir "${tmp}"
+              ok=1
+              while read -r digest file; do
+                case "${file}" in *.tar.gz) ;; *) continue ;; esac
+                n="$(gh api "repos/${DEPS_REPO}/attestations/sha256:${digest}" --jq '.attestations | length' 2>/dev/null || echo 0)"
+                [ "${n}" != "0" ] || { ok=0; echo "release ${tag}: ${file##*/} has no attestation, skipping"; break; }
+                gh release download "${tag}" --repo "${DEPS_REPO}" --pattern "${file##*/}" --dir "${tmp}"
+                gh attestation verify "${tmp}/${file##*/}" --repo "${DEPS_REPO}" >/dev/null 2>&1 \
+                  || { ok=0; echo "release ${tag}: ${file##*/} attestation FAILED to verify, skipping"; break; }
+                rm -f "${tmp}/${file##*/}"
+              done < "${tmp}/SHA256SUMS"
+              if [ "${ok}" = 1 ]; then chosen="${tag}"; sums="$(sha256sum "${tmp}/SHA256SUMS" | awk '{print $1}')"; fi
+              rm -rf "${tmp}"
+              [ -z "${chosen}" ] || break
+            done
+            if [ -z "${chosen}" ]; then echo "${platform}: ${current} is current (or no newer attested release)"; continue; fi
+            echo "${platform}: ${current} -> ${chosen}"
+            sed -i "s/^tag=.*/tag=${chosen}/; s/^sha256sums=.*/sha256sums=${sums}/" "${lock}"
+            changed=1
+            # Manifest diff for the PR body.
+            old="$(mktemp -d)"; new="$(mktemp -d)"
+            gh release download "${current}" --repo "${DEPS_REPO}" --pattern manifest.txt --dir "${old}" 2>/dev/null || true
+            gh release download "${chosen}"  --repo "${DEPS_REPO}" --pattern manifest.txt --dir "${new}"
+            {
+              echo "### ${platform}: \`${current}\` -> \`${chosen}\`"
+              echo
+              echo "Release: https://github.com/${DEPS_REPO}/releases/tag/${chosen}"
+              echo
+              echo '```diff'
+              diff -u "${old}/manifest.txt" "${new}/manifest.txt" | grep -vE '^(---|\+\+\+)' | grep -E '^[-+]' | grep -vE '^[-+]\s*#' || echo "(no manifest changes; rebuilt from the same pins)"
+              echo '```'
+              echo
+            } >> .bump/body.md
+          done
+          echo "changed=${changed}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the bump pull request
+        if: steps.find.outputs.changed == '1'
+        env:
+          GH_TOKEN: ${{ secrets.SYSROOT_BUMP_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${BUMP_BRANCH}"
+          git add android/sysroot.lock ios/sysroot.lock
+          {
+            echo "deps: bump the prebuilt dependency sysroots"
+            echo
+            grep -E '^### ' .bump/body.md | sed 's/^### //; s/`//g'
+            echo
+            echo "Attested releases from ${DEPS_REPO}; see the pull request for the manifest diff."
+          } > .bump/commit.txt
+          git commit -F .bump/commit.txt
+          git push --force-with-lease=${BUMP_BRANCH} origin "${BUMP_BRANCH}" 2>/dev/null || git push -f origin "${BUMP_BRANCH}"
+          {
+            echo "Automated bump of the pinned prebuilt dependency sysroots. Each proposed release's tarballs carry a verified GitHub build-provenance attestation from \`${DEPS_REPO}\`."
+            echo
+            cat .bump/body.md
+          } > .bump/pr.md
+          if gh pr view "${BUMP_BRANCH}" --json number >/dev/null 2>&1; then
+            gh pr edit "${BUMP_BRANCH}" --title "deps: bump the prebuilt dependency sysroots" --body-file .bump/pr.md
+          else
+            gh pr create --base main --head "${BUMP_BRANCH}" --title "deps: bump the prebuilt dependency sysroots" --body-file .bump/pr.md
+          fi
