@@ -1128,6 +1128,28 @@ ns_ext_init(void)
     }
 }
 
+guint
+ns_ext_count(void)
+{
+    ns_ext_init();
+    return g_exts ? g_exts->len : 0;
+}
+
+gboolean
+ns_ext_get_info(guint index, ns_ext_info *out)
+{
+    ns_ext_init();
+    if (!g_exts || index >= g_exts->len || !out) return FALSE;
+    const ns_ext *e = g_ptr_array_index(g_exts, index);
+    out->id = e->id;
+    out->name = e->name;
+    out->version = e->version;
+    out->content_scripts = e->content_scripts ? e->content_scripts->len : 0;
+    out->blocking_rules = (e->dnr_rules ? e->dnr_rules->len : 0) +
+                          (e->cosmetic_rules ? e->cosmetic_rules->len : 0);
+    return TRUE;
+}
+
 static void
 ns_ext_append_js_string(GString *out, const char *s)
 {

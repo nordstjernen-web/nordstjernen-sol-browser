@@ -3596,6 +3596,48 @@ about_security_html(void)
 }
 
 static char *
+about_extensions_html(void)
+{
+    guint n = ns_ext_count();
+    GString *s = g_string_new("<div class=\"diag\">");
+    if (n == 0) {
+        g_autofree char *root = ns_ext_default_root();
+        g_autofree char *esc_root = ns_html_escape_text(root ? root : "");
+        g_string_append_printf(s,
+            "<p>No extensions installed. Nordstjernen loads unpacked "
+            "WebExtensions from <code>%s</code>.</p>", esc_root);
+    }
+    for (guint i = 0; i < n; i++) {
+        ns_ext_info info;
+        if (!ns_ext_get_info(i, &info)) continue;
+        const char *label = info.name && *info.name ? info.name : info.id;
+        g_autofree char *esc_name = ns_html_escape_text(label ? label : "");
+        g_autofree char *esc_id = ns_html_escape_text(info.id ? info.id : "");
+        g_autofree char *esc_ver =
+            ns_html_escape_text(info.version && *info.version
+                                ? info.version : "Unknown");
+        GString *what = g_string_new(NULL);
+        if (info.content_scripts)
+            g_string_append_printf(what, "%u content script%s",
+                                   info.content_scripts,
+                                   info.content_scripts == 1 ? "" : "s");
+        if (info.blocking_rules)
+            g_string_append_printf(what, "%s%u blocking rule%s",
+                                   what->len ? ", " : "", info.blocking_rules,
+                                   info.blocking_rules == 1 ? "" : "s");
+        g_string_append_printf(s,
+            "<div class=\"drow\"><span class=\"dk\">%s"
+            "<span class=\"ext-id\">%s%s%s</span></span>"
+            "<span class=\"dv\">%s</span></div>",
+            esc_name, esc_id, what->len ? " \xc2\xb7 " : "", what->str,
+            esc_ver);
+        g_string_free(what, TRUE);
+    }
+    g_string_append(s, "</div>");
+    return g_string_free(s, FALSE);
+}
+
+static char *
 about_diagnostics_html(void)
 {
     const char *platform =
@@ -5317,6 +5359,10 @@ static const char k_about_nordstjernen_template[] =
     "font-weight:400;font-size:13px}\n"
     ".group-label .edit{margin-right:20px;font-size:13px;"
     "font-weight:600;color:var(--accent-text)}\n"
+    ".ext-id{display:block;color:var(--muted);font-weight:400;"
+    "font-size:12.5px;overflow-wrap:anywhere}\n"
+    ".card code{font-family:var(--mono);font-size:12.5px;"
+    "overflow-wrap:anywhere}\n"
     ".foot{display:flex;flex-wrap:wrap;justify-content:space-between;"
     "gap:12px;margin-top:26px;color:var(--faint);font-size:13px}\n"
     ".foot a{color:var(--muted);margin-left:14px}\n"
@@ -5331,6 +5377,8 @@ static const char k_about_nordstjernen_template[] =
     "<section class=\"card\">__ND_SECURITY__</section>"
     "<h2 class=\"group-label\">System</h2>"
     "<section class=\"card\">__ND_DIAG__</section>"
+    "<h2 class=\"group-label\">Extensions</h2>"
+    "<section class=\"card\">__ND_EXTENSIONS__</section>"
     "<h2 class=\"group-label\">License</h2>"
     "<section class=\"card\">"
     "<p>Nordstjernen is \xc2\xa9 2026 Andreas R\xc3\xb8sdal and dual-licensed: "
@@ -5811,9 +5859,11 @@ synthesize_about_response(const char *url, const char *top_url,
                           gsize req_body_len, ns_response *resp)
 {
     if (!g_str_has_prefix(url, "about:")) return FALSE;
-    const char *what = url + strlen("about:");
+    g_autofree char *what = g_strndup(url + strlen("about:"),
+                                      strcspn(url + strlen("about:"), "?#"));
     if ((g_str_has_prefix(what, "ai") || g_str_equal(what, "history") ||
-         g_str_equal(what, "config") ||
+         g_str_equal(what, "config") || g_str_equal(what, "nordstjernen") ||
+         g_str_equal(what, "about") ||
          g_str_has_prefix(what, "settings")) &&
         !ns_net_url_is_chrome_page(top_url)) {
         resp->status = 403;
@@ -5884,9 +5934,15 @@ synthesize_about_response(const char *url, const char *top_url,
         g_free(security);
         g_free(with_logo);
         char *diag = about_diagnostics_html();
-        char *body = about_substitute(with_security, "__ND_DIAG__", diag);
+        char *with_diag = about_substitute(with_security, "__ND_DIAG__",
+                                           diag);
         g_free(diag);
         g_free(with_security);
+        char *extensions = about_extensions_html();
+        char *body = about_substitute(with_diag, "__ND_EXTENSIONS__",
+                                      extensions);
+        g_free(extensions);
+        g_free(with_diag);
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "mozilla")) {

@@ -5,6 +5,15 @@ Changelog:
 ======
 * about:nordstjernen names the Safe Browsing API in use (Google Safe Browsing
   v5, local-list mode).
+* Fix: links to a Settings section (about:nordstjernen's "Change in
+  Settings", History's "Clear browsing data…") opened an empty page,
+  because an about: page was looked up with its `#fragment` or `?query`
+  still attached. The page name is now matched without them, which also
+  stops `about:history#x` from skipping the web-content gate.
+* about:nordstjernen lists the installed WebExtensions (name, id, version,
+  content scripts and blocking rules) and says where to install unpacked
+  ones. The page is now readable only from built-in pages, as
+  about:settings is, since the extension list fingerprints the user.
 * Security: Google Safe Browsing. Every navigation and redirect is checked
   against Google's phishing, malware and unwanted-software lists (Safe
   Browsing v5, local-list mode) as well as the local blocklist, and a match
