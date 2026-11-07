@@ -3,6 +3,10 @@ Changelog:
 
 1.0.45-dev:
 ======
+* Forms: a `<select>` styled with its own background or border draws its
+  arrow inside its padding box. With an explicit `width` the arrow was
+  placed from the start of the text plus the CSS width, so padding and
+  border pushed it past the right edge of the control.
 * Paint: a rounded border whose sides differ in width or colour splits
   its corners within the corner area. Each side was clipped to a triangle
   reaching the point where two corner diagonals meet, which for a thick top

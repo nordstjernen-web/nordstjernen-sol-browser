@@ -5862,7 +5862,14 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                     ? r->style->values[NS_CSS_COLOR] : NULL;
                 rgba arrow = rgba_of(cv, 0.1, 0.1, 0.1, 1);
                 double sz = MIN(5.0, (y1 - y0) / 5.0);
-                double ax = x1 - 6.0 - sz;
+                double right = x1;
+                if (block_chrome)
+                    right = field_box->x + field_box->margin.left +
+                            field_box->border.left +
+                            field_box->padding.left +
+                            field_box->content_width +
+                            field_box->padding.right;
+                double ax = right - 6.0 - sz;
                 double ay = (y0 + y1) / 2.0;
                 cairo_save(cr);
                 set_source_rgba(cr, arrow);
