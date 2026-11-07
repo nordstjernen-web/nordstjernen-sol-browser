@@ -3116,6 +3116,7 @@ typedef struct {
 static void
 wgl_unpack_tight(ns_webgl *g, wgl_unpack_state *saved)
 {
+    wgl_reassert(g);
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &saved->align);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     if (g->version < 2) return;
@@ -3305,7 +3306,10 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
                 flipped = wgl_flip_rows(px, w, h, wgl_components(format));
                 if (flipped) px = flipped;
             }
+            wgl_unpack_state saved;
+            wgl_unpack_tight(g, &saved);
             glTexImage2D(target, level, internalformat, w, h, 0, format, type, px);
+            wgl_unpack_restore(g, &saved);
             g_free(flipped);
             if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         } else if (px) {
@@ -3404,8 +3408,11 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
                 flipped = wgl_flip_rows(px, w, h, wgl_components(format));
                 if (flipped) px = flipped;
             }
+            wgl_unpack_state saved;
+            wgl_unpack_tight(g, &saved);
             glTexSubImage2D(target, level, xoff, yoff, w, h, format,
                             wgl_upload_type(g, type), px);
+            wgl_unpack_restore(g, &saved);
             g_free(flipped);
             if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         } else if (px) {
