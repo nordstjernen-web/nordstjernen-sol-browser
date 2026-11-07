@@ -258,12 +258,6 @@ is a per-process temporary directory.
 The jar files of earlier versions are not read or migrated; the first
 start with the store begins with an empty cookie database.
 
-## Security review
-
-[cookies-security-report.md](cookies-security-report.md) is a source
-review of the store and its callers with the open findings and the fix
-each one needs.
-
 ## Checking a change
 
 - `scripts/wpt-score.sh --wpt-root=~/wpt cookies` scores the WPT

@@ -79,10 +79,6 @@ Changelog:
   it and replaced `window.fetch`. On mail.ru that assignment threw,
   because the page makes `fetch` read-only, and stopped its start-up: the
   news list, weather and calendar stayed grey placeholders.
-* Docs: `docs/security-review-2026-11.md` reports a security review of
-  the engine: the Critical and High findings fixed in this release, the
-  Medium and Low findings still open, and what LWN's article on the
-  sibling Northstar project means for this tree.
 * Security: an animated WebGL canvas that shrinks no longer overflows its
   picture. On Windows and macOS an animated canvas is copied out through
   two pixel buffers sized for the frame; resizing the canvas replaced
@@ -1111,15 +1107,6 @@ Changelog:
   does), and a navigation's cookie partition is its own destination
   rather than the referrer's. `Sec-Fetch-Site` reports `cross-site` on
   such hops too.
-* Cookies: `docs/cookies-security-report.md` is a source review of the
-  cookie store and its callers. It records one high finding (SameSite is
-  not enforced on a navigation that reaches a cross-site target through a
-  redirect, because the redirect loop drops the top URL without carrying
-  an initiator), three medium ones (any hostname starting with `127.` is
-  a secure context; WebSocket and EventSource cookies are keyed by the
-  frame origin rather than the top-level site; a sandboxed iframe can
-  list its origin's cookies through `cookieStore`), and the low and
-  informational items, each with the code path and a suggested fix.
 * CSS Grid: a line number or span written with `calc()`
   (`grid-column: 2 / span calc(5)`) is now evaluated to its integer;
   layout read it as `span 1`, collapsing such grids into one narrow track
