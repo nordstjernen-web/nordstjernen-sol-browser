@@ -143,6 +143,17 @@ containing_block(const ns_box *b)
     return p;
 }
 
+static const ns_box *
+box_frame_host(const ns_box *b)
+{
+    for (const ns_box *p = b; p; p = p->parent)
+        if (ns_node_is_element_named(p->dom, "iframe") ||
+            ns_node_is_element_named(p->dom, "frame") ||
+            ns_node_is_element_named(p->dom, "object"))
+            return p;
+    return NULL;
+}
+
 static gboolean
 box_xy_inside(const ns_box *b, double x, double y)
 {
@@ -318,6 +329,7 @@ edge_walk_cb(const ns_box *b, gpointer ud)
     if (b->kind != NS_BOX_INLINE) return;
     if (!b->text || !*b->text) return;
     if (!box_user_selectable(b)) return;
+    if (box_frame_host(b)) return;
     if (!ctx->first) ctx->first = b;
     ctx->last = b;
 }
@@ -534,6 +546,7 @@ typedef struct collect_ctx {
     gsize          last_byte;
     int            state;
     const ns_box  *prev_block;
+    const ns_box  *host;
 } collect_ctx;
 
 static void
@@ -578,6 +591,10 @@ collect_walk_cb(const ns_box *b, gpointer ud)
         }
         return;
     }
+    if (box_frame_host(b) != ctx->host) {
+        if (ctx->state == 1 && b == ctx->last_box) ctx->state = 2;
+        return;
+    }
     gsize tlen = strlen(b->text);
     if (ctx->first_box == ctx->last_box) {
         if (b == ctx->first_box) {
@@ -617,7 +634,7 @@ ns_selection_collect_text(const ns_box *root, const ns_selection *sel)
     order_endpoints(root, *sel, &first_box, &first_byte, &last_box, &last_byte);
     GString *out = g_string_new(NULL);
     collect_ctx ctx = { out, first_box, last_box, first_byte, last_byte, 0,
-                        NULL };
+                        NULL, box_frame_host(first_box) };
     walk_inline_pre(root, collect_walk_cb, &ctx);
     return g_string_free(out, FALSE);
 }
