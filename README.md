@@ -14,7 +14,7 @@ modern HTML, CSS and JavaScript standards.
 
 ![Nordstjernen 1.0.44 playing The Great Gatsby trailer on YouTube](docs/screenshot.png)
 
-**Current release:** **1.0.44** (November 2026) — see [Changelog.md](Changelog.md).
+**Current release:** **1.0.45** (November 2026) — see [Changelog.md](Changelog.md).
 
 ## Download
 

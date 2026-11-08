@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.45-dev:
+1.0.45:
 ======
 * about:nordstjernen names the Safe Browsing API in use (Google Safe Browsing
   v5, local-list mode).
