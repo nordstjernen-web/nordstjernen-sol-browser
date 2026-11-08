@@ -56,12 +56,6 @@ The first `nordstjernen` run puts the browser in place the same way as the
 npm package, in your user data directory; `nordstjernen-install --remove`
 deletes it again. See [pip/README.md](pip/README.md).
 
-### Install with Homebrew (macOS)
-
-```sh
-brew install --cask nordstjernen-web/tap/nordstjernen
-```
-
 ## Standards, security and size
 
 **Standards.** Behaviour is measured against the spec text, section by

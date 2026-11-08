@@ -3,6 +3,11 @@ Changelog:
 
 1.0.46-dev:
 ======
+* macOS: the Homebrew cask is gone. The `homebrew` workflow no longer
+  updates nordstjernen-web/homebrew-tap on release, and the README and
+  docs/macOS.md no longer offer `brew install --cask`; install from the
+  release `.dmg`. Building from source still uses Homebrew for the
+  dependencies.
 
 1.0.45:
 ======
