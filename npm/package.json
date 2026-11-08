@@ -1,6 +1,6 @@
 {
   "name": "nordstjernen-browser",
-  "version": "1.0.44",
+  "version": "1.0.45",
   "description": "Nordstjernen Web Browser: a minimal, secure web browser written from scratch in C with GTK 4",
   "keywords": [
     "browser",

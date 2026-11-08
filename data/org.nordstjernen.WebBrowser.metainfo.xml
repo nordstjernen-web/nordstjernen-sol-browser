@@ -60,6 +60,17 @@
   </branding>
 
   <releases>
+    <release version="1.0.45" date="2026-11-08">
+      <description>
+        <p>Safe Browsing, security and interface release.</p>
+        <ul>
+          <li>Google Safe Browsing warns before phishing, malware and unwanted-software sites, with the lists kept on the device.</li>
+          <li>Browsing history is owned by the browser process, and the built-in backends refuse requests from web content.</li>
+          <li>The window chrome follows the dark colour scheme, and the address bar flags insecure and dangerous sites.</li>
+          <li>Many layout, text and frame fixes: column grids, float margins, viewport units in sizes, tabular digits and icon fonts.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.44" date="2026-11-05">
       <description>
         <p>Passkeys, security and site compatibility release.</p>
