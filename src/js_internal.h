@@ -65,6 +65,8 @@ struct ns_js {
     JSContext    *ctx;
     JSContext    *main_realm_ctx;
     JSContext    *module_ctx;
+    JSContext    *remote_ctx;
+    JSValue       remote_helper;
     GPtrArray    *frame_ctxs;
     GHashTable   *frame_contexts;
     GHashTable   *frame_csps;

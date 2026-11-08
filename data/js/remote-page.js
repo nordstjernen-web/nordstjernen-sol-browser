@@ -1,7 +1,8 @@
-/* Nordstjernen — in-page helper the remote-control (MCP) tools evaluate to read and act on the page. */
-(function () {
-  var KEY = Symbol.for('nordstjernen.remote');
-  if (globalThis[KEY]) return globalThis[KEY];
+/* Nordstjernen — the remote-control (MCP) helper: run in a realm of its own, holding its state where page script cannot reach it, it reads and acts on the page passed in. */
+(function (page) {
+  'use strict';
+  var document = page.document;
+  var location = page.location;
 
   var refByEl = new WeakMap();
   var elByRef = new Map();
@@ -33,7 +34,7 @@
     var rect = rectOf(el);
     if (rect && (rect.width > 0 || rect.height > 0)) return false;
     try {
-      var cs = getComputedStyle(el);
+      var cs = page.getComputedStyle(el);
       return cs.display === 'none' || cs.visibility === 'hidden';
     } catch (e) {
       return false;
@@ -184,7 +185,7 @@
   function hidden(el, rect) {
     if (!rect || (rect.width <= 0 && rect.height <= 0)) return true;
     try {
-      var cs = getComputedStyle(el);
+      var cs = page.getComputedStyle(el);
       if (cs.visibility === 'hidden' || cs.display === 'none') return true;
       if (cs.opacity === '0') return true;
     } catch (e) {}
@@ -227,7 +228,7 @@
     if (rect) {
       parts.push('(x=' + Math.round(rect.left) + ',y=' + Math.round(rect.top) +
                  ',w=' + Math.round(rect.width) + ',h=' + Math.round(rect.height) + ')');
-      if (rect.bottom < 0 || rect.top > innerHeight || rect.right < 0 || rect.left > innerWidth)
+      if (rect.bottom < 0 || rect.top > page.innerHeight || rect.right < 0 || rect.left > page.innerWidth)
         parts.push('offscreen');
     }
     return parts.join(' ');
@@ -242,8 +243,8 @@
   function header() {
     var de = document.documentElement;
     return 'Page: ' + clip(document.title, 200) + '\nURL: ' + location.href +
-      '\nViewport: ' + innerWidth + 'x' + innerHeight + ', scroll ' +
-      Math.round(scrollX) + ',' + Math.round(scrollY) + ', document ' +
+      '\nViewport: ' + page.innerWidth + 'x' + page.innerHeight + ', scroll ' +
+      Math.round(page.scrollX) + ',' + Math.round(page.scrollY) + ', document ' +
       (de ? de.scrollWidth + 'x' + de.scrollHeight : '?') + '\n';
   }
 
@@ -356,7 +357,7 @@
     var el = byRef(ref);
     var rect = rectOf(el);
     var scrolled = false;
-    if (!rect || rect.top < 0 || rect.left < 0 || rect.bottom > innerHeight || rect.right > innerWidth) {
+    if (!rect || rect.top < 0 || rect.left < 0 || rect.bottom > page.innerHeight || rect.right > page.innerWidth) {
       try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) { el.scrollIntoView(); }
       rect = rectOf(el);
       scrolled = true;
@@ -365,7 +366,7 @@
       throw new Error(ref + ' has no visible box');
     var x = rect.left + rect.width / 2;
     var y = rect.top + rect.height / 2;
-    var res = { x: x, y: y, px: x + scrollX, py: y + scrollY, scrolled: scrolled,
+    var res = { x: x, y: y, px: x + page.scrollX, py: y + page.scrollY, scrolled: scrolled,
                 desc: describe(el, role(el), rect) };
     try {
       var top = document.elementFromPoint(x, y);
@@ -388,7 +389,7 @@
 
   function fire(el, type) {
     var ev;
-    try { ev = new Event(type, { bubbles: true }); } catch (e) {
+    try { ev = new page.Event(type, { bubbles: true }); } catch (e) {
       ev = document.createEvent('Event');
       ev.initEvent(type, true, false);
     }
@@ -453,21 +454,24 @@
     }
   }
 
-  function run(code) {
-    var r;
-    try {
-      r = (0, eval)(code);
-    } catch (e) {
-      return JSON.stringify({ error: String(e && e.stack ? e + '\n' + e.stack : e) });
-    }
+  function errorText(e) {
+    return String(e && e.stack ? e + '\n' + e.stack : e);
+  }
+
+  function settle(r, threw) {
+    if (threw) return JSON.stringify({ error: errorText(r) });
     if (r && typeof r.then === 'function') {
       var id = nextPending++;
       pending.set(id, null);
       r.then(function (v) { pending.set(id, { value: format(v) }); },
-             function (e) { pending.set(id, { error: String(e && e.stack ? e + '\n' + e.stack : e) }); });
+             function (e) { pending.set(id, { error: errorText(e) }); });
       return JSON.stringify({ pending: id });
     }
     return JSON.stringify({ value: format(r) });
+  }
+
+  function run(code) {
+    return { code: String(code), settle: settle };
   }
 
   function poll(id) {
@@ -482,10 +486,12 @@
     readPage: readPage, find: find, point: point, setValue: setValue,
     pageText: pageText, run: run, poll: poll
   };
-  try {
-    Object.defineProperty(globalThis, KEY, { value: api, configurable: true });
-  } catch (e) {
-    globalThis[KEY] = api;
-  }
-  return api;
-})()
+  return function (request) {
+    var call = JSON.parse(request);
+    var fn = Object.prototype.hasOwnProperty.call(api, call.fn) ? api[call.fn] : null;
+    if (!fn) throw new Error('unknown remote call ' + call.fn);
+    document = page.document;
+    location = page.location;
+    return fn.apply(null, Array.isArray(call.args) ? call.args : []);
+  };
+})

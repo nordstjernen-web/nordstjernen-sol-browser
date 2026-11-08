@@ -19,7 +19,6 @@
 #include <unistd.h>
 #endif
 
-#include "remote_page.h"
 #include "remotectl.h"
 #include "rjson.h"
 #include "version.h"
@@ -384,14 +383,23 @@ add_state(McpResult *r, const RjValue *state)
 static char *
 page_call(int tab, const char *call, char **error)
 {
-    GString *js = g_string_new("(");
-    g_string_append(js, ns_remote_page_src);
-    g_string_append(js, ").");
-    g_string_append(js, call);
-    GString *fields = g_string_new("\"js\":");
-    rj_append_str(fields, js->str);
-    g_string_free(js, TRUE);
-    RjValue *resp = ctl_call("eval", tab, fields->str, error);
+    const char *open = strchr(call, '(');
+    size_t len = strlen(call);
+    if (!open || len < 2 || call[len - 1] != ')') {
+        *error = g_strdup("malformed helper call");
+        return NULL;
+    }
+    char *name = g_strndup(call, (gsize)(open - call));
+    GString *request = g_string_new("{\"fn\":");
+    rj_append_str(request, name);
+    g_free(name);
+    g_string_append(request, ",\"args\":[");
+    g_string_append_len(request, open + 1, (gssize)(call + len - 1 - (open + 1)));
+    g_string_append(request, "]}");
+    GString *fields = g_string_new("\"request\":");
+    rj_append_str(fields, request->str);
+    g_string_free(request, TRUE);
+    RjValue *resp = ctl_call("remote_call", tab, fields->str, error);
     g_string_free(fields, TRUE);
     if (!resp)
         return NULL;

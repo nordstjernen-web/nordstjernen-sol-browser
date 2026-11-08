@@ -1454,6 +1454,16 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/remote-call") == 0) {
+        char *request = json_get_str(body, "request");
+        s->frame_valid = 0;
+        char *res = s->cur && request ? ns_browser_remote_call(s->cur, request) : NULL;
+        reply_str(ctrl_w, "text", res);
+        free(res);
+        free(request);
+        return 0;
+    }
+
     if (strcmp(head->path, "/dump") == 0) {
         char *kind = json_get_str(body, "kind");
         char *res = NULL;

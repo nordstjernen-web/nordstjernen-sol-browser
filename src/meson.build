@@ -404,7 +404,7 @@ endif
 nordstjernen_embed_sources = nordstjernen_engine_sources + files(
   'embed_shim.c',
   'libnordstjernen.c',
-) + [polyfills_h, streaming_h]
+) + [polyfills_h, streaming_h, remote_page_h]
 
 if is_android
   nordstjernen_embed_sources += files(

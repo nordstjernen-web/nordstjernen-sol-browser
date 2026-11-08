@@ -86,13 +86,6 @@
         </includes>
         <targetPath>META-INF</targetPath>
       </resource>
-      <resource>
-        <directory>${project.basedir}/../data/js</directory>
-        <includes>
-          <include>remote-page.js</include>
-        </includes>
-        <targetPath>org/nordstjernen/agent</targetPath>
-      </resource>
     </resources>
 
     <plugins>

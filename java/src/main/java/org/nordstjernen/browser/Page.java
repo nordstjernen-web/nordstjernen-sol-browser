@@ -486,6 +486,19 @@ public final class Page implements AutoCloseable {
             "text");
     }
 
+    /**
+     * Send {@code request}, a JSON {@code {"fn": …, "args": […]}} object, to
+     * the engine's remote-control helper, which the renderer runs in a
+     * script realm of its own, and return its reply, or null when the page
+     * has no scripting. A reply starting {@code "error: "} is the helper's
+     * error.
+     */
+    public String remoteCall(String request) {
+        return Json.stringOrNull(
+            call("/remote-call", "{\"request\":" + Json.quote(request) + "}").text(),
+            "text");
+    }
+
     /** What the page wrote to its console since the last call, or null. */
     public String consoleOutput() {
         return Json.stringOrNull(call("/console", "{}").text(), "text");

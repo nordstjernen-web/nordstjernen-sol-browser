@@ -22,6 +22,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 }
 #include "polyfills.h"
 #include "streaming.h"
+#include "remote_page.h"
 #include "version.h"
 
 #include <math.h>
@@ -66419,6 +66420,7 @@ ns_js_reset_runtime_state(ns_js *js)
         g_hash_table_remove_all(js->frame_referrers);
     ns_js_drop_pending_rejections(js);
     ns_js_drop_realm_helpers(js);
+    ns_js_drop_remote_helper(js);
     if (js->frame_ctxs) {
         for (guint i = 0; i < js->frame_ctxs->len; i++)
             JS_FreeContext(g_ptr_array_index(js->frame_ctxs, i));
@@ -67458,6 +67460,7 @@ ns_js_free(ns_js *js)
     }
     ns_js_drop_pending_rejections(js);
     ns_js_drop_realm_helpers(js);
+    ns_js_drop_remote_helper(js);
     if (js->frame_ctxs) {
         for (guint i = 0; i < js->frame_ctxs->len; i++)
             JS_FreeContext(g_ptr_array_index(js->frame_ctxs, i));
@@ -73485,6 +73488,108 @@ ns_js_eval_source(ns_js *js, const char *src, const char *origin)
         if (s) JS_FreeCString(js->ctx, s);
     }
     JS_FreeValue(js->ctx, v);
+    ns_js_microtask_checkpoint(js);
+    ns_js_budget_pop(js, &bg);
+    return out;
+}
+
+void
+ns_js_drop_remote_helper(ns_js *js)
+{
+    if (!js || !js->remote_ctx) return;
+    JS_FreeValue(js->remote_ctx, js->remote_helper);
+    JS_FreeContext(js->remote_ctx);
+    js->remote_ctx = NULL;
+}
+
+static gboolean
+ns_js_remote_helper_ready(ns_js *js)
+{
+    if (js->remote_ctx) return TRUE;
+    JSContext *ctx = JS_NewContext(js->rt);
+    if (!ctx) return FALSE;
+    JS_SetContextOpaque(ctx, js);
+    JSValue factory = JS_Eval(ctx, ns_remote_page_src, strlen(ns_remote_page_src),
+                              "<remote-control>", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(factory)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeContext(ctx);
+        return FALSE;
+    }
+    JSValue page = JS_GetGlobalObject(js->ctx);
+    JSValue helper = JS_Call(ctx, factory, JS_UNDEFINED, 1, &page);
+    JS_FreeValue(ctx, page);
+    JS_FreeValue(ctx, factory);
+    if (JS_IsException(helper)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeContext(ctx);
+        return FALSE;
+    }
+    js->remote_ctx = ctx;
+    js->remote_helper = helper;
+    return TRUE;
+}
+
+static JSValue
+ns_js_remote_settle(ns_js *js, JSValue reply)
+{
+    JSContext *ctx = js->remote_ctx;
+    JSValue code = JS_GetPropertyStr(ctx, reply, "code");
+    JSValue settle = JS_GetPropertyStr(ctx, reply, "settle");
+    const char *src = JS_ToCString(ctx, code);
+    JS_FreeValue(ctx, code);
+    JSValue args[2];
+    if (src) {
+        js->console_eval_depth++;
+        args[0] = JS_Eval(js->ctx, src, strlen(src), NS_JS_CONSOLE_SCRIPT,
+                          JS_EVAL_TYPE_GLOBAL);
+        js->console_eval_depth--;
+        JS_FreeCString(ctx, src);
+    } else {
+        args[0] = JS_EXCEPTION;
+    }
+    gboolean threw = JS_IsException(args[0]);
+    if (threw) args[0] = src ? JS_GetException(js->ctx) : JS_GetException(ctx);
+    args[1] = JS_NewBool(ctx, threw);
+    JSValue out = JS_Call(ctx, settle, JS_UNDEFINED, 2, args);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, settle);
+    return out;
+}
+
+char *
+ns_js_remote_call(ns_js *js, const char *request)
+{
+    if (!js || !request) return NULL;
+    if (js->halted || js->in_pump) return NULL;
+    ns_budget_guard bg = {0};
+    ns_js_budget_push(js, &bg);
+    char *out = NULL;
+    if (!ns_js_remote_helper_ready(js)) {
+        out = g_strdup("error: the remote-control helper could not start");
+    } else {
+        JSContext *ctx = js->remote_ctx;
+        JSValue arg = JS_NewString(ctx, request);
+        JSValue reply = JS_Call(ctx, js->remote_helper, JS_UNDEFINED, 1, &arg);
+        JS_FreeValue(ctx, arg);
+        if (!JS_IsException(reply) && JS_IsObject(reply)) {
+            JSValue settled = ns_js_remote_settle(js, reply);
+            JS_FreeValue(ctx, reply);
+            reply = settled;
+        }
+        if (JS_IsException(reply)) {
+            JSValue ex = JS_GetException(ctx);
+            const char *msg = JS_ToCString(ctx, ex);
+            out = g_strdup_printf("error: %s", msg ? msg : "(no message)");
+            if (msg) JS_FreeCString(ctx, msg);
+            JS_FreeValue(ctx, ex);
+        } else {
+            const char *s = JS_ToCString(ctx, reply);
+            out = g_strdup(s ? s : "undefined");
+            if (s) JS_FreeCString(ctx, s);
+        }
+        JS_FreeValue(ctx, reply);
+    }
     ns_js_microtask_checkpoint(js);
     ns_js_budget_pop(js, &bg);
     return out;

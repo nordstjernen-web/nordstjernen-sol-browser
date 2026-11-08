@@ -104,10 +104,18 @@ navigation call `read_page` or `find` again.
   ask for `2025-03-26` or `2024-11-05`). It implements `initialize`,
   `notifications/initialized`, `ping`, `tools/list` and `tools/call`, and
   keeps one connection to the browser open for the session.
-- **`data/js/remote-page.js`** is the page-side helper `read_page`,
-  `find`, `form_input`, `get_page_text` and `javascript` evaluate through
-  the renderer's console-eval path. It stores itself under
-  `Symbol.for('nordstjernen.remote')`.
+- **`data/js/remote-page.js`** is the helper behind `read_page`, `find`,
+  `form_input`, `get_page_text` and `javascript`. The server sends a JSON
+  request (`{"fn": …, "args": […]}`) with the `remote_call` command; the
+  renderer (`ns_js_remote_call` in `src/js.c`) runs the helper in a QuickJS
+  context of its own, created on the page's first remote call and dropped
+  when the page's realm is reset. Page script cannot name, replace or reach
+  it, and its built-ins (`JSON`, `Map`, `WeakMap`, `Array`, …) are that
+  context's own, so a page that patches its own built-ins does not change
+  what the helper returns. The helper reads the page through the page's
+  global object, so the DOM methods it calls are still the page's: treat
+  what it reports as page content. The Java agent (`PageScript.java`) calls
+  the same helper through the renderer's `/remote-call`.
 - **`src/gtk/rjson.c`** is the small JSON parser/writer both sides use.
 
 ## Security model

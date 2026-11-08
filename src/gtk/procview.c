@@ -126,6 +126,7 @@ typedef struct {
     char   *vheld;
     NsProcViewTextFn remote_cb;
     gpointer remote_ud;
+    gboolean remote_call;
     long    download_id;
     unsigned long session_gen;
 } Req;
@@ -1557,7 +1558,12 @@ worker_main(gpointer data)
             res->inspect = req->inspect;
             res->remote_cb = req->remote_cb;
             res->remote_ud = req->remote_ud;
-            res->href = v->proc ? ns_rproc_http_eval(v->proc, req->query) : NULL;
+            if (!v->proc)
+                res->href = NULL;
+            else if (req->remote_call)
+                res->href = ns_rproc_http_remote_call(v->proc, req->query);
+            else
+                res->href = ns_rproc_http_eval(v->proc, req->query);
             post(res);
         } else if (req->type == REQ_POPUP) {
             if (req->kind == 0) {
@@ -5801,9 +5807,9 @@ ns_proc_view_is_private(NsProcView *v)
     return v && v->private_mode;
 }
 
-void
-ns_proc_view_remote_eval(NsProcView *v, const char *js, NsProcViewTextFn cb,
-                         gpointer user_data)
+static void
+proc_view_remote_eval_req(NsProcView *v, const char *text, gboolean remote_call,
+                          NsProcViewTextFn cb, gpointer user_data)
 {
     if (!v || v->closed) {
         cb(NULL, user_data);
@@ -5811,10 +5817,25 @@ ns_proc_view_remote_eval(NsProcView *v, const char *js, NsProcViewTextFn cb,
     }
     Req *req = g_new0(Req, 1);
     req->type = REQ_EVAL;
-    req->query = g_strdup(js ? js : "");
+    req->query = g_strdup(text ? text : "");
+    req->remote_call = remote_call;
     req->remote_cb = cb;
     req->remote_ud = user_data;
     push_req(v, req);
+}
+
+void
+ns_proc_view_remote_eval(NsProcView *v, const char *js, NsProcViewTextFn cb,
+                         gpointer user_data)
+{
+    proc_view_remote_eval_req(v, js, FALSE, cb, user_data);
+}
+
+void
+ns_proc_view_remote_call(NsProcView *v, const char *request, NsProcViewTextFn cb,
+                         gpointer user_data)
+{
+    proc_view_remote_eval_req(v, request, TRUE, cb, user_data);
 }
 
 NsProcView *

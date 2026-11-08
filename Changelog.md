@@ -3,6 +3,14 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security: a web page can no longer take over the remote-control (MCP)
+  helper. The helper cached itself under `Symbol.for('nordstjernen.remote')`,
+  so a page could plant its own object there and decide what `read_page`,
+  `find`, `form_input` and the other page tools reported to the agent, and
+  where its clicks went. The renderer now runs the helper in a QuickJS
+  context of its own, out of page script's reach; the `--mcp` server and the
+  Java agent send a JSON request (`remote_call`, `/remote-call`) instead of
+  helper source.
 * The browser starts on about:start again. Since 1.0.42's session store a
   plain launch reopened the tabs of the previous run; the stored tabs are
   now reopened only by the watchdog after a crash, and a normal start
