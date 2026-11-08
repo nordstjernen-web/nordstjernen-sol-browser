@@ -1762,23 +1762,35 @@ ns_rproc_http_set_permissions(ns_rproc_http *r, const char *entries,
     return request_ok(r, "/permission", json);
 }
 
-char *
-ns_rproc_http_eval(ns_rproc_http *r, const char *src)
+static char *
+text_request(ns_rproc_http *r, const char *path, const char *key, const char *value)
 {
     if (!r)
         return NULL;
-    char *se = json_escape(src ? src : "");
+    char *escaped = json_escape(value ? value : "");
     char *json = NULL;
-    if (asprintf(&json, "{\"src\":\"%s\"}", se ? se : "") < 0)
+    if (asprintf(&json, "{\"%s\":\"%s\"}", key, escaped ? escaped : "") < 0)
         json = NULL;
-    free(se);
-    char *body = json ? request(r, "/eval", json) : NULL;
+    free(escaped);
+    char *body = json ? request(r, path, json) : NULL;
     free(json);
     if (!body)
         return NULL;
     char *text = json_get_str(body, "text");
     free(body);
     return text;
+}
+
+char *
+ns_rproc_http_eval(ns_rproc_http *r, const char *src)
+{
+    return text_request(r, "/eval", "src", src);
+}
+
+char *
+ns_rproc_http_remote_call(ns_rproc_http *r, const char *call)
+{
+    return text_request(r, "/remote-call", "request", call);
 }
 
 char *

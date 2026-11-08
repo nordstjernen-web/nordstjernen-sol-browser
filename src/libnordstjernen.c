@@ -3901,18 +3901,34 @@ ns_browser_console_drain(ns_browser *browser)
     return out;
 }
 
-char *
-ns_browser_eval(ns_browser *browser, const char *src)
+static void
+browser_settle_eval(ns_browser *browser)
 {
-    if (!browser || !browser->js || !src) return NULL;
-    browser_damp_reset(browser);
-    char *res = ns_js_eval_source(browser->js, src, "devtools-console");
     if (ns_js_run_animation_frame(browser->js)) browser->dirty = TRUE;
     if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     if (browser->dirty) {
         browser_relayout(browser);
         browser->dirty = FALSE;
     }
+}
+
+char *
+ns_browser_eval(ns_browser *browser, const char *src)
+{
+    if (!browser || !browser->js || !src) return NULL;
+    browser_damp_reset(browser);
+    char *res = ns_js_eval_source(browser->js, src, "devtools-console");
+    browser_settle_eval(browser);
+    return res;
+}
+
+char *
+ns_browser_remote_call(ns_browser *browser, const char *request)
+{
+    if (!browser || !browser->js || !request) return NULL;
+    browser_damp_reset(browser);
+    char *res = ns_js_remote_call(browser->js, request);
+    browser_settle_eval(browser);
     return res;
 }
 

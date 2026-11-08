@@ -627,6 +627,16 @@ rc_dispatch(RcOp *op)
         ns_proc_view_remote_eval(v, js, rc_eval_done, rc_op_ref(op));
         return;
     }
+    if (!g_strcmp0(cmd, "remote_call")) {
+        const char *request = rj_get_str(req, "request");
+        if (!request) {
+            rc_op_err(op, "missing request");
+            return;
+        }
+        op->timeout = g_timeout_add(RC_EVAL_TIMEOUT_MS, rc_op_timeout, op);
+        ns_proc_view_remote_call(v, request, rc_eval_done, rc_op_ref(op));
+        return;
+    }
     if (!g_strcmp0(cmd, "console")) {
         op->timeout = g_timeout_add(RC_EVAL_TIMEOUT_MS, rc_op_timeout, op);
         ns_proc_view_remote_console(v, rc_eval_done, rc_op_ref(op));

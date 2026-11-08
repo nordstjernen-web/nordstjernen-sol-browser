@@ -115,6 +115,8 @@ typedef void (*NsProcViewTextFn)(const char *text, gpointer user_data);
 
 void     ns_proc_view_remote_eval(NsProcView *view, const char *js,
                                   NsProcViewTextFn cb, gpointer user_data);
+void     ns_proc_view_remote_call(NsProcView *view, const char *request,
+                                  NsProcViewTextFn cb, gpointer user_data);
 NsProcView *ns_proc_view_ref(NsProcView *view);
 void     ns_proc_view_unref(NsProcView *view);
 void ns_proc_view_set_opener(NsProcView *v, const char *token,

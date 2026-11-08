@@ -152,6 +152,8 @@ char *ns_browser_console_drain(ns_browser *browser);
 
 char *ns_browser_eval(ns_browser *browser, const char *src);
 
+char *ns_browser_remote_call(ns_browser *browser, const char *request);
+
 char *ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
                           int *out_stream);
 
