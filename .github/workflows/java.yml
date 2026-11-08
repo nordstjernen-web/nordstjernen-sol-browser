@@ -119,7 +119,7 @@ jobs:
                 | grep -Ev -- '-(sources|javadoc)\.jar$' | head -1)
           unzip -l "$JAR" | grep -q 'org/nordstjernen/browser/Page.class'
           unzip -l "$JAR" | grep -q 'META-INF/License.md'
-          unzip -l "$JAR" | grep -q 'org/nordstjernen/agent/remote-page.js'
+          unzip -l "$JAR" | grep -q 'org/nordstjernen/agent/McpServer.class'
 
       - name: Upload jar
         if: hashFiles('java/build/libs/*.jar') != ''
