@@ -3,6 +3,8 @@ Changelog:
 
 1.0.45:
 ======
+* The New Tab page shows "Nordstjernen Web Browser" and the version under
+  the logo again, as in 1.0.44.
 * about:nordstjernen names the Safe Browsing API in use (Google Safe Browsing
   v5, local-list mode).
 * Fix: links to a Settings section (about:nordstjernen's "Change in
