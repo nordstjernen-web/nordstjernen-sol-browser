@@ -104,12 +104,10 @@ The supervisor hands the child a fresh instance id with
 hang triggers a restart, it also sets `NS_WATCHDOG_RECOVER=1`; the
 respawned child, carrying the same id, reopens exactly the tabs the
 crashed one owned and shows a status-bar note that it recovered after an
-unexpected exit. A normal launch without a URL reopens the tabs of every
-shell that is no longer running (no heartbeat for 15 seconds, or a clean
-exit); a launch with a URL opens just that URL and leaves the stored tabs
-for the next plain launch. Private windows never touch the database.
-`about:` pages are not stored, so a window that had only `about:start`
-simply opens the home page.
+unexpected exit. Any other launch opens `about:start` (or the URL given on
+the command line) and discards the stored tabs of shells that are no
+longer running (no heartbeat for 15 seconds, or a clean exit); tabs are
+reopened only after a crash. Private windows never touch the database.
 
 ## Shutting it down
 

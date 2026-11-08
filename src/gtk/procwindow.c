@@ -4063,6 +4063,16 @@ restore_session(ProcWindow *pw, gboolean own_only)
 }
 
 static void
+discard_stale_session(void)
+{
+    GPtrArray *tabs = ns_session_take_tabs(FALSE);
+    for (guint i = 0; i < tabs->len; i++)
+        ns_session_tab_remove(
+            ((const ns_session_tab *)g_ptr_array_index(tabs, i))->id);
+    g_ptr_array_unref(tabs);
+}
+
+static void
 on_proc_activate(GtkApplication *app, gpointer user_data)
 {
     ProcAppCtx *ctx = user_data;
@@ -4079,8 +4089,10 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
 
     gboolean opened = FALSE;
     if (!ctx->private_mode && ns_session_open(ctx->instance_id)) {
-        if (ctx->recover || !ctx->explicit_url)
-            opened = restore_session(pw, ctx->recover);
+        if (ctx->recover)
+            opened = restore_session(pw, TRUE);
+        else
+            discard_stale_session();
         if (opened && ctx->recover)
             pw_set_status(pw, ns_i18n("Recovered the previous session after "
                                       "an unexpected exit"));
