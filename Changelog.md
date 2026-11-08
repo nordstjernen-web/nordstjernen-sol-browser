@@ -1,6 +1,9 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.46-dev:
+======
+
 1.0.45:
 ======
 * The New Tab page shows "Nordstjernen Web Browser" and the version under
