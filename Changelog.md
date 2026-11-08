@@ -3,6 +3,10 @@ Changelog:
 
 1.0.46-dev:
 ======
+* The browser starts on about:start again. Since 1.0.42's session store a
+  plain launch reopened the tabs of the previous run; the stored tabs are
+  now reopened only by the watchdog after a crash, and a normal start
+  discards them.
 * macOS: the Homebrew cask is gone. The `homebrew` workflow no longer
   updates nordstjernen-web/homebrew-tap on release, and the README and
   docs/macOS.md no longer offer `brew install --cask`; install from the
