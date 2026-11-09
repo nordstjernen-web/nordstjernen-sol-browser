@@ -4,6 +4,7 @@
  */
 
 #include "ext.h"
+#include "js_cage.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -1099,10 +1100,10 @@ ns_ext_do_init(void)
     g_blocked_hosts = g_hash_table_new_full(g_str_hash, g_str_equal,
                                             g_free, NULL);
 
-    JSRuntime *rt = JS_NewRuntime();
+    JSRuntime *rt = ns_js_runtime_new();
     if (!rt) return;
     JSContext *ctx = JS_NewContext(rt);
-    if (!ctx) { JS_FreeRuntime(rt); return; }
+    if (!ctx) { ns_js_runtime_free(rt); return; }
 
     const char *envd = g_getenv("NS_EXTENSIONS_DIR");
     if (envd && *envd) {
@@ -1115,7 +1116,7 @@ ns_ext_do_init(void)
     ns_ext_scan_root(def, ctx);
 
     JS_FreeContext(ctx);
-    JS_FreeRuntime(rt);
+    ns_js_runtime_free(rt);
 }
 
 static void

@@ -158,6 +158,7 @@ nordstjernen_engine_sources += files(
   'js_brand.c',
   'js_canvas.c',
   'js_canvas_api.c',
+  'js_cage.c',
   'js_perf.c',
   'js_webauthn.c',
   'js_realm.c',
