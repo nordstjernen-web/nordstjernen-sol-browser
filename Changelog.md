@@ -3,6 +3,15 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: the last raw pointers inside the JavaScript engine's internal
+  structures, other than module records and bytecode, are now 32-bit
+  offsets into the heap cage (stage 3a.2 batch 7 of
+  `docs/heap-hardening.md`): a typed array's links to its object and
+  buffer, a regular expression's pattern and compiled program, Map and
+  Set hash buckets, record owners and iterator cursors, weak-reference
+  records, promise resolution state, async-generator back pointers,
+  iterator-helper buffers and function source text. A corrupted heap can
+  no longer point any of them outside the cage.
 
 1.0.46:
 ======

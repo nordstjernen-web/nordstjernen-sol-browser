@@ -5,40 +5,36 @@ JavaScript engine or its bindings harder to turn into control of the
 renderer process. The model is V8's heap sandbox: assume an attacker who
 can already read and write arbitrary memory *inside* the JavaScript heap,
 and arrange the heap so that this is not enough to reach memory outside
-it. Until the last stage lands, the stages here are **exploit-cost
-hardening**, not a security boundary: each removes a class of primitive an
-exploit relies on, but a determined attacker with a second bug in the
-right place can still escape. Only pointer compression together with a
-trusted space for bytecode (stage 3) makes the heap a boundary that holds
+it. Until stage 3b lands this is **exploit-cost hardening**, not a
+security boundary: each stage removes a class of primitive an exploit
+relies on, but an attacker who corrupts the bytecode the interpreter
+trusts can still size and index a native stack frame. Only a trusted
+space for bytecode and saved frames makes the heap a boundary that holds
 on its own, and only then is it fair to call it a sandbox.
 
 Nordstjernen's position differs from V8's in ways that make the work
 smaller: QuickJS is an interpreter, so the renderer never maps executable
 memory, and with WebGL and WebGPU switched off the seccomp filter refuses
-`PROT_EXEC` mappings outright (`src/security.c`); the heap is small; the
-engine exposes a pluggable
-allocator; and every host object reaches the heap through one opaque
-pointer API. It also differs in a way that makes it harder: the binding
-layer (`src/js.c`) is as large as the engine and holds raw pointers in
-both directions.
+`PROT_EXEC` mappings outright (`src/security.c`); the heap is small; and
+every host object reaches the heap through one opaque pointer API. It
+also differs in a way that makes it harder: the binding layer
+(`src/js.c`) is as large as the engine.
 
-Each stage is benchmarked with `scripts/sitebench/ab.sh` (old build
-against new build on live sites) before it merges, and kept as small and
-isolated from upstream quickjs-ng as the design allows, so security fixes
-from upstream keep merging cleanly into `src/quickjs/`.
+Each change is benchmarked before it merges and kept as small and
+isolated from upstream quickjs-ng as the design allows, so security
+fixes from upstream keep merging cleanly into `src/quickjs/`.
 
 ## Status
 
 | Stage | What | State |
 |---|---|---|
-| 1a | Separate allocation partition for the JS heap (the cage) | **done** (`src/quickjs/quickjs-cage.c`, wrapper in `src/js_cage.c`) |
-| 1b | Credential-less renderer broker | skipped for now, see below |
-| 2a | Bounded, cage-relative ArrayBuffer and TypedArray pointers | **done** |
-| 2b | Tagged external pointer table and code pointer table | **done** |
-| 2c | Inventory of raw host and function pointers left in the heap | **done**, kept current below |
-| 3p | Trusted runtime structures and context table (preparation for 3a and 3b) | **done** |
-| 3a.1 | Caged values: 8-byte `JSValue` holding a 32-bit cage offset, cage owned by the engine | **done** |
-| 3a.2 | Compressed pointer fields inside heap structures | **batches 2 to 6 done**: shape, property array, prototype, shape hash chain, fast-array values, closure variables, home object, bytecode arrays, weak-reference chains, string-slice parents, every internal class structure behind the opaque union and the bytecode pointer of functions. Batch 1 (list links) done as safe linking |
+| 1a | Separate allocation partition for the JS heap (the cage) | done |
+| 1b | Credential-less renderer broker | not started, see below |
+| 2a | Bounded, cage-relative ArrayBuffer and TypedArray pointers | done |
+| 2b | Tagged external pointer table and code pointer table | done |
+| 3p | Trusted runtime structures and context table | done |
+| 3a.1 | Caged values: 8-byte `JSValue` holding a 32-bit cage offset | done |
+| 3a.2 | Compressed pointer fields inside heap structures | batches 1 to 7 done; module records open |
 | 3b | Trusted space for bytecode and saved frames | planned |
 
 Stage 1b, moving cookies, HSTS, the HTTP cache and storage behind the
@@ -47,706 +43,232 @@ the heap stages and remains the complementary architectural step that
 `docs/tab-isolation.md` already lists. It limits what a compromise is
 worth; the stages here limit how a bug becomes a compromise.
 
-## Stage 1a: the cage
+## What is in place
 
-The cage reserves one range of virtual address space per renderer
-process at the first runtime creation and serves every QuickJS
-allocation from it. It started life in `src/js_cage.c`, plugged in
-through the public `JS_NewRuntime2` allocator hook with no engine
-change; since stage 3a.1 it lives in the engine itself
-(`src/quickjs/quickjs-cage.c`, GLib-free, used by `JS_NewRuntime()`), so
-the in-tree `qjs`/`qjsc` host tools and test262 run the real layout, and
-`src/js_cage.c` is a thin wrapper that logs the reservation and exposes
-the shared cage heap to `src/wasm.c` and `src/webgpu.c`. The fork's own
-small-block arena allocator
-(`src/quickjs/quickjs.c`) steps aside while a cage is active: its arena
-headers, free lists and list links live inside the blocks it manages,
-so a corrupted heap could have steered `js_arena_free` into an unlink
-write outside the cage. With the cage on, every allocation goes to the
-cage allocator and its out-of-cage bookkeeping; without one, the arena
-works as before.
+The invariants below are what the engine and the bindings must keep.
 
-Layout:
+**The cage** (`src/quickjs/quickjs-cage.c`). `JS_NewRuntime()` reserves
+one 4 GB range per process on first use (halving to 1 GB when address
+space is short), aligned to its size, with 32 GB inaccessible guard
+regions on both sides. Each runtime (page, worker, extension host) gets
+its own lock-free heap inside it. Allocations up to 32 KB come from
+size-classed 64 KB slabs, larger ones from runs of slabs or 1 MB chunks;
+freed chunks beyond a small cache are decommitted, so a stale pointer
+into them faults. **No allocator bookkeeping lives inside the cage**:
+chunk and slab metadata, bitmaps and free lists are outside it, found
+through a side table by chunk number, and the allocator aborts on a free
+it did not hand out, a misaligned free or a double free. The fork's own
+small-block arena steps aside while the cage is active. The first chunk
+is never handed out, so offset zero means `NULL`. The engine refuses to
+create a runtime without a cage; AddressSanitizer and 32-bit builds
+compile the classic layouts and use the process heap, and
+`-Dquickjs=quickjs` (Bellard's original engine) has no cage at all.
+`src/js_cage.c` wraps it for browser code (`ns_js_runtime_new`,
+`ns_js_cage_shared_malloc`) and logs the reservation under
+`G_MESSAGES_DEBUG=all`.
 
-- The reservation is 4 GB, the most a 32-bit offset can address, halving
-  down to 1 GB when the address space is short, aligned to its own size
-  so the offset mask is a plain bit-and. Inaccessible guard regions of
-  32 GB sit on both sides, and the first chunk is never handed out so
-  offset zero stays distinguishable from a pointer. Nothing is committed
-  until used. (Stage 1a reserved 64 GB with 8 GB guards; stage 2a raised
-  the guards to 32 GB for the bounded-length arithmetic; stage 3a.1
-  brought the cage down to the 4 GB a boxed value can name.)
-- The range is cut into 1 MB chunks; chunks into 64 KB slabs. Allocations
-  up to 32 KB come from size-classed slabs (40 classes, four per
-  doubling), allocations up to 1 MB from runs of slabs, and larger ones
-  from runs of chunks. Freed chunks are decommitted (`madvise` plus
-  `PROT_NONE`, `VirtualFree` on Windows) beyond a small committed cache,
-  so a stale pointer into a released chunk faults instead of reading.
-- Each runtime (page, dedicated worker, extension host) owns a heap of its
-  own inside the shared cage, so the hot allocation path takes no lock;
-  only chunk acquisition and release do.
+**Buffers.** Every ArrayBuffer backing store lives inside the cage: the
+engine refuses a foreign store (`JS_NewArrayBuffer` with an external
+buffer, `JS_RepointArrayBuffer`, a SharedArrayBuffer allocation hook
+returning out-of-cage memory). WebAssembly memory comes from a locked
+shared heap inside the cage (`src/wasm.c`), and WebGPU `getMappedRange()`
+returns a cage copy written back on `unmap()` (`src/webgpu.c`). Every
+read of a buffer data pointer or the cached typed-array element pointer
+is masked into the cage (`js_abuf_data()`, `js_ta_ptr()`), and with
+32-bit lengths and offsets the furthest reach is the trailing guard.
 
-Design rule, the same one V8 arrived at after moving its chunk metadata
-out of the sandbox: **no allocator bookkeeping lives inside the cage.**
-Chunk and slab metadata, bitmaps and free lists are ordinary process
-allocations outside the range, looked up through a side table indexed by
-chunk number. An attacker who controls the heap contents cannot therefore
-make the allocator hand out an address of their choosing, and a corrupted
-heap cannot forge a free-list link, a size class or a run length. The
-allocator aborts on a free of a pointer it did not hand out, a misaligned
-free or a double free.
+**Tables outside the cage** (`src/quickjs/quickjs-hardening.h`).
 
-What stage 1a buys on its own:
+- External pointer table: `JS_SetOpaque` on a host class stores the
+  pointer in an entry tagged with the class id; the object holds the
+  index, and `JS_GetOpaque` returns `NULL` on a tag mismatch. The Intl
+  classes, whose structures come from libc, use it too under their own
+  tag.
+- Code pointer table: every native function pointer a heap object used
+  to hold (C functions, function-data and closure records, their
+  finalizers, the ArrayBuffer reallocation hook, job functions, C-module
+  init functions) is an index into an append-only table.
+- Context table: `JSRuntime`, every `JSContext` and the class table are
+  allocated from trusted memory outside the cage, and every heap field
+  that named a context (function realms, jobs, finalization records,
+  Atomics waiters, ShadowRealm) holds a masked index instead.
 
-- JavaScript objects can no longer be groomed next to DOM nodes, network
-  buffers, layout state or the IPC framing. A use-after-free in the
-  engine cannot be reclaimed by an attacker-shaped DOM allocation, and
-  the reverse holds.
-- Guard regions and decommitted chunks turn a class of stale reads into
-  crashes.
-- Every later stage needs a cage base and a power-of-two size to mask
-  against; they now exist (`JS_CageBase()`, `JS_CageSize()`, wrapped by
-  `ns_js_cage_base` / `ns_js_cage_size` for browser code).
+**Caged values.** Under `JS_CAGE_BOXING` (default on 64-bit builds
+without ASan) a `JSValue` is 8 bytes whose pointer payload is a 32-bit
+cage offset, so no property slot, array element, stack slot, constant
+pool entry or argument can name memory outside the cage.
 
-What it does not buy: heap-internal pointers are still raw 64-bit
-addresses, so a corrupted object pointer still reaches anywhere. That is
-the subject of stages 2 and 3.
+**Compressed fields.** Pointer fields inside cage structures are
+declared `JS_CPTR(T)` (`src/quickjs/quickjs-cptr.h`), read through
+`js_cload(T, field)` and written through `js_cstore(field, ptr)`. The
+encoder **fails closed**: a pointer from outside the cage aborts with a
+message naming it instead of being truncated into a random in-cage
+address. Converted so far: object shape, property array, prototype and
+shape hash chain; fast-array values, closure variables and home object;
+the bytecode arrays and source text; weak-reference chains and records;
+string-slice parents; every member of the object's opaque union and the
+function's bytecode pointer; typed-array back pointers; regexp pattern
+and bytecode; Map hash buckets, record owners and iterator cursors;
+promise resolution state; async-generator back pointers; iterator-helper
+buffers.
 
-Switches: none at runtime any more. Since stage 3a.1 a boxed value can
-only name cage memory, so the engine refuses to create a runtime when
-the reservation fails instead of falling back. Builds with
-AddressSanitizer and 32-bit builds compile the classic value layouts and
-use the process heap. The cage prints its base and size under
-`G_MESSAGES_DEBUG=all`. The `-Dquickjs=quickjs` configuration, Bellard's
-original engine, has no cage at all.
+**Safe-linked lists.** The `list_head` links stay 64-bit because the
+runtime's GC list threads both cage objects and the trusted contexts,
+but `list.h` checks on every insert and unlink that both neighbours
+point at each other before it writes. An in-cage attacker cannot plant
+the matching back pointer outside the cage, so the classic unlink write
+primitive is gone.
 
-Measurements at the time stage 1a landed (headless, this container,
-median of three; the process-heap configuration no longer exists):
+## What is still open
 
-| Run | Wall time | Peak RSS |
-|---|---|---|
-| Allocation stress script, process heap | 0.37 s | 175.7 MB |
-| Allocation stress script, cage | 0.32 s | 177.3 MB |
+The rows below are the raw pointers or trusted data a write primitive
+inside the cage can still corrupt. Everything not listed is either
+converted or is trusted memory pointing into the cage, which the model
+allows (`ctx->class_proto`, `rt->atom_array`, `ns_node.js_wrapper` and
+the other embedder structures).
 
-The stress script builds 200 000 objects, 64 typed arrays, a 40 MB
-ArrayBuffer, a 200 KB string by concatenation and a 100 000-entry Map,
-then churns small arrays. Sitebench results are recorded in the
-*Benchmarks* section below as stages land.
-
-## Stage 2: buffers and pointer tables
-
-Stage 2a (done) masks every read of an ArrayBuffer data pointer and of
-the cached typed-array element pointer into the cage: the engine keeps
-the fields as they are and decodes them through `js_abuf_data()` and
-`js_ta_ptr()` as `cage_base | (pointer & (cage_size - 1))`, so a forged
-buffer with an arbitrary address still lands inside the cage, and with
-lengths and offsets of at most 32 bits and elements of at most 8 bytes
-the furthest reach is 32 GB past the end, which is exactly the trailing
-guard region. The cage base and mask are set when the engine reserves
-the cage; in builds without one (AddressSanitizer, 32-bit) the mask is
-the identity and the unmodified arithmetic runs. The
-engine change is one 20-line block plus mechanical substitutions at the
-read sites (17 buffer reads, 67 typed-array pointer reads), with no
-change to the writers, which keeps the diff against upstream small and
-re-applicable.
-
-The rule that makes this sound is that **every ArrayBuffer backing store
-lives inside the cage**. The engine now refuses a foreign backing store
-outside it (`JS_NewArrayBuffer` with an external buffer, and
-`JS_RepointArrayBuffer`). Two embedder paths had to change to follow the
-rule: WebAssembly linear memory and the runtime's own allocations come
-from a locked shared heap inside the cage through WAMR's allocator hooks
-(`WASM_MEM_ALLOC_WITH_USAGE`, `src/wasm.c`), with linear memory zeroed on
-allocation and growth; and WebGPU `getMappedRange()` returns a cage copy
-of the mapped range that is written back to the GPU buffer on `unmap()`
-for write mappings (`src/webgpu.c`) instead of aliasing wgpu-native's
-memory.
-
-Stage 2b (done) adds two tables that live outside the cage, both in one
-block of `src/quickjs/quickjs.c` next to the cage helpers:
-
-- **External pointer table.** `JS_SetOpaque` on a host class (any class
-  id at or above `JS_CLASS_INIT_COUNT`, which is every class the browser
-  registers) stores the pointer in a table entry tagged with the class
-  id and leaves only the entry index in the object. `JS_GetOpaque` and
-  `JS_GetAnyOpaque` look the index up, masked to the table's capacity,
-  and return `NULL` when the tag does not match the class the caller
-  asked for, so a corrupted index can at most name another live object
-  of the same class and a forged pointer is never dereferenced. The
-  entry is released when the object is freed, after its finalizer ran.
-  The table is a two-level array of 16 M entries whose segments never
-  move, so reads need no lock; allocation and release take a spinlock
-  shared with the code table. The engine's own classes keep their
-  internal structs in the object (as compressed offsets since stage
-  3a.2), except the Intl classes, whose structures are allocated with
-  libc and therefore also live in the table under a tag of their own.
-- **Code pointer table.** Native function pointers stored in heap objects
-  are interned into an append-only table and the object holds the
-  index: the C function behind every `JS_NewCFunction*` object, the
-  function and data-record function of `JS_NewCFunctionData`, the
-  function and finalizer of `JS_NewCClosure`, and the ArrayBuffer
-  reallocation hook. A corrupted index selects another registered
-  function at worst, never an arbitrary address. Interning deduplicates
-  through a hash table under the same spinlock; lookups are a masked
-  two-level array read.
-
-Both sit behind the existing API, so the call sites in `src/js.c`,
-`src/webgpu.c`, `src/wasm.c` and the canvas code did not change; the
-engine diff is the table block, four struct fields and about twenty
-call-site lines.
-
-### Stage 2c: raw pointers still in the heap
-
-What a write primitive inside the cage can still corrupt into something
-dangerous. The table is kept current as stages land; the *Stage* column
-says which stage removed the item or will.
-
-| Where | Pointer | Reach | Stage |
+| Where | What | Reach | Plan |
 |---|---|---|---|
-| `JSRuntime` | `mf` allocator hooks, `class_array[]` finalizer / `gc_mark` / `call` / `exotic` methods, interrupt handler, promise-rejection tracker, module loader, `sab_funcs` | trusted memory outside the cage | done (3p) |
-| `JSContext` | `rt`, realm tables, class prototypes, `host_functions` policy bits | trusted memory outside the cage, reached from the heap only through the context table | done (3p) |
-| `JSJobEntry` | `ctx`, `job_func` | context-table index, code-table index | done (3p) |
-| `JSModuleDef.init_func`, `JSFinRecEntry.ctx`, `JSFinalizationRegistryData.ctx`, `JSAtomicsWaiter.ctx`, auto-init property realm | native pointer or `JSContext *` | table indices | done (3p) |
-| `JSAtomicsWaiter.async_rt` | `JSRuntime *`, tested for non-NULL and compared only | raw pointer in a cage struct, never dereferenced | open, low value |
-| `ctx->class_proto`, `rt->atom_array`, `rt->atom_hash` | arrays owned by trusted structures that point into the cage | trusted memory pointing in, which the model allows | fine |
-| `JSObject` | `shape`, `prop`, `first_weak_ref` | compressed offsets | done (3a.2) |
-| `JSObject`, `JSFunctionBytecode`, `JSTypedArray`, … | GC and bookkeeping `list_head` links | raw, but every insert and unlink verifies both neighbours first, so a corrupted link aborts instead of writing elsewhere | done (3a.2 batch 1) |
-| `JSObject.u.array` | `values` (fast arrays), `var_refs` | compressed offsets | done (3a.2) |
-| `JSObject.u.func` | `function_bytecode`, `var_refs`, `home_object` | compressed offsets; the bytecode they reach is still in-cage and trusted by the interpreter | done (3a.2); trust is **3b** |
-| `JSObject.u.cfunc.realm`, `JSFunctionBytecode.realm`, `JSWrappedFunction.realm` | context-table index; the interpreter switches realm only to a live context | done (3p) |
-| internal `u.opaque` structs | `JSArrayBuffer`, `JSTypedArray`, `JSMapState`, `JSProxyData`, `JSPromiseData`, … | compressed offsets | done (3a.2) |
-| `JSTypedArray.obj`, `JSTypedArray.buffer` and other members inside those structs | raw pointers to cage objects | in-cage | later 3a.2 batch |
-| `JSArrayBuffer.opaque` | host `void *` handed back to the realloc hook (`src/webgpu.c` held value, in-engine `NULL`) | tagged table entry | done |
-| `JSCClosureRecord.opaque` | host `void *` | tagged table entry | done |
-| `JSFunctionBytecode` | opcodes, `cpool`, `closure_var`, `vardefs`, `stack_size`, `var_count` | sizes and indexes the interpreter trusts for its native frame | **3b** |
-| `JSAsyncFunctionState` / generators | a saved `JSStackFrame` with `cur_pc`, `arg_buf`, `var_buf` | native stack layout | **3b** |
-| `JSShape` | `proto`, hash-chain link | compressed offsets (property atoms are integers) | done (3a.2) |
-| `JSString` ropes and slices | rope children are boxed values, slice parent compressed | done (3a.1, 3a.2) |
-| typed array / buffer lengths | `byte_length`, `offset`, `length`, `count` | bounded by the 32 GB guard | done |
-| embedder structs | `ns_node.js_wrapper`, listener records, `ns_js` | outside the cage pointing in; decoded only through the engine | fine |
+| `JSFunctionBytecode` | opcodes, `cpool`, `closure_var`, `vardefs`, `stack_size`, `var_count`, `arg_count` | sizes and indexes the interpreter trusts for its native frame | **3b** |
+| `JSAsyncFunctionState` (generators, async functions) | saved `JSStackFrame`: `cur_pc`, `arg_buf`, `var_buf`, `var_refs`, `prev_frame` | native stack layout | **3b** |
+| `JSVarRef` | `pvalue`, `stack_frame` of an open reference | points at a live native stack frame or a saved frame | **3b**, with the frames |
+| `JSModuleDef`, `JSReqModuleEntry`, `JSExportEntry` | `req_module_entries`, `export_entries`, `star_export_entries`, `import_entries`, `stack_prev`, `async_parent_modules`, `cycle_root`, `module`, `local.var_ref` | raw pointers in cage structures; about 107 sites, many through `js_resize_array` | 3a.2 batch 8 |
+| regexp bytecode | jump offsets and register indexes `lre_exec` reads from the in-cage bytecode string | reads and capture writes relative to cage buffers; the guard regions bound the reach, but the interpreter has not been reviewed against a corrupted program | review with 3b |
+| `JSAtomicsWaiter.async_rt` | `JSRuntime *`, tested and compared, never dereferenced | none today | low value |
+| `JSRegExp.realm` | `JSContext *`, compared, never dereferenced | none today | low value |
 
-After 3a.2 the rows that still turn an in-cage write into something
-outside the cage are the two bold `3b` rows, bytecode and saved frames;
-everything else is data corruption inside the cage.
+### Next: batch 8, module records
 
-## Stage 3: a real boundary
-
-Pointer compression turns every heap-to-heap reference into a 32-bit
-offset from the cage base. QuickJS already carries a 64-bit value layout
-with a 32-bit pointer field, the NaN-boxing mode used on 32-bit targets;
-enabling it on 64-bit and decoding the pointer field as base plus offset
-gives compressed values, and the manual work is converting the raw
-object, shape, string and list-link pointers inside heap structures.
-
-Scoping notes for 3a, from reading the tree after 3p:
-
-- The value layout is fully encapsulated. Every pointer enters or leaves
-  a `JSValue` through `JS_MKPTR` / `JS_VALUE_GET_PTR` and their typed
-  wrappers (650 sites in the engine, 199 in the bindings), and no
-  engine or binding code touches the struct's `.tag` or `.u` members
-  directly. A `JS_CAGE_BOXING` mode in `quickjs.h`, the NaN-boxing
-  encoding with the low 32 bits holding `pointer - cage_base`, is
-  therefore a header change plus one exported cage base, and it halves
-  every value to 8 bytes.
-- It makes the cage mandatory in that build: a 32-bit offset cannot name
-  memory outside the reservation, which is the point, so the runtime
-  must refuse to start without one instead of falling back to the
-  process heap. ASan and 32-bit builds keep today's layouts.
-- Offset zero must never be handed out, so that a `NULL` pointer boxed
-  into a value stays distinguishable; the allocator keeps the first
-  chunk of the cage permanently reserved.
-- Step two is the struct fields: 179 `JSObject *`, 75 `JSString *`,
-  33 `JSShape *` and 29 `JSValue *` members, plus the GC list links,
-  converted to 32-bit offsets behind typed accessors the way V8 did it
-  field by field. Until that step the heap still holds raw 64-bit
-  pointers next to compressed values, so step one is a memory and
-  exploit-cost improvement, not yet the boundary.
-
-### Stage 3p: trusted runtime structures (done)
-
-Shared preparation for both halves, done first because it closed the
-shortest path from an in-cage write to native code: `JSRuntime` held
-the allocator hooks and the class table with every finalizer, mark and
-call hook, and heap objects held raw realm pointers that the
-interpreter switched to on every call, so a forged realm gave a forged
-runtime gave a code pointer in three dependent reads.
-
-- `JSRuntime`, every `JSContext` and the runtime's `class_array` are
-  allocated from trusted memory (plain libc, outside the reservation)
-  through a trusted block path in the fork's allocator front end: the
-  block keeps the 8-byte header the GC's reference count lives in,
-  carries its size in the 8 bytes before that, and is recognised by a
-  reserved size-class index, so `js_free_rt`, `js_realloc_rt` and the
-  memory accounting keep working on it unchanged.
-- A trusted **context table** (65 536 slots, outside the cage) hands
-  every context an index at creation. The nine heap-resident `JSContext`
-  fields now hold that index instead of a pointer: C-function realm,
-  bytecode realm, wrapped-function realm, job-queue entries,
-  finalization-registry records and entries, async Atomics waiters and
-  auto-init property records. `js_ctx_get()` masks the index and reads
-  the slot, so a forged realm selects a live context or `NULL`, never
-  memory of the attacker's choosing.
-- The two native function pointers still in heap structures after
-  stage 2b, the job-queue function and the C-module init function, are
-  interned in the code pointer table.
-
-Realm fields are still reference counted through `JS_DupContext` /
-`JS_FreeContext` on the decoded pointer. The embedder maps runtime to
-cage heap through a small table of its own now that the runtime no
-longer lives in the cage (`src/js_cage.c`).
-
-### Stage 3a.1: caged values (done)
-
-`JS_CAGE_BOXING`, on by default in 64-bit builds without
-AddressSanitizer, makes `JSValue` an 8-byte word in the NaN-boxing
-encoding whose low 32 bits hold `pointer - cage_base`. `JS_MKPTR` and
-`JS_VALUE_GET_PTR` are the only two macros that changed; every property
-slot, array element, stack slot, constant pool entry and argument now
-names cage memory and nothing else, and all of them are half their
-former size. The cage became the engine's own: `JS_NewRuntime()`
-reserves it on first use, gives each runtime a heap inside it and
-destroys that heap with the runtime, so `qjs`, `qjsc` and test262 run
-the production layout. The exported `js_cage_pointer_base` is the one
-global the decode reads.
-
-Consequences worth knowing: the cage is 4 GB for the whole process,
-shared by the page runtime, its workers and WebAssembly memory, the same
-limit V8's pointer-compression cage has; a runtime cannot be created
-without it; and `NULL` never appears inside a value, which the allocator
-guarantees by never handing out offset zero.
-
-### Stage 3a.2: compressed fields (batches 2 to 6 done)
-
-The pointers that were raw inside heap structures after 3a.1, with the
-number of engine sites that read or write each, and the batch that
-converts each to 32-bit cage offsets behind typed accessors. Batch 1,
-the GC list links, is the one still open: a corrupted link is an unlink
-write outside the cage, the same primitive the arena bypass removed, but
-the runtime's GC list also threads the trusted `JSContext` structures,
-which a compressed link cannot name (see the design notes under stage
-3b). The other batches landed in the order 2 to 6.
-
-| Field | Sites | Batch |
-|---|---|---|
-| `JSGCObjectHeader.link`, `JSTypedArray.link`, other `list_head` members in cage objects | 20 direct, plus the `list.h` macro uses over those lists | 1, **done** as safe linking in `list.h` rather than compression |
-| `JSObject.shape`, `JSObject.prop`, `JSShape.proto`, `JSShape.shape_hash_next` | 55, 43, 29, 9 | 2, **done** |
-| `JSObject.u.array.u.values`, `u.array.u.var_refs`, `u.func.var_refs`, `u.func.home_object` | 41, 13, 11 | 3, **done** |
-| `JSFunctionBytecode.cpool`, `byte_code_buf`, `closure_var`, `vardefs`, `pc2line_buf` | 17, 22, 16, 29, 10 | 4, **done** |
-| `JSStringSlice.parent`, `first_weak_ref` on objects and strings, `JSWeakRefRecord.next_weak_ref` | 4, 10, 11 | 5, **done** (rope children are boxed values already) |
-| internal class structs reached from `u.opaque` (`JSArrayBuffer`, `JSTypedArray`, `JSMapState`, …) and `u.func.function_bytecode` | 22 union members, about 200 sites | 6, **done** |
-
-Each batch is a mechanical rewrite in the style of stage 2a: the field
-is declared `JS_CPTR(T)`, which is `uint32_t` under cage boxing and `T`
-otherwise, reads go through `js_cload(T, field)` and writes through
-`js_cstore(field, ptr)`, with offset zero meaning `NULL` (the allocator
-never hands out offset zero). Each batch is benchmarked with sitebench
-before it merges.
-
-Batches 2 and 3 are done: every `JSObject` now holds its shape, property
-array, fast-array values, mapped-arguments and closure variable arrays
-and home object as 32-bit offsets, and every `JSShape` its prototype and
-hash-chain link. The two engine paths that took the address of the
-shape field now work on a local and store it back; the shape hash unlink
-walks the chain with explicit previous and current pointers instead of a
-pointer to pointer. The allocation stress script runs in 0.33 s and
-176 MB, down from 179 MB; `qjs -d` reports `JSObject` at 72 bytes.
-
-Batch 4 is done too: the five arrays a `JSFunctionBytecode` carries as
-self pointers into its own allocation (the opcodes, the constant pool,
-the closure-variable and variable-definition tables and the line table)
-are offsets, so the interpreter's `pc` and every constant-pool read start
-from cage memory even if the function object was corrupted. The sizes
-and indexes those arrays are read with are still trusted from in-cage
-data; that is what stage 3b changes.
-
-Batch 5 is done: the weak-reference chain that hangs off every object
-and symbol (`first_weak_ref` and each record's `next_weak_ref`) and the
-parent pointer of a string slice are offsets. The chain is manipulated
-through pointers to slots, so the helpers that returned or took a
-`JSWeakRefRecord **` now return or take a pointer to the compressed slot
-and decode on read. Rope children were already boxed values.
-
-Batch 6 is done: every member of the object's opaque union is an offset,
-which covers the structures behind ArrayBuffer, typed arrays and
-DataView, Map and Set, Proxy, bound functions, promises and their
-resolving functions, generators, every iterator kind, async functions
-and the C-function and closure records, plus the function object's
-pointer to its bytecode. Host classes keep their external-pointer-table
-index in the same slot, and the ShadowRealm object keeps its context as
-a context-table index. With this, the only raw pointers left inside
-cage objects are the GC list links (batch 1), the typed-array back
-pointers inside `JSTypedArray` (`obj`, `buffer`) and the internal
-structures' own members, which later batches take as they come up. The
-allocation stress script is at 0.37 s and 174 MB.
-
-Batch 6 found two places that stored a pointer from *outside* the cage
-in a compressed slot, which the encoder then truncated into a random
-in-cage address: the Intl objects keep structures allocated with libc
-`malloc` in the opaque slot, and a cleared `WeakRef` was marked with the
-address of a static sentinel. The first crashed a settled load of one
-live site; the second surfaced only once the encoder started checking.
-Intl objects now keep their structure in the external pointer table
-under a tag of their own, and the sentinel is a cage allocation. Both
-builds pass the site captures that failed.
-
-### Proposed improvement: fail closed on compression
-
-The improvement this stage most needed, now in place: `js_cptr_encode`
-refuses a pointer that does not lie inside the cage and aborts with a
-message naming it, instead of truncating it. Before, a stray out-of-cage
-pointer in a compressed field became a silent, data-dependent crash
-somewhere else; the Intl case above showed up as a site that failed to
-load, with nothing on stderr. The check is one compare on the store
-path, which is far rarer than the load path, so it costs nothing
-measurable, and it turns every future mistake of this kind, including
-ones upstream merges will introduce as new fields appear, into a loud
-failure in the first run that exercises the code. The same rule should
-extend to the two remaining raw-pointer kinds as they are converted:
-the GC list links (batch 1) and the typed-array back pointers.
+The module structures are cage allocations full of raw pointers:
+corrupting `req_module_entries` or an entry's `module` hands module
+linking and evaluation an arbitrary address to read and write through.
+Convert them the way the other batches went: declare the fields
+`JS_CPTR(T)`, add them to `scripts/quickjs-cage-rewrite.py`, run
+`--apply`, and take the address-of sites (`js_resize_array(ctx, (void
+**)&m->export_entries, …)`) by hand through a local, as batch 7 did for
+the iterator-helper buffer. Verify with the module directories of
+test262 and a site that loads ES modules.
 
 ### Stage 3b: trusted bytecode space (plan)
 
-Trusted bytecode space allocates `JSFunctionBytecode`, its opcode buffer,
-closure tables and the saved frames of generators and async functions
-from memory outside the cage, reached through an indirect table, so the
-interpreter sizes and indexes its native stack frame from data an
-in-cage attacker cannot reach.
+Allocate `JSFunctionBytecode`, its opcode buffer, closure tables and the
+saved frames of generators and async functions from memory outside the
+cage, reached through an indirect table, so the interpreter sizes and
+indexes its native stack frame only from data an in-cage attacker cannot
+reach.
 
-Design notes for 3b, from the tree after 3a.2:
-
-- `JSFunctionBytecode` is a GC object with the reference count in its
+- `JSFunctionBytecode` is a GC object with its reference count in the
   allocation header, so the trusted block path that already carries
-  `JSRuntime` and `JSContext` can carry it too, and its `cpool` values
-  and realm index may keep pointing into the cage and the context table.
+  `JSRuntime` and `JSContext` can carry it too; its `cpool` values and
+  realm index may keep pointing into the cage and the context table.
 - Function objects reach their bytecode through `u.func.function_bytecode`
-  (now a cage offset); that becomes an index into a trusted bytecode
-  table, like the context table, with `js_ctx_get`-style masked decode.
-- The hard part is that bytecode also travels as a *value*:
-  `JS_TAG_FUNCTION_BYTECODE` values sit in constant pools for nested
-  functions and in module records. Under cage boxing a value's payload
-  is a cage offset, so a trusted bytecode cannot be boxed as a pointer.
-  Either the payload for that tag becomes the table index and every
-  `JS_VALUE_GET_PTR` on such a value goes through a tag-aware getter
-  (the generic macro stays tag-agnostic and fast; the handful of
-  bytecode-tag sites in GC marking, freeing and the constant-pool reader
-  switch to the typed getter), or an in-cage handle object stands in
-  for the bytecode in values and holds the index. The first keeps the
-  value layout; the second keeps the macros untouched. The engine has
-  eleven bytecode-tag sites (four `JS_MKPTR`, five `case` labels), so
-  the tag-aware getter is the smaller change.
-- Generator and async frames (`JSAsyncFunctionState`) embed a
-  `JSStackFrame` with `cur_pc`, `arg_buf` and `var_buf`; they move to
-  trusted blocks with the same indirection, and the interpreter's
-  `alloca` sizing then reads `stack_size`, `var_count` and `arg_count`
-  from trusted memory only.
+  (a cage offset today); that becomes an index into a trusted bytecode
+  table, decoded with a mask like `js_ctx_get`.
+- Bytecode also travels as a value: `JS_TAG_FUNCTION_BYTECODE` values sit
+  in constant pools and module records, and under cage boxing a value's
+  payload is a cage offset. Make the payload for that tag the table
+  index and route the handful of bytecode-tag sites (four `JS_MKPTR`,
+  five `case` labels in GC marking, freeing and the constant-pool reader)
+  through a tag-aware getter. The generic macros stay tag-agnostic and
+  fast. The alternative, an in-cage handle object standing in for the
+  bytecode in values, keeps the macros untouched but adds an allocation
+  per function.
+- Generator and async frames embed a `JSStackFrame`; they move to trusted
+  blocks with the same indirection, which also takes the open `JSVarRef`
+  pointers into them out of reach. The interpreter's `alloca` sizing then
+  reads `stack_size`, `var_count` and `arg_count` from trusted memory
+  only.
 
-Batch 1 of 3a.2, the list links, was done differently from the other
-batches. The runtime's `gc_obj_list` threads both cage objects and the
-trusted `JSContext` structures, and a compressed link cannot name
-trusted memory. Instead of splitting the lists, `list.h` now verifies on
-every insert and unlink that the two neighbours point at each other
-before it writes, the safe-linking rule glibc and the Linux kernel use.
-An attacker with an in-cage write cannot satisfy that check for a target
-outside the cage, because they cannot plant the matching back pointer
-there, so the unlink primitive is gone while the links keep their 64-bit
-form and the mixed trusted-and-caged list keeps working. Two compares per
-list operation; the allocation stress script did not move.
+### Performance follow-up
 
-### Review findings: test262 over the caged engine
+Caging values costs about 2 to 3 % main-thread CPU on script-heavy sites
+(stage 3a.1, below), from the base-plus-offset decode on every pointer
+value. Caching the cage base in a local inside the interpreter loop,
+where most decodes happen, is the obvious thing to try; the compressed
+fields cost nothing measurable on top.
 
-A full test262 run (tc39 main, `run-test262 -a` from `src/quickjs`)
-after stage 3a.2 found three faults the browsing captures had not:
+## Lessons that apply to every batch
 
-- **ShadowRealm crashed on first use.** Batch 6 stored the realm's
-  context as a context-table index in the opaque slot, but the getter
-  behind `evaluate` and `importValue` still decoded the slot as a cage
-  offset. The resulting address lies in the cage's first chunk, which is
-  never mapped, so a page calling `new ShadowRealm().evaluate("1")`
-  killed its renderer: a reliable crash, not a read of other data.
-  `JS_GetOpaque` and `JS_GetAnyOpaque` now decode the slot by class, so
-  each encoding (cage offset, external-pointer-table index, Intl entry,
-  context index) is chosen in one place. Lesson for later batches: when
-  a slot changes encoding, grep every reader of it, including the
-  generic opaque getters.
-- **The test262 runner's SharedArrayBuffers lay outside the cage.** The
-  runner installs SharedArrayBuffer allocation hooks that used `malloc`.
-  The engine now refuses an out-of-cage backing store from such a hook
-  with a TypeError, and the bundled libc allocates through
-  `JS_CageMalloc`. The browser installs no such hook.
-- **The CMake build lacked `quickjs-cage.c`**, so `run-test262` did not
-  link.
-
-The same run found two conformance gaps that predate the hardening, now
-fixed: the Date field setters did not store NaN for a non-finite
-argument, and the DataView `byteOffset`/`byteLength` getters threw for
-an out-of-bounds view where the current specification returns 0. With
-these fixes every directory of test262 runs to completion without a
-crash. The remaining unexpected results are two Temporal tests: one
-extreme-year PlainMonthDay overflow case, and a time-zone link test that
-depends on the system's tz database.
-
-A full parallel run can also report `InternalError: out of memory` from
-`staging/sm/String/replace-math.js`. Run alone, it peaks at about 2 GB
-and passes. In the full run, the runner's threads share one process, and
-so one 4 GB cage. That is the cage working as designed: a renderer runs
-one page per process, which may use the whole cage.
+- When a slot changes encoding, grep every reader of it, including the
+  generic opaque getters. Batch 6 stored ShadowRealm's context as a
+  context-table index while `JS_GetOpaque` still decoded the slot as a
+  cage offset; `JS_GetOpaque` and `JS_GetAnyOpaque` now pick the
+  encoding by class in one place.
+- Anything stored in a compressed field must be a cage allocation. Libc
+  structures (the Intl case) go through the external pointer table, and
+  sentinels (the cleared `WeakRef` marker) are cage allocations.
+- The rewrite script skips comments and cannot see through `&field`:
+  address-taking sites need a local that is stored back, and a
+  `sizeof(x->field[0])` on a compressed field must name the element type.
+- Run test262 as well as browsing captures: the full run found faults
+  live sites had not.
+- A full parallel test262 run can report `InternalError: out of memory`
+  from `staging/sm/String/replace-math.js`, because the runner's threads
+  share one 4 GB cage. Run alone it peaks near 2 GB and passes; a
+  renderer runs one page per process.
 
 ## Maintaining the hardening across upstream refreshes
 
 The fork-local code is kept out of `quickjs.c` where it can be, and the
 rewrites that cannot be are reproducible:
 
-- `src/quickjs/quickjs-cptr.h` holds the compressed-field machinery
-  (`JS_CPTR`, `js_cload`, `js_cstore`, the fail-closed encoder) and
-  `src/quickjs/quickjs-hardening.h` the cage masking, the external and
-  code pointer tables and the context table. `quickjs.c` includes each
-  at one line, so an upstream refresh sees two include lines where it
-  would otherwise see 330 lines of foreign code. `quickjs-cage.c` is a
-  separate file already, and `list.h` carries the safe-linking checks.
+- `src/quickjs/quickjs-cptr.h` holds the compressed-field machinery and
+  the fail-closed encoder, `src/quickjs/quickjs-hardening.h` the cage
+  masking and the three tables. `quickjs.c` includes each at one line.
+  `quickjs-cage.c` is a separate file, and `list.h` carries the
+  safe-linking checks.
 - `scripts/quickjs-cage-rewrite.py` is the single list of compressed
-  fields. `--check` reports every raw access to one of them and exits
-  non-zero; `--apply` rewrites the raw accesses in place, idempotently,
-  and reports the address-taking and slot-move sites that need a hand.
-  Stripping the conversions from the current tree and re-applying
-  reproduces it byte for byte, so after a refresh the procedure is:
-  3-way merge `quickjs.c`, declare any new pointer field in a heap
-  structure `JS_CPTR(T)` and add it to the script's table, run
-  `--apply`, build, run the engine tests and a settled live-site
-  capture. A pointer that escaped the rules fails loudly: the encoder
-  aborts on an out-of-cage pointer and the lists abort on a bad link.
-- The trusted block path in the arena front end, the `JS_NewRuntime`
-  cage path, the Intl and WeakRef sentinel handling and the
-  bytecode-tag sites remain in `quickjs.c` because they are glued to
-  the code around them; they are listed in
+  fields. `--check` reports every raw access to one of them outside
+  comments and exits non-zero; `--apply` rewrites them in place,
+  idempotently, and reports the address-taking and slot-move sites that
+  need a hand. After a refresh: 3-way merge `quickjs.c`, declare any new
+  pointer field in a heap structure `JS_CPTR(T)` and add it to the
+  script's table, run `--apply`, build, run test262 and a settled
+  live-site capture. A pointer that escaped the rules fails loudly: the
+  encoder aborts on an out-of-cage pointer and the lists abort on a bad
+  link.
+- The trusted block path, the `JS_NewRuntime` cage path, the Intl and
+  WeakRef sentinel handling, the bytecode-tag sites and the few hand
+  conversions the script reports are listed in
   `docs/vendored-engine-updates.md` for the person doing the refresh.
 
 ## Benchmarks
 
-Sitebench comparisons, old build against new, per stage. Runs here used
-`RUNS=2 VISUAL_RUNS=1` on a 4-core container, so single-site deltas
-under about 10 % are noise; the aggregate lines are what to read.
+Sitebench (`scripts/sitebench/ab.sh`, old build against new on google,
+anthropic, bbc, cnn and guardian, `RUNS=2 VISUAL_RUNS=1` on a 4-core
+container, 2025-11-09). Single-site deltas under about 10 % are noise;
+the aggregate is what to read.
 
-Stage 1a, `scripts/sitebench/ab.sh` on google, anthropic, bbc, cnn,
-guardian (2025-11-09):
+| Stage | Main CPU ÷ Chrome, before → after | Memory ÷ Chrome, before → after | Note |
+|---|---|---|---|
+| 1a cage | 3.71× → 3.84× | 0.26× → 0.27× | RSS +0.5 to 2 % from slab rounding and outside metadata |
+| 2a masked buffers | 3.40× → 3.52× | 0.27× → 0.27× | an AND and an OR per buffer access |
+| 2b tables + arena bypass | 3.62× → 3.63× | 0.26× → 0.26× | arena bypass costs ~10 % on pure allocation churn, invisible in page loads |
+| 3p trusted contexts | 3.99× → 3.98× | 0.29× → 0.30× | |
+| 3a.1 caged values | 3.87× → 3.97× | 0.30× → 0.30× | the one visible cost, 2 to 3 % on script-heavy sites |
+| 3a.2 batches 2 and 3 | 3.54× → 3.55× | 0.26× → 0.25× | |
+| 3a.2 batch 4 | 3.52× → 3.47× | 0.27× → 0.27× | |
+| 3a.2 batch 5 | 3.43× → 3.34× | 0.26× → 0.26× | |
+| 3a.2 batch 6 | 3.98× → 3.88× | 0.28× → 0.28× | |
+| 3a.2 batch 1 (safe linking) | 3.68× → 3.60× | 0.28× → 0.27× | |
 
-| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
-|---|---|---|---|---|
-| before (process heap) | 84.9 | 1.46× | 3.71× | 0.26× |
-| after (cage) | 84.6 | 1.37× | 3.84× | 0.27× |
+The allocation stress script (200 000 objects, 64 typed arrays, a 40 MB
+ArrayBuffer, a 200 KB concatenated string, a 100 000-entry Map, then
+small-array churn) went from 0.32 s / 177 MB with the cage alone to
+0.37 s / 174 MB after batch 6; `qjs -d` reports `JSObject` at 72 bytes.
 
-| Site | CPU before | CPU after | RSS before | RSS after |
-|---|---|---|---|---|
-| google | 239 ms | 249 ms | 76.5 MB | 76.9 MB |
-| anthropic | 710 ms | 668 ms | 138.5 MB | 138.9 MB |
-| bbc | 3037 ms | 2893 ms | 452.0 MB | 454.0 MB |
-| cnn | 6766 ms | 7193 ms | 667.6 MB | 681.7 MB |
-| guardian | 5111 ms | 5061 ms | 379.0 MB | 380.8 MB |
+Batch 7 touches no interpreter hot path, so it was measured with `qjs`
+microbenchmarks over the code it changed (Windows, MSYS2 build, three
+interleaved runs each, milliseconds, 2026-11-09):
 
-Memory grows by 0.5 to 2 % from slab rounding and the out-of-cage
-metadata; CPU is within noise in both directions.
+| Benchmark | before | after |
+|---|---|---|
+| 400 000 `RegExp.exec` | 1010 to 1019 | 956 to 998 |
+| 300 global `replace` + `split` over 8 KB | 226 to 252 | 230 to 240 |
+| 300 000 typed-array views, `.buffer`, `subarray` | 448 to 471 | 450 to 481 |
+| 300 000-entry Map fill, iterate, look up | 648 to 662 | 611 to 635 |
+| 200 000 WeakMap entries and WeakRefs | 193 to 200 | 190 to 193 |
+| 200 000 resolved promises | 404 to 495 | 366 to 406 |
+| mixed churn (objects, Map, typed arrays, strings, regexps, helpers) | 605 to 610 | 587 to 595 |
 
-Stage 2a, same sites, before = stage 1a build, after = masked buffer
-pointers (2025-11-09):
-
-| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
-|---|---|---|---|---|
-| before (stage 1a) | 87.1 | 1.41× | 3.40× | 0.27× |
-| after (stage 2a) | 86.9 | 1.24× | 3.52× | 0.27× |
-
-| Site | CPU before | CPU after | RSS before | RSS after |
-|---|---|---|---|---|
-| google | 279 ms | 264 ms | 77.0 MB | 77.9 MB |
-| anthropic | 727 ms | 697 ms | 138.8 MB | 139.2 MB |
-| bbc | 3574 ms | 3094 ms | 454.0 MB | 454.1 MB |
-| cnn | 7509 ms | 7170 ms | 683.1 MB | 681.8 MB |
-| guardian | 5300 ms | 5299 ms | 381.0 MB | 381.7 MB |
-
-The masking adds an AND and an OR per buffer access; nothing in these
-loads shows it above the noise.
-
-Stage 2b, pointer tables only (arena still active), before = stage 2a
-build (2025-11-09):
-
-| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
-|---|---|---|---|---|
-| before (stage 2a) | 87.2 | 1.47× | 3.36× | 0.27× |
-| after (stage 2b tables) | 86.8 | 1.33× | 3.38× | 0.27× |
-
-| Site | CPU before | CPU after | RSS before | RSS after |
-|---|---|---|---|---|
-| google | 240 ms | 247 ms | 76.9 MB | 77.9 MB |
-| anthropic | 689 ms | 711 ms | 139.2 MB | 139.6 MB |
-| bbc | 3153 ms | 3048 ms | 453.2 MB | 452.5 MB |
-| cnn | 6960 ms | 7133 ms | 682.9 MB | 682.8 MB |
-| guardian | 5114 ms | 5070 ms | 382.2 MB | 381.9 MB |
-
-The table lookups are a masked two-level array read per host-object
-access and per native call; within noise on every site.
-
-Bypassing the fork's arena allocator while the cage is active costs
-more on the allocation stress script: 0.36 s and 183 MB against 0.32 s
-and 177 MB with the arena, so about 10 % more time on an allocation-bound
-microbenchmark and 3 % more memory from 16-byte size-class rounding of
-the 8-byte block header.
-
-Stage 2b complete (tables and arena bypass), before = stage 2a build
-(2025-11-09):
-
-| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
-|---|---|---|---|---|
-| before (stage 2a) | 83.0 | 1.58× | 3.62× | 0.26× |
-| after (stage 2b complete) | 82.5 | 1.47× | 3.63× | 0.26× |
-
-| Site | CPU before | CPU after | RSS before | RSS after |
-|---|---|---|---|---|
-| google | 295 ms | 259 ms | 78.4 MB | 78.1 MB |
-| anthropic | 779 ms | 739 ms | 139.6 MB | 139.9 MB |
-| bbc | 3024 ms | 3690 ms | 454.3 MB | 450.7 MB |
-| cnn | 7448 ms | 7531 ms | 682.0 MB | 683.1 MB |
-| guardian | 5036 ms | 5014 ms | 382.1 MB | 382.8 MB |
-
-The aggregate is flat. The bbc outlier is run-to-run noise on that
-site, whose CPU has ranged from 2.9 s to 3.7 s across the eight captures
-in this document with no consistent direction; the allocation-bound
-microbenchmark above is the honest measure of the arena bypass, about
-10 % on pure allocation churn and invisible in page loads.
-
-Stage 3p, before = stage 2b complete (2025-11-09):
-
-| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
-|---|---|---|---|---|
-| before (stage 2b) | 85.6 | 1.60× | 3.99× | 0.29× |
-| after (stage 3p) | 85.8 | 1.18× | 3.98× | 0.30× |
-
-| Site | CPU before | CPU after | RSS before | RSS after |
-|---|---|---|---|---|
-| google | 239 ms | 234 ms | 77.5 MB | 79.2 MB |
-| anthropic | 657 ms | 677 ms | 139.6 MB | 139.4 MB |
-| bbc | 3136 ms | 3163 ms | 454.6 MB | 452.5 MB |
-| cnn | 7521 ms | 7086 ms | 682.0 MB | 681.7 MB |
-| guardian | 5161 ms | 5151 ms | 382.4 MB | 382.4 MB |
-
-A context-table read replaces a pointer load on every realm switch;
-flat on every site. The allocation stress script is unchanged at
-0.32 to 0.39 s and 183 MB.
-
-Stage 3a.1, caged values, before = stage 3p (2025-11-09):
-
-| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
-|---|---|---|---|---|
-| before (stage 3p) | 86.1 | 1.55× | 3.87× | 0.30× |
-| after (stage 3a.1) | 85.6 | 1.41× | 3.97× | 0.30× |
-
-| Site | CPU before | CPU after | RSS before | RSS after |
-|---|---|---|---|---|
-| google | 242 ms | 240 ms | 77.4 MB | 78.4 MB |
-| anthropic | 680 ms | 723 ms | 139.1 MB | 138.9 MB |
-| bbc | 3019 ms | 3030 ms | 452.9 MB | 451.3 MB |
-| cnn | 7077 ms | 7331 ms | 682.2 MB | 681.5 MB |
-| guardian | 5019 ms | 5026 ms | 382.4 MB | 382.4 MB |
-
-This is the first stage with a visible cost: about 2 to 3 % more main
-thread CPU in aggregate, concentrated on the script-heavy sites, from
-the base-plus-offset decode on every value that holds a pointer. The
-allocation stress script is unchanged in time (0.35 s) and 2 % smaller in
-peak memory (179 MB against 183 MB) from the halved values. Process RSS
-on real pages is dominated by images, layout and network buffers, so the
-value shrink does not show there. A follow-up worth trying is caching
-the cage base in a local inside the interpreter loop, where most decodes
-happen.
-
-Stage 3a.2 batches 2 and 3, before = stage 3a.1 (2025-11-09):
-
-| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
-|---|---|---|---|---|
-| before (stage 3a.1) | 87.2 | 1.61× | 3.54× | 0.26× |
-| after (batches 2 and 3) | 86.9 | 1.53× | 3.55× | 0.25× |
-
-| Site | CPU before | CPU after | RSS before | RSS after |
-|---|---|---|---|---|
-| google | 247 ms | 249 ms | 77.7 MB | 78.2 MB |
-| anthropic | 704 ms | 694 ms | 139.6 MB | 138.9 MB |
-| bbc | 3064 ms | 3073 ms | 452.5 MB | 453.0 MB |
-| cnn | 7797 ms | 7973 ms | 681.7 MB | 679.8 MB |
-| guardian | 5141 ms | 5248 ms | 382.9 MB | 382.3 MB |
-
-Flat in aggregate; the shape and property-array decodes sit on the
-property access path and cost nothing measurable beyond the value
-decode already paid for in 3a.1.
-
-Stage 3a.2 batch 4, bytecode arrays, before = batches 2 and 3
-(2025-11-09):
-
-| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
-|---|---|---|---|---|
-| before (batches 2 and 3) | 87.0 | 1.71× | 3.52× | 0.27× |
-| after (batch 4) | 87.0 | 1.41× | 3.47× | 0.27× |
-
-| Site | CPU before | CPU after | RSS before | RSS after |
-|---|---|---|---|---|
-| google | 265 ms | 279 ms | 77.5 MB | 78.3 MB |
-| anthropic | 736 ms | 688 ms | 138.9 MB | 139.4 MB |
-| bbc | 3098 ms | 3040 ms | 452.2 MB | 451.3 MB |
-| cnn | 7399 ms | 7351 ms | 681.8 MB | 682.0 MB |
-| guardian | 5143 ms | 5102 ms | 383.1 MB | 383.6 MB |
-
-Flat; the bytecode-array decodes happen once per call, not per
-instruction.
-
-Stage 3a.2 batch 5, weak references and slices, before = batch 4
-(2025-11-09):
-
-| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
-|---|---|---|---|---|
-| before (batch 4) | 83.4 | 1.46× | 3.43× | 0.26× |
-| after (batch 5) | 83.4 | 1.36× | 3.34× | 0.26× |
-
-| Site | CPU before | CPU after | RSS before | RSS after |
-|---|---|---|---|---|
-| google | 254 ms | 238 ms | 78.4 MB | 77.7 MB |
-| anthropic | 686 ms | 707 ms | 139.4 MB | 138.7 MB |
-| bbc | 3088 ms | 3012 ms | 451.8 MB | 451.8 MB |
-| cnn | 7325 ms | 7329 ms | 680.9 MB | 679.9 MB |
-| guardian | 5058 ms | 4993 ms | 383.0 MB | 382.5 MB |
-
-Flat.
-
-Stage 3a.2 batch 6, opaque-union members, before = batch 5 (2025-11-09;
-a first run of this A/B failed one site's settled load, which traced to
-the Intl structures described above, and was rerun after the fix):
-
-| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
-|---|---|---|---|---|
-| before (batch 5) | 87.2 | 1.55× | 3.98× | 0.28× |
-| after (batch 6) | 87.2 | 1.31× | 3.88× | 0.28× |
-
-| Site | CPU before | CPU after | RSS before | RSS after |
-|---|---|---|---|---|
-| google | 247 ms | 250 ms | 77.9 MB | 77.9 MB |
-| anthropic | 683 ms | 730 ms | 139.6 MB | 138.5 MB |
-| bbc | 3020 ms | 3013 ms | 452.3 MB | 451.0 MB |
-| cnn | 7123 ms | 6829 ms | 680.1 MB | 678.4 MB |
-| guardian | 5087 ms | 5211 ms | 382.2 MB | 382.3 MB |
-
-Flat. Across batches 2 to 6 the allocation stress script went from
-179 MB to 174 MB peak with no change in time, and the sitebench
-aggregate moved within noise in both directions.
-
-Stage 3a.2 batch 1, safe-linked lists, before = batch 6 (2025-11-09):
-
-| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
-|---|---|---|---|---|
-| before (batch 6) | 73.2 | 1.41× | 3.68× | 0.28× |
-| after (batch 1) | 73.2 | 1.27× | 3.60× | 0.27× |
-
-| Site | CPU before | CPU after | RSS before | RSS after |
-|---|---|---|---|---|
-| google | 249 ms | 272 ms | 76.7 MB | 78.5 MB |
-| anthropic | 690 ms | 700 ms | 138.9 MB | 138.6 MB |
-| bbc | 3097 ms | 3062 ms | 453.1 MB | 451.9 MB |
-| cnn | 7189 ms | 7223 ms | 678.5 MB | 678.4 MB |
-| guardian | 4981 ms | 5073 ms | 381.9 MB | 381.8 MB |
-
-Flat; the two compares per list operation do not show. (Parity is lower
-in this run for both builds because one site changed its page between
-captures; it is the same for both.)
+Flat; the extra decode per access is lost in the noise.

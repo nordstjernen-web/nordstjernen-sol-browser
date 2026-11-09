@@ -705,16 +705,16 @@ typedef struct JSWeakRefRecord {
     JSWeakRefKindEnum kind;
     JS_CPTR(struct JSWeakRefRecord *) next_weak_ref;
     union {
-        struct JSMapRecord *map_record;
-        struct JSWeakRefData *weak_ref_data;
-        struct JSFinRecEntry *fin_rec_entry;
+        JS_CPTR(struct JSMapRecord *) map_record;
+        JS_CPTR(struct JSWeakRefData *) weak_ref_data;
+        JS_CPTR(struct JSFinRecEntry *) fin_rec_entry;
     } u;
 } JSWeakRefRecord;
 
 typedef struct JSMapRecord {
     int ref_count; /* used during enumeration to avoid freeing the record */
     bool empty; /* true if the record is deleted */
-    struct JSMapState *map;
+    JS_CPTR(struct JSMapState *) map;
     struct list_head link;
     struct list_head hash_link;
     JSValue key;
@@ -725,7 +725,7 @@ typedef struct JSMapState {
     bool is_weak; /* true if WeakSet/WeakMap */
     struct list_head records; /* list of JSMapRecord.link */
     uint32_t record_count;
-    struct list_head *hash_table;
+    JS_CPTR(struct list_head *) hash_buckets;
     uint32_t hash_size; /* must be a power of two */
     uint32_t record_count_threshold; /* count at which a hash table
                                         resize is needed */
@@ -959,7 +959,7 @@ typedef struct JSFunctionBytecode {
     int source_len;
     int pc2line_len;
     JS_CPTR(uint8_t *) pc2line_buf;
-    char *source;
+    JS_CPTR(char *) source;
 } JSFunctionBytecode;
 
 typedef struct JSWrappedFunction {
@@ -1002,8 +1002,8 @@ typedef struct JSForInIterator {
 } JSForInIterator;
 
 typedef struct JSRegExp {
-    JSString *pattern;
-    JSString *bytecode; /* also contains the flags */
+    JS_CPTR(JSString *) pattern;
+    JS_CPTR(JSString *) bytecode; /* also contains the flags */
     JSContext *realm; /* compared, never dereferenced */
     bool legacy_features;
 } JSRegExp;
@@ -1029,8 +1029,8 @@ typedef struct JSArrayBuffer {
 
 typedef struct JSTypedArray {
     struct list_head link; /* link to arraybuffer */
-    JSObject *obj; /* back pointer to the TypedArray/DataView object */
-    JSObject *buffer; /* based array buffer */
+    JS_CPTR(JSObject *) obj; /* back pointer to the TypedArray/DataView object */
+    JS_CPTR(JSObject *) buffer; /* based array buffer */
     uint32_t offset; /* byte offset in the array buffer */
     uint32_t length; /* byte length in the array buffer */
     bool track_rab; /* auto-track length of backing array buffer */
@@ -1278,7 +1278,7 @@ struct JSObject {
         struct { /* JS_CLASS_ARRAY, JS_CLASS_ARGUMENTS, JS_CLASS_MAPPED_ARGUMENTS, JS_CLASS_UINT8C_ARRAY..JS_CLASS_FLOAT64_ARRAY */
             union {
                 uint32_t size;          /* JS_CLASS_ARRAY */
-                struct JSTypedArray *typed_array; /* JS_CLASS_UINT8C_ARRAY..JS_CLASS_FLOAT64_ARRAY */
+                JS_CPTR(struct JSTypedArray *) typed_array; /* JS_CLASS_UINT8C_ARRAY..JS_CLASS_FLOAT64_ARRAY */
             } u1;
             union {
                 JS_CPTR(JSValue *) values; /* JS_CLASS_ARRAY, JS_CLASS_ARGUMENTS */
@@ -6575,8 +6575,8 @@ static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID clas
         p->u.object_data = JS_UNDEFINED;
         goto set_exotic;
     case JS_CLASS_REGEXP:
-        p->u.regexp.pattern = NULL;
-        p->u.regexp.bytecode = NULL;
+        js_cstore(p->u.regexp.pattern, NULL);
+        js_cstore(p->u.regexp.bytecode, NULL);
         goto set_exotic;
     default:
     set_exotic:
@@ -7892,8 +7892,8 @@ static void mark_weak_map_value(JSRuntime *rt, JSWeakRefRecord *first_weak_ref, 
 
     for (wr = first_weak_ref; wr != NULL; wr = js_cload(JSWeakRefRecord *, wr->next_weak_ref)) {
         if (wr->kind == JS_WEAK_REF_KIND_MAP) {
-            mr = wr->u.map_record;
-            s = mr->map;
+            mr = js_cload(struct JSMapRecord *, wr->u.map_record);
+            s = js_cload(struct JSMapState *, mr->map);
             assert(s->is_weak);
             assert(!mr->empty); /* no iterator on WeakMap/WeakSet */
             JS_MarkValue(rt, mr->value, mark_func);
@@ -8413,8 +8413,8 @@ void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)
             }
             break;
         case JS_CLASS_REGEXP:            /* u.regexp */
-            compute_jsstring_size(p->u.regexp.pattern, hp);
-            compute_jsstring_size(p->u.regexp.bytecode, hp);
+            compute_jsstring_size(js_cload(JSString *, p->u.regexp.pattern), hp);
+            compute_jsstring_size(js_cload(JSString *, p->u.regexp.bytecode), hp);
             break;
 
         case JS_CLASS_FOR_IN_ITERATOR:   /* u.for_in_iterator */
@@ -9286,7 +9286,7 @@ static int ns_extract_callee_src(JSContext *ctx, char *out, int out_size)
     if (!js_class_has_bytecode(p->class_id))
         return 0;
     JSFunctionBytecode *b = js_cload(struct JSFunctionBytecode *, p->u.func.function_bytecode);
-    if (!b || !b->source || b->source_len <= 0)
+    if (!b || !js_cload(char *, b->source) || b->source_len <= 0)
         return 0;
     uint32_t pc = sf->cur_pc - js_cload(uint8_t *, b->byte_code_buf) - 1;
     int col;
@@ -9296,7 +9296,7 @@ static int ns_extract_callee_src(JSContext *ctx, char *out, int out_size)
     int off = col - b->col_num;
     if (off < 0 || off >= b->source_len)
         return 0;
-    const char *src = b->source;
+    const char *src = js_cload(char *, b->source);
     /* For a new-expression the source position points at the 'new' keyword
        (matching V8's stack frame column); skip it to reach the callee. */
     if (off + 4 <= b->source_len && src[off] == 'n' && src[off + 1] == 'e' &&
@@ -10808,7 +10808,7 @@ int JS_PreventExtensions(JSContext *ctx, JSValueConst obj)
         return js_proxy_preventExtensions(ctx, obj);
     if (is_typed_array(p->class_id)) {
         JSTypedArray *ta = js_cload(struct JSTypedArray *, p->u.typed_array);
-        JSArrayBuffer *abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
+        JSArrayBuffer *abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, ta->buffer)->u.array_buffer);
         if (ta->track_rab ||
             (array_buffer_is_resizable(abuf) && !abuf->shared))
         {
@@ -23123,7 +23123,7 @@ typedef struct JSAsyncGeneratorRequest {
 } JSAsyncGeneratorRequest;
 
 typedef struct JSAsyncGeneratorData {
-    JSObject *generator; /* back pointer to the object (const) */
+    JS_CPTR(JSObject *) generator; /* back pointer to the object (const) */
     JSAsyncGeneratorStateEnum state;
     JSAsyncFunctionState func_state;
     struct list_head queue; /* list of JSAsyncGeneratorRequest.link */
@@ -23220,7 +23220,7 @@ static int js_async_generator_await(JSContext *ctx,
     if (JS_IsException(promise))
         goto fail;
 
-    if (js_async_generator_resolve_function_create(ctx, JS_MKPTR(JS_TAG_OBJECT, s->generator),
+    if (js_async_generator_resolve_function_create(ctx, JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, s->generator)),
                                                    resolving_funcs, false)) {
         JS_FreeValue(ctx, promise);
         goto fail;
@@ -23312,7 +23312,7 @@ static int js_async_generator_completed_return(JSContext *ctx,
             return -1;
     }
     if (js_async_generator_resolve_function_create(ctx,
-                                                   JS_MKPTR(JS_TAG_OBJECT, s->generator),
+                                                   JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, s->generator)),
                                                    resolving_funcs1,
                                                    true)) {
         JS_FreeValue(ctx, promise);
@@ -23541,10 +23541,10 @@ static JSValue js_async_generator_function_call(JSContext *ctx,
     obj = js_create_from_ctor(ctx, func_obj, JS_CLASS_ASYNC_GENERATOR);
     if (JS_IsException(obj))
         goto fail;
-    s->generator = JS_VALUE_GET_OBJ(obj);
+    js_cstore(s->generator, JS_VALUE_GET_OBJ(obj));
     /* root captured locals against the async generator object (the initial
        resume above only reaches OP_initial_yield, before any user code) */
-    s->func_state.frame.cur_gc_obj = &s->generator->header;
+    s->func_state.frame.cur_gc_obj = &js_cload(JSObject *, s->generator)->header;
     JS_SetOpaqueInternal(obj, s);
     return obj;
  fail:
@@ -36715,7 +36715,7 @@ static __maybe_unused void dump_single_byte_code(JSContext *ctx,
 
 static __maybe_unused void print_func_name(JSFunctionBytecode *b)
 {
-    print_lines(b->source, 0, 1);
+    print_lines(js_cload(char *, b->source), 0, 1);
 }
 
 static __maybe_unused void dump_pc2line(JSContext *ctx,
@@ -36864,7 +36864,7 @@ static __maybe_unused void js_dump_function_bytecode(JSContext *ctx, JSFunctionB
                    js_cload(JSVarDef *, b->vardefs) ? js_cload(JSVarDef *, b->vardefs) + b->arg_count : NULL, b->var_count,
                    js_cload(JSClosureVar *, b->closure_var), b->closure_var_count,
                    js_cload(JSValue *, b->cpool), b->cpool_count,
-                   b->source, b->line_num, NULL, b, 0);
+                   js_cload(char *, b->source), b->line_num, NULL, b, 0);
 #ifdef ENABLE_DUMPS // JS_DUMP_BYTECODE_PC2LINE
     if (check_dump_flag(ctx->rt, JS_DUMP_BYTECODE_PC2LINE))
         dump_pc2line(ctx, js_cload(uint8_t *, b->pc2line_buf), b->pc2line_len, b->line_num, b->col_num);
@@ -40504,7 +40504,7 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     if (!js_cload(uint8_t *, b->pc2line_buf))
         js_cstore(b->pc2line_buf, fd->pc2line.buf);
     b->pc2line_len = fd->pc2line.size;
-    b->source = fd->source;
+    js_cstore(b->source, fd->source);
     b->source_len = fd->source_len;
 
     if (fd->scopes != fd->def_scope_array)
@@ -40579,7 +40579,7 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
     JS_FreeAtomRT(rt, b->func_name);
     JS_FreeAtomRT(rt, b->filename);
     js_free_rt(rt, js_cload(uint8_t *, b->pc2line_buf));
-    js_free_rt(rt, b->source);
+    js_free_rt(rt, js_cload(char *, b->source));
 
     remove_gc_object(&b->header);
     if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && JS_REF_COUNT(b) != 0) {
@@ -42408,9 +42408,9 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
         bc_put_leb128(s, b->col_num);
         bc_put_leb128(s, b->pc2line_len);
         dbuf_put(&s->dbuf, js_cload(uint8_t *, b->pc2line_buf), b->pc2line_len);
-        if (s->allow_source && b->source) {
+        if (s->allow_source && js_cload(char *, b->source)) {
             bc_put_leb128(s, b->source_len);
-            dbuf_put(&s->dbuf, b->source, b->source_len);
+            dbuf_put(&s->dbuf, js_cload(char *, b->source), b->source_len);
         } else {
             bc_put_leb128(s, 0);
         }
@@ -42583,7 +42583,7 @@ static int JS_WriteTypedArray(BCWriterState *s, JSValueConst obj)
     bc_put_u8(s, p->class_id - JS_CLASS_UINT8C_ARRAY);
     bc_put_leb128(s, p->u.array.count);
     bc_put_leb128(s, ta->offset);
-    if (JS_WriteObjectRec(s, JS_MKPTR(JS_TAG_OBJECT, ta->buffer)))
+    if (JS_WriteObjectRec(s, JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, ta->buffer))))
         return -1;
     return 0;
 }
@@ -42620,11 +42620,11 @@ static int JS_WriteSharedArrayBuffer(BCWriterState *s, JSValueConst obj)
     return 0;
 }
 
-static int JS_WriteRegExp(BCWriterState *s, JSRegExp regexp)
+static int JS_WriteRegExp(BCWriterState *s, const JSRegExp *re)
 {
-    JSString *bc = regexp.bytecode;
+    JSString *bc = js_cload(JSString *, re->bytecode);
     assert(!bc->is_wide_char);
-    JS_WriteString(s, regexp.pattern);
+    JS_WriteString(s, js_cload(JSString *, re->pattern));
     JS_WriteString(s, bc);
     return 0;
 }
@@ -42737,7 +42737,7 @@ static int JS_WriteObjectRec(BCWriterState *s, JSValueConst obj)
                 break;
             case JS_CLASS_REGEXP:
                 bc_put_u8(s, BC_TAG_REGEXP);
-                ret = JS_WriteRegExp(s, p->u.regexp);
+                ret = JS_WriteRegExp(s, &p->u.regexp);
                 break;
             case JS_CLASS_DATE:
                 bc_put_u8(s, BC_TAG_DATE);
@@ -43502,10 +43502,10 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
         if (s->ptr_last)
             s->ptr_last += b->source_len;  // omit source code hex dump
         /* b->source is a UTF-8 encoded null terminated C string */
-        b->source = js_mallocz(ctx, b->source_len + 1);
-        if (!b->source)
+        js_cstore(b->source, js_mallocz(ctx, b->source_len + 1));
+        if (!js_cload(char *, b->source))
             goto fail;
-        if (bc_get_buf(s, b->source, b->source_len))
+        if (bc_get_buf(s, js_cload(char *, b->source), b->source_len))
             goto fail;
     }
     bc_read_trace(s, "}\n");
@@ -46510,8 +46510,8 @@ static JSValue js_function_toString(JSContext *ctx, JSValueConst this_val,
     if (js_class_has_bytecode(p->class_id)) {
         JSFunctionBytecode *b = js_cload(struct JSFunctionBytecode *, p->u.func.function_bytecode);
         /* `b->source` must be pure ASCII or UTF-8 encoded */
-        if (b->source)
-            return JS_NewStringLen(ctx, b->source, b->source_len);
+        if (js_cload(char *, b->source))
+            return JS_NewStringLen(ctx, js_cload(char *, b->source), b->source_len);
     }
     {
         JSValue name;
@@ -49350,7 +49350,7 @@ typedef struct JSIteratorHelperData {
     JSValue next;
     JSValue func; // predicate (filter) or mapper (flatMap, map)
     JSValue inner; // innerValue (flatMap)
-    JSValue *buf; // buffered values (chunks, windows)
+    JS_CPTR(JSValue *) buf; // buffered values (chunks, windows)
     int64_t count; // limit (drop, take), counter (filter, map, flatMap) or
                    // chunk/window size (chunks, windows)
     int buf_count; // number of values in |buf|
@@ -49472,7 +49472,7 @@ static JSValue js_create_iterator_helper(JSContext *ctx, JSValueConst this_val,
     it->func = js_dup(func);
     it->next = method;
     it->inner = JS_UNDEFINED;
-    it->buf = NULL;
+    js_cstore(it->buf, NULL);
     it->count = count;
     it->buf_count = 0;
     it->buf_size = 0;
@@ -49982,8 +49982,8 @@ static void js_iterator_helper_finalizer(JSRuntime *rt, JSValueConst val)
         JS_FreeValueRT(rt, it->next);
         JS_FreeValueRT(rt, it->inner);
         while (it->buf_count > 0)
-            JS_FreeValueRT(rt, it->buf[--it->buf_count]);
-        js_free_rt(rt, it->buf);
+            JS_FreeValueRT(rt, js_cload(JSValue *, it->buf)[--it->buf_count]);
+        js_free_rt(rt, js_cload(JSValue *, it->buf));
         js_free_rt(rt, it);
     }
 }
@@ -49999,7 +49999,7 @@ static void js_iterator_helper_mark(JSRuntime *rt, JSValueConst val,
         JS_MarkValue(rt, it->next, mark_func);
         JS_MarkValue(rt, it->inner, mark_func);
         for (int i = 0; i < it->buf_count; i++)
-            JS_MarkValue(rt, it->buf[i], mark_func);
+            JS_MarkValue(rt, js_cload(JSValue *, it->buf)[i], mark_func);
     }
 }
 
@@ -50061,9 +50061,9 @@ static JSValue js_iterator_helper_next(JSContext *ctx, JSValueConst this_val,
                         /* a full window was already yielded */
                         if (!it->allow_partial || it->buf_count >= it->count)
                             goto done;
-                        ret = js_create_array(ctx, it->buf_count, vc(it->buf));
+                        ret = js_create_array(ctx, it->buf_count, vc(js_cload(JSValue *, it->buf)));
                     } else {
-                        ret = JS_NewArrayFrom(ctx, it->buf_count, it->buf);
+                        ret = JS_NewArrayFrom(ctx, it->buf_count, js_cload(JSValue *, it->buf));
                         it->buf_count = 0; // ownership transferred
                     }
                     if (JS_IsException(ret))
@@ -50073,22 +50073,24 @@ static JSValue js_iterator_helper_next(JSContext *ctx, JSValueConst this_val,
                 }
                 if (windows && it->buf_count == it->count) {
                     /* slide the window */
-                    JS_FreeValue(ctx, it->buf[0]);
+                    JS_FreeValue(ctx, js_cload(JSValue *, it->buf)[0]);
                     it->buf_count--;
-                    memmove(it->buf, &it->buf[1],
-                            it->buf_count * sizeof(*it->buf));
+                    memmove(js_cload(JSValue *, it->buf), &js_cload(JSValue *, it->buf)[1],
+                            it->buf_count * sizeof(JSValue));
                 }
-                if (js_resize_array(ctx, (void **)&it->buf, sizeof(*it->buf),
+                JSValue *buf = js_cload(JSValue *, it->buf);
+                if (js_resize_array(ctx, (void **)&buf, sizeof(JSValue),
                                     &it->buf_size, it->buf_count + 1)) {
                     JS_FreeValue(ctx, item);
                     goto step_fail;
                 }
-                it->buf[it->buf_count++] = item;
+                js_cstore(it->buf, buf);
+                buf[it->buf_count++] = item;
                 if (it->buf_count == it->count) {
                     if (windows) {
-                        ret = js_create_array(ctx, it->buf_count, vc(it->buf));
+                        ret = js_create_array(ctx, it->buf_count, vc(js_cload(JSValue *, it->buf)));
                     } else {
-                        ret = JS_NewArrayFrom(ctx, it->buf_count, it->buf);
+                        ret = JS_NewArrayFrom(ctx, it->buf_count, js_cload(JSValue *, it->buf));
                         it->buf_count = 0; // ownership transferred
                     }
                     if (JS_IsException(ret))
@@ -50280,11 +50282,11 @@ close:
 done:
     it->done = finished || (magic == GEN_MAGIC_NEXT ? *pdone : 1);
     it->executing = 0;
-    if (it->done && it->buf) {
+    if (it->done && js_cload(JSValue *, it->buf)) {
         while (it->buf_count > 0)
-            JS_FreeValue(ctx, it->buf[--it->buf_count]);
-        js_free(ctx, it->buf);
-        it->buf = NULL;
+            JS_FreeValue(ctx, js_cload(JSValue *, it->buf)[--it->buf_count]);
+        js_free(ctx, js_cload(JSValue *, it->buf));
+        js_cstore(it->buf, NULL);
         it->buf_size = 0;
     }
     return ret;
@@ -53165,10 +53167,10 @@ static void js_regexp_finalizer(JSRuntime *rt, JSValueConst val)
 {
     JSObject *p = JS_VALUE_GET_OBJ(val);
     JSRegExp *re = &p->u.regexp;
-    if (re->bytecode)
-        JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_STRING, re->bytecode));
-    if (re->pattern)
-        JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_STRING, re->pattern));
+    if (js_cload(JSString *, re->bytecode))
+        JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_STRING, js_cload(JSString *, re->bytecode)));
+    if (js_cload(JSString *, re->pattern))
+        JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_STRING, js_cload(JSString *, re->pattern)));
 }
 
 /* create a string containing the RegExp bytecode */
@@ -53289,8 +53291,8 @@ static JSValue js_regexp_constructor_internal(JSContext *ctx, JSValueConst ctor,
     }
     p = JS_VALUE_GET_OBJ(obj);
     re = &p->u.regexp;
-    re->pattern = JS_VALUE_GET_STRING(pattern);
-    re->bytecode = JS_VALUE_GET_STRING(bc);
+    js_cstore(re->pattern, JS_VALUE_GET_STRING(pattern));
+    js_cstore(re->bytecode, JS_VALUE_GET_STRING(bc));
     re->realm = ctx;
     re->legacy_features = JS_IsUndefined(ctor) ||
         js_same_value(ctx, ctor, ctx->regexp_ctor);
@@ -53335,8 +53337,8 @@ static JSValue js_regexp_initialize(JSContext *ctx, JSValue obj,
 {
     JSRegExp *re = &JS_VALUE_GET_OBJ(obj)->u.regexp;
 
-    re->pattern = JS_VALUE_GET_STRING(pattern);
-    re->bytecode = JS_VALUE_GET_STRING(bc);
+    js_cstore(re->pattern, JS_VALUE_GET_STRING(pattern));
+    js_cstore(re->bytecode, JS_VALUE_GET_STRING(bc));
     re->realm = ctx;
     re->legacy_features = false;
     if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_lastIndex, js_int32(0),
@@ -53380,9 +53382,9 @@ static JSValue js_regexp_constructor(JSContext *ctx, JSValueConst new_target,
     bc = JS_UNDEFINED;
     re = js_get_regexp(ctx, pat, false);
     if (re) {
-        pattern = js_dup(JS_MKPTR(JS_TAG_STRING, re->pattern));
+        pattern = js_dup(JS_MKPTR(JS_TAG_STRING, js_cload(JSString *, re->pattern)));
         if (JS_IsUndefined(flags1))
-            bc = js_dup(JS_MKPTR(JS_TAG_STRING, re->bytecode));
+            bc = js_dup(JS_MKPTR(JS_TAG_STRING, js_cload(JSString *, re->bytecode)));
         else
             flags = js_dup(flags1);
     } else if (pat_is_regexp) {
@@ -53457,8 +53459,8 @@ static JSValue js_regexp_compile(JSContext *ctx, JSValueConst this_val,
     if (re1) {
         if (!JS_IsUndefined(flags1))
             return JS_ThrowTypeError(ctx, "flags must be undefined");
-        pattern = js_dup(JS_MKPTR(JS_TAG_STRING, re1->pattern));
-        bc = js_dup(JS_MKPTR(JS_TAG_STRING, re1->bytecode));
+        pattern = js_dup(JS_MKPTR(JS_TAG_STRING, js_cload(JSString *, re1->pattern)));
+        bc = js_dup(JS_MKPTR(JS_TAG_STRING, js_cload(JSString *, re1->bytecode)));
     } else {
         bc = JS_UNDEFINED;
         if (JS_IsUndefined(pattern1))
@@ -53471,10 +53473,10 @@ static JSValue js_regexp_compile(JSContext *ctx, JSValueConst this_val,
         if (JS_IsException(bc))
             goto fail;
     }
-    JS_FreeValue(ctx, JS_MKPTR(JS_TAG_STRING, re->pattern));
-    JS_FreeValue(ctx, JS_MKPTR(JS_TAG_STRING, re->bytecode));
-    re->pattern = JS_VALUE_GET_STRING(pattern);
-    re->bytecode = JS_VALUE_GET_STRING(bc);
+    JS_FreeValue(ctx, JS_MKPTR(JS_TAG_STRING, js_cload(JSString *, re->pattern)));
+    JS_FreeValue(ctx, JS_MKPTR(JS_TAG_STRING, js_cload(JSString *, re->bytecode)));
+    js_cstore(re->pattern, JS_VALUE_GET_STRING(pattern));
+    js_cstore(re->bytecode, JS_VALUE_GET_STRING(bc));
     if (JS_SetProperty(ctx, this_val, JS_ATOM_lastIndex,
                        js_int32(0)) < 0)
         return JS_EXCEPTION;
@@ -53502,7 +53504,7 @@ static JSValue js_regexp_get_source(JSContext *ctx, JSValueConst this_val)
     if (!re)
         return JS_EXCEPTION;
 
-    p = re->pattern;
+    p = js_cload(JSString *, re->pattern);
 
     if (p->len == 0) {
     empty_regex:
@@ -53578,7 +53580,7 @@ static JSValue js_regexp_get_flag(JSContext *ctx, JSValueConst this_val, int mas
             return JS_ThrowTypeErrorInvalidClass(ctx, JS_CLASS_REGEXP);
     }
 
-    flags = lre_get_flags(str8(re->bytecode));
+    flags = lre_get_flags(str8(js_cload(JSString *, re->bytecode)));
     return js_bool(flags & mask);
 }
 
@@ -53940,7 +53942,7 @@ static JSValue js_regexp_exec(JSContext *ctx, JSValueConst this_val,
     if (JS_IsException(val) || JS_ToLengthFree(ctx, &last_index, val))
         goto fail;
 
-    re_bytecode = str8(re->bytecode);
+    re_bytecode = str8(js_cload(JSString *, re->bytecode));
     re_flags = lre_get_flags(re_bytecode);
     if ((re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) == 0) {
         last_index = 0;
@@ -54190,7 +54192,7 @@ static JSValue JS_RegExpDelete(JSContext *ctx, JSValueConst this_val, JSValue ar
     val = JS_GetProperty(ctx, this_val, JS_ATOM_lastIndex);
     if (JS_IsException(val) || JS_ToLengthFree(ctx, &last_index, val))
         goto fail;
-    re_bytecode = str8(re->bytecode);
+    re_bytecode = str8(js_cload(JSString *, re->bytecode));
     re_flags = lre_get_flags(re_bytecode);
     if ((re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) == 0) {
         last_index = 0;
@@ -54635,7 +54637,7 @@ static int js_regexp_replace_global_fast(JSContext *ctx, JSValueConst rx,
     uint32_t start, end, next_pos;
     bool unicode;
 
-    re_bytecode = str8(re->bytecode);
+    re_bytecode = str8(js_cload(JSString *, re->bytecode));
     re_flags = lre_get_flags(re_bytecode);
     unicode = (re_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS)) != 0;
     if (!(re_flags & LRE_FLAG_GLOBAL) || (re_flags & LRE_FLAG_STICKY) ||
@@ -54972,7 +54974,7 @@ static int js_regexp_split_fast(JSContext *ctx, JSValueConst splitter,
     bool unicode;
     JSValue sub;
 
-    re_bytecode = str8(re->bytecode);
+    re_bytecode = str8(js_cload(JSString *, re->bytecode));
     capture_count = lre_get_capture_count(re_bytecode);
     alloc_count = lre_get_alloc_count(re_bytecode);
     unicode = (lre_get_flags(re_bytecode) &
@@ -57730,10 +57732,10 @@ static JSValue js_map_constructor(JSContext *ctx, JSValueConst new_target,
     s->is_weak = is_weak;
     JS_SetOpaqueInternal(obj, s);
     s->hash_size = 1;
-    s->hash_table = js_malloc(ctx, sizeof(s->hash_table[0]) * s->hash_size);
-    if (!s->hash_table)
+    js_cstore(s->hash_buckets, js_malloc(ctx, sizeof(struct list_head) * s->hash_size));
+    if (!js_cload(struct list_head *, s->hash_buckets))
         goto fail;
-    init_list_head(&s->hash_table[0]);
+    init_list_head(&js_cload(struct list_head *, s->hash_buckets)[0]);
     s->record_count_threshold = 4;
 
     arr = JS_UNDEFINED;
@@ -57904,7 +57906,7 @@ static JSMapRecord *map_find_record(JSContext *ctx, JSMapState *s,
     JSMapRecord *mr;
     uint32_t h;
     h = map_hash_key(ctx, key) & (s->hash_size - 1);
-    list_for_each(el, &s->hash_table[h]) {
+    list_for_each(el, &js_cload(struct list_head *, s->hash_buckets)[h]) {
         mr = list_entry(el, JSMapRecord, hash_link);
         if (js_same_value_zero(ctx, mr->key, key))
             return mr;
@@ -57923,7 +57925,7 @@ static void map_hash_resize(JSContext *ctx, JSMapState *s)
         new_hash_size = 4;
     else
         new_hash_size = s->hash_size * 2;
-    new_hash_table = js_realloc(ctx, s->hash_table,
+    new_hash_table = js_realloc(ctx, js_cload(struct list_head *, s->hash_buckets),
                                 sizeof(new_hash_table[0]) * new_hash_size);
     if (!new_hash_table)
         return;
@@ -57938,7 +57940,7 @@ static void map_hash_resize(JSContext *ctx, JSMapState *s)
             list_add_tail(&mr->hash_link, &new_hash_table[h]);
         }
     }
-    s->hash_table = new_hash_table;
+    js_cstore(s->hash_buckets, new_hash_table);
     s->hash_size = new_hash_size;
     s->record_count_threshold = new_hash_size * 2;
 }
@@ -57974,7 +57976,7 @@ static JSMapRecord *map_add_record(JSContext *ctx, JSMapState *s,
     if (!mr)
         return NULL;
     mr->ref_count = 1;
-    mr->map = s;
+    js_cstore(mr->map, s);
     mr->empty = false;
     if (s->is_weak) {
         JSWeakRefRecord *wr = js_malloc(ctx, sizeof(*wr));
@@ -57983,14 +57985,14 @@ static JSMapRecord *map_add_record(JSContext *ctx, JSMapState *s,
             return NULL;
         }
         wr->kind = JS_WEAK_REF_KIND_MAP;
-        wr->u.map_record = mr;
+        js_cstore(wr->u.map_record, mr);
         insert_weakref_record(key, wr);
         mr->key = unsafe_unconst(key);
     } else {
         mr->key = js_dup(key);
     }
     h = map_hash_key(ctx, key) & (s->hash_size - 1);
-    list_add_tail(&mr->hash_link, &s->hash_table[h]);
+    list_add_tail(&mr->hash_link, &js_cload(struct list_head *, s->hash_buckets)[h]);
     list_add_tail(&mr->link, &s->records);
     s->record_count++;
     if (s->record_count >= s->record_count_threshold) {
@@ -58012,7 +58014,7 @@ static void delete_map_weak_ref(JSRuntime *rt, JSMapRecord *mr)
     for(;;) {
         wr = js_cload(JSWeakRefRecord *, *pwr);
         assert(wr != NULL);
-        if (wr->kind == JS_WEAK_REF_KIND_MAP && wr->u.map_record == mr)
+        if (wr->kind == JS_WEAK_REF_KIND_MAP && js_cload(struct JSMapRecord *, wr->u.map_record) == mr)
             break;
         pwr = &wr->next_weak_ref;
     }
@@ -58361,7 +58363,7 @@ static void js_map_finalizer(JSRuntime *rt, JSValueConst val)
             }
             js_free_rt(rt, mr);
         }
-        js_free_rt(rt, s->hash_table);
+        js_free_rt(rt, js_cload(struct list_head *, s->hash_buckets));
         js_free_rt(rt, s);
     }
 }
@@ -58390,7 +58392,7 @@ static void js_map_mark(JSRuntime *rt, JSValueConst val,
 typedef struct JSMapIteratorData {
     JSValue obj;
     JSIteratorKindEnum kind;
-    JSMapRecord *cur_record;
+    JS_CPTR(JSMapRecord *) cur_record;
 } JSMapIteratorData;
 
 static void js_map_iterator_finalizer(JSRuntime *rt, JSValueConst val)
@@ -58403,8 +58405,8 @@ static void js_map_iterator_finalizer(JSRuntime *rt, JSValueConst val)
     if (it) {
         /* During the GC sweep phase the Map finalizer may be
            called before the Map iterator finalizer */
-        if (JS_IsLiveObject(rt, it->obj) && it->cur_record) {
-            map_decref_record(rt, it->cur_record);
+        if (JS_IsLiveObject(rt, it->obj) && js_cload(JSMapRecord *, it->cur_record)) {
+            map_decref_record(rt, js_cload(JSMapRecord *, it->cur_record));
         }
         JS_FreeValueRT(rt, it->obj);
         js_free_rt(rt, it);
@@ -58446,7 +58448,7 @@ static JSValue js_create_map_iterator(JSContext *ctx, JSValueConst this_val,
     }
     it->obj = js_dup(this_val);
     it->kind = kind;
-    it->cur_record = NULL;
+    js_cstore(it->cur_record, NULL);
     JS_SetOpaqueInternal(enum_obj, it);
     return enum_obj;
  fail:
@@ -58471,17 +58473,17 @@ static JSValue js_map_iterator_next(JSContext *ctx, JSValueConst this_val,
         goto done;
     s = JS_GetOpaque(it->obj, JS_CLASS_MAP + magic);
     assert(s != NULL);
-    if (!it->cur_record) {
+    if (!js_cload(JSMapRecord *, it->cur_record)) {
         el = s->records.next;
     } else {
-        mr = it->cur_record;
+        mr = js_cload(JSMapRecord *, it->cur_record);
         el = mr->link.next;
         map_decref_record(ctx->rt, mr); /* the record can be freed here */
     }
     for(;;) {
         if (el == &s->records) {
             /* no more record  */
-            it->cur_record = NULL;
+            js_cstore(it->cur_record, NULL);
             JS_FreeValue(ctx, it->obj);
             it->obj = JS_UNDEFINED;
         done:
@@ -58498,7 +58500,7 @@ static JSValue js_map_iterator_next(JSContext *ctx, JSValueConst this_val,
 
     /* lock the record so that it won't be freed */
     mr->ref_count++;
-    it->cur_record = mr;
+    js_cstore(it->cur_record, mr);
     *pdone = false;
 
     if (it->kind == JS_ITERATOR_KIND_KEY) {
@@ -59982,7 +59984,7 @@ typedef struct JSPromiseFunctionDataResolved {
 
 typedef struct JSPromiseFunctionData {
     JSValue promise;
-    JSPromiseFunctionDataResolved *presolved;
+    JS_CPTR(JSPromiseFunctionDataResolved *) presolved;
 } JSPromiseFunctionData;
 
 typedef struct JSPromiseReactionData {
@@ -60252,7 +60254,7 @@ static int js_create_resolving_functions(JSContext *ctx,
             break;
         }
         sr->ref_count++;
-        s->presolved = sr;
+        js_cstore(s->presolved, sr);
         s->promise = js_dup(promise);
         JS_SetOpaqueInternal(obj, s);
         js_function_set_properties(ctx, obj, JS_ATOM_empty_string, 1);
@@ -60267,7 +60269,7 @@ static void js_promise_resolve_function_finalizer(JSRuntime *rt,
 {
     JSPromiseFunctionData *s = js_cload(struct JSPromiseFunctionData *, JS_VALUE_GET_OBJ(val)->u.promise_function_data);
     if (s) {
-        js_promise_resolve_function_free_resolved(rt, s->presolved);
+        js_promise_resolve_function_free_resolved(rt, js_cload(JSPromiseFunctionDataResolved *, s->presolved));
         JS_FreeValueRT(rt, s->promise);
         js_free_rt(rt, s);
     }
@@ -60296,9 +60298,9 @@ static JSValue js_promise_resolve_function_call(JSContext *ctx,
     bool is_reject;
 
     s = js_cload(struct JSPromiseFunctionData *, p->u.promise_function_data);
-    if (!s || s->presolved->already_resolved)
+    if (!s || js_cload(JSPromiseFunctionDataResolved *, s->presolved)->already_resolved)
         return JS_UNDEFINED;
-    s->presolved->already_resolved = true;
+    js_cload(JSPromiseFunctionDataResolved *, s->presolved)->already_resolved = true;
     is_reject = p->class_id - JS_CLASS_PROMISE_RESOLVE_FUNCTION;
     if (argc > 0)
         resolution = argv[0];
@@ -64099,7 +64101,7 @@ static void js_array_buffer_finalizer(JSRuntime *rt, JSValueConst val)
             ta = list_entry(el, JSTypedArray, link);
             ta->link.prev = NULL;
             ta->link.next = NULL;
-            p1 = ta->obj;
+            p1 = js_cload(JSObject *, ta->obj);
             /* Note: the typed array length and offset fields are not modified */
             if (p1->class_id != JS_CLASS_DATAVIEW) {
                 p1->u.array.count = 0;
@@ -64228,7 +64230,7 @@ void JS_DetachArrayBuffer(JSContext *ctx, JSValueConst obj)
         JSObject *p;
 
         ta = list_entry(el, JSTypedArray, link);
-        p = ta->obj;
+        p = js_cload(JSObject *, ta->obj);
         /* Note: the typed array length and offset fields are not modified */
         if (p->class_id != JS_CLASS_DATAVIEW) {
             p->u.array.count = 0;
@@ -64306,7 +64308,7 @@ static void js_array_buffer_update_typed_arrays(JSArrayBuffer *abuf)
     data = js_abuf_data(abuf);
     list_for_each(el, &abuf->array_list) {
         ta = list_entry(el, JSTypedArray, link);
-        p = ta->obj;
+        p = js_cload(JSObject *, ta->obj);
         if (p->class_id == JS_CLASS_DATAVIEW) {
             if (ta->track_rab && ta->offset < len)
                 ta->length = len - ta->offset;
@@ -64622,7 +64624,7 @@ static bool typed_array_is_immutable(JSObject *p)
 
     assert(is_typed_array(p->class_id));
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
-    abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
+    abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, ta->buffer)->u.array_buffer);
     return abuf->immutable;
 }
 
@@ -64638,7 +64640,7 @@ static bool typed_array_is_oob(JSObject *p)
     assert(is_typed_array(p->class_id));
 
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
-    abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
+    abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, ta->buffer)->u.array_buffer);
     if (abuf->detached)
         return true;
     len = abuf->byte_length;
@@ -64692,7 +64694,7 @@ static JSValue js_typed_array_get_buffer(JSContext *ctx, JSValueConst this_val)
     if (!p)
         return JS_EXCEPTION;
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
-    return js_dup(JS_MKPTR(JS_TAG_OBJECT, ta->buffer));
+    return js_dup(JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, ta->buffer)));
 }
 
 static JSValue js_typed_array_get_byteLength(JSContext *ctx, JSValueConst this_val)
@@ -64776,7 +64778,7 @@ JSValue JS_GetTypedArrayBuffer(JSContext *ctx, JSValueConst obj,
     if (pbytes_per_element) {
         *pbytes_per_element = 1 << typed_array_size_log2(p->class_id);
     }
-    return js_dup(JS_MKPTR(JS_TAG_OBJECT, ta->buffer));
+    return js_dup(JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, ta->buffer)));
 }
 
 static bool dataview_is_oob(JSObject *p);
@@ -64801,9 +64803,9 @@ JSValue JS_GetArrayBufferViewBuffer(JSContext *ctx, JSValueConst obj,
         *pbyte_offset = ta->offset;
     if (pbyte_length)
         *pbyte_length = ta->track_rab
-            ? js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer)->byte_length - ta->offset
+            ? js_cload(struct JSArrayBuffer *, js_cload(JSObject *, ta->buffer)->u.array_buffer)->byte_length - ta->offset
             : ta->length;
-    return js_dup(JS_MKPTR(JS_TAG_OBJECT, ta->buffer));
+    return js_dup(JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, ta->buffer)));
 }
 
 /* return NULL if exception. WARNING: any JS call can detach the
@@ -64825,7 +64827,7 @@ uint8_t *JS_GetUint8Array(JSContext *ctx, size_t *psize, JSValueConst obj)
         goto fail;
     }
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
-    abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
+    abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, ta->buffer)->u.array_buffer);
 
     *psize = p->u.array.count;
     return js_abuf_data(abuf) + ta->offset;
@@ -64880,9 +64882,9 @@ static JSValue js_typed_array_set_internal(JSContext *ctx,
     src_p = JS_VALUE_GET_OBJ(src_obj);
     if (is_typed_array(src_p->class_id)) {
         JSTypedArray *dest_ta = js_cload(struct JSTypedArray *, p->u.typed_array);
-        JSArrayBuffer *dest_abuf = js_cload(struct JSArrayBuffer *, dest_ta->buffer->u.array_buffer);
+        JSArrayBuffer *dest_abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, dest_ta->buffer)->u.array_buffer);
         JSTypedArray *src_ta = js_cload(struct JSTypedArray *, src_p->u.typed_array);
-        JSArrayBuffer *src_abuf = js_cload(struct JSArrayBuffer *, src_ta->buffer->u.array_buffer);
+        JSArrayBuffer *src_abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, src_ta->buffer)->u.array_buffer);
         int shift = typed_array_size_log2(p->class_id);
 
         if (typed_array_is_oob(src_p))
@@ -65068,7 +65070,7 @@ static JSValue js_typed_array_with(JSContext *ctx, JSValueConst this_val,
     /* copy min(len, newlen) elements from source; rest stays zero */
     if (copy_len > 0) {
         ta = js_cload(struct JSTypedArray *, p->u.typed_array);
-        src_abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
+        src_abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, ta->buffer)->u.array_buffer);
         memcpy(js_abuf_data(abuf), js_abuf_data(src_abuf) + ta->offset,
                (size_t)copy_len << size_log2);
     }
@@ -66515,8 +66517,8 @@ static int typed_array_init(JSContext *ctx, JSValue obj, JSValue buffer,
     }
     pbuffer = JS_VALUE_GET_OBJ(buffer);
     abuf = js_cload(struct JSArrayBuffer *, pbuffer->u.array_buffer);
-    ta->obj = p;
-    ta->buffer = pbuffer;
+    js_cstore(ta->obj, p);
+    js_cstore(ta->buffer, pbuffer);
     ta->offset = offset;
     ta->length = len << size_log2;
     ta->track_rab = track_rab;
@@ -66654,7 +66656,7 @@ static JSValue js_typed_array_constructor_ta(JSContext *ctx,
         goto fail;
     }
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
-    src_buffer = ta->buffer;
+    src_buffer = js_cload(JSObject *, ta->buffer);
     src_abuf = js_cload(struct JSArrayBuffer *, src_buffer->u.array_buffer);
     size_log2 = typed_array_size_log2(classid);
     buffer = js_array_buffer_constructor1(ctx, JS_UNDEFINED,
@@ -66780,7 +66782,7 @@ static void js_typed_array_finalizer(JSRuntime *rt, JSValueConst val)
         if (ta->link.next) {
             list_del(&ta->link);
         }
-        JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, ta->buffer));
+        JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, ta->buffer)));
         js_free_rt(rt, ta);
     }
 }
@@ -66791,7 +66793,7 @@ static void js_typed_array_mark(JSRuntime *rt, JSValueConst val,
     JSObject *p = JS_VALUE_GET_OBJ(val);
     JSTypedArray *ta = js_cload(struct JSTypedArray *, p->u.typed_array);
     if (ta) {
-        JS_MarkValue(rt, JS_MKPTR(JS_TAG_OBJECT, ta->buffer), mark_func);
+        JS_MarkValue(rt, JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, ta->buffer)), mark_func);
     }
 }
 
@@ -66860,8 +66862,8 @@ static JSValue js_dataview_constructor(JSContext *ctx,
         return JS_EXCEPTION;
     }
     p = JS_VALUE_GET_OBJ(obj);
-    ta->obj = p;
-    ta->buffer = JS_VALUE_GET_OBJ(js_dup(buffer));
+    js_cstore(ta->obj, p);
+    js_cstore(ta->buffer, JS_VALUE_GET_OBJ(js_dup(buffer)));
     ta->offset = offset;
     ta->length = len;
     ta->track_rab = track_rab;
@@ -66878,7 +66880,7 @@ static bool dataview_is_oob(JSObject *p)
 
     assert(p->class_id == JS_CLASS_DATAVIEW);
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
-    abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
+    abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, ta->buffer)->u.array_buffer);
     if (abuf->detached)
         return true;
     if (ta->offset > abuf->byte_length)
@@ -66910,7 +66912,7 @@ static JSValue js_dataview_get_buffer(JSContext *ctx, JSValueConst this_val)
     if (!p)
         return JS_EXCEPTION;
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
-    return js_dup(JS_MKPTR(JS_TAG_OBJECT, ta->buffer));
+    return js_dup(JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, ta->buffer)));
 }
 
 static JSValue js_dataview_get_byteLength(JSContext *ctx, JSValueConst this_val)
@@ -66926,7 +66928,7 @@ static JSValue js_dataview_get_byteLength(JSContext *ctx, JSValueConst this_val)
         return js_int32(0);
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
     if (ta->track_rab) {
-        abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
+        abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, ta->buffer)->u.array_buffer);
         return js_uint32(abuf->byte_length - ta->offset);
     }
     return js_uint32(ta->length);
@@ -66966,7 +66968,7 @@ static JSValue js_dataview_getValue(JSContext *ctx,
         return JS_EXCEPTION;
     littleEndian = argc > 1 && JS_ToBool(ctx, argv[1]);
     is_swap = littleEndian ^ !is_be();
-    abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
+    abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, ta->buffer)->u.array_buffer);
     if (abuf->detached)
         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
     // order matters: this check should come before the next one
@@ -67076,7 +67078,7 @@ static JSValue js_dataview_setValue(JSContext *ctx,
     ta = JS_GetOpaque2(ctx, this_obj, JS_CLASS_DATAVIEW);
     if (!ta)
         return JS_EXCEPTION;
-    abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
+    abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, ta->buffer)->u.array_buffer);
     if (abuf->immutable)
         return JS_ThrowTypeErrorImmutableArrayBuffer(ctx);
     size = 1 << typed_array_size_log2(class_id);
@@ -67277,7 +67279,7 @@ static JSObject *js_atomics_get_buf(JSContext *ctx,
         return NULL;
     }
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
-    abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
+    abuf = js_cload(struct JSArrayBuffer *, js_cload(JSObject *, ta->buffer)->u.array_buffer);
     if (!abuf->shared) {
         if (is_waitable == 2) {
             JS_ThrowTypeError(ctx, "not a SharedArrayBuffer TypedArray");
@@ -68186,7 +68188,7 @@ static void js_weakref_finalizer(JSRuntime *rt, JSValueConst val)
     for(;;) {
         wr = js_cload(JSWeakRefRecord *, *pwr);
         assert(wr != NULL);
-        if (wr->kind == JS_WEAK_REF_KIND_WEAK_REF && wr->u.weak_ref_data == wrd)
+        if (wr->kind == JS_WEAK_REF_KIND_WEAK_REF && js_cload(struct JSWeakRefData *, wr->u.weak_ref_data) == wrd)
             break;
         pwr = &wr->next_weak_ref;
     }
@@ -68221,7 +68223,7 @@ static JSValue js_weakref_constructor(JSContext *ctx, JSValueConst new_target,
     wrd->target = arg;
     wrd->obj = obj;
     wr->kind = JS_WEAK_REF_KIND_WEAK_REF;
-    wr->u.weak_ref_data = wrd;
+    js_cstore(wr->u.weak_ref_data, wrd);
     insert_weakref_record(arg, wr);
 
     JS_SetOpaqueInternal(obj, wrd);
@@ -68271,7 +68273,7 @@ static void delete_finrec_weakref(JSRuntime *rt, JSFinRecEntry *fre)
     for(;;) {
         wr = js_cload(JSWeakRefRecord *, *pwr);
         assert(wr != NULL);
-        if (wr->kind == JS_WEAK_REF_KIND_FINALIZATION_REGISTRY_ENTRY && wr->u.fin_rec_entry == fre)
+        if (wr->kind == JS_WEAK_REF_KIND_FINALIZATION_REGISTRY_ENTRY && js_cload(struct JSFinRecEntry *, wr->u.fin_rec_entry) == fre)
             break;
         pwr = &wr->next_weak_ref;
     }
@@ -68386,7 +68388,7 @@ static JSValue js_finrec_register(JSContext *ctx, JSValueConst this_val,
     fre->token = js_dup(token);
     list_add_tail(&fre->link, &frd->entries);
     wr->kind = JS_WEAK_REF_KIND_FINALIZATION_REGISTRY_ENTRY;
-    wr->u.fin_rec_entry = fre;
+    js_cstore(wr->u.fin_rec_entry, fre);
     insert_weakref_record(target, wr);
 
     return JS_UNDEFINED;
@@ -68886,8 +68888,8 @@ static void reset_weak_ref(JSRuntime *rt, JS_CPTR(JSWeakRefRecord *) *first_weak
     for(wr = js_cload(JSWeakRefRecord *, *first_weak_ref); wr != NULL; wr = js_cload(JSWeakRefRecord *, wr->next_weak_ref)) {
         switch(wr->kind) {
         case JS_WEAK_REF_KIND_MAP:
-            mr = wr->u.map_record;
-            s = mr->map;
+            mr = js_cload(struct JSMapRecord *, wr->u.map_record);
+            s = js_cload(struct JSMapState *, mr->map);
             assert(s->is_weak);
             assert(!mr->empty); /* no iterator on WeakMap/WeakSet */
             list_del(&mr->hash_link);
@@ -68895,11 +68897,11 @@ static void reset_weak_ref(JSRuntime *rt, JS_CPTR(JSWeakRefRecord *) *first_weak
             s->record_count--;
             break;
         case JS_WEAK_REF_KIND_WEAK_REF:
-            wrd = wr->u.weak_ref_data;
+            wrd = js_cload(struct JSWeakRefData *, wr->u.weak_ref_data);
             wrd->target = JS_UNDEFINED;
             break;
         case JS_WEAK_REF_KIND_FINALIZATION_REGISTRY_ENTRY:
-            fre = wr->u.fin_rec_entry;
+            fre = js_cload(struct JSFinRecEntry *, wr->u.fin_rec_entry);
             list_del(&fre->link);
             break;
         default:
@@ -68913,17 +68915,17 @@ static void reset_weak_ref(JSRuntime *rt, JS_CPTR(JSWeakRefRecord *) *first_weak
         wr_next = js_cload(JSWeakRefRecord *, wr->next_weak_ref);
         switch(wr->kind) {
         case JS_WEAK_REF_KIND_MAP:
-            mr = wr->u.map_record;
+            mr = js_cload(struct JSMapRecord *, wr->u.map_record);
             JS_FreeValueRT(rt, mr->value);
             js_free_rt(rt, mr);
             break;
         case JS_WEAK_REF_KIND_WEAK_REF:
-            wrd = wr->u.weak_ref_data;
+            wrd = js_cload(struct JSWeakRefData *, wr->u.weak_ref_data);
             JS_SetOpaqueInternal(wrd->obj, js_weakref_sentinel_ptr());
             js_free_rt(rt, wrd);
             break;
         case JS_WEAK_REF_KIND_FINALIZATION_REGISTRY_ENTRY: {
-            fre = wr->u.fin_rec_entry;
+            fre = js_cload(struct JSFinRecEntry *, wr->u.fin_rec_entry);
             /**
              * During the GC sweep phase the held object might be
              * collected first (free_mark set). Also skip if the
