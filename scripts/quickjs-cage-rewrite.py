@@ -22,6 +22,8 @@ SOURCE = Path(__file__).resolve().parent.parent / "src" / "quickjs" / "quickjs.c
 
 OBJECT_HEAD = r"(?:JS_VALUE_GET_OBJ\(\w+\)|js_cload\(JSShape \*, [^()]*\)|\w+)(?:->\w+)*"
 BYTECODE_HEAD = r"b"
+TYPED_ARRAY_HEAD = r"(?:ta|dest_ta|src_ta)"
+REGEXP_HEAD = r"re1?"
 
 UNION_MEMBERS = {
     "bound_function": "struct JSBoundFunction *",
@@ -61,7 +63,22 @@ FIELDS = [
     (BYTECODE_HEAD, r"closure_var", "JSClosureVar *"),
     (BYTECODE_HEAD, r"vardefs", "JSVarDef *"),
     (BYTECODE_HEAD, r"pc2line_buf", "uint8_t *"),
+    (BYTECODE_HEAD, r"source", "char *"),
     (r"slice", r"parent", "JSString *"),
+    (TYPED_ARRAY_HEAD, r"obj", "JSObject *"),
+    (TYPED_ARRAY_HEAD, r"buffer", "JSObject *"),
+    (OBJECT_HEAD, r"u\.array\.u1\.typed_array", "struct JSTypedArray *"),
+    (REGEXP_HEAD, r"(?:pattern|bytecode)", "JSString *"),
+    (OBJECT_HEAD, r"u\.regexp\.(?:pattern|bytecode)", "JSString *"),
+    (OBJECT_HEAD, r"hash_buckets", "struct list_head *"),
+    (r"mr", r"map", "struct JSMapState *"),
+    (OBJECT_HEAD, r"cur_record", "JSMapRecord *"),
+    (OBJECT_HEAD, r"presolved", "JSPromiseFunctionDataResolved *"),
+    (r"s", r"generator", "JSObject *"),
+    (r"it", r"buf", "JSValue *"),
+    (r"wr", r"u\.map_record", "struct JSMapRecord *"),
+    (r"wr", r"u\.weak_ref_data", "struct JSWeakRefData *"),
+    (r"wr", r"u\.fin_rec_entry", "struct JSFinRecEntry *"),
 ] + [(OBJECT_HEAD, r"u\." + m, t) for m, t in UNION_MEMBERS.items()]
 
 MANUAL_FIELDS = ["first_weak_ref", "next_weak_ref"]
@@ -78,9 +95,16 @@ def already_converted(line, start, end):
     return before.endswith("js_cstore(") or re.search(r"js_cload\([^,]+, $", before) is not None
 
 
+COMMENT_RE = re.compile(r"/\*.*?\*/|(?<![:\"'\\])//[^\n]*", re.S)
+
+
+def blank_comments(text):
+    return COMMENT_RE.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+
+
 def raw_sites(text):
     out = []
-    for lineno, line in enumerate(text.split("\n"), 1):
+    for lineno, line in enumerate(blank_comments(text).split("\n"), 1):
         if any(re.search(idiom, line) for idiom in HOST_INDEX_IDIOMS):
             continue
         for head, field, _type in FIELDS:
@@ -93,7 +117,7 @@ def raw_sites(text):
 
 def address_sites(text):
     out = []
-    for lineno, line in enumerate(text.split("\n"), 1):
+    for lineno, line in enumerate(blank_comments(text).split("\n"), 1):
         for head, field, _type in FIELDS:
             if re.search(r"&" + head + r"->" + field + r"\b(?!\[)", line):
                 out.append((lineno, line.strip()))
@@ -102,6 +126,13 @@ def address_sites(text):
 
 
 def apply(text):
+    comments = []
+
+    def stash(m):
+        comments.append(m.group(0))
+        return "\0%d\0" % (len(comments) - 1)
+
+    text = COMMENT_RE.sub(stash, text)
     for head, field, type_name in FIELDS:
         write_re = re.compile(r"(?<![\w.>])(" + head + r"->" + field + r") = (?!\(JS_CPTR)([^;=][^;]*);")
         text = write_re.sub(lambda m: "js_cstore(%s, %s);" % (m.group(1), m.group(2)), text)
@@ -110,7 +141,7 @@ def apply(text):
         esc = re.escape(type_name)
         text = re.sub(r"js_cstore\(js_cload\(" + esc + r", ([^()]*(?:\([^()]*\))?[^()]*)\), ", r"js_cstore(\1, ", text)
         text = re.sub(r"js_cload\(" + esc + r", js_cload\(" + esc + r", ([^()]*(?:\([^()]*\))?[^()]*)\)\)", r"js_cload(" + type_name + r", \1)", text)
-    return text
+    return re.sub(r"\0(\d+)\0", lambda m: comments[int(m.group(1))], text)
 
 
 def main():
@@ -120,11 +151,11 @@ def main():
     ap.add_argument("--source", default=str(SOURCE))
     args = ap.parse_args()
     path = Path(args.source)
-    text = path.read_text()
+    text = path.read_bytes().decode()
     if args.apply:
         new = apply(text)
         if new != text:
-            path.write_text(new)
+            path.write_bytes(new.encode())
             print("rewrote %s" % path)
         text = new
     sites = raw_sites(text)

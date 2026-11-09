@@ -56,7 +56,7 @@ Fork-local pieces a QuickJS refresh touches, by file:
 | `quickjs-cptr.h`, `quickjs-hardening.h` | compressed fields, masking, pointer and context tables; included from `quickjs.c` |
 | `list.h` | neighbour checks in `__list_add` and `list_del` |
 | `quickjs.h` | `JS_CAGE_BOXING` layout, `js_cage_pointer_base`, `JS_SetHeapCage`, `JS_Cage*` |
-| `quickjs.c` | the two include lines; the trusted block path in the arena front end; `JS_NewRuntime`'s cage heap; `JS_SetOpaque` / `JS_GetOpaque` table paths and the Intl tag; the context-table indices in realm fields; the code-table indices in C function, closure, job and module records; the WeakRef sentinel; and the `js_cload` / `js_cstore` / `js_abuf_data` / `js_ta_ptr` rewrites the script reproduces |
+| `quickjs.c` | the two include lines; the trusted block path in the arena front end; `JS_NewRuntime`'s cage heap; `JS_SetOpaque` / `JS_GetOpaque` table paths and the Intl tag; the context-table indices in realm fields; the code-table indices in C function, closure, job and module records; the WeakRef sentinel; the hand conversions around compressed fields (`JSMapState.hash_buckets`, renamed from upstream's `hash_table` so the rewrite script can tell it from `JSObjectList`'s, its element-typed `sizeof`, the iterator-helper buffer resized through a local, and `JS_WriteRegExp` taking a pointer); and the `js_cload` / `js_cstore` / `js_abuf_data` / `js_ta_ptr` rewrites the script reproduces |
 | `meson.build` | `quickjs-cage.c` in the sources |
 
 ## 2026-11-09 — original QuickJS 712e8c0 → e5ac135
