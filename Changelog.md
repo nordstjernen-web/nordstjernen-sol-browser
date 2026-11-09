@@ -3,6 +3,11 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security (QuickJS): a RegExp read back with `JS_ReadObject` (structured
+  clone for `postMessage` and IndexedDB) carried its compiled regexp bytecode
+  verbatim, and only the header was validated before the regexp executor
+  ran it. The reader now keeps the pattern and flags and recompiles the
+  expression, so no bytecode from the serialized form is ever executed.
 * Security (QuickJS): the rejection handler `AsyncDisposableStack` chains
   onto a disposer's returned promise was created with length 0 and read its
   first argument unconditionally; a page that replaced `Promise.prototype.then`
