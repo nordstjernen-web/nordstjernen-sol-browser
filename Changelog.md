@@ -3,6 +3,11 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security (QuickJS): `for (await using x of y)` inside a non-async function
+  (in module code or a class static block) was accepted by the parser; the
+  resulting `await` ran in an ordinary frame and left closures pointing at a
+  dead C stack. The parser now rejects it with a SyntaxError, as it already
+  did for the other `await using` forms.
 * WebDriver: `nordstjernen --webdriver[=PORT]` serves the W3C WebDriver
   protocol on the loopback interface, so Selenium, WebdriverIO and other
   clients can drive the browser (`browserName: "nordstjernen"`). The server

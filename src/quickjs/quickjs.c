@@ -31475,6 +31475,8 @@ static __exception int js_parse_for_in_of(JSParseState *s, int label_name,
     bool is_await_using = false;
     if (tok == TOK_AWAIT) {
         int u;
+        if (!(s->cur_func->func_kind & JS_FUNC_ASYNC))
+            return js_parse_error(s, "await using is only valid in asynchronous functions");
         if (next_token(s))
             return -1;
         u = is_using(s, false);
