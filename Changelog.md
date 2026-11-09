@@ -9,6 +9,9 @@ Changelog:
   array, fast-array values, mapped-arguments and closure variable arrays
   and home object, a shape's prototype and hash-chain link, and the
   opcode, constant-pool, closure-variable, variable-definition and line
+  tables of compiled functions, the weak-reference chains of objects and
+  symbols, and string-slice parents. A corrupted field can therefore
+  only name cage memory.
   tables of compiled functions. A corrupted field can therefore only name
   cage memory.
   and home object, and a shape's prototype and hash-chain link. A

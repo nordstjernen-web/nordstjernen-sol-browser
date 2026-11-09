@@ -38,7 +38,7 @@ from upstream keep merging cleanly into `src/quickjs/`.
 | 2c | Inventory of raw host and function pointers left in the heap | **done**, kept current below |
 | 3p | Trusted runtime structures and context table (preparation for 3a and 3b) | **done** |
 | 3a.1 | Caged values: 8-byte `JSValue` holding a 32-bit cage offset, cage owned by the engine | **done** |
-| 3a.2 | Compressed pointer fields inside heap structures | **batches 2, 3 and 4 done**: shape, property array, prototype, shape hash chain, fast-array values, closure variables, home object, bytecode arrays |
+| 3a.2 | Compressed pointer fields inside heap structures | **batches 2 to 5 done**: shape, property array, prototype, shape hash chain, fast-array values, closure variables, home object, bytecode arrays, weak-reference chains, string-slice parents |
 | 3b | Trusted space for bytecode and saved frames | planned |
 
 Stage 1b, moving cookies, HSTS, the HTTP cache and storage behind the
@@ -293,7 +293,7 @@ cage, the same primitive the arena bypass removed.
 | `JSObject.shape`, `JSObject.prop`, `JSShape.proto`, `JSShape.shape_hash_next` | 55, 43, 29, 9 | 2, **done** |
 | `JSObject.u.array.u.values`, `u.array.u.var_refs`, `u.func.var_refs`, `u.func.home_object` | 41, 13, 11 | 3, **done** |
 | `JSFunctionBytecode.cpool`, `byte_code_buf`, `closure_var`, `vardefs`, `pc2line_buf` | 17, 22, 16, 29, 10 | 4, **done** |
-| `JSString.parent` and rope children, `first_weak_ref` on objects and strings | 39, 10 | 5 |
+| `JSStringSlice.parent`, `first_weak_ref` on objects and strings, `JSWeakRefRecord.next_weak_ref` | 4, 10, 11 | 5, **done** (rope children are boxed values already) |
 | internal class structs reached from `u.opaque` (`JSArrayBuffer`, `JSTypedArray`, `JSMapState`, …) | per struct | 6 |
 
 Each batch is a mechanical rewrite in the style of stage 2a: the field
@@ -319,6 +319,13 @@ are offsets, so the interpreter's `pc` and every constant-pool read start
 from cage memory even if the function object was corrupted. The sizes
 and indexes those arrays are read with are still trusted from in-cage
 data; that is what stage 3b changes.
+
+Batch 5 is done: the weak-reference chain that hangs off every object
+and symbol (`first_weak_ref` and each record's `next_weak_ref`) and the
+parent pointer of a string slice are offsets. The chain is manipulated
+through pointers to slots, so the helpers that returned or took a
+`JSWeakRefRecord **` now return or take a pointer to the compressed slot
+and decode on read. Rope children were already boxed values.
 
 Trusted bytecode space allocates `JSFunctionBytecode`, its opcode buffer,
 closure tables and the saved frames of generators and async functions
@@ -516,3 +523,22 @@ Stage 3a.2 batches 2 and 3, before = stage 3a.1 (2025-11-09):
 Flat in aggregate; the shape and property-array decodes sit on the
 property access path and cost nothing measurable beyond the value
 decode already paid for in 3a.1.
+
+Stage 3a.2 batch 4, bytecode arrays, before = batches 2 and 3
+(2025-11-09):
+
+| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
+|---|---|---|---|---|
+| before (batches 2 and 3) | 87.0 | 1.71× | 3.52× | 0.27× |
+| after (batch 4) | 87.0 | 1.41× | 3.47× | 0.27× |
+
+| Site | CPU before | CPU after | RSS before | RSS after |
+|---|---|---|---|---|
+| google | 265 ms | 279 ms | 77.5 MB | 78.3 MB |
+| anthropic | 736 ms | 688 ms | 138.9 MB | 139.4 MB |
+| bbc | 3098 ms | 3040 ms | 452.2 MB | 451.3 MB |
+| cnn | 7399 ms | 7351 ms | 681.8 MB | 682.0 MB |
+| guardian | 5143 ms | 5102 ms | 383.1 MB | 383.6 MB |
+
+Flat; the bytecode-array decodes happen once per call, not per
+instruction.
