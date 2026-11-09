@@ -19,6 +19,8 @@ Changelog:
   unwound the scope stack past its bottom, reading outside the parser's
   scope array. The parser now stops at the next token once the limit is
   reached.
+* The browser name in the title bar now carries the running version,
+  "Nordstjernen Web Browser 1.0.x", as the window title already did.
 * Pages served as `application/xhtml+xml` are parsed as XML, as Chrome
   does. They went through the HTML parser, so `<style><![CDATA[ ... ]]>`
   kept the CDATA markers in the style text and every rule in it was
