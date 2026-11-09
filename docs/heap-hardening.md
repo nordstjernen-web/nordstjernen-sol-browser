@@ -86,7 +86,12 @@ and native function pointers. WebGPU `getMappedRange()`
 returns a cage copy written back on `unmap()` (`src/webgpu.c`). Every
 read of a buffer data pointer or the cached typed-array element pointer
 is masked into the cage (`js_abuf_data()`, `js_ta_ptr()`), and with
-32-bit lengths and offsets the furthest reach is the trailing guard.
+32-bit lengths and offsets the furthest reach is the trailing guard. The
+same applies where the pointer leaves the engine: the reallocation and
+free hooks, `sab_free`, `transfer()` and the SharedArrayBuffer
+serializer receive it through `js_abuf_owned_data()`, which masks it and
+keeps `NULL` as `NULL`, so a forged buffer can only hand a hook cage
+memory, which the cage allocator validates.
 
 **Tables outside the cage** (`src/quickjs/quickjs-hardening.h`).
 
@@ -194,7 +199,7 @@ the table keeps the ones still open.
 | H2 | The code-pointer table was untyped: a forged index called any registered native function through another signature (an ArrayBuffer realloc hook, a C function under a different `cproto`) | signature confusion | fixed: entries carry their call kind |
 | H2b | The `magic` of C functions, data records and closures, which many builtins use as an index into their own tables, was in-cage data the function trusted; so were the declared argument count and the `this` brand, whose index into `rt->brand_classes` was unchecked | out-of-bounds reads in builtin tables, brand check disabled | fixed: the code-table entry holds them |
 | H3 | The context table is process-wide and `js_ctx_get` did not check that a context belongs to the caller's runtime | page code running in another runtime's realm (a worker on another thread, the extension host) | fixed: `js_ctx_get(rt, idx)` aborts on a foreign context |
-| H4 | `JSArrayBuffer.data` is masked on access but handed unmasked to the realloc and free hooks and `sab_free` | free of an out-of-cage pointer | open |
+| H4 | `JSArrayBuffer.data` was masked on access but handed unmasked to the realloc and free hooks, `sab_free` and the SharedArrayBuffer serializer | free of an out-of-cage pointer | fixed: every hand-off is masked |
 | M1 | The engine-private name table and bitmap, the policy that hides embedder names from page scripts, are cage allocations | policy rewrite | open |
 | M2 | Runtimes share the cage, and `js_cage_free` releases into the owning runtime's heap without a lock, so a forged pointer to another runtime's object races on that heap's metadata | metadata race outside the cage | open |
 

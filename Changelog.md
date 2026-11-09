@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a corrupted JavaScript heap can no longer make an
+  ArrayBuffer's free or resize hook release memory outside the heap cage.
+  The buffer's data pointer was masked into the cage whenever scripts
+  read through it, but handed unmasked to the hooks that free, resize and
+  transfer it and to the SharedArrayBuffer serializer. Those hand-offs
+  are masked now too (`docs/heap-hardening.md`, review finding H4).
 * Security: a native function's `magic` number, declared argument count
   and `this`-type brand no longer come from the JavaScript heap. Many
   builtins use the magic number as an index into their own tables, and
