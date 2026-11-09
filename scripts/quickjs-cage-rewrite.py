@@ -24,6 +24,7 @@ OBJECT_HEAD = r"(?:JS_VALUE_GET_OBJ\(\w+\)|js_cload\(JSShape \*, [^()]*\)|\w+)(?
 BYTECODE_HEAD = r"b"
 TYPED_ARRAY_HEAD = r"(?:ta|dest_ta|src_ta)"
 REGEXP_HEAD = r"re1?"
+MODULE_HEAD = r"(?:m|m1|module|res_m)"
 
 UNION_MEMBERS = {
     "bound_function": "struct JSBoundFunction *",
@@ -79,6 +80,18 @@ FIELDS = [
     (r"wr", r"u\.map_record", "struct JSMapRecord *"),
     (r"wr", r"u\.weak_ref_data", "struct JSWeakRefData *"),
     (r"wr", r"u\.fin_rec_entry", "struct JSFinRecEntry *"),
+    (r"pr", r"u\.getset\.(?:getter|setter)", "JSObject *"),
+    (r"pr", r"u\.var_ref", "JSVarRef *"),
+    (MODULE_HEAD, r"req_module_entries", "JSReqModuleEntry *"),
+    (MODULE_HEAD, r"export_entries", "JSExportEntry *"),
+    (MODULE_HEAD, r"star_export_entries", "JSStarExportEntry *"),
+    (MODULE_HEAD, r"import_entries", "JSImportEntry *"),
+    (MODULE_HEAD, r"stack_prev", "JSModuleDef *"),
+    (MODULE_HEAD, r"async_parent_modules", "JSModuleDef **"),
+    (MODULE_HEAD, r"cycle_root", "JSModuleDef *"),
+    (r"rme2?", r"module", "JSModuleDef *"),
+    (r"js_cload\(JSReqModuleEntry \*, " + MODULE_HEAD + r"->req_module_entries\)\[[^\]]+\]", r"module", "JSModuleDef *", r"\."),
+    (r"(?:me|res_me)", r"u\.local\.var_ref", "JSVarRef *"),
 ] + [(OBJECT_HEAD, r"u\." + m, t) for m, t in UNION_MEMBERS.items()]
 
 MANUAL_FIELDS = ["first_weak_ref", "next_weak_ref"]
@@ -92,7 +105,7 @@ HOST_INDEX_IDIOMS = (
 
 def already_converted(line, start, end):
     before = line[:start]
-    return before.endswith("js_cstore(") or re.search(r"js_cload\([^,]+, $", before) is not None
+    return before.endswith(("js_cstore(", "js_resize_cptr_array(ctx, ")) or re.search(r"js_cload\([^,]+, $", before) is not None
 
 
 COMMENT_RE = re.compile(r"/\*.*?\*/|(?<![:\"'\\])//[^\n]*", re.S)
@@ -107,8 +120,9 @@ def raw_sites(text):
     for lineno, line in enumerate(blank_comments(text).split("\n"), 1):
         if any(re.search(idiom, line) for idiom in HOST_INDEX_IDIOMS):
             continue
-        for head, field, _type in FIELDS:
-            for m in re.finditer(r"(?<![\w.>])(" + head + r"->" + field + r")\b", line):
+        for head, field, _type, *sep in FIELDS:
+            sep = sep[0] if sep else r"->"
+            for m in re.finditer(r"(?<![\w.>])(" + head + sep + field + r")\b", line):
                 if not already_converted(line, m.start(1), m.end(1)):
                     out.append((lineno, line.strip()))
                     break
@@ -118,8 +132,9 @@ def raw_sites(text):
 def address_sites(text):
     out = []
     for lineno, line in enumerate(blank_comments(text).split("\n"), 1):
-        for head, field, _type in FIELDS:
-            if re.search(r"&" + head + r"->" + field + r"\b(?!\[)", line):
+        for head, field, _type, *sep in FIELDS:
+            sep = sep[0] if sep else r"->"
+            if re.search(r"&" + head + sep + field + r"\b(?!\[)", line):
                 out.append((lineno, line.strip()))
                 break
     return out
@@ -133,10 +148,11 @@ def apply(text):
         return "\0%d\0" % (len(comments) - 1)
 
     text = COMMENT_RE.sub(stash, text)
-    for head, field, type_name in FIELDS:
-        write_re = re.compile(r"(?<![\w.>])(" + head + r"->" + field + r") = (?!\(JS_CPTR)([^;=][^;]*);")
+    for head, field, type_name, *sep in FIELDS:
+        sep = sep[0] if sep else r"->"
+        write_re = re.compile(r"(?<![\w.>])(" + head + sep + field + r") = (?!\(JS_CPTR)([^;=][^;]*);")
         text = write_re.sub(lambda m: "js_cstore(%s, %s);" % (m.group(1), m.group(2)), text)
-        read_re = re.compile(r"(?<![\w.>])(?<!\(uintptr_t\))(" + head + r"->" + field + r")\b(?! = [^=])")
+        read_re = re.compile(r"(?<![\w.>])(?<!\(uintptr_t\))(?<!js_resize_cptr_array\(ctx, )(" + head + sep + field + r")\b(?! = [^=])")
         text = read_re.sub(lambda m: "js_cload(%s, %s)" % (type_name, m.group(1)), text)
         esc = re.escape(type_name)
         text = re.sub(r"js_cstore\(js_cload\(" + esc + r", ([^()]*(?:\([^()]*\))?[^()]*)\), ", r"js_cstore(\1, ", text)

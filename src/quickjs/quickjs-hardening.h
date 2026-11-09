@@ -84,11 +84,16 @@ typedef struct JSExternalPointerEntry {
     uint32_t next_free;
 } JSExternalPointerEntry;
 
+typedef struct JSInternTable {
+    uintptr_t *_Atomic segments[JS_CPT_SEGS];
+    uint32_t count;
+    uint32_t *hash;
+    uint32_t hash_size;
+} JSInternTable;
+
 static _Atomic int js_ptr_tables_lock_word;
-static JSCodePtr *_Atomic js_cpt_segments[JS_CPT_SEGS];
-static uint32_t js_cpt_count = 1;
-static uint32_t *js_cpt_hash;
-static uint32_t js_cpt_hash_size;
+static JSInternTable js_code_table = { .count = 1 };
+static JSInternTable js_func_list_table = { .count = 1 };
 static JSExternalPointerEntry *_Atomic js_ept_segments[JS_EPT_SEGS];
 static uint32_t js_ept_count = 1;
 static uint32_t js_ept_free_head;
@@ -104,69 +109,89 @@ static void js_ptr_tables_unlock(void)
     atomic_store(&js_ptr_tables_lock_word, 0);
 }
 
-static inline JSCodePtr js_cpt_get(uint32_t idx)
+static inline uintptr_t js_intern_get(JSInternTable *t, uint32_t idx)
 {
     idx &= JS_CPT_SEGS * JS_CPT_SEG_SIZE - 1;
-    JSCodePtr *seg = atomic_load(&js_cpt_segments[idx >> JS_CPT_SEG_SHIFT]);
-    return seg ? seg[idx & (JS_CPT_SEG_SIZE - 1)] : NULL;
+    uintptr_t *seg = atomic_load(&t->segments[idx >> JS_CPT_SEG_SHIFT]);
+    return seg ? seg[idx & (JS_CPT_SEG_SIZE - 1)] : 0;
 }
 
-static uint32_t js_cpt_hash_slot(JSCodePtr fn, uint32_t size)
+static uint32_t js_intern_hash_slot(uintptr_t v, uint32_t size)
 {
-    uint64_t h = (uint64_t)(uintptr_t)fn * 0x9E3779B97F4A7C15ull;
+    uint64_t h = (uint64_t)v * 0x9E3779B97F4A7C15ull;
     return (uint32_t)(h >> 32) & (size - 1);
 }
 
-static void js_cpt_rehash(uint32_t new_size)
+static void js_intern_rehash(JSInternTable *t, uint32_t new_size)
 {
     uint32_t *table = calloc(new_size, sizeof(*table));
     if (!table)
         abort();
-    for (uint32_t idx = 1; idx < js_cpt_count; idx++) {
-        uint32_t slot = js_cpt_hash_slot(js_cpt_get(idx), new_size);
+    for (uint32_t idx = 1; idx < t->count; idx++) {
+        uint32_t slot = js_intern_hash_slot(js_intern_get(t, idx), new_size);
         while (table[slot])
             slot = (slot + 1) & (new_size - 1);
         table[slot] = idx;
     }
-    free(js_cpt_hash);
-    js_cpt_hash = table;
-    js_cpt_hash_size = new_size;
+    free(t->hash);
+    t->hash = table;
+    t->hash_size = new_size;
 }
 
-static uint32_t js_cpt_intern(JSCodePtr fn)
+static uint32_t js_intern_add(JSInternTable *t, uintptr_t v)
 {
-    if (!fn)
+    if (!v)
         return 0;
     js_ptr_tables_lock();
-    if (js_cpt_count * 2 > js_cpt_hash_size)
-        js_cpt_rehash(js_cpt_hash_size ? js_cpt_hash_size * 2 : 4096);
-    uint32_t slot = js_cpt_hash_slot(fn, js_cpt_hash_size);
+    if (t->count * 2 > t->hash_size)
+        js_intern_rehash(t, t->hash_size ? t->hash_size * 2 : 4096);
+    uint32_t slot = js_intern_hash_slot(v, t->hash_size);
     for (;;) {
-        uint32_t idx = js_cpt_hash[slot];
+        uint32_t idx = t->hash[slot];
         if (!idx)
             break;
-        if (js_cpt_get(idx) == fn) {
+        if (js_intern_get(t, idx) == v) {
             js_ptr_tables_unlock();
             return idx;
         }
-        slot = (slot + 1) & (js_cpt_hash_size - 1);
+        slot = (slot + 1) & (t->hash_size - 1);
     }
-    uint32_t idx = js_cpt_count;
+    uint32_t idx = t->count;
     if (idx >= JS_CPT_SEGS * JS_CPT_SEG_SIZE)
         abort();
     uint32_t seg = idx >> JS_CPT_SEG_SHIFT;
-    JSCodePtr *entries = atomic_load(&js_cpt_segments[seg]);
+    uintptr_t *entries = atomic_load(&t->segments[seg]);
     if (!entries) {
         entries = calloc(JS_CPT_SEG_SIZE, sizeof(*entries));
         if (!entries)
             abort();
-        atomic_store(&js_cpt_segments[seg], entries);
+        atomic_store(&t->segments[seg], entries);
     }
-    entries[idx & (JS_CPT_SEG_SIZE - 1)] = fn;
-    js_cpt_count++;
-    js_cpt_hash[slot] = idx;
+    entries[idx & (JS_CPT_SEG_SIZE - 1)] = v;
+    t->count++;
+    t->hash[slot] = idx;
     js_ptr_tables_unlock();
     return idx;
+}
+
+static inline JSCodePtr js_cpt_get(uint32_t idx)
+{
+    return (JSCodePtr)js_intern_get(&js_code_table, idx);
+}
+
+static uint32_t js_cpt_intern(JSCodePtr fn)
+{
+    return js_intern_add(&js_code_table, (uintptr_t)fn);
+}
+
+static inline const JSCFunctionListEntry *js_flt_get(uint32_t idx)
+{
+    return (const JSCFunctionListEntry *)js_intern_get(&js_func_list_table, idx);
+}
+
+static uint32_t js_flt_intern(const JSCFunctionListEntry *e)
+{
+    return js_intern_add(&js_func_list_table, (uintptr_t)e);
 }
 
 static inline JSExternalPointerEntry *js_ept_entry(uint32_t idx)
