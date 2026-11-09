@@ -55,7 +55,21 @@ function Invoke-GitHubDownload($Url, $OutFile) {
     if ($Token) {
         $headers["Authorization"] = "Bearer $Token"
     }
-    Invoke-WebRequest -Headers $headers -MaximumRedirection 5 -Uri $Url -OutFile $OutFile
+    $attempts = 5
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            Invoke-WebRequest -Headers $headers -MaximumRedirection 5 -Uri $Url -OutFile $OutFile
+            return
+        } catch {
+            $status = 0
+            if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+            $transient = $status -eq 0 -or $status -eq 408 -or $status -eq 429 -or $status -ge 500
+            if (-not $transient -or $attempt -ge $attempts) { throw }
+            $delay = [int][math]::Pow(2, $attempt)
+            Write-Step "download of $([System.IO.Path]::GetFileName($OutFile)) failed ($($_.Exception.Message)); retrying in $delay s (attempt $attempt of $attempts)"
+            Start-Sleep -Seconds $delay
+        }
+    }
 }
 
 $lockFile = Join-Path (Resolve-Path "$PSScriptRoot\..") "sysroot.lock"
