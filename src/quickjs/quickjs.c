@@ -43651,9 +43651,51 @@ static JSValue JS_ReadRegExp(BCReaderState *s)
         return JS_ThrowInternalError(ctx, "bad regexp bytecode");
     }
 
-    obj = js_regexp_constructor_internal(ctx, JS_UNDEFINED,
-                                         JS_MKPTR(JS_TAG_STRING, pattern),
-                                         JS_MKPTR(JS_TAG_STRING, bc));
+    if (!s->allow_bytecode) {
+        /* the serialized bytecode is executed as is by lre_exec() and is
+           only validated structurally, so it cannot be trusted: keep the
+           flags and recompile the pattern. */
+        char flags_buf[16], *q = flags_buf;
+        int re_flags = lre_get_flags(str8(bc));
+        JSValue pattern_val, flags_val, bc_val;
+
+        js_free_string(ctx->rt, bc);
+        if (re_flags & LRE_FLAG_INDICES)
+            *q++ = 'd';
+        if (re_flags & LRE_FLAG_GLOBAL)
+            *q++ = 'g';
+        if (re_flags & LRE_FLAG_IGNORECASE)
+            *q++ = 'i';
+        if (re_flags & LRE_FLAG_MULTILINE)
+            *q++ = 'm';
+        if (re_flags & LRE_FLAG_DOTALL)
+            *q++ = 's';
+        if (re_flags & LRE_FLAG_UNICODE)
+            *q++ = 'u';
+        if (re_flags & LRE_FLAG_UNICODE_SETS)
+            *q++ = 'v';
+        if (re_flags & LRE_FLAG_STICKY)
+            *q++ = 'y';
+        *q = '\0';
+        pattern_val = JS_MKPTR(JS_TAG_STRING, pattern);
+        flags_val = JS_NewString(ctx, flags_buf);
+        if (JS_IsException(flags_val)) {
+            JS_FreeValue(ctx, pattern_val);
+            return JS_EXCEPTION;
+        }
+        bc_val = js_compile_regexp(ctx, pattern_val, flags_val);
+        JS_FreeValue(ctx, flags_val);
+        if (JS_IsException(bc_val)) {
+            JS_FreeValue(ctx, pattern_val);
+            return JS_EXCEPTION;
+        }
+        obj = js_regexp_constructor_internal(ctx, JS_UNDEFINED, pattern_val,
+                                             bc_val);
+    } else {
+        obj = js_regexp_constructor_internal(ctx, JS_UNDEFINED,
+                                             JS_MKPTR(JS_TAG_STRING, pattern),
+                                             JS_MKPTR(JS_TAG_STRING, bc));
+    }
     if (JS_IsException(obj))
         return JS_EXCEPTION;
     if (BC_add_object_ref(s, obj)) {
