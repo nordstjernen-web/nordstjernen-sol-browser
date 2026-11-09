@@ -10,8 +10,11 @@ Changelog:
   and home object, a shape's prototype and hash-chain link, and the
   opcode, constant-pool, closure-variable, variable-definition and line
   tables of compiled functions, the weak-reference chains of objects and
-  symbols, and string-slice parents. A corrupted field can therefore
-  only name cage memory.
+  symbols, string-slice parents, and every internal class structure
+  behind the object's opaque slot (ArrayBuffer, typed arrays, Map and
+  Set, Proxy, promises, generators, iterators, bound functions and the
+  bytecode pointer of functions). A corrupted field can therefore only
+  name cage memory.
   tables of compiled functions. A corrupted field can therefore only name
   cage memory.
   and home object, and a shape's prototype and hash-chain link. A

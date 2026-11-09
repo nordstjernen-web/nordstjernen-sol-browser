@@ -38,7 +38,7 @@ from upstream keep merging cleanly into `src/quickjs/`.
 | 2c | Inventory of raw host and function pointers left in the heap | **done**, kept current below |
 | 3p | Trusted runtime structures and context table (preparation for 3a and 3b) | **done** |
 | 3a.1 | Caged values: 8-byte `JSValue` holding a 32-bit cage offset, cage owned by the engine | **done** |
-| 3a.2 | Compressed pointer fields inside heap structures | **batches 2 to 5 done**: shape, property array, prototype, shape hash chain, fast-array values, closure variables, home object, bytecode arrays, weak-reference chains, string-slice parents |
+| 3a.2 | Compressed pointer fields inside heap structures | **batches 2 to 6 done**: shape, property array, prototype, shape hash chain, fast-array values, closure variables, home object, bytecode arrays, weak-reference chains, string-slice parents, every internal class structure behind the opaque union and the bytecode pointer of functions. Batch 1 (GC list links) remains |
 | 3b | Trusted space for bytecode and saved frames | planned |
 
 Stage 1b, moving cookies, HSTS, the HTTP cache and storage behind the
@@ -294,7 +294,7 @@ cage, the same primitive the arena bypass removed.
 | `JSObject.u.array.u.values`, `u.array.u.var_refs`, `u.func.var_refs`, `u.func.home_object` | 41, 13, 11 | 3, **done** |
 | `JSFunctionBytecode.cpool`, `byte_code_buf`, `closure_var`, `vardefs`, `pc2line_buf` | 17, 22, 16, 29, 10 | 4, **done** |
 | `JSStringSlice.parent`, `first_weak_ref` on objects and strings, `JSWeakRefRecord.next_weak_ref` | 4, 10, 11 | 5, **done** (rope children are boxed values already) |
-| internal class structs reached from `u.opaque` (`JSArrayBuffer`, `JSTypedArray`, `JSMapState`, …) | per struct | 6 |
+| internal class structs reached from `u.opaque` (`JSArrayBuffer`, `JSTypedArray`, `JSMapState`, …) and `u.func.function_bytecode` | 22 union members, about 200 sites | 6, **done** |
 
 Each batch is a mechanical rewrite in the style of stage 2a: the field
 is declared `JS_CPTR(T)`, which is `uint32_t` under cage boxing and `T`
@@ -326,6 +326,19 @@ parent pointer of a string slice are offsets. The chain is manipulated
 through pointers to slots, so the helpers that returned or took a
 `JSWeakRefRecord **` now return or take a pointer to the compressed slot
 and decode on read. Rope children were already boxed values.
+
+Batch 6 is done: every member of the object's opaque union is an offset,
+which covers the structures behind ArrayBuffer, typed arrays and
+DataView, Map and Set, Proxy, bound functions, promises and their
+resolving functions, generators, every iterator kind, async functions
+and the C-function and closure records, plus the function object's
+pointer to its bytecode. Host classes keep their external-pointer-table
+index in the same slot, and the ShadowRealm object keeps its context as
+a context-table index. With this, the only raw pointers left inside
+cage objects are the GC list links (batch 1), the typed-array back
+pointers inside `JSTypedArray` (`obj`, `buffer`) and the internal
+structures' own members, which later batches take as they come up. The
+allocation stress script is at 0.37 s and 174 MB.
 
 Trusted bytecode space allocates `JSFunctionBytecode`, its opcode buffer,
 closure tables and the saved frames of generators and async functions
@@ -542,3 +555,21 @@ Stage 3a.2 batch 4, bytecode arrays, before = batches 2 and 3
 
 Flat; the bytecode-array decodes happen once per call, not per
 instruction.
+
+Stage 3a.2 batch 5, weak references and slices, before = batch 4
+(2025-11-09):
+
+| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
+|---|---|---|---|---|
+| before (batch 4) | 83.4 | 1.46× | 3.43× | 0.26× |
+| after (batch 5) | 83.4 | 1.36× | 3.34× | 0.26× |
+
+| Site | CPU before | CPU after | RSS before | RSS after |
+|---|---|---|---|---|
+| google | 254 ms | 238 ms | 78.4 MB | 77.7 MB |
+| anthropic | 686 ms | 707 ms | 139.4 MB | 138.7 MB |
+| bbc | 3088 ms | 3012 ms | 451.8 MB | 451.8 MB |
+| cnn | 7325 ms | 7329 ms | 680.9 MB | 679.9 MB |
+| guardian | 5058 ms | 4993 ms | 383.0 MB | 382.5 MB |
+
+Flat.
