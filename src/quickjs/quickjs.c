@@ -42710,12 +42710,12 @@ static int JS_WriteSharedArrayBuffer(BCWriterState *s, JSValueConst obj)
     bc_put_u8(s, BC_TAG_SHARED_ARRAY_BUFFER);
     bc_put_leb128(s, abuf->byte_length);
     bc_put_leb128(s, abuf->max_byte_length);
-    bc_put_u64(s, (uintptr_t)abuf->data);
+    bc_put_u64(s, (uintptr_t)js_abuf_owned_data(abuf));
     if (js_resize_array(s->ctx, (void **)&s->sab_tab, sizeof(s->sab_tab[0]),
                         &s->sab_tab_size, s->sab_tab_len + 1))
         return -1;
     /* keep the SAB pointer so that the user can clone it or free it */
-    s->sab_tab[s->sab_tab_len++] = abuf->data;
+    s->sab_tab[s->sab_tab_len++] = js_abuf_owned_data(abuf);
     return 0;
 }
 
@@ -64211,10 +64211,10 @@ static void js_array_buffer_finalizer(JSRuntime *rt, JSValueConst val)
             }
         }
         if (abuf->shared && rt->sab_funcs.sab_free) {
-            rt->sab_funcs.sab_free(rt->sab_funcs.sab_opaque, abuf->data);
+            rt->sab_funcs.sab_free(rt->sab_funcs.sab_opaque, js_abuf_owned_data(abuf));
         } else {
             if (abuf->realloc_func)
-                js_abuf_realloc_func(abuf)(rt, js_abuf_opaque(abuf), abuf->data, 0);
+                js_abuf_realloc_func(abuf)(rt, js_abuf_opaque(abuf), js_abuf_owned_data(abuf), 0);
         }
         js_ept_clear(&abuf->opaque);
         js_free_rt(rt, abuf);
@@ -64317,7 +64317,7 @@ void JS_DetachArrayBuffer(JSContext *ctx, JSValueConst obj)
     if (!abuf || abuf->detached)
         return;
     if (abuf->realloc_func) {
-        js_abuf_realloc_func(abuf)(ctx->rt, js_abuf_opaque(abuf), abuf->data, 0);
+        js_abuf_realloc_func(abuf)(ctx->rt, js_abuf_opaque(abuf), js_abuf_owned_data(abuf), 0);
         /* The backing data has been released. Do not release it again when
            the detached ArrayBuffer object is later finalized. */
         abuf->realloc_func = 0;
@@ -64498,7 +64498,7 @@ static JSValue js_array_buffer_transfer(JSContext *ctx, JSValueConst this_val,
                                            JS_CLASS_ARRAY_BUFFER);
         goto fini;
     }
-    bs = abuf->data;
+    bs = js_abuf_owned_data(abuf);
     old_len = abuf->byte_length;
     realloc_func = js_abuf_realloc_func(abuf);
     opaque = js_abuf_opaque(abuf);
@@ -64580,7 +64580,7 @@ static JSValue js_array_buffer_resize(JSContext *ctx, JSValueConst this_val,
         // the ArrayBuffer cannot be resizable without a way to resize it,
         // js_array_buffer_constructor3 rejects that combination
         assert(abuf->realloc_func);
-        data = js_abuf_realloc_func(abuf)(ctx->rt, js_abuf_opaque(abuf), abuf->data,
+        data = js_abuf_realloc_func(abuf)(ctx->rt, js_abuf_opaque(abuf), js_abuf_owned_data(abuf),
                                   max_int(len, 1));
         if (!data)
             return JS_ThrowOutOfMemory(ctx);

@@ -66,6 +66,7 @@ static inline bool js_in_heap_cage(const void *ptr)
 
 
 #define js_abuf_data(abuf) ((uint8_t *)js_caged_ptr((abuf)->data))
+#define js_abuf_owned_data(abuf) ((abuf)->data ? js_abuf_data(abuf) : NULL)
 #define js_ta_ptr(p, member) \
     ((__typeof__((p)->u.array.u.member))js_caged_ptr((p)->u.array.u.member))
 
