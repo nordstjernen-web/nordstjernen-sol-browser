@@ -27,21 +27,31 @@ lexbor_conv_long_to_data(long num, lxb_char_t *buf, size_t len)
 size_t
 lexbor_conv_int64_to_data(int64_t num, lxb_char_t *buf, size_t len)
 {
-    int64_t tmp;
+    uint64_t unum, tmp;
     size_t have_minus, i, length;
 
     static const lxb_char_t *digits = (const lxb_char_t *) "0123456789";
 
     if (num != 0) {
-        tmp = num;
         length = 0;
         have_minus = 0;
 
         if (num < 0) {
             length = 1;
-            num = -num;
             have_minus = 1;
+            /*
+             * Take the magnitude in unsigned arithmetic so that INT64_MIN,
+             * whose negation is not representable in int64_t, does not trigger
+             * signed-overflow UB and a negative modulus (out-of-bounds digit
+             * index) further down.
+             */
+            unum = -((uint64_t) num);
         }
+        else {
+            unum = (uint64_t) num;
+        }
+
+        tmp = unum;
 
         while (tmp != 0) {
             length += 1;
@@ -64,7 +74,7 @@ lexbor_conv_int64_to_data(int64_t num, lxb_char_t *buf, size_t len)
 
         while (i != have_minus) {
             i -= 1;
-            num /= 10;
+            unum /= 10;
         }
 
         length = len;
@@ -81,8 +91,8 @@ lexbor_conv_int64_to_data(int64_t num, lxb_char_t *buf, size_t len)
 
     while (i != have_minus) {
         i -= 1;
-        buf[i] = digits[ num % 10 ];
-        num /= 10;
+        buf[i] = digits[ unum % 10 ];
+        unum /= 10;
     }
 
     return length;
