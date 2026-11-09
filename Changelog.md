@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a corrupted JavaScript heap can no longer run code in another
+  JavaScript runtime's realm. Functions name their realm by an index into
+  a process-wide table, which a page's heap shares with its workers and
+  the extension host; a forged index ran page code with another runtime's
+  context, on another thread or with the extension host's globals. Realm
+  lookups now check that the context belongs to the calling runtime
+  (`docs/heap-hardening.md`, review finding H3).
 * Security: a corrupted JavaScript heap can no longer call a native
   function through the wrong signature. The heap names native functions
   by an index into a table outside the cage, but the table did not record

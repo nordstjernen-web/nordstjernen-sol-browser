@@ -363,9 +363,18 @@ static void js_ctx_table_remove(uint32_t idx)
         atomic_store(&js_ctx_table[idx & (JS_CTX_TABLE_SIZE - 1)], NULL);
 }
 
-static inline JSContext *js_ctx_get(uint32_t idx)
+static no_inline __attribute__((noreturn)) void js_ctx_foreign(uint32_t idx)
 {
-    return atomic_load(&js_ctx_table[idx & (JS_CTX_TABLE_SIZE - 1)]);
+    fprintf(stderr, "quickjs heap cage: context %u belongs to another runtime\n", idx);
+    abort();
+}
+
+static inline JSContext *js_ctx_get(JSRuntime *rt, uint32_t idx)
+{
+    JSContext *ctx = atomic_load(&js_ctx_table[idx & (JS_CTX_TABLE_SIZE - 1)]);
+    if (ctx && unlikely(ctx->rt != rt))
+        js_ctx_foreign(idx);
+    return ctx;
 }
 
 static inline uint32_t js_ctx_ref(JSContext *ctx)
