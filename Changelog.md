@@ -3,6 +3,10 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Fixed: an async generator answers every request queued while it was
+  running or returning. Once it had finished, it settled one queued
+  `next()` and left the rest pending forever, keeping the generator
+  alive; `next()` calls queued behind a `return()` never settled at all.
 * Security: a function with more than 65534 block scopes (for example
   33000 `for` loops) no longer crashes the renderer. The scope limit
   raised a SyntaxError that most callers ignored, so parsing went on and

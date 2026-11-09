@@ -23358,10 +23358,11 @@ static void js_async_generator_resume_next(JSContext *ctx,
             } else if (next->completion_type == GEN_MAGIC_RETURN) {
                 s->state = JS_ASYNC_GENERATOR_STATE_AWAITING_RETURN;
                 js_async_generator_completed_return(ctx, s, next->result);
+                goto done;
             } else {
                 js_async_generator_reject(ctx, s, next->result);
             }
-            goto done;
+            break;
         case JS_ASYNC_GENERATOR_STATE_SUSPENDED_YIELD:
         case JS_ASYNC_GENERATOR_STATE_SUSPENDED_YIELD_STAR:
             value = js_dup(next->result);
@@ -23452,6 +23453,7 @@ static JSValue js_async_generator_resolve_function(JSContext *ctx,
         } else {
             js_async_generator_resolve(ctx, s, arg, true);
         }
+        js_async_generator_resume_next(ctx, s);
     } else if (s->state == JS_ASYNC_GENERATOR_STATE_EXECUTING) {
         /* restart function execution after await() */
         s->func_state.throw_flag = is_reject;
