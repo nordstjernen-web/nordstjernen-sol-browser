@@ -14,7 +14,9 @@ Changelog:
   behind the object's opaque slot (ArrayBuffer, typed arrays, Map and
   Set, Proxy, promises, generators, iterators, bound functions and the
   bytecode pointer of functions). A corrupted field can therefore only
-  name cage memory.
+  name cage memory, and the encoder refuses a pointer from outside the
+  cage instead of truncating it. Intl objects keep their libc-allocated
+  structure in the tagged pointer table.
   tables of compiled functions. A corrupted field can therefore only name
   cage memory.
   and home object, and a shape's prototype and hash-chain link. A

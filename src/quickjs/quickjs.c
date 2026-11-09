@@ -79,6 +79,7 @@
 #include "quickjs-cage.h"
 
 static uintptr_t js_heap_cage_base;
+static uintptr_t js_heap_cage_mask;
 
 #if JS_CAGE_BOXING
 #define JS_CPTR(T) uint32_t
@@ -86,9 +87,18 @@ static inline void *js_cptr_decode(uint32_t off)
 {
     return off ? (void *)(js_heap_cage_base + off) : NULL;
 }
+static no_inline __attribute__((noreturn)) void js_cptr_encode_outside_cage(const void *ptr)
+{
+    fprintf(stderr, "quickjs heap cage: refusing to compress the pointer %p, which lies outside the cage\n", ptr);
+    abort();
+}
 static inline uint32_t js_cptr_encode(const void *ptr)
 {
-    return ptr ? (uint32_t)((uintptr_t)ptr - js_heap_cage_base) : 0;
+    if (!ptr)
+        return 0;
+    if (unlikely(((uintptr_t)ptr & ~js_heap_cage_mask) != js_heap_cage_base))
+        js_cptr_encode_outside_cage(ptr);
+    return (uint32_t)((uintptr_t)ptr - js_heap_cage_base);
 }
 #define js_cload(T, field) ((T)js_cptr_decode(field))
 #define js_cstore(field, ptr) ((field) = js_cptr_encode(ptr))
@@ -1292,6 +1302,12 @@ static void *js_ept_get(const void *slot, uint32_t tag)
 
 #define JS_EPT_TAG_ABUF_OPAQUE 0xfffffffeu
 #define JS_EPT_TAG_CCLOSURE_OPAQUE 0xfffffffdu
+#define JS_EPT_TAG_INTL_OPAQUE 0xfffffffcu
+
+static inline bool js_class_is_intl(JSClassID class_id)
+{
+    return class_id >= JS_CLASS_INTL_LOCALE && class_id <= JS_CLASS_INTL_SEGMENT_ITERATOR;
+}
 
 static uint32_t js_ept_store(void *ptr, uint32_t tag)
 {
@@ -8037,7 +8053,7 @@ static void free_object(JSRuntime *rt, JSObject *p)
     finalizer = rt->class_array[p->class_id].finalizer;
     if (finalizer)
         (*finalizer)(rt, JS_MKPTR(JS_TAG_OBJECT, p));
-    if (p->class_id >= JS_CLASS_INIT_COUNT && js_cload(void *, p->u.opaque))
+    if ((p->class_id >= JS_CLASS_INIT_COUNT || js_class_is_intl(p->class_id)) && p->u.opaque)
         js_ept_release((uint32_t)(uintptr_t)p->u.opaque);
 
     /* fail safe */
@@ -13431,6 +13447,8 @@ void *JS_GetOpaque(JSValueConst obj, JSClassID class_id)
         return NULL;
     if (class_id >= JS_CLASS_INIT_COUNT)
         return js_ept_get((const void *)(uintptr_t)p->u.opaque, class_id);
+    if (js_class_is_intl(class_id))
+        return js_ept_load((uint32_t)(uintptr_t)p->u.opaque, JS_EPT_TAG_INTL_OPAQUE);
     return js_cload(void *, p->u.opaque);
 }
 
@@ -13454,6 +13472,8 @@ void *JS_GetAnyOpaque(JSValueConst obj, JSClassID *class_id)
     *class_id = p->class_id;
     if (p->class_id >= JS_CLASS_INIT_COUNT)
         return js_ept_get((const void *)(uintptr_t)p->u.opaque, p->class_id);
+    if (js_class_is_intl(p->class_id))
+        return js_ept_load((uint32_t)(uintptr_t)p->u.opaque, JS_EPT_TAG_INTL_OPAQUE);
     return js_cload(void *, p->u.opaque);
 }
 
@@ -68436,12 +68456,36 @@ typedef struct JSWeakRefData {
     JSValue obj;
 } JSWeakRefData;
 
+#if JS_CAGE_BOXING
+static JSWeakRefData *js_weakref_sentinel_ptr(void)
+{
+    static JSWeakRefData *_Atomic caged_sentinel;
+    JSWeakRefData *sentinel = atomic_load(&caged_sentinel);
+    if (!sentinel) {
+        sentinel = js_cage_shared_malloc(sizeof(*sentinel));
+        if (!sentinel)
+            abort();
+        memset(sentinel, 0, sizeof(*sentinel));
+        JSWeakRefData *expected = NULL;
+        if (!atomic_compare_exchange_strong(&caged_sentinel, &expected, sentinel)) {
+            js_cage_shared_free(sentinel);
+            sentinel = expected;
+        }
+    }
+    return sentinel;
+}
+#else
 static JSWeakRefData js_weakref_sentinel;
+static JSWeakRefData *js_weakref_sentinel_ptr(void)
+{
+    return &js_weakref_sentinel;
+}
+#endif
 
 static void js_weakref_finalizer(JSRuntime *rt, JSValueConst val)
 {
     JSWeakRefData *wrd = JS_GetOpaque(val, JS_CLASS_WEAK_REF);
-    if (!wrd || wrd == &js_weakref_sentinel)
+    if (!wrd || wrd == js_weakref_sentinel_ptr())
         return;
 
     /* Delete weak ref */
@@ -68499,7 +68543,7 @@ static JSValue js_weakref_deref(JSContext *ctx, JSValueConst this_val, int argc,
     JSWeakRefData *wrd = JS_GetOpaque2(ctx, this_val, JS_CLASS_WEAK_REF);
     if (!wrd)
         return JS_EXCEPTION;
-    if (wrd == &js_weakref_sentinel)
+    if (wrd == js_weakref_sentinel_ptr())
         return JS_UNDEFINED;
     return js_dup(wrd->target);
 }
@@ -69185,7 +69229,7 @@ static void reset_weak_ref(JSRuntime *rt, JS_CPTR(JSWeakRefRecord *) *first_weak
             break;
         case JS_WEAK_REF_KIND_WEAK_REF:
             wrd = wr->u.weak_ref_data;
-            JS_SetOpaqueInternal(wrd->obj, &js_weakref_sentinel);
+            JS_SetOpaqueInternal(wrd->obj, js_weakref_sentinel_ptr());
             js_free_rt(rt, wrd);
             break;
         case JS_WEAK_REF_KIND_FINALIZATION_REGISTRY_ENTRY: {
@@ -70921,8 +70965,8 @@ JSValue js_intl_this_bigint_value(JSContext *ctx, JSValueConst this_val)
 void js_intl_set_opaque(JSValueConst obj, void *opaque)
 {
     JSObject *p = JS_VALUE_GET_OBJ(obj);
-    if (p->class_id >= JS_CLASS_INTL_LOCALE && p->class_id <= JS_CLASS_INTL_SEGMENT_ITERATOR)
-        js_cstore(p->u.opaque, opaque);
+    if (js_class_is_intl(p->class_id))
+        p->u.opaque = (JS_CPTR(void *))(uintptr_t)js_ept_store(opaque, JS_EPT_TAG_INTL_OPAQUE);
 }
 
 bool js_intl_in_constructor_call(JSContext *ctx)

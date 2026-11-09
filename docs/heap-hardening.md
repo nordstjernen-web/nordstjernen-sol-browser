@@ -340,11 +340,72 @@ pointers inside `JSTypedArray` (`obj`, `buffer`) and the internal
 structures' own members, which later batches take as they come up. The
 allocation stress script is at 0.37 s and 174 MB.
 
+Batch 6 found two places that stored a pointer from *outside* the cage
+in a compressed slot, which the encoder then truncated into a random
+in-cage address: the Intl objects keep structures allocated with libc
+`malloc` in the opaque slot, and a cleared `WeakRef` was marked with the
+address of a static sentinel. The first crashed a settled load of one
+live site; the second surfaced only once the encoder started checking.
+Intl objects now keep their structure in the external pointer table
+under a tag of their own, and the sentinel is a cage allocation. Both
+builds pass the site captures that failed.
+
+### Proposed improvement: fail closed on compression
+
+The improvement this stage most needed, now in place: `js_cptr_encode`
+refuses a pointer that does not lie inside the cage and aborts with a
+message naming it, instead of truncating it. Before, a stray out-of-cage
+pointer in a compressed field became a silent, data-dependent crash
+somewhere else; the Intl case above showed up as a site that failed to
+load, with nothing on stderr. The check is one compare on the store
+path, which is far rarer than the load path, so it costs nothing
+measurable, and it turns every future mistake of this kind, including
+ones upstream merges will introduce as new fields appear, into a loud
+failure in the first run that exercises the code. The same rule should
+extend to the two remaining raw-pointer kinds as they are converted:
+the GC list links (batch 1) and the typed-array back pointers.
+
 Trusted bytecode space allocates `JSFunctionBytecode`, its opcode buffer,
 closure tables and the saved frames of generators and async functions
 from memory outside the cage, reached through an indirect table, so the
 interpreter sizes and indexes its native stack frame from data an
 in-cage attacker cannot reach.
+
+Design notes for 3b, from the tree after 3a.2:
+
+- `JSFunctionBytecode` is a GC object with the reference count in its
+  allocation header, so the trusted block path that already carries
+  `JSRuntime` and `JSContext` can carry it too, and its `cpool` values
+  and realm index may keep pointing into the cage and the context table.
+- Function objects reach their bytecode through `u.func.function_bytecode`
+  (now a cage offset); that becomes an index into a trusted bytecode
+  table, like the context table, with `js_ctx_get`-style masked decode.
+- The hard part is that bytecode also travels as a *value*:
+  `JS_TAG_FUNCTION_BYTECODE` values sit in constant pools for nested
+  functions and in module records. Under cage boxing a value's payload
+  is a cage offset, so a trusted bytecode cannot be boxed as a pointer.
+  Either the payload for that tag becomes the table index and every
+  `JS_VALUE_GET_PTR` on such a value goes through a tag-aware getter
+  (the generic macro stays tag-agnostic and fast; the handful of
+  bytecode-tag sites in GC marking, freeing and the constant-pool reader
+  switch to the typed getter), or an in-cage handle object stands in
+  for the bytecode in values and holds the index. The first keeps the
+  value layout; the second keeps the macros untouched. The engine has
+  eleven bytecode-tag sites (four `JS_MKPTR`, five `case` labels), so
+  the tag-aware getter is the smaller change.
+- Generator and async frames (`JSAsyncFunctionState`) embed a
+  `JSStackFrame` with `cur_pc`, `arg_buf` and `var_buf`; they move to
+  trusted blocks with the same indirection, and the interpreter's
+  `alloca` sizing then reads `stack_size`, `var_count` and `arg_count`
+  from trusted memory only.
+
+Batch 1 of 3a.2, the GC list links, has a wrinkle of its own: the
+runtime's `gc_obj_list` threads both cage objects and the trusted
+`JSContext` structures, and a compressed link cannot name trusted
+memory. Contexts therefore need a list of their own before the links
+can shrink (the runtime already keeps `context_list`); the GC walk then
+visits both lists. Until then a corrupted link is still an unlink write
+outside the cage.
 
 These two stages are the ones that diverge the fork from upstream for
 good, which is why they come last and only after the earlier stages have
