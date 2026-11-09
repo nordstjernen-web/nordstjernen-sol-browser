@@ -176,6 +176,29 @@ typedef uint32_t JSAtom;
 #endif
 #endif
 
+/* Cage boxing: 64-bit builds box values like the NaN-boxing layout, with the
+   low 32 bits holding the pointer's offset from the heap cage base, so a
+   value can only ever name memory inside the cage. */
+#ifndef JS_CAGE_BOXING
+#if INTPTR_MAX == INT64_MAX && !defined(JS_CHECK_JSVALUE) && !defined(__SANITIZE_ADDRESS__)
+#if defined(__has_feature)
+#if !__has_feature(address_sanitizer)
+#define JS_CAGE_BOXING 1
+#endif
+#else
+#define JS_CAGE_BOXING 1
+#endif
+#endif
+#endif
+#ifndef JS_CAGE_BOXING
+#define JS_CAGE_BOXING 0
+#endif
+#if JS_CAGE_BOXING
+#undef JS_NAN_BOXING
+#define JS_NAN_BOXING 1
+extern JS_EXTERN uintptr_t js_cage_pointer_base;
+#endif
+
 enum {
     /* all tags with a reference count are negative */
     JS_TAG_FIRST       = -9, /* first negative tag */
@@ -256,10 +279,18 @@ typedef uint64_t JSValue;
 #define JS_VALUE_GET_INT(v) (int)(v)
 #define JS_VALUE_GET_BOOL(v) (int)(v)
 #define JS_VALUE_GET_SHORT_BIG_INT(v) (int)(v)
+#if JS_CAGE_BOXING
+#define JS_VALUE_GET_PTR(v) ((void *)(js_cage_pointer_base + (uint32_t)(v)))
+#else
 #define JS_VALUE_GET_PTR(v) (void *)(intptr_t)(v)
+#endif
 
 #define JS_MKVAL(tag, val) (((uint64_t)(tag) << 32) | (uint32_t)(val))
+#if JS_CAGE_BOXING
+#define JS_MKPTR(tag, ptr) (((uint64_t)(tag) << 32) | (uint32_t)((uintptr_t)(ptr) - js_cage_pointer_base))
+#else
 #define JS_MKPTR(tag, ptr) (((uint64_t)(tag) << 32) | (uintptr_t)(ptr))
+#endif
 
 #define JS_FLOAT64_TAG_ADDEND (0x7ff80000 - JS_TAG_FIRST + 1) /* quiet NaN encoding */
 
@@ -527,6 +558,14 @@ JS_EXTERN void JS_SetMaxStackSize(JSRuntime *rt, size_t stack_size);
 JS_EXTERN void JS_UpdateStackTop(JSRuntime *rt);
 JS_EXTERN JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque);
 JS_EXTERN void JS_SetHeapCage(uintptr_t base, size_t size);
+JS_EXTERN bool JS_CageContains(const void *ptr);
+JS_EXTERN uintptr_t JS_CageBase(void);
+JS_EXTERN size_t JS_CageSize(void);
+JS_EXTERN size_t JS_CageCommittedBytes(void);
+JS_EXTERN void *JS_CageMalloc(size_t size);
+JS_EXTERN void *JS_CageRealloc(void *ptr, size_t size);
+JS_EXTERN void JS_CageFree(void *ptr);
+JS_EXTERN size_t JS_CageUsableSize(const void *ptr);
 JS_EXTERN void JS_FreeRuntime(JSRuntime *rt);
 JS_EXTERN void *JS_GetRuntimeOpaque(JSRuntime *rt);
 JS_EXTERN void JS_SetRuntimeOpaque(JSRuntime *rt, void *opaque);

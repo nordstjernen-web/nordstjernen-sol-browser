@@ -3,6 +3,16 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security: JavaScript values are now 8 bytes and hold a 32-bit offset
+  into the heap cage instead of a raw pointer (`JS_CAGE_BOXING`, stage
+  3a.1 of `docs/heap-hardening.md`), so a property slot, array element,
+  stack slot or constant can only ever name memory inside the cage, and
+  all of them take half the space. The cage moved into the engine
+  (`src/quickjs/quickjs-cage.c`): `JS_NewRuntime()` reserves it on first
+  use and the in-tree `qjs`/`qjsc` tools run the same layout as the
+  browser. It is 4 GB per process and the runtime refuses to start
+  without it; AddressSanitizer and 32-bit builds keep the classic
+  layouts. `NS_JS_HEAP_CAGE=0` is gone.
 * Security: the JavaScript runtime and every context now live in trusted
   memory outside the heap cage, and heap objects refer to a context
   through an index into a trusted context table instead of a raw

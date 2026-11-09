@@ -76,6 +76,7 @@
 // the __atomic_*() helpers in its lib/stdatomic.c and lib/atomic.S
 #if !defined(__TINYC__) && !defined(EMSCRIPTEN) && !defined(__wasi__) && !__STDC_NO_ATOMICS__ && !defined(__DJGPP)
 #include "quickjs-c-atomics.h"
+#include "quickjs-cage.h"
 #define CONFIG_ATOMICS
 #endif
 
@@ -385,6 +386,7 @@ struct JSRuntime {
     uint16_t brand_classes[JS_BRAND_MAX][JS_BRAND_SET_SIZE];
     int brand_count;
     JSArenaState arena_state;
+    JSCageHeap *cage_heap;
     const char *rt_info;
 
     int atom_hash_size; /* power of two */
@@ -1041,6 +1043,46 @@ void JS_SetHeapCage(uintptr_t base, size_t size)
     js_heap_cage_base = base;
     js_heap_cage_mask = size - 1;
     js_heap_cage_active = true;
+}
+
+bool JS_CageContains(const void *ptr)
+{
+    return js_cage_contains(ptr);
+}
+
+uintptr_t JS_CageBase(void)
+{
+    return js_cage_base();
+}
+
+size_t JS_CageSize(void)
+{
+    return js_cage_size();
+}
+
+size_t JS_CageCommittedBytes(void)
+{
+    return js_cage_committed_bytes();
+}
+
+void *JS_CageMalloc(size_t size)
+{
+    return js_cage_shared_malloc(size);
+}
+
+void *JS_CageRealloc(void *ptr, size_t size)
+{
+    return js_cage_shared_realloc(ptr, size);
+}
+
+void JS_CageFree(void *ptr)
+{
+    js_cage_shared_free(ptr);
+}
+
+size_t JS_CageUsableSize(const void *ptr)
+{
+    return js_cage_shared_usable_size(ptr);
 }
 
 static inline void *js_caged_ptr(const void *ptr)
@@ -2842,9 +2884,59 @@ static const JSMallocFunctions def_malloc_funcs = {
     js__malloc_usable_size
 };
 
+static void *js_cage_mf_calloc(void *opaque, size_t count, size_t size)
+{
+    size_t total;
+    if (__builtin_mul_overflow(count, size, &total))
+        return NULL;
+    void *p = js_cage_heap_alloc(opaque, total);
+    if (p)
+        memset(p, 0, total);
+    return p;
+}
+
+static void *js_cage_mf_malloc(void *opaque, size_t size)
+{
+    return js_cage_heap_alloc(opaque, size);
+}
+
+static void js_cage_mf_free(void *opaque, void *ptr)
+{
+    (void)opaque;
+    js_cage_free(ptr);
+}
+
+static void *js_cage_mf_realloc(void *opaque, void *ptr, size_t size)
+{
+    return js_cage_heap_realloc(opaque, ptr, size);
+}
+
+static const JSMallocFunctions cage_malloc_funcs = {
+    js_cage_mf_calloc,
+    js_cage_mf_malloc,
+    js_cage_mf_free,
+    js_cage_mf_realloc,
+    js_cage_usable_size,
+};
+
 JSRuntime *JS_NewRuntime(void)
 {
+#if JS_CAGE_BOXING
+    JSCageHeap *heap = js_cage_heap_new();
+    if (!heap)
+        return NULL;
+    JS_SetHeapCage(js_cage_base(), js_cage_size());
+    JSRuntime *rt = JS_NewRuntime2(&cage_malloc_funcs, heap);
+    if (!rt) {
+        js_cage_heap_destroy(heap);
+        return NULL;
+    }
+    rt->cage_heap = heap;
+    return rt;
+#else
+    (void)cage_malloc_funcs;
     return JS_NewRuntime2(&def_malloc_funcs, NULL);
+#endif
 }
 
 void JS_SetMemoryLimit(JSRuntime *rt, size_t limit)
@@ -3287,7 +3379,9 @@ void JS_FreeRuntime(JSRuntime *rt)
 
     js_arena_free_all(rt);
 
+    JSCageHeap *cage_heap = rt->cage_heap;
     js_trusted_block_free(js_rc(rt));
+    js_cage_heap_destroy(cage_heap);
 
     if (leak)
         abort();

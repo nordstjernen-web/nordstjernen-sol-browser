@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 typedef JS_BOOL ns_js_bool;
 typedef JSRuntime ns_js_interrupt_arg;
@@ -69,6 +70,62 @@ JS_SetHeapCage(uintptr_t base, size_t size)
 {
     (void)base;
     (void)size;
+}
+
+static inline bool
+JS_CageContains(const void *ptr)
+{
+    (void)ptr;
+    return false;
+}
+
+static inline uintptr_t
+JS_CageBase(void)
+{
+    return 0;
+}
+
+static inline size_t
+JS_CageSize(void)
+{
+    return 0;
+}
+
+static inline size_t
+JS_CageCommittedBytes(void)
+{
+    return 0;
+}
+
+static inline void *
+JS_CageMalloc(size_t size)
+{
+    size_t *raw = malloc(sizeof(size_t) + (size ? size : 1));
+    if (!raw) return NULL;
+    raw[0] = size;
+    return raw + 1;
+}
+
+static inline void *
+JS_CageRealloc(void *ptr, size_t size)
+{
+    if (!ptr) return JS_CageMalloc(size);
+    size_t *raw = realloc((size_t *)ptr - 1, sizeof(size_t) + (size ? size : 1));
+    if (!raw) return NULL;
+    raw[0] = size;
+    return raw + 1;
+}
+
+static inline void
+JS_CageFree(void *ptr)
+{
+    if (ptr) free((size_t *)ptr - 1);
+}
+
+static inline size_t
+JS_CageUsableSize(const void *ptr)
+{
+    return ptr ? ((const size_t *)ptr)[-1] : 0;
 }
 
 #define JS_EVAL_OPTIONS_VERSION 1
