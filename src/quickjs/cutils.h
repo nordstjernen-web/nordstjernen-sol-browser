@@ -872,6 +872,13 @@ static inline int JS_PRINTF_FORMAT_ATTR(2, 3) dbuf_printf(DynBuf *s, JS_PRINTF_F
     va_start(ap, fmt);
     len = vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
+    if (len < 0) {
+        /* encoding error or a width/precision that does not fit in an
+           int: a negative length must not be passed to dbuf_put() as a
+           size_t */
+        s->error = true;
+        return -1;
+    }
     if (len < (int)sizeof(buf)) {
         /* fast case */
         return dbuf_put(s, (uint8_t *)buf, len);
