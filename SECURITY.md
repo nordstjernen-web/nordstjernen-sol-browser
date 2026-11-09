@@ -86,6 +86,11 @@ made inaccessible. ArrayBuffer data pointers and typed-array element
 pointers are masked into the range on every read, and every backing
 store (WebAssembly linear memory and WebGPU mapped ranges included) must
 lie inside it, so a forged buffer reaches cage or guard memory only.
+Host pointers behind `JS_SetOpaque` live in a class-tagged table outside
+the range, and native function pointers held by heap objects are
+indices into an append-only code pointer table, so a corrupted object
+can name another live object of the same class or another registered
+function at worst, never an arbitrary address.
 This is exploit-cost hardening on the way to a V8-style heap sandbox,
 not yet a boundary of its own; the staged plan and its measurements are
 in `docs/heap-hardening.md`.

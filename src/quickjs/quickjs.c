@@ -1017,8 +1017,8 @@ typedef struct JSArrayBuffer {
     uint8_t shared; /* if shared, the array buffer cannot be detached */
     uint8_t *data; /* NULL if detached */
     struct list_head array_list;
-    void *opaque;
-    JSReallocArrayBufferDataFunc *realloc_func;
+    uint32_t opaque;
+    uint32_t realloc_func;
 } JSArrayBuffer;
 
 typedef struct JSTypedArray {
@@ -1032,11 +1032,13 @@ typedef struct JSTypedArray {
 
 static uintptr_t js_heap_cage_base;
 static uintptr_t js_heap_cage_mask = ~(uintptr_t)0;
+static bool js_heap_cage_active;
 
 void JS_SetHeapCage(uintptr_t base, size_t size)
 {
     js_heap_cage_base = base;
     js_heap_cage_mask = size - 1;
+    js_heap_cage_active = true;
 }
 
 static inline void *js_caged_ptr(const void *ptr)
@@ -1052,6 +1054,199 @@ static inline bool js_in_heap_cage(const void *ptr)
 #define js_abuf_data(abuf) ((uint8_t *)js_caged_ptr((abuf)->data))
 #define js_ta_ptr(p, member) \
     ((__typeof__((p)->u.array.u.member))js_caged_ptr((p)->u.array.u.member))
+
+typedef void (*JSCodePtr)(void);
+
+#define JS_CPT_SEG_SHIFT 12
+#define JS_CPT_SEG_SIZE (1u << JS_CPT_SEG_SHIFT)
+#define JS_CPT_SEGS 256u
+#define JS_EPT_SEG_SHIFT 16
+#define JS_EPT_SEG_SIZE (1u << JS_EPT_SEG_SHIFT)
+#define JS_EPT_SEGS 256u
+
+typedef struct JSExternalPointerEntry {
+    void *ptr;
+    uint32_t tag;
+    uint32_t next_free;
+} JSExternalPointerEntry;
+
+static _Atomic int js_ptr_tables_lock_word;
+static JSCodePtr *_Atomic js_cpt_segments[JS_CPT_SEGS];
+static uint32_t js_cpt_count = 1;
+static uint32_t *js_cpt_hash;
+static uint32_t js_cpt_hash_size;
+static JSExternalPointerEntry *_Atomic js_ept_segments[JS_EPT_SEGS];
+static uint32_t js_ept_count = 1;
+static uint32_t js_ept_free_head;
+
+static void js_ptr_tables_lock(void)
+{
+    while (atomic_exchange(&js_ptr_tables_lock_word, 1))
+        continue;
+}
+
+static void js_ptr_tables_unlock(void)
+{
+    atomic_store(&js_ptr_tables_lock_word, 0);
+}
+
+static inline JSCodePtr js_cpt_get(uint32_t idx)
+{
+    idx &= JS_CPT_SEGS * JS_CPT_SEG_SIZE - 1;
+    JSCodePtr *seg = atomic_load(&js_cpt_segments[idx >> JS_CPT_SEG_SHIFT]);
+    return seg ? seg[idx & (JS_CPT_SEG_SIZE - 1)] : NULL;
+}
+
+static uint32_t js_cpt_hash_slot(JSCodePtr fn, uint32_t size)
+{
+    uint64_t h = (uint64_t)(uintptr_t)fn * 0x9E3779B97F4A7C15ull;
+    return (uint32_t)(h >> 32) & (size - 1);
+}
+
+static void js_cpt_rehash(uint32_t new_size)
+{
+    uint32_t *table = calloc(new_size, sizeof(*table));
+    if (!table)
+        abort();
+    for (uint32_t idx = 1; idx < js_cpt_count; idx++) {
+        uint32_t slot = js_cpt_hash_slot(js_cpt_get(idx), new_size);
+        while (table[slot])
+            slot = (slot + 1) & (new_size - 1);
+        table[slot] = idx;
+    }
+    free(js_cpt_hash);
+    js_cpt_hash = table;
+    js_cpt_hash_size = new_size;
+}
+
+static uint32_t js_cpt_intern(JSCodePtr fn)
+{
+    if (!fn)
+        return 0;
+    js_ptr_tables_lock();
+    if (js_cpt_count * 2 > js_cpt_hash_size)
+        js_cpt_rehash(js_cpt_hash_size ? js_cpt_hash_size * 2 : 4096);
+    uint32_t slot = js_cpt_hash_slot(fn, js_cpt_hash_size);
+    for (;;) {
+        uint32_t idx = js_cpt_hash[slot];
+        if (!idx)
+            break;
+        if (js_cpt_get(idx) == fn) {
+            js_ptr_tables_unlock();
+            return idx;
+        }
+        slot = (slot + 1) & (js_cpt_hash_size - 1);
+    }
+    uint32_t idx = js_cpt_count;
+    if (idx >= JS_CPT_SEGS * JS_CPT_SEG_SIZE)
+        abort();
+    uint32_t seg = idx >> JS_CPT_SEG_SHIFT;
+    JSCodePtr *entries = atomic_load(&js_cpt_segments[seg]);
+    if (!entries) {
+        entries = calloc(JS_CPT_SEG_SIZE, sizeof(*entries));
+        if (!entries)
+            abort();
+        atomic_store(&js_cpt_segments[seg], entries);
+    }
+    entries[idx & (JS_CPT_SEG_SIZE - 1)] = fn;
+    js_cpt_count++;
+    js_cpt_hash[slot] = idx;
+    js_ptr_tables_unlock();
+    return idx;
+}
+
+static inline JSExternalPointerEntry *js_ept_entry(uint32_t idx)
+{
+    idx &= JS_EPT_SEGS * JS_EPT_SEG_SIZE - 1;
+    JSExternalPointerEntry *seg = atomic_load(&js_ept_segments[idx >> JS_EPT_SEG_SHIFT]);
+    return seg ? &seg[idx & (JS_EPT_SEG_SIZE - 1)] : NULL;
+}
+
+static uint32_t js_ept_alloc(void *ptr, uint32_t tag)
+{
+    js_ptr_tables_lock();
+    uint32_t idx = js_ept_free_head;
+    JSExternalPointerEntry *e;
+    if (idx) {
+        e = js_ept_entry(idx);
+        js_ept_free_head = e->next_free;
+    } else {
+        idx = js_ept_count;
+        if (idx >= JS_EPT_SEGS * JS_EPT_SEG_SIZE) {
+            js_ptr_tables_unlock();
+            return 0;
+        }
+        uint32_t seg = idx >> JS_EPT_SEG_SHIFT;
+        JSExternalPointerEntry *entries = atomic_load(&js_ept_segments[seg]);
+        if (!entries) {
+            entries = calloc(JS_EPT_SEG_SIZE, sizeof(*entries));
+            if (!entries) {
+                js_ptr_tables_unlock();
+                return 0;
+            }
+            atomic_store(&js_ept_segments[seg], entries);
+        }
+        js_ept_count++;
+        e = &entries[idx & (JS_EPT_SEG_SIZE - 1)];
+    }
+    e->ptr = ptr;
+    e->tag = tag;
+    e->next_free = 0;
+    js_ptr_tables_unlock();
+    return idx;
+}
+
+static void js_ept_release(uint32_t idx)
+{
+    JSExternalPointerEntry *e = js_ept_entry(idx);
+    if (!e)
+        return;
+    js_ptr_tables_lock();
+    if (e->tag) {
+        e->ptr = NULL;
+        e->tag = 0;
+        e->next_free = js_ept_free_head;
+        js_ept_free_head = idx;
+    }
+    js_ptr_tables_unlock();
+}
+
+static void *js_ept_get(const void *slot, uint32_t tag)
+{
+    uint32_t idx = (uint32_t)(uintptr_t)slot;
+    if (!idx)
+        return NULL;
+    JSExternalPointerEntry *e = js_ept_entry(idx);
+    if (!e || e->tag != tag)
+        return NULL;
+    return e->ptr;
+}
+
+#define js_abuf_realloc_func(abuf) \
+    ((JSReallocArrayBufferDataFunc *)js_cpt_get((abuf)->realloc_func))
+
+#define JS_EPT_TAG_ABUF_OPAQUE 0xfffffffeu
+#define JS_EPT_TAG_CCLOSURE_OPAQUE 0xfffffffdu
+
+static uint32_t js_ept_store(void *ptr, uint32_t tag)
+{
+    return ptr ? js_ept_alloc(ptr, tag) : 0;
+}
+
+static void *js_ept_load(uint32_t idx, uint32_t tag)
+{
+    return js_ept_get((const void *)(uintptr_t)idx, tag);
+}
+
+static void js_ept_clear(uint32_t *slot)
+{
+    if (*slot) {
+        js_ept_release(*slot);
+        *slot = 0;
+    }
+}
+
+#define js_abuf_opaque(abuf) js_ept_load((abuf)->opaque, JS_EPT_TAG_ABUF_OPAQUE)
 
 typedef struct JSAsyncFunctionState {
     JSValue this_val; /* 'this' generator argument */
@@ -1282,7 +1477,7 @@ struct JSObject {
         } func;
         struct { /* JS_CLASS_C_FUNCTION: 12/20 bytes */
             JSContext *realm;
-            JSCFunctionType c_function;
+            uint32_t c_function;
             uint8_t length;
             uint8_t cproto;
             int16_t magic;
@@ -1922,7 +2117,8 @@ static void *js_arena_malloc(JSRuntime *rt, size_t size)
         return arena_zero_block(rt)->user_data;
     total_size = ((size + JS_ARENA_ALIGN - 1) & ~(size_t)(JS_ARENA_ALIGN - 1)) +
         sizeof(JSMallocBlockHeader);
-    if (!JS_ARENA_LARGE_BLOCKS_ONLY && total_size <= JS_ARENA_MAX_SMALL_SIZE) {
+    if (!JS_ARENA_LARGE_BLOCKS_ONLY && !js_heap_cage_active &&
+        total_size <= JS_ARENA_MAX_SMALL_SIZE) {
         int block_size_idx;
         unsigned int block_idx, block_size;
         JSMallocBlockHeader *b;
@@ -2061,7 +2257,8 @@ static void *js_arena_calloc(JSRuntime *rt, size_t count, size_t size)
     size_t n = count * size; /* overflow already checked by js_calloc_rt */
     size_t total_size = ((n + JS_ARENA_ALIGN - 1) & ~(size_t)(JS_ARENA_ALIGN - 1)) +
         sizeof(JSMallocBlockHeader);
-    if (!JS_ARENA_LARGE_BLOCKS_ONLY && total_size <= JS_ARENA_MAX_SMALL_SIZE) {
+    if (!JS_ARENA_LARGE_BLOCKS_ONLY && !js_heap_cage_active &&
+        total_size <= JS_ARENA_MAX_SMALL_SIZE) {
         /* Small blocks are carved from recycled (dirty) arena memory, so they
            must be zeroed explicitly. */
         void *ptr = js_arena_malloc(rt, n);
@@ -6745,7 +6942,7 @@ JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
     p = JS_VALUE_GET_OBJ(func_obj);
     p->is_host_function = ctx->host_functions;
     p->u.cfunc.realm = JS_DupContext(ctx);
-    p->u.cfunc.c_function.generic = func;
+    p->u.cfunc.c_function = js_cpt_intern((JSCodePtr)func);
     p->u.cfunc.length = length;
     p->u.cfunc.cproto = cproto;
     p->u.cfunc.magic = magic;
@@ -6778,7 +6975,7 @@ JSValue JS_NewCFunction2(JSContext *ctx, JSCFunction *func,
 }
 
 typedef struct JSCFunctionDataRecord {
-    JSCFunctionData *func;
+    uint32_t func;
     uint8_t length;
     uint8_t data_len;
     uint16_t magic;
@@ -6847,7 +7044,7 @@ static JSValue js_call_c_function_data(JSContext *ctx, JSValueConst func_obj,
     sf->is_constructor = (flags & JS_CALL_FLAG_CONSTRUCTOR) != 0;
     sf->cur_func = unsafe_unconst(func_obj);
     sf->arg_count = argc;
-    ret = s->func(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
+    ret = ((JSCFunctionData *)js_cpt_get(s->func))(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
     rt->current_stack_frame = sf->prev_frame;
     return ret;
 }
@@ -6896,7 +7093,7 @@ bool JS_IsForwarder(JSValueConst v, JSValue *target)
     if (p->class_id != JS_CLASS_C_FUNCTION_DATA)
         return false;
     s = p->u.opaque;
-    if (!s || s->func != js_forwarder_call)
+    if (!s || js_cpt_get(s->func) != (JSCodePtr)js_forwarder_call)
         return false;
     if (target)
         *target = s->data[0];
@@ -7162,7 +7359,7 @@ JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
         JS_FreeValue(ctx, func_obj);
         return JS_EXCEPTION;
     }
-    s->func = func;
+    s->func = js_cpt_intern((JSCodePtr)func);
     s->length = length;
     s->data_len = data_len;
     s->magic = magic;
@@ -7217,11 +7414,11 @@ static void js_autoinit_mark(JSRuntime *rt, JSProperty *pr,
 }
 
 typedef struct JSCClosureRecord {
-    JSCClosure *func;
+    uint32_t func;
     uint16_t length;
     uint16_t magic;
-    void *opaque;
-    void (*opaque_finalize)(void *opaque);
+    uint32_t opaque;
+    uint32_t opaque_finalize;
 } JSCClosureRecord;
 
 static void js_c_closure_finalizer(JSRuntime *rt, JSValueConst val)
@@ -7230,8 +7427,8 @@ static void js_c_closure_finalizer(JSRuntime *rt, JSValueConst val)
 
     if (s) {
         if (s->opaque_finalize)
-           s->opaque_finalize(s->opaque);
-
+           ((JSCClosureFinalizerFunc *)js_cpt_get(s->opaque_finalize))(js_ept_load(s->opaque, JS_EPT_TAG_CCLOSURE_OPAQUE));
+        js_ept_clear(&s->opaque);
         js_free_rt(rt, s);
     }
 }
@@ -7270,7 +7467,7 @@ static JSValue js_call_c_closure(JSContext *ctx, JSValueConst func_obj,
     sf->is_constructor = (flags & JS_CALL_FLAG_CONSTRUCTOR) != 0;
     sf->cur_func = unsafe_unconst(func_obj);
     sf->arg_count = argc;
-    ret = s->func(ctx, this_val, argc, arg_buf, s->magic, s->opaque);
+    ret = ((JSCClosure *)js_cpt_get(s->func))(ctx, this_val, argc, arg_buf, s->magic, js_ept_load(s->opaque, JS_EPT_TAG_CCLOSURE_OPAQUE));
     rt->current_stack_frame = sf->prev_frame;
 
     return ret;
@@ -7294,11 +7491,11 @@ JSValue JS_NewCClosure(JSContext *ctx, JSCClosure *func, const char *name,
         JS_FreeValue(ctx, func_obj);
         return JS_EXCEPTION;
     }
-    s->func = func;
+    s->func = js_cpt_intern((JSCodePtr)func);
     s->length = length;
     s->magic = magic;
-    s->opaque = opaque;
-    s->opaque_finalize = opaque_finalize;
+    s->opaque = js_ept_store(opaque, JS_EPT_TAG_CCLOSURE_OPAQUE);
+    s->opaque_finalize = js_cpt_intern((JSCodePtr)opaque_finalize);
     JS_SetOpaqueInternal(func_obj, s);
     name_atom = JS_ATOM_empty_string;
     if (name && *name) {
@@ -7596,6 +7793,8 @@ static void free_object(JSRuntime *rt, JSObject *p)
     finalizer = rt->class_array[p->class_id].finalizer;
     if (finalizer)
         (*finalizer)(rt, JS_MKPTR(JS_TAG_OBJECT, p));
+    if (p->class_id >= JS_CLASS_INIT_COUNT && p->u.opaque)
+        js_ept_release((uint32_t)(uintptr_t)p->u.opaque);
 
     /* fail safe */
     p->class_id = 0;
@@ -12814,7 +13013,7 @@ static bool JS_IsCFunction(JSContext *ctx, JSValueConst val, JSCFunction *func,
         return false;
     p = JS_VALUE_GET_OBJ(val);
     if (p->class_id == JS_CLASS_C_FUNCTION)
-        return (p->u.cfunc.c_function.generic == func && p->u.cfunc.magic == magic);
+        return (js_cpt_get(p->u.cfunc.c_function) == (JSCodePtr)func && p->u.cfunc.magic == magic);
     else
         return false;
 }
@@ -12933,7 +13132,20 @@ int JS_SetOpaque(JSValueConst obj, void *opaque)
         p = JS_VALUE_GET_OBJ(obj);
         // User code can't set the opaque of internal objects.
         if (p->class_id >= JS_CLASS_INIT_COUNT) {
-            p->u.opaque = opaque;
+            uint32_t idx = (uint32_t)(uintptr_t)p->u.opaque;
+            JSExternalPointerEntry *e = idx ? js_ept_entry(idx) : NULL;
+            if (e && e->tag == p->class_id) {
+                e->ptr = opaque;
+                return 0;
+            }
+            if (!opaque) {
+                p->u.opaque = NULL;
+                return 0;
+            }
+            idx = js_ept_alloc(opaque, p->class_id);
+            if (!idx)
+                return -1;
+            p->u.opaque = (void *)(uintptr_t)idx;
             return 0;
         }
     }
@@ -12960,6 +13172,8 @@ void *JS_GetOpaque(JSValueConst obj, JSClassID class_id)
     p = JS_VALUE_GET_OBJ(obj);
     if (p->class_id != class_id)
         return NULL;
+    if (class_id >= JS_CLASS_INIT_COUNT)
+        return js_ept_get(p->u.opaque, class_id);
     return p->u.opaque;
 }
 
@@ -12981,6 +13195,8 @@ void *JS_GetAnyOpaque(JSValueConst obj, JSClassID *class_id)
     }
     p = JS_VALUE_GET_OBJ(obj);
     *class_id = p->class_id;
+    if (p->class_id >= JS_CLASS_INIT_COUNT)
+        return js_ept_get(p->u.opaque, p->class_id);
     return p->u.opaque;
 }
 
@@ -17941,7 +18157,7 @@ static JSValue JS_IteratorNext2(JSContext *ctx, JSValueConst enum_obj,
                 args[0] = JS_UNDEFINED;
                 argv = args;
             }
-            func = p->u.cfunc.c_function;
+            func.generic = (JSCFunction *)js_cpt_get(p->u.cfunc.c_function);
             return func.iterator_next(ctx, enum_obj, argc, argv,
                                       pdone, p->u.cfunc.magic);
         }
@@ -18930,7 +19146,7 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     }
     sf->arg_buf = (JSValue *)arg_buf;
 
-    func = p->u.cfunc.c_function;
+    func.generic = (JSCFunction *)js_cpt_get(p->u.cfunc.c_function);
     switch(cproto) {
     case JS_CFUNC_constructor:
     case JS_CFUNC_constructor_or_func:
@@ -48859,7 +49075,7 @@ static JSValue js_iterator_constructor(JSContext *ctx, JSValueConst new_target,
         return JS_ThrowTypeError(ctx, "constructor requires 'new'");
     p = JS_VALUE_GET_OBJ(new_target);
     if (p->class_id == JS_CLASS_C_FUNCTION)
-        if (p->u.cfunc.c_function.generic == js_iterator_constructor)
+        if (js_cpt_get(p->u.cfunc.c_function) == (JSCodePtr)js_iterator_constructor)
             return JS_ThrowTypeError(ctx, "abstract class not constructable");
     return js_create_from_ctor(ctx, new_target, JS_CLASS_ITERATOR);
 }
@@ -63742,8 +63958,8 @@ static JSValue js_array_buffer_constructor3(JSContext *ctx,
     abuf->detached = false;
     abuf->immutable = false;
     abuf->shared = (class_id == JS_CLASS_SHARED_ARRAY_BUFFER);
-    abuf->opaque = opaque;
-    abuf->realloc_func = realloc_func;
+    abuf->opaque = js_ept_store(opaque, JS_EPT_TAG_ABUF_OPAQUE);
+    abuf->realloc_func = js_cpt_intern((JSCodePtr)realloc_func);
     if (alloc_flag && buf)
         memcpy(abuf->data, buf, len);
     JS_SetOpaqueInternal(obj, abuf);
@@ -63891,8 +64107,9 @@ static void js_array_buffer_finalizer(JSRuntime *rt, JSValueConst val)
             rt->sab_funcs.sab_free(rt->sab_funcs.sab_opaque, abuf->data);
         } else {
             if (abuf->realloc_func)
-                abuf->realloc_func(rt, abuf->opaque, abuf->data, 0);
+                js_abuf_realloc_func(abuf)(rt, js_abuf_opaque(abuf), abuf->data, 0);
         }
+        js_ept_clear(&abuf->opaque);
         js_free_rt(rt, abuf);
     }
 }
@@ -63993,11 +64210,11 @@ void JS_DetachArrayBuffer(JSContext *ctx, JSValueConst obj)
     if (!abuf || abuf->detached)
         return;
     if (abuf->realloc_func) {
-        abuf->realloc_func(ctx->rt, abuf->opaque, abuf->data, 0);
+        js_abuf_realloc_func(abuf)(ctx->rt, js_abuf_opaque(abuf), abuf->data, 0);
         /* The backing data has been released. Do not release it again when
            the detached ArrayBuffer object is later finalized. */
-        abuf->realloc_func = NULL;
-        abuf->opaque = NULL;
+        abuf->realloc_func = 0;
+        js_ept_clear(&abuf->opaque);
     }
     abuf->data = NULL;
     abuf->byte_length = 0;
@@ -64176,8 +64393,8 @@ static JSValue js_array_buffer_transfer(JSContext *ctx, JSValueConst this_val,
     }
     bs = abuf->data;
     old_len = abuf->byte_length;
-    realloc_func = abuf->realloc_func;
-    opaque = abuf->opaque;
+    realloc_func = js_abuf_realloc_func(abuf);
+    opaque = js_abuf_opaque(abuf);
     /* if length mismatch, realloc. Otherwise, use the same backing buffer. */
     if (new_len != old_len) {
         if (!realloc_func)
@@ -64197,8 +64414,8 @@ static JSValue js_array_buffer_transfer(JSContext *ctx, JSValueConst this_val,
     abuf->data = NULL;
     abuf->byte_length = 0;
     abuf->detached = true;
-    abuf->realloc_func = NULL;
-    abuf->opaque = NULL;
+    abuf->realloc_func = 0;
+    js_ept_clear(&abuf->opaque);
     js_array_buffer_update_typed_arrays(abuf);
     ret = js_array_buffer_constructor3(ctx, JS_UNDEFINED, new_len, pmax_len,
                                        JS_CLASS_ARRAY_BUFFER, bs,
@@ -64256,7 +64473,7 @@ static JSValue js_array_buffer_resize(JSContext *ctx, JSValueConst this_val,
         // the ArrayBuffer cannot be resizable without a way to resize it,
         // js_array_buffer_constructor3 rejects that combination
         assert(abuf->realloc_func);
-        data = abuf->realloc_func(ctx->rt, abuf->opaque, abuf->data,
+        data = js_abuf_realloc_func(abuf)(ctx->rt, js_abuf_opaque(abuf), abuf->data,
                                   max_int(len, 1));
         if (!data)
             return JS_ThrowOutOfMemory(ctx);

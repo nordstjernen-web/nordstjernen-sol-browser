@@ -3,6 +3,18 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security: host objects and native function pointers no longer sit as
+  raw addresses in JavaScript heap objects (stage 2b of
+  `docs/heap-hardening.md`). `JS_SetOpaque` stores the browser's DOM
+  nodes, WebGPU handles, workers, sockets and other host pointers in a
+  table outside the heap cage tagged with the class id, and
+  `JS_GetOpaque` returns nothing when the tag does not match; C function
+  objects, C-function data records, C closures and ArrayBuffer
+  reallocation hooks hold an index into an append-only code pointer
+  table instead of a code address. A corrupted heap can therefore at
+  most name another live object of the same class or another registered
+  function, never an arbitrary address. The document gains an inventory
+  of the raw pointers that remain and the stage that removes each.
 * Security: ArrayBuffer data pointers and the cached typed-array element
   pointers are now masked into the JavaScript heap cage on every read, so
   a forged buffer with an arbitrary address and length reaches cage or
