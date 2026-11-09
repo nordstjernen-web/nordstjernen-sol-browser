@@ -4274,6 +4274,16 @@ static void JS_FreeAtomStruct(JSRuntime *rt, JSAtomStruct *p)
 #ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
     list_del(&p->link);
 #endif
+    /* an atom may have been created in place from a slice (see
+       __JS_NewAtom), so release what js_free_string0 would release */
+    switch (p->kind) {
+    case JS_STRING_KIND_SLICE:
+        js_free_string(rt, ((JSStringSlice *)&p[1])->parent);
+        break;
+    case JS_STRING_KIND_INDIRECT:
+        js_free_rt(rt, strv(p));
+        break;
+    }
     js_free_rt(rt, p);
     rt->atom_count--;
     assert(rt->atom_count >= 0);
@@ -6064,7 +6074,11 @@ static JSValue JS_ConcatString2(JSContext *ctx, JSValue op1, JSValue op2)
     if (p2->len == 0) {
         goto ret_op1;
     }
-    if (JS_REF_COUNT(p1) == 1 && p1->is_wide_char == p2->is_wide_char
+    /* a string that is also an atom is hashed by its contents, so it must
+       not be modified in place even when this is the last reference */
+    if (JS_REF_COUNT(p1) == 1 && p1->atom_type == 0
+    &&  p1->kind == JS_STRING_KIND_NORMAL
+    &&  p1->is_wide_char == p2->is_wide_char
     &&  js_malloc_usable_size(ctx, p1) >= sizeof(*p1) + ((p1->len + p2->len) << p2->is_wide_char) + 1 - p1->is_wide_char) {
         /* Concatenate in place in available space at the end of p1 */
         if (p1->is_wide_char) {
