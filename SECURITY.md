@@ -96,8 +96,10 @@ through a trusted context table. JavaScript values are 8-byte words whose
 pointer half is a 32-bit offset into the range, so a value can only name
 cage memory.
 None of this applies to the `-Dquickjs=quickjs` configuration, which
-runs Bellard's original QuickJS unpatched on the process heap: it is a
-compatibility and verification build, not one to ship.
+runs Bellard's original QuickJS on the process heap with only a handful
+of local security patches for reported faults (`docs/quickjs.md`, "Local
+patches"): it is a compatibility and verification build, not one to
+ship.
 This is exploit-cost hardening on the way to a V8-style heap sandbox,
 not yet a boundary of its own; the staged plan and its measurements are
 in `docs/heap-hardening.md`.

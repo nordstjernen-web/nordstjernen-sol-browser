@@ -3,6 +3,11 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Build: `-Dquickjs=quickjs` builds Bellard's newest QuickJS (`e5ac135`),
+  which brings seventeen upstream fixes, most for memory safety, and
+  applies four local security patches for faults reported upstream that
+  it still has. `scripts/bump-bellard-quickjs.sh` moves the pin to
+  upstream's newest commit and checks that the patches still apply.
 * Fixed: an async generator answers every request queued while it was
   running or returning. Once it had finished, it settled one queued
   `next()` and left the rest pending forever, keeping the generator

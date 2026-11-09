@@ -485,6 +485,12 @@ crash. The remaining unexpected results are two Temporal tests: one
 extreme-year PlainMonthDay overflow case, and a time-zone link test that
 depends on the system's tz database.
 
+A full parallel run can also report `InternalError: out of memory` from
+`staging/sm/String/replace-math.js`. Run alone, it peaks at about 2 GB
+and passes. In the full run, the runner's threads share one process, and
+so one 4 GB cage. That is the cage working as designed: a renderer runs
+one page per process, which may use the whole cage.
+
 ## Maintaining the hardening across upstream refreshes
 
 The fork-local code is kept out of `quickjs.c` where it can be, and the
