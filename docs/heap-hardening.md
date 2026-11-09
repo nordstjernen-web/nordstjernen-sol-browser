@@ -116,7 +116,11 @@ is masked into the cage (`js_abuf_data()`, `js_ta_ptr()`), and with
 - Context table: `JSRuntime`, every `JSContext` and the class table are
   allocated from trusted memory outside the cage, and every heap field
   that named a context (function realms, jobs, finalization records,
-  Atomics waiters, ShadowRealm) holds a masked index instead.
+  Atomics waiters, ShadowRealm) holds a masked index instead. The table
+  is shared by every runtime in the process (page, workers, extension
+  host), so `js_ctx_get(rt, idx)` also checks the context's trusted `rt`
+  against the caller's and aborts on a foreign one. A ShadowRealm's
+  context is engine-internal: `JS_GetOpaque` returns `NULL` for it.
 
 **Class table lookups.** An object's 16-bit class id lies in the cage
 and selects the trusted `JSClass` whose `call`, `finalizer`, `gc_mark` and
@@ -184,7 +188,7 @@ the table keeps the ones still open.
 | H1 | `rt->class_array[p->class_id]` indexed trusted memory with the in-cage class id unchecked, and called the `call`, `finalizer`, `gc_mark` and `exotic` pointers it read | function pointers read from the libc heap | fixed: `js_class_get` aborts on an unregistered id |
 | H2 | The code-pointer table was untyped: a forged index called any registered native function through another signature (an ArrayBuffer realloc hook, a C function under a different `cproto`) | signature confusion | fixed: entries carry their call kind |
 | H2b | The `magic` of C functions, data records and closures, which many builtins use as an index into their own tables, is still in-cage data the function trusts | out-of-bounds reads in builtin tables | open |
-| H3 | The context table is process-wide and `js_ctx_get` does not check that a context belongs to the caller's runtime | page code running in another runtime's realm (a worker on another thread, the extension host) | open |
+| H3 | The context table is process-wide and `js_ctx_get` did not check that a context belongs to the caller's runtime | page code running in another runtime's realm (a worker on another thread, the extension host) | fixed: `js_ctx_get(rt, idx)` aborts on a foreign context |
 | H4 | `JSArrayBuffer.data` is masked on access but handed unmasked to the realloc and free hooks and `sab_free` | free of an out-of-cage pointer | open |
 | M1 | The engine-private name table and bitmap, the policy that hides embedder names from page scripts, are cage allocations | policy rewrite | open |
 | M2 | Runtimes share the cage, and `js_cage_free` releases into the owning runtime's heap without a lock, so a forged pointer to another runtime's object races on that heap's metadata | metadata race outside the cage | open |
