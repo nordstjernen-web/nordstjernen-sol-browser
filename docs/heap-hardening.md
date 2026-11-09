@@ -692,3 +692,22 @@ the Intl structures described above, and was rerun after the fix):
 Flat. Across batches 2 to 6 the allocation stress script went from
 179 MB to 174 MB peak with no change in time, and the sitebench
 aggregate moved within noise in both directions.
+
+Stage 3a.2 batch 1, safe-linked lists, before = batch 6 (2025-11-09):
+
+| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
+|---|---|---|---|---|
+| before (batch 6) | 73.2 | 1.41× | 3.68× | 0.28× |
+| after (batch 1) | 73.2 | 1.27× | 3.60× | 0.27× |
+
+| Site | CPU before | CPU after | RSS before | RSS after |
+|---|---|---|---|---|
+| google | 249 ms | 272 ms | 76.7 MB | 78.5 MB |
+| anthropic | 690 ms | 700 ms | 138.9 MB | 138.6 MB |
+| bbc | 3097 ms | 3062 ms | 453.1 MB | 451.9 MB |
+| cnn | 7189 ms | 7223 ms | 678.5 MB | 678.4 MB |
+| guardian | 4981 ms | 5073 ms | 381.9 MB | 381.8 MB |
+
+Flat; the two compares per list operation do not show. (Parity is lower
+in this run for both builds because one site changed its page between
+captures; it is the same for both.)
