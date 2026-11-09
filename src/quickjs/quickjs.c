@@ -1980,6 +1980,35 @@ static void *js_arena_malloc(JSRuntime *rt, size_t size)
     }
 }
 
+typedef enum {
+    JS_BLOCK_ZERO,
+    JS_BLOCK_TRUSTED,
+    JS_BLOCK_LARGE,
+    JS_BLOCK_ARENA,
+} JSBlockKind;
+
+static no_inline __attribute__((noreturn)) void js_block_corrupt(const void *b)
+{
+    fprintf(stderr, "quickjs heap cage: refusing to release the block %p, which is neither in the cage nor trusted\n", b);
+    abort();
+}
+
+static JSBlockKind js_block_kind(JSRuntime *rt, const JSMallocBlockHeader *b)
+{
+    if (b == arena_zero_block(rt))
+        return JS_BLOCK_ZERO;
+    if (js_heap_cage_active) {
+        if (js_in_heap_cage(b))
+            return JS_BLOCK_LARGE;
+        if (js_block_is_trusted(b))
+            return JS_BLOCK_TRUSTED;
+        js_block_corrupt(b);
+    }
+    if (b->u.block_idx != JS_ARENA_FREE_NIL)
+        return JS_BLOCK_ARENA;
+    return js_block_is_trusted(b) ? JS_BLOCK_TRUSTED : JS_BLOCK_LARGE;
+}
+
 static void js_arena_free(JSRuntime *rt, void *ptr)
 {
     JSMallocBlockHeader *b;
@@ -1987,16 +2016,16 @@ static void js_arena_free(JSRuntime *rt, void *ptr)
     if (!ptr)
         return;
     b = container_of(ptr, JSMallocBlockHeader, user_data);
-    if (unlikely(b->u.block_idx == JS_ARENA_FREE_NIL)) {
-        /* large or zero-size block */
-        if (b == arena_zero_block(rt)) {
-            /* nothing to do */
-        } else if (js_block_is_trusted(b)) {
-            js_trusted_block_free(b);
-        } else {
-            rt->mf.js_free(rt->malloc_state.opaque, b);
-        }
-    } else {
+    switch (js_block_kind(rt, b)) {
+    case JS_BLOCK_ZERO:
+        break;
+    case JS_BLOCK_TRUSTED:
+        js_trusted_block_free(b);
+        break;
+    case JS_BLOCK_LARGE:
+        rt->mf.js_free(rt->malloc_state.opaque, b);
+        break;
+    case JS_BLOCK_ARENA: {
         unsigned int block_idx = b->u.block_idx;
         unsigned int block_size_idx = b->block_size_idx;
         unsigned int block_size = arena_block_sizes[block_size_idx];
@@ -2014,6 +2043,8 @@ static void js_arena_free(JSRuntime *rt, void *ptr)
             list_del(&ar->free_link);
             rt->mf.js_free(rt->malloc_state.opaque, ar);
         }
+        break;
+    }
     }
 }
 
@@ -2024,18 +2055,19 @@ static size_t js_arena_usable_size(JSRuntime *rt, const void *ptr)
     if (!ptr)
         return 0;
     b = container_of(ptr, JSMallocBlockHeader, user_data);
-    if (b->u.block_idx == JS_ARENA_FREE_NIL) {
-        if (b == arena_zero_block(rt)) {
-            return 0;
-        } else if (js_block_is_trusted(b)) {
-            return *js_trusted_block_raw(b);
-        } else {
+    switch (js_block_kind(rt, b)) {
+    case JS_BLOCK_ZERO:
+        return 0;
+    case JS_BLOCK_TRUSTED:
+        return *js_trusted_block_raw(b);
+    case JS_BLOCK_LARGE:
+        {
             size_t size = rt->mf.js_malloc_usable_size(b);
             if (size != 0)
                 size -= sizeof(JSMallocBlockHeader);
             return size;
         }
-    } else {
+    default:
         return arena_block_sizes[b->block_size_idx] - sizeof(JSMallocBlockHeader);
     }
 }
@@ -2046,10 +2078,11 @@ static void *js_arena_realloc(JSRuntime *rt, void *ptr, size_t size)
 
     /* js_realloc_rt already handles ptr == NULL and size == 0 */
     b = container_of(ptr, JSMallocBlockHeader, user_data);
-    if (b->u.block_idx == JS_ARENA_FREE_NIL) {
-        if (b == arena_zero_block(rt)) {
+    JSBlockKind kind = js_block_kind(rt, b);
+    if (kind != JS_BLOCK_ARENA) {
+        if (kind == JS_BLOCK_ZERO) {
             return js_arena_malloc(rt, size);
-        } else if (js_block_is_trusted(b)) {
+        } else if (kind == JS_BLOCK_TRUSTED) {
             size_t *raw = realloc(js_trusted_block_raw(b),
                                   sizeof(size_t) + sizeof(JSMallocBlockHeader) + size);
             if (!raw)

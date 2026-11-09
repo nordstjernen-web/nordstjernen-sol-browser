@@ -4,6 +4,14 @@ Changelog:
 1.0.47-dev:
 ======
 * Security: a corrupted JavaScript heap can no longer make the engine
+  hand heap memory to the C library's `free()`. The engine chose how to
+  release a block from a header stored inside the heap cage; a forged
+  header sent a cage address to libc `free()` or `realloc()`, or made the
+  free path write through an address computed from the header. While the
+  cage is active the block's address now decides, and the cage allocator
+  validates every block it takes back (`docs/heap-hardening.md`, review
+  finding C1).
+* Security: a corrupted JavaScript heap can no longer make the engine
   call a native function of its choosing through a lazily created
   builtin. Such a property kept a raw pointer to its static definition,
   whose C function pointer the engine registers when the property is

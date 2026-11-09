@@ -8,7 +8,9 @@ and arrange the heap so that this is not enough to reach memory outside
 it. Until stage 3b lands this is **exploit-cost hardening**, not a
 security boundary: each stage removes a class of primitive an exploit
 relies on, but an attacker who corrupts the bytecode the interpreter
-trusts can still size and index a native stack frame. Only a trusted
+trusts can still size and index a native stack frame, and the review
+findings under *What is still open* list further ways out that are being
+closed one by one. Only a trusted
 space for bytecode and saved frames makes the heap a boundary that holds
 on its own, and only then is it fair to call it a sandbox.
 
@@ -58,7 +60,13 @@ into them faults. **No allocator bookkeeping lives inside the cage**:
 chunk and slab metadata, bitmaps and free lists are outside it, found
 through a side table by chunk number, and the allocator aborts on a free
 it did not hand out, a misaligned free or a double free. The fork's own
-small-block arena steps aside while the cage is active. The first chunk
+small-block arena steps aside while the cage is active. Every allocation
+still carries the engine's 8-byte block header, which lies inside the
+cage; while the cage is active the engine decides how to release or
+resize a block by its address, never by that header (`js_block_kind`):
+a block inside the cage always goes back to the cage allocator, a block
+outside it must be one of the engine's trusted blocks, and anything else
+aborts. The first chunk
 is never handed out, so offset zero means `NULL`. The engine refuses to
 create a runtime without a cage; AddressSanitizer and 32-bit builds
 compile the classic layouts and use the process heap, and
@@ -137,8 +145,27 @@ primitive is gone.
 The rows below are the raw pointers or trusted data a write primitive
 inside the cage can still corrupt. Everything not listed is either
 converted or is trusted memory pointing into the cage, which the model
-allows (`ctx->class_proto`, `rt->atom_array`, `ns_node.js_wrapper` and
-the other embedder structures).
+allows (`ns_node.js_wrapper` and the other embedder structures).
+
+### Review findings (2026-11-09)
+
+A review of the implementation against its own model found ways out of
+the cage that the stage inventory had missed. They are fixed one by one;
+the table keeps the ones still open.
+
+| # | Finding | Reach | State |
+|---|---|---|---|
+| C1 | The free, realloc and size paths chose between the cage allocator, libc and the arena by the 8-byte block header inside the cage. A forged "trusted" header made libc `free()` or `realloc()` a cage address (a house-of-spirit on the libc heap); a forged arena header made the free path write and decrement through an address computed from header fields | outside the cage | fixed: the block's address decides |
+| C2 | `rt->atom_array` (`JSAtomStruct *`) and `rt->shape_hash` (`JSShape *`) are allocated from the cage, so their raw entries are attacker-writable | arbitrary read, reference-count increment and decrement anywhere | open |
+| C3 | WebAssembly's runtime allocations (module and memory instances with `memory_data` and bounds, import function pointers, the execution stack) all come from the cage, not only linear memory | arbitrary read and write, native calls | open |
+| H1 | `rt->class_array[p->class_id]` indexes trusted memory with the in-cage class id unchecked, and calls the `call`, `finalizer`, `gc_mark` and `exotic` pointers it reads | function pointers read from the libc heap | open |
+| H2 | The code-pointer table is untyped: a forged index calls any registered native function through another signature (an ArrayBuffer realloc hook, a C function under a different `cproto`) | signature confusion | open |
+| H3 | The context table is process-wide and `js_ctx_get` does not check that a context belongs to the caller's runtime | page code running in another runtime's realm (a worker on another thread, the extension host) | open |
+| H4 | `JSArrayBuffer.data` is masked on access but handed unmasked to the realloc and free hooks and `sab_free` | free of an out-of-cage pointer | open |
+| M1 | The engine-private name table and bitmap, the policy that hides embedder names from page scripts, are cage allocations | policy rewrite | open |
+| M2 | Runtimes share the cage, and `js_cage_free` releases into the owning runtime's heap without a lock, so a forged pointer to another runtime's object races on that heap's metadata | metadata race outside the cage | open |
+
+### Inventory
 
 | Where | What | Reach | Plan |
 |---|---|---|---|
