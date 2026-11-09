@@ -2652,6 +2652,7 @@ JSRuntime *JS_NewRuntime(void)
         return NULL;
     }
     rt->cage_heap = heap;
+    (void)def_malloc_funcs;
     return rt;
 #else
     (void)cage_malloc_funcs;
