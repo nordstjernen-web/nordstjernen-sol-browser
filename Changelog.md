@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: WebAssembly's runtime structures no longer live in the
+  JavaScript heap cage. Every allocation the WebAssembly runtime made came
+  from the cage, including the memory instance that holds a module's
+  memory base and bounds, its import tables of native functions and its
+  execution stack, so a corrupted heap could aim wasm loads and stores
+  anywhere in the process. Only linear memory, which scripts address
+  directly, stays in the cage (`docs/heap-hardening.md`, review finding
+  C3).
 * Security: the JavaScript engine's atom table, atom hash and shape hash
   now live outside the heap cage. The atom table and shape hash hold raw
   pointers the engine reads strings through and counts references on, so

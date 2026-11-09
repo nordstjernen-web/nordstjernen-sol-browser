@@ -18,6 +18,7 @@ void ns_wasm_install(JSContext *ctx, JSValueConst global)
 #else
 
 #include <glib.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <wasm_export.h>
@@ -180,9 +181,23 @@ ns_wasm_linkage_gc_mark(JSRuntime *rt, const ns_wasm_linkage *linkage,
     JS_MarkValue(rt, linkage->provided_table, mark_func);
 }
 
+static gboolean
+ns_wasm_usage_outside_cage(mem_alloc_usage_t usage)
+{
+    return usage != Alloc_For_LinearMemory && ns_js_cage_enabled();
+}
+
+static gboolean
+ns_wasm_block_outside_cage(const void *ptr)
+{
+    return ns_js_cage_enabled() && !ns_js_cage_contains(ptr);
+}
+
 static void *
 ns_wasm_runtime_alloc(mem_alloc_usage_t usage, unsigned int size)
 {
+    if (ns_wasm_usage_outside_cage(usage))
+        return malloc(size ? size : 1);
     void *p = ns_js_cage_shared_malloc(size);
     if (p && usage == Alloc_For_LinearMemory)
         memset(p, 0, ns_js_cage_shared_usable_size(p));
@@ -194,6 +209,8 @@ ns_wasm_runtime_realloc(mem_alloc_usage_t usage, bool full_size_mmaped,
                         void *ptr, unsigned int size)
 {
     (void)full_size_mmaped;
+    if (ptr ? ns_wasm_block_outside_cage(ptr) : ns_wasm_usage_outside_cage(usage))
+        return realloc(ptr, size ? size : 1);
     size_t old = ptr ? ns_js_cage_shared_usable_size(ptr) : 0;
     void *p = ns_js_cage_shared_realloc(ptr, size);
     if (p && usage == Alloc_For_LinearMemory) {
@@ -207,7 +224,10 @@ static void
 ns_wasm_runtime_free(mem_alloc_usage_t usage, void *ptr)
 {
     (void)usage;
-    ns_js_cage_shared_free(ptr);
+    if (ptr && ns_wasm_block_outside_cage(ptr))
+        free(ptr);
+    else
+        ns_js_cage_shared_free(ptr);
 }
 
 static gpointer
