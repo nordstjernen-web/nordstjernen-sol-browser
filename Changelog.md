@@ -28,6 +28,16 @@ Changelog:
   `ref-filled-green-100px-square.xht` shows its green square; in
   css/CSS2/margin-padding-clear and css/CSS2/abspos 578 more reftests pass
   (606 of 711, was 29).
+* Security: the engine's intrusive lists (GC object list, typed-array
+  views, map records, job queue, module lists) verify that both
+  neighbours point back before every insert and unlink, so a corrupted
+  link aborts instead of writing a pointer to an address of the
+  attacker's choosing (stage 3a.2 batch 1 of `docs/heap-hardening.md`).
+* Maintenance: the QuickJS heap hardening is kept in `quickjs-cptr.h`,
+  `quickjs-hardening.h` and `quickjs-cage.c` rather than inside
+  `quickjs.c`, and `scripts/quickjs-cage-rewrite.py` lists the
+  compressed fields and re-applies or checks their accesses after an
+  upstream refresh (`docs/vendored-engine-updates.md`).
 * Security: the pointer fields inside JavaScript objects and shapes are
   now 32-bit cage offsets rather than raw addresses (stage 3a.2, batches
   2 and 3 of `docs/heap-hardening.md`): an object's shape, property

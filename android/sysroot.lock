@@ -9,5 +9,5 @@
 # Bumped by .github/workflows/sysroot-bump.yml, which opens a pull request with
 # the dependency manifest diff. To bump by hand: download SHA256SUMS from the
 # release page, `sha256sum SHA256SUMS`, and paste both values.
-tag=sysroot-20261107-cda42787a
-sha256sums=446f56b72cec961c0b142e4936b5bc33e226ddd011d3ce8c64e8204b5a5fb4dd
+tag=sysroot-20261107-fe7897d03-r194
+sha256sums=894868c921e84496f6a568bd981bfcb041b41a2ba8042987c121a6455d192f95

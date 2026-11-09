@@ -106,7 +106,9 @@ Update Changelog.md
   allocator bookkeeping inside the cage, no raw host or code pointers in
   heap objects) and its benchmarks live in `docs/heap-hardening.md`; keep
   engine changes for it small and grouped so upstream quickjs-ng fixes
-  keep merging.
+  keep merging. The machinery lives in `src/quickjs/quickjs-cptr.h`,
+  `quickjs-hardening.h` and `quickjs-cage.c`; after touching engine
+  pointer fields run `scripts/quickjs-cage-rewrite.py --check`.
 - Does not phone home, does not telemeter the user.
 - Make good descriptive commit messages always
 
