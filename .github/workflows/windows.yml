@@ -126,6 +126,11 @@ jobs:
               "$MINGW_PREFIX"/lib/pkgconfig/libav*.pc \
               "$MINGW_PREFIX"/lib/pkgconfig/libsw*.pc
 
+      - name: Prefetch wgpu-native through the GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/prefetch-wrap.sh wgpu-native-windows-x86_64-gnu
+
       - name: Build
         id: build
         run: |
