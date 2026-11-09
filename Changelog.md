@@ -28,6 +28,20 @@ Changelog:
   `ref-filled-green-100px-square.xht` shows its green square; in
   css/CSS2/margin-padding-clear and css/CSS2/abspos 578 more reftests pass
   (606 of 711, was 29).
+* Security: `ShadowRealm.prototype.evaluate` and `importValue` no longer
+  crash the renderer. The heap hardening stored the realm as a
+  context-table index, but the getter still read it as a heap offset.
+* Fixed: `Date` setters such as `setMinutes(NaN)` now make the date
+  invalid, and `DataView` `byteOffset`/`byteLength` return 0 for a view
+  whose buffer was detached or shrunk instead of throwing.
+* Security: the engine refuses a SharedArrayBuffer backing store that an
+  embedder's allocation hook returns from outside the heap cage, frees it
+  through that hook and throws a TypeError. The bundled libc allocates
+  worker SharedArrayBuffers in the cage, so the `qjs` tool and the test262
+  runner no longer crash in the Atomics tests. The browser installs no such
+  hook and was not affected.
+* Build: the QuickJS CMake tree builds the cage allocator, so
+  `run-test262` and `qjs` link again.
 * Security: the engine's intrusive lists (GC object list, typed-array
   views, map records, job queue, module lists) verify that both
   neighbours point back before every insert and unlink, so a corrupted

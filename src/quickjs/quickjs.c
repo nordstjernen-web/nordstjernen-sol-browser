@@ -2652,6 +2652,7 @@ JSRuntime *JS_NewRuntime(void)
         return NULL;
     }
     rt->cage_heap = heap;
+    (void)def_malloc_funcs;
     return rt;
 #else
     (void)cage_malloc_funcs;
@@ -13121,6 +13122,8 @@ void *JS_GetOpaque(JSValueConst obj, JSClassID class_id)
         return js_ept_get((const void *)(uintptr_t)p->u.opaque, class_id);
     if (js_class_is_intl(class_id))
         return js_ept_load((uint32_t)(uintptr_t)p->u.opaque, JS_EPT_TAG_INTL_OPAQUE);
+    if (class_id == JS_CLASS_SHADOW_REALM)
+        return js_ctx_get((uint32_t)(uintptr_t)p->u.opaque);
     return js_cload(void *, p->u.opaque);
 }
 
@@ -13146,6 +13149,8 @@ void *JS_GetAnyOpaque(JSValueConst obj, JSClassID *class_id)
         return js_ept_get((const void *)(uintptr_t)p->u.opaque, p->class_id);
     if (js_class_is_intl(p->class_id))
         return js_ept_load((uint32_t)(uintptr_t)p->u.opaque, JS_EPT_TAG_INTL_OPAQUE);
+    if (p->class_id == JS_CLASS_SHADOW_REALM)
+        return js_ctx_get((uint32_t)(uintptr_t)p->u.opaque);
     return js_cload(void *, p->u.opaque);
 }
 
@@ -62231,7 +62236,7 @@ static JSValue set_date_field(JSContext *ctx, JSValueConst this_val,
 {
     // _field(obj, first_field, end_field, args, is_local)
     double fields[9];
-    int res, first_field, end_field, is_local, i, n;
+    int res, finite, first_field, end_field, is_local, i, n;
     double d, a;
 
     d = NAN;
@@ -62244,19 +62249,20 @@ static JSValue set_date_field(JSContext *ctx, JSValueConst this_val,
         return JS_EXCEPTION;
 
     // Argument coercion is observable and must be done unconditionally.
+    finite = true;
     n = min_int(argc, end_field - first_field);
     for(i = 0; i < n; i++) {
         if (JS_ToFloat64(ctx, &a, argv[i]))
             return JS_EXCEPTION;
         if (!isfinite(a))
-            res = false;
+            finite = false;
         fields[first_field + i] = trunc(a);
     }
 
     if (!res)
         return JS_NAN;
 
-    if (argc > 0)
+    if (finite && argc > 0)
         d = set_date_fields(fields, is_local);
 
     return JS_SetThisTimeValue(ctx, this_val, d);
@@ -63914,6 +63920,12 @@ static JSValue js_array_buffer_constructor3(JSContext *ctx,
                                                  max_int(sab_alloc_len, 1));
             if (!abuf->data)
                 goto fail;
+            if (!js_in_heap_cage(abuf->data)) {
+                if (rt->sab_funcs.sab_free)
+                    rt->sab_funcs.sab_free(rt->sab_funcs.sab_opaque, abuf->data);
+                JS_ThrowTypeError(ctx, "SharedArrayBuffer backing store lies outside the heap cage");
+                goto fail;
+            }
             memset(abuf->data, 0, sab_alloc_len);
         } else {
             /* the allocation must be done after the object creation */
@@ -66905,7 +66917,7 @@ static JSValue js_dataview_get_byteLength(JSContext *ctx, JSValueConst this_val)
     if (!p)
         return JS_EXCEPTION;
     if (dataview_is_oob(p))
-        return JS_ThrowTypeErrorArrayBufferOOB(ctx);
+        return js_int32(0);
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
     if (ta->track_rab) {
         abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
@@ -66923,7 +66935,7 @@ static JSValue js_dataview_get_byteOffset(JSContext *ctx, JSValueConst this_val)
     if (!p)
         return JS_EXCEPTION;
     if (dataview_is_oob(p))
-        return JS_ThrowTypeErrorArrayBufferOOB(ctx);
+        return js_int32(0);
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
     return js_uint32(ta->offset);
 }
