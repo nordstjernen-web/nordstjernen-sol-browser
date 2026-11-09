@@ -9268,17 +9268,6 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
 }
 
 static gboolean
-ns_node_in_html_document(const ns_node *n)
-{
-    if (n->flags & (NS_NODE_XML_DOC | NS_NODE_KEEP_CASE)) return FALSE;
-    const ns_node *p = n->parent;
-    for (int depth = 0; p && p->kind != NS_NODE_DOCUMENT &&
-                        depth < NS_DOM_MAX_DEPTH; depth++)
-        p = p->parent;
-    return !(p && (p->flags & NS_NODE_XML_DOC));
-}
-
-static gboolean
 ns_node_is_html_in_html_document(const ns_node *n)
 {
     return !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) &&
@@ -9290,8 +9279,6 @@ ns_attr_name_normalize(const ns_node *n, const char *raw_name, char **out_lowere
 {
     *out_lowered = NULL;
     if (!n || !raw_name) return raw_name;
-    if (!ns_node_is_html_in_html_document(n))
-        return raw_name;
     gboolean needs_lower = FALSE;
     for (const char *p = raw_name; *p; p++) {
         if ((unsigned char)*p >= 'A' && (unsigned char)*p <= 'Z') {
@@ -9299,7 +9286,7 @@ ns_attr_name_normalize(const ns_node *n, const char *raw_name, char **out_lowere
             break;
         }
     }
-    if (!needs_lower) return raw_name;
+    if (!needs_lower || !ns_node_is_html_in_html_document(n)) return raw_name;
     *out_lowered = g_ascii_strdown(raw_name, -1);
     return *out_lowered ? *out_lowered : raw_name;
 }
@@ -45863,9 +45850,8 @@ ns_live_named(JSContext *ctx, ns_live_back *b, JSValueConst snap, uint32_t len,
     if (!name || !*name) return JS_UNDEFINED;
     if (b->kind == NS_LIVE_ATTRIBUTES) {
         const ns_node *root = ns_unwrap_element(b->owner);
-        gboolean is_html_in_html = root &&
-            ns_node_is_html_in_html_document(root);
-        if (is_html_in_html && !ns_is_all_ascii_lower(name))
+        if (root && !ns_is_all_ascii_lower(name) &&
+            ns_node_is_html_in_html_document(root))
             return JS_UNDEFINED;
         for (uint32_t i = 0; i < len; i++) {
             JSValue attr = JS_GetPropertyUint32(ctx, snap, i);
@@ -64563,6 +64549,7 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
     JSValue w = ns_make_element(ctx, doc_node);
     if (!JS_IsObject(w)) return w;
     if (is_xml) {
+        doc_node->flags |= NS_NODE_XML_DOC;
         ns_document_use_xml_document_prototype(ctx, w);
         JS_DefinePropertyValueStr(ctx, w, "__ndXmlDoc", JS_TRUE, 0);
     } else {
@@ -69461,6 +69448,15 @@ ns_script_source_is_empty(const ns_node *n)
     return TRUE;
 }
 
+static GString *
+ns_script_child_text(const ns_node *n)
+{
+    GString *text = g_string_new(NULL);
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_TEXT && c->text) g_string_append(text, c->text);
+    return text;
+}
+
 static void
 ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
 {
@@ -69642,22 +69638,19 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         ns_js_dispatch_resource_event(js, n, loaded ? "load" : "error");
         return;
     }
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_TEXT || !c->text) continue;
-        gsize tlen = strlen(c->text);
-        if (!ns_csp_inline_script_allowed(ns_js_node_csp(js, n), c->text,
-                                          tlen, nonce)) {
-            if (js->log_cb) {
-                char *line = g_strdup_printf(
-                    "CSP blocked: inline <script> on %s: %.120s", origin,
-                    c->text);
-                js->log_cb(line, js->log_user_data);
-                g_free(line);
-            }
-            continue;
+    g_autoptr(GString) text = ns_script_child_text(n);
+    if (!ns_csp_inline_script_allowed(ns_js_node_csp(js, n), text->str,
+                                      text->len, nonce)) {
+        if (js->log_cb) {
+            char *line = g_strdup_printf(
+                "CSP blocked: inline <script> on %s: %.120s", origin,
+                text->str);
+            js->log_cb(line, js->log_user_data);
+            g_free(line);
         }
-        ns_js_eval_script_source(js, n, c->text, tlen, origin, is_module);
+        return;
     }
+    ns_js_eval_script_source(js, n, text->str, text->len, origin, is_module);
 }
 
 typedef struct ns_parser_held {

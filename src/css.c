@@ -25935,13 +25935,10 @@ css_name_equals_lower(const char *name, const char *lower)
     }
 }
 
-static const char *
-css_attr_value_exact(const ns_node *el, const ns_css_attr_pred *pred)
+static gboolean
+css_attr_pred_uses_case(const ns_node *el, const ns_css_attr_pred *pred)
 {
-    const char *name = pred->name_cased ? pred->name_cased : pred->name;
-    for (const ns_attr *a = el->attrs; a; a = a->next)
-        if (a->name && strcmp(a->name, name) == 0) return a->value;
-    return NULL;
+    return pred->name_cased && !ns_node_in_html_document(el);
 }
 
 static gboolean
@@ -25983,17 +25980,15 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
     }
     if (sel->attrs && sel->attrs->len > 0) {
         guint64 elbloom = ns_node_attr_bloom(el);
-        gboolean xml_names =
-            (el->flags & (NS_NODE_XML_DOC | NS_NODE_KEEP_CASE)) != 0;
-        gboolean html_doc = !xml_names &&
+        gboolean html_doc = !(el->flags & (NS_NODE_XML_DOC | NS_NODE_KEEP_CASE)) &&
                              !(el->flags & (NS_NODE_FOREIGN_NS | NS_NODE_SVG_NS));
         for (guint i = 0; i < sel->attrs->len; i++) {
             const ns_css_attr_pred *a = &g_array_index(sel->attrs, ns_css_attr_pred, i);
-            guint64 bit = xml_names && a->name_cased ? a->name_cased_bit
-                                                     : a->name_bit;
+            gboolean cased = css_attr_pred_uses_case(el, a);
+            guint64 bit = cased ? a->name_cased_bit : a->name_bit;
             if (bit && (elbloom & bit) == 0) return FALSE;
-            const char *v = xml_names ? css_attr_value_exact(el, a)
-                                      : ns_element_get_attr(el, a->name);
+            const char *v = ns_element_get_attr(el, cased ? a->name_cased
+                                                          : a->name);
             if (a->op == NS_CSS_ATTR_PRESENT) {
                 if (!v) return FALSE;
             } else {
@@ -35517,7 +35512,8 @@ incr_node_matches_keys(const ns_node *n, GHashTable *keyset)
 static gboolean
 incr_attr_pred_matches(const ns_node *n, const ns_css_attr_pred *wanted)
 {
-    const char *value = ns_element_get_attr(n, wanted->name);
+    const char *value = ns_element_get_attr(n,
+        css_attr_pred_uses_case(n, wanted) ? wanted->name_cased : wanted->name);
     if (wanted->op == NS_CSS_ATTR_PRESENT) return value != NULL;
     if (!value || !wanted->value) return FALSE;
     gsize value_len = strlen(value);

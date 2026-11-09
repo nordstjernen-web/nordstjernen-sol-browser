@@ -1372,6 +1372,37 @@ ns_attr_matches_ns(const ns_attr *attr, const char *namespace_uri,
            strcmp(ns_attr_local_name(attr), local_name) == 0;
 }
 
+static gboolean
+ns_attr_names_exact(const ns_node *el)
+{
+    return (el->flags & (NS_NODE_SVG_NS | NS_NODE_KEEP_CASE |
+                         NS_NODE_XML_DOC)) != 0;
+}
+
+static gboolean
+ns_attr_name_is(const ns_node *el, const char *stored, const char *name)
+{
+    if (ns_attr_names_exact(el)) return strcmp(stored, name) == 0;
+    return g_ascii_strcasecmp(stored, name) == 0;
+}
+
+static gboolean
+ns_node_is_document_root(const ns_node *n)
+{
+    return n->kind == NS_NODE_DOCUMENT && !(n->flags & NS_NODE_FRAGMENT);
+}
+
+gboolean
+ns_node_in_html_document(const ns_node *n)
+{
+    if (!(n->flags & (NS_NODE_XML_DOC | NS_NODE_KEEP_CASE))) return TRUE;
+    const ns_node *p = n->parent;
+    for (int depth = 0; p && !ns_node_is_document_root(p) &&
+                        depth < NS_DOM_MAX_DEPTH; depth++)
+        p = p->parent;
+    return p && ns_node_is_document_root(p) && !(p->flags & NS_NODE_XML_DOC);
+}
+
 char *
 ns_value_dup_len(const char *value, gsize len)
 {
@@ -1398,7 +1429,7 @@ ns_element_set_attr_len(ns_node *el, const char *name,
 
     ns_attr *tail = NULL;
     for (ns_attr *a = el->attrs; a; a = a->next) {
-        if (g_ascii_strcasecmp(a->name, name) == 0) {
+        if (ns_attr_name_is(el, a->name, name)) {
             if (a->flags & NS_ATTR_OWN_VALUE) g_free(a->value);
             a->value = ns_value_dup_len(value, vlen);
             a->value_len = (guint)vlen;
@@ -1484,7 +1515,7 @@ ns_element_remove_attr(ns_node *el, const char *name)
     ns_dom_attr_changed(name);
     ns_attr **link = &el->attrs;
     while (*link) {
-        if (g_ascii_strcasecmp((*link)->name, name) == 0) {
+        if (ns_attr_name_is(el, (*link)->name, name)) {
             ns_attr *dead = *link;
             *link = dead->next;
             ns_attr_presence_removed(el, dead->name);
@@ -1629,7 +1660,7 @@ ns_element_find_attr(const ns_node *el, const char *name)
     if (!el || el->kind != NS_NODE_ELEMENT || !name)
         return NULL;
 
-    if (el->flags & NS_NODE_SVG_NS) {
+    if (ns_attr_names_exact(el)) {
         for (const ns_attr *a = el->attrs; a; a = a->next)
             if (a->name && strcmp(a->name, name) == 0)
                 return a;

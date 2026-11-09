@@ -12,16 +12,22 @@ Changelog:
   entities (`&times;`, `&mdash;`) resolve as under an XHTML doctype,
   `<template>` children go into its `content`, the doctype keeps its
   public and system identifiers, type selectors and attribute selector
-  names and values in style sheets match case-sensitively,
-  `getAttribute` and `setAttribute` keep the case of attribute names, and
-  `contentType` is `application/xhtml+xml`. The XML parser, which
-  `DOMParser` and XML iframes share, now also turns `\r\n` and a lone `\r`
-  into `\n` and a tab or newline inside an attribute value into a space.
-  A document that is not well-formed still falls back to the HTML parser
-  instead of Chrome's error page. Example: the shared WPT reference
+  names and values in style sheets match case-sensitively, `getAttribute`,
+  `setAttribute`, `removeAttribute` and `toggleAttribute` match attribute
+  names exactly (an element moved into an HTML document lowercases the
+  name it looks up there), an inline script wrapped as
+  `/* <![CDATA[ */ ... /* ]]> */` runs, and `contentType` is
+  `application/xhtml+xml`. A script element whose text is split over
+  several text or CDATA nodes now runs as one program, also in HTML; each
+  node ran on its own, so `/* a` in one and ` */ 1;` in the next were two
+  syntax errors. The XML parser, which `DOMParser` and XML iframes share,
+  now also turns `\r\n` and a lone `\r` into `\n` and a tab or newline
+  inside an attribute value into a space. A document that is not
+  well-formed still falls back to the HTML parser instead of Chrome's
+  error page. Example: the shared WPT reference
   `ref-filled-green-100px-square.xht` shows its green square; in
-  css/CSS2/margin-padding-clear and css/CSS2/abspos 578 more reftests
-  pass (606 of 711, was 29).
+  css/CSS2/margin-padding-clear and css/CSS2/abspos 578 more reftests pass
+  (606 of 711, was 29).
 * Security: the pointer fields inside JavaScript objects and shapes are
   now 32-bit cage offsets rather than raw addresses (stage 3a.2, batches
   2 and 3 of `docs/heap-hardening.md`): an object's shape, property
