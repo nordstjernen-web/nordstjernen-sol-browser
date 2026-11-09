@@ -279,6 +279,28 @@ limit V8's pointer-compression cage has; a runtime cannot be created
 without it; and `NULL` never appears inside a value, which the allocator
 guarantees by never handing out offset zero.
 
+### Stage 3a.2: compressed fields (plan)
+
+The pointers that remain raw inside heap structures, with the number of
+engine sites that read or write each, in the order they will be
+converted to 32-bit cage offsets behind typed accessors. The GC list
+links come first because a corrupted link is an unlink write outside the
+cage, the same primitive the arena bypass removed.
+
+| Field | Sites | Batch |
+|---|---|---|
+| `JSGCObjectHeader.link`, `JSTypedArray.link`, other `list_head` members in cage objects | 20 direct, plus the `list.h` macro uses over those lists | 1 |
+| `JSObject.shape`, `JSObject.prop`, `JSShape.proto`, `JSShape.shape_hash_next` | 55, 43, 29, 9 | 2 |
+| `JSObject.u.array.u.values`, `u.array.u.var_refs`, `u.func.var_refs`, `u.func.home_object` | 41, 13, 11 | 3 |
+| `JSFunctionBytecode.cpool`, `byte_code_buf`, `closure_var`, `vardefs` | 26, 22, and the parser's writers | 4 (overlaps 3b) |
+| `JSString.parent` and rope children, `first_weak_ref` on objects and strings | 39, 10 | 5 |
+| internal class structs reached from `u.opaque` (`JSArrayBuffer`, `JSTypedArray`, `JSMapState`, …) | per struct | 6 |
+
+Each batch is a mechanical rewrite in the style of stage 2a: the field
+becomes `uint32_t`, reads go through `js_cptr_T(field)` and writes
+through `js_cref(ptr)`, with offset zero meaning `NULL`. Each batch is
+benchmarked with sitebench before it merges.
+
 Trusted bytecode space allocates `JSFunctionBytecode`, its opcode buffer,
 closure tables and the saved frames of generators and async functions
 from memory outside the cage, reached through an indirect table, so the
@@ -431,3 +453,28 @@ Stage 3p, before = stage 2b complete (2025-11-09):
 A context-table read replaces a pointer load on every realm switch;
 flat on every site. The allocation stress script is unchanged at
 0.32 to 0.39 s and 183 MB.
+
+Stage 3a.1, caged values, before = stage 3p (2025-11-09):
+
+| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
+|---|---|---|---|---|
+| before (stage 3p) | 86.1 | 1.55× | 3.87× | 0.30× |
+| after (stage 3a.1) | 85.6 | 1.41× | 3.97× | 0.30× |
+
+| Site | CPU before | CPU after | RSS before | RSS after |
+|---|---|---|---|---|
+| google | 242 ms | 240 ms | 77.4 MB | 78.4 MB |
+| anthropic | 680 ms | 723 ms | 139.1 MB | 138.9 MB |
+| bbc | 3019 ms | 3030 ms | 452.9 MB | 451.3 MB |
+| cnn | 7077 ms | 7331 ms | 682.2 MB | 681.5 MB |
+| guardian | 5019 ms | 5026 ms | 382.4 MB | 382.4 MB |
+
+This is the first stage with a visible cost: about 2 to 3 % more main
+thread CPU in aggregate, concentrated on the script-heavy sites, from
+the base-plus-offset decode on every value that holds a pointer. The
+allocation stress script is unchanged in time (0.35 s) and 2 % smaller in
+peak memory (179 MB against 183 MB) from the halved values. Process RSS
+on real pages is dominated by images, layout and network buffers, so the
+value shrink does not show there. A follow-up worth trying is caching
+the cage base in a local inside the interpreter loop, where most decodes
+happen.
