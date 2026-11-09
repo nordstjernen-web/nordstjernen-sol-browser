@@ -23917,6 +23917,7 @@ typedef struct JSParseState {
     bool is_module; /* parsing a module */
     bool allow_html_comments;
     bool hide_source;
+    bool too_many_scopes;
 } JSParseState;
 
 typedef struct JSOpCode {
@@ -24599,6 +24600,8 @@ static __exception int next_token(JSParseState *s)
         JS_ThrowStackOverflow(s->ctx);
         return -1;
     }
+    if (unlikely(s->too_many_scopes))
+        return -1;
 
     free_token(s, &s->token);
 
@@ -25869,9 +25872,10 @@ static int push_scope(JSParseState *s) {
     if (s->cur_func) {
         JSFunctionDef *fd = s->cur_func;
         int scope = fd->scope_count;
-        /* scope indexes are stored on 16 bits in the bytecode */
-        if (scope >= 65535)
-            return js_parse_error(s, "too many scopes (only 65534 allowed)");
+        if (scope >= 65535 && !s->too_many_scopes) {
+            js_parse_error(s, "too many scopes (only 65534 allowed)");
+            s->too_many_scopes = true;
+        }
         if ((fd->scope_count + 1) > fd->scope_size) {
             int new_size;
             JSVarScope *new_buf;
