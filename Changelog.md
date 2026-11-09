@@ -3,6 +3,11 @@ Changelog:
 
 1.0.46-dev:
 ======
+* CI: the scheduled `sysroot-bump` workflow no longer fails when the
+  repository forbids GitHub Actions from opening pull requests; it pushes the
+  bump branch, warns with the compare link and the two ways to enable the
+  pull request (the Actions workflow-permission setting or the
+  `SYSROOT_BUMP_TOKEN` secret), and ends green.
 * QuickJS robustness: `String.prototype.normalize` and `localeCompare`
   sorted each run of combining marks with an insertion sort, so a string of
   alternating marks cost time quadratic in its length (200,000 marks took

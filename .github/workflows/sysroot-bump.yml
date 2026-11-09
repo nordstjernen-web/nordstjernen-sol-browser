@@ -7,10 +7,15 @@ name: sysroot-bump
 # dependency manifest between the locked and the proposed release, so a sysroot
 # update is reviewed like any other dependency bump.
 #
-# A pull request opened with the default GITHUB_TOKEN does not trigger the
-# `android` workflow on itself; set the SYSROOT_BUMP_TOKEN secret (a fine-grained
-# PAT with contents + pull-requests write on this repository) to get CI on the
-# bump PR, or re-run the android workflow on it by hand.
+# Opening the pull request needs one of two things: the repository setting
+# "Allow GitHub Actions to create and approve pull requests" (Settings >
+# Actions > General > Workflow permissions), or the SYSROOT_BUMP_TOKEN secret
+# (a fine-grained PAT with contents + pull-requests write on this repository).
+# Without either, the bump is still pushed to the bump branch and the run ends
+# with a warning carrying the compare link, so the pull request can be opened
+# by hand. A pull request opened with the default GITHUB_TOKEN does not trigger
+# the `android` workflow on itself; the PAT does, or re-run the android
+# workflow on it by hand.
 
 on:
   schedule:
@@ -114,8 +119,25 @@ jobs:
             echo
             cat .bump/body.md
           } > .bump/pr.md
+          title="deps: bump the prebuilt dependency sysroots"
           if gh pr view "${BUMP_BRANCH}" --json number >/dev/null 2>&1; then
-            gh pr edit "${BUMP_BRANCH}" --title "deps: bump the prebuilt dependency sysroots" --body-file .bump/pr.md
-          else
-            gh pr create --base main --head "${BUMP_BRANCH}" --title "deps: bump the prebuilt dependency sysroots" --body-file .bump/pr.md
+            gh pr edit "${BUMP_BRANCH}" --title "${title}" --body-file .bump/pr.md
+          elif ! gh pr create --base main --head "${BUMP_BRANCH}" --title "${title}" --body-file .bump/pr.md 2> .bump/create.err; then
+            cat .bump/create.err
+            if grep -q "not permitted to create or approve pull requests" .bump/create.err; then
+              compare="https://github.com/${GITHUB_REPOSITORY}/compare/main...${BUMP_BRANCH}?expand=1"
+              echo "::warning::The bump was pushed to ${BUMP_BRANCH}, but GitHub Actions may not open pull requests in this repository. Open it at ${compare}, or allow it under Settings > Actions > General > Workflow permissions, or set the SYSROOT_BUMP_TOKEN secret."
+              {
+                echo "## Sysroot bump pushed, pull request not opened"
+                echo
+                echo "GitHub Actions is not permitted to create pull requests in this repository."
+                echo "The bump is on \`${BUMP_BRANCH}\`: [open the pull request](${compare})."
+                echo
+                echo "To let this workflow open it: enable *Allow GitHub Actions to create and approve pull requests* under Settings > Actions > General > Workflow permissions, or add the \`SYSROOT_BUMP_TOKEN\` secret."
+                echo
+                cat .bump/pr.md
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              exit 1
+            fi
           fi
