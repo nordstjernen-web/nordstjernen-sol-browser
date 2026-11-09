@@ -62232,7 +62232,7 @@ static JSValue set_date_field(JSContext *ctx, JSValueConst this_val,
 {
     // _field(obj, first_field, end_field, args, is_local)
     double fields[9];
-    int res, first_field, end_field, is_local, i, n;
+    int res, finite, first_field, end_field, is_local, i, n;
     double d, a;
 
     d = NAN;
@@ -62245,19 +62245,20 @@ static JSValue set_date_field(JSContext *ctx, JSValueConst this_val,
         return JS_EXCEPTION;
 
     // Argument coercion is observable and must be done unconditionally.
+    finite = true;
     n = min_int(argc, end_field - first_field);
     for(i = 0; i < n; i++) {
         if (JS_ToFloat64(ctx, &a, argv[i]))
             return JS_EXCEPTION;
         if (!isfinite(a))
-            res = false;
+            finite = false;
         fields[first_field + i] = trunc(a);
     }
 
     if (!res)
         return JS_NAN;
 
-    if (argc > 0)
+    if (finite && argc > 0)
         d = set_date_fields(fields, is_local);
 
     return JS_SetThisTimeValue(ctx, this_val, d);
@@ -66912,7 +66913,7 @@ static JSValue js_dataview_get_byteLength(JSContext *ctx, JSValueConst this_val)
     if (!p)
         return JS_EXCEPTION;
     if (dataview_is_oob(p))
-        return JS_ThrowTypeErrorArrayBufferOOB(ctx);
+        return js_int32(0);
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
     if (ta->track_rab) {
         abuf = js_cload(struct JSArrayBuffer *, ta->buffer->u.array_buffer);
@@ -66930,7 +66931,7 @@ static JSValue js_dataview_get_byteOffset(JSContext *ctx, JSValueConst this_val)
     if (!p)
         return JS_EXCEPTION;
     if (dataview_is_oob(p))
-        return JS_ThrowTypeErrorArrayBufferOOB(ctx);
+        return js_int32(0);
     ta = js_cload(struct JSTypedArray *, p->u.typed_array);
     return js_uint32(ta->offset);
 }
