@@ -3,6 +3,11 @@ Changelog:
 
 1.0.46-dev:
 ======
+* QuickJS robustness: `String.prototype.normalize` and `localeCompare`
+  sorted each run of combining marks with an insertion sort, so a string of
+  alternating marks cost time quadratic in its length (200,000 marks took
+  29 s, with no way to interrupt it). Long runs now use a linear counting
+  sort on the combining class (8 ms for the same input).
 * QuickJS robustness: `JS_ReadObject` rejects a symbol tag that names a
   string atom and no longer leaks an atom reference per symbol read; the
   writer clears its cycle mark when it refuses a SharedArrayBuffer, so the
