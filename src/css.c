@@ -1983,6 +1983,7 @@ ns_attr_pred_clear(gpointer p)
 {
     ns_css_attr_pred *a = p;
     g_free(a->name);
+    g_free(a->name_cased);
     g_free(a->value);
 }
 
@@ -2018,6 +2019,14 @@ css_simple_keep_type_case(ns_css_simple *s, const char *as_written)
 {
     if (strcmp(s->type, as_written) != 0)
         s->type_cased = g_strdup(as_written);
+}
+
+static void
+css_attr_pred_keep_case(ns_css_attr_pred *ap, const char *as_written)
+{
+    if (strcmp(ap->name, as_written) == 0) return;
+    ap->name_cased = g_strdup(as_written);
+    ap->name_cased_bit = ns_attr_name_bloom_bit(ap->name_cased);
 }
 
 static void
@@ -3029,6 +3038,7 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                 ns_css_attr_pred ap = {0};
                 ap.name = ascii_lower(attr_name, strlen(attr_name));
                 ap.name_bit = ns_attr_name_bloom_bit(ap.name);
+                css_attr_pred_keep_case(&ap, attr_name);
                 ap.html_ci = ns_css_html_ci_attr(ap.name);
                 g_free(attr_name);
                 ap.op   = NS_CSS_ATTR_PRESENT;
@@ -25926,6 +25936,12 @@ css_name_equals_lower(const char *name, const char *lower)
 }
 
 static gboolean
+css_attr_pred_uses_case(const ns_node *el, const ns_css_attr_pred *pred)
+{
+    return pred->name_cased && !ns_node_in_html_document(el);
+}
+
+static gboolean
 match_simple(const ns_css_simple *sel, const ns_node *el)
 {
     if (sel->never_match) return FALSE;
@@ -25938,7 +25954,8 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
     }
     if (sel->type && !(sel->type[0] == '*' && sel->type[1] == '\0')) {
         if (!el->name) return FALSE;
-        if (el->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) {
+        if (el->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS |
+                         NS_NODE_KEEP_CASE)) {
             if (strcmp(sel->type_cased ? sel->type_cased : sel->type,
                        el->name) != 0)
                 return FALSE;
@@ -25963,12 +25980,15 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
     }
     if (sel->attrs && sel->attrs->len > 0) {
         guint64 elbloom = ns_node_attr_bloom(el);
-        gboolean html_doc = !(el->flags & NS_NODE_XML_DOC) &&
+        gboolean html_doc = !(el->flags & (NS_NODE_XML_DOC | NS_NODE_KEEP_CASE)) &&
                              !(el->flags & (NS_NODE_FOREIGN_NS | NS_NODE_SVG_NS));
         for (guint i = 0; i < sel->attrs->len; i++) {
             const ns_css_attr_pred *a = &g_array_index(sel->attrs, ns_css_attr_pred, i);
-            if (a->name_bit && (elbloom & a->name_bit) == 0) return FALSE;
-            const char *v = ns_element_get_attr(el, a->name);
+            gboolean cased = css_attr_pred_uses_case(el, a);
+            guint64 bit = cased ? a->name_cased_bit : a->name_bit;
+            if (bit && (elbloom & bit) == 0) return FALSE;
+            const char *v = ns_element_get_attr(el, cased ? a->name_cased
+                                                          : a->name);
             if (a->op == NS_CSS_ATTR_PRESENT) {
                 if (!v) return FALSE;
             } else {
@@ -34649,6 +34669,7 @@ incr_own_attr_deps_from(GPtrArray *attrs, guint first)
         ns_css_attr_pred *copy = g_new0(ns_css_attr_pred, 1);
         *copy = *source;
         copy->name = g_strdup(source->name);
+        copy->name_cased = g_strdup(source->name_cased);
         copy->value = g_strdup(source->value);
         attrs->pdata[i] = copy;
     }
@@ -35491,12 +35512,13 @@ incr_node_matches_keys(const ns_node *n, GHashTable *keyset)
 static gboolean
 incr_attr_pred_matches(const ns_node *n, const ns_css_attr_pred *wanted)
 {
-    const char *value = ns_element_get_attr(n, wanted->name);
+    const char *value = ns_element_get_attr(n,
+        css_attr_pred_uses_case(n, wanted) ? wanted->name_cased : wanted->name);
     if (wanted->op == NS_CSS_ATTR_PRESENT) return value != NULL;
     if (!value || !wanted->value) return FALSE;
     gsize value_len = strlen(value);
     gsize wanted_len = strlen(wanted->value);
-    gboolean html_doc = !(n->flags & NS_NODE_XML_DOC) &&
+    gboolean html_doc = !(n->flags & (NS_NODE_XML_DOC | NS_NODE_KEEP_CASE)) &&
                         !(n->flags & (NS_NODE_FOREIGN_NS | NS_NODE_SVG_NS));
     gboolean ci = wanted->case_insensitive ||
         (!wanted->case_sensitive && html_doc &&
@@ -36461,6 +36483,7 @@ incr_has_anchor_copy_keys(incr_has_anchor *a, const ns_css_simple *c)
         ns_css_attr_pred *copy = g_new0(ns_css_attr_pred, 1);
         *copy = *src;
         copy->name = g_strdup(src->name);
+        copy->name_cased = g_strdup(src->name_cased);
         copy->value = g_strdup(src->value);
         g_ptr_array_add(a->attrs, copy);
     }

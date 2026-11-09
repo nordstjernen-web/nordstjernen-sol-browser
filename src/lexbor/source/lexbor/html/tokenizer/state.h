@@ -243,6 +243,10 @@ LXB_API const lxb_char_t *
 lxb_html_tokenizer_state_char_ref(lxb_html_tokenizer_t *tkz,
                                   const lxb_char_t *data, const lxb_char_t *end);
 
+LXB_API const lxb_char_t *
+lxb_html_tokenizer_named_char_ref(const lxb_char_t *name, size_t len,
+                                  size_t *value_len);
+
 
 #ifdef __cplusplus
 } /* extern "C" */

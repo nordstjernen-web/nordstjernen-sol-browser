@@ -1933,9 +1933,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
                                              &doc_charset);
     const ns_config *parse_cfg = ns_config_get();
     gboolean scripting_on = !parse_cfg || parse_cfg->javascript_enabled;
-    ns_node *doc = ns_html_parse_with_scripting(
+    ns_node *doc = ns_parse_document_for_type(
         decoded ? decoded : "", decoded ? (gssize)strlen(decoded) : 0,
-        scripting_on);
+        resp->content_type, scripting_on);
     g_free(decoded);
     int sec = resp->security;
     if (sec == NS_SEC_NONE) {

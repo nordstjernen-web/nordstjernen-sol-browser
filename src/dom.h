@@ -161,6 +161,7 @@ gboolean    ns_element_has_shadow_marker(const ns_node *el);
 const char *ns_element_get_attr_len(const ns_node *el, const char *name,
                                     gsize *out_len);
 const ns_attr *ns_element_find_attr(const ns_node *el, const char *name);
+gboolean ns_node_in_html_document(const ns_node *n);
 const ns_attr *ns_element_find_attr_ns(const ns_node *el,
                                        const char *namespace_uri,
                                        const char *local_name);
