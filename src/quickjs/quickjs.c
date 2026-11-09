@@ -1663,6 +1663,19 @@ static int _JS_AddIntrinsicCallSite(JSContext *ctx);
 
 static void JS_SetOpaqueInternal(JSValueConst obj, void *opaque);
 
+static no_inline __attribute__((noreturn)) void js_class_corrupt(uint32_t class_id)
+{
+    fprintf(stderr, "quickjs heap cage: class id %u is not a registered class\n", class_id);
+    abort();
+}
+
+static inline JSClass *js_class_get(JSRuntime *rt, uint32_t class_id)
+{
+    if (unlikely(class_id >= (uint32_t)rt->class_count))
+        js_class_corrupt(class_id);
+    return &rt->class_array[class_id];
+}
+
 static const JSClassExoticMethods js_arguments_exotic_methods;
 static const JSClassExoticMethods js_string_exotic_methods;
 static const JSClassExoticMethods js_proxy_exotic_methods;
@@ -6639,7 +6652,7 @@ static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID clas
         goto set_exotic;
     default:
     set_exotic:
-        if (ctx->rt->class_array[class_id].exotic) {
+        if (js_class_get(ctx->rt, class_id)->exotic) {
             p->is_exotic = 1;
         }
         break;
@@ -7802,7 +7815,7 @@ static void free_object(JSRuntime *rt, JSObject *p)
         reset_weak_ref(rt, &p->first_weak_ref);
     }
 
-    finalizer = rt->class_array[p->class_id].finalizer;
+    finalizer = js_class_get(rt, p->class_id)->finalizer;
     if (finalizer)
         (*finalizer)(rt, JS_MKPTR(JS_TAG_OBJECT, p));
     if ((p->class_id >= JS_CLASS_INIT_COUNT || js_class_is_intl(p->class_id)) && (uintptr_t)p->u.opaque)
@@ -8026,7 +8039,7 @@ static void mark_children(JSRuntime *rt, JSGCObjectHeader *gp,
 
             if (p->class_id != JS_CLASS_OBJECT) {
                 JSClassGCMark *gc_mark;
-                gc_mark = rt->class_array[p->class_id].gc_mark;
+                gc_mark = js_class_get(rt, p->class_id)->gc_mark;
                 if (gc_mark)
                     gc_mark(rt, JS_MKPTR(JS_TAG_OBJECT, p), mark_func);
             }
@@ -8652,7 +8665,7 @@ void JS_DumpMemoryUsage(FILE *fp, const JSMemoryUsage *s, JSRuntime *rt)
                 if (obj_classes[class_id] && class_id < rt->class_count) {
                     char buf[ATOM_GET_STR_BUF_SIZE];
                     fprintf(fp, "  %5d  %2.0d %s\n", obj_classes[class_id], class_id,
-                            JS_AtomGetStrRT(rt, buf, sizeof(buf), rt->class_array[class_id].class_name));
+                            JS_AtomGetStrRT(rt, buf, sizeof(buf), js_class_get(rt, class_id)->class_name));
                 }
             }
             if (obj_classes[JS_CLASS_INIT_COUNT])
@@ -9487,7 +9500,7 @@ static JSValue JS_ThrowTypeErrorInvalidClass(JSContext *ctx, int class_id)
 {
     JSRuntime *rt = ctx->rt;
     JSAtom name;
-    name = rt->class_array[class_id].class_name;
+    name = js_class_get(rt, class_id)->class_name;
     return JS_ThrowTypeErrorAtom(ctx, "%s object expected", name);
 }
 
@@ -10150,7 +10163,7 @@ static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
                     }
                 }
             } else {
-                const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+                const JSClassExoticMethods *em = js_class_get(ctx->rt, p->class_id)->exotic;
                 if (em) {
                     if (em->get_property) {
                         JSValue obj1, retval;
@@ -10590,7 +10603,7 @@ static int __exception JS_GetOwnPropertyNamesInternal(JSContext *ctx,
                 num_keys_count += js_string_obj_get_length(ctx, JS_MKPTR(JS_TAG_OBJECT, p));
             }
         } else {
-            const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+            const JSClassExoticMethods *em = js_class_get(ctx->rt, p->class_id)->exotic;
             if (em && em->get_own_property_names) {
                 if (em->get_own_property_names(ctx, &tab_exotic, &exotic_count,
                                                JS_MKPTR(JS_TAG_OBJECT, p)))
@@ -10805,7 +10818,7 @@ retry:
                 }
             }
         } else {
-            const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+            const JSClassExoticMethods *em = js_class_get(ctx->rt, p->class_id)->exotic;
             if (em && em->get_own_property) {
                 if (flags_only) {
                     /* Call the exotic handler with a temporary desc,
@@ -10911,7 +10924,7 @@ int JS_HasProperty(JSContext *ctx, JSValueConst obj, JSAtom prop)
     p = JS_VALUE_GET_OBJ(obj);
     for(;;) {
         if (p->is_exotic) {
-            const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+            const JSClassExoticMethods *em = js_class_get(ctx->rt, p->class_id)->exotic;
             if (em && em->has_property) {
                 /* has_property can free the prototype */
                 obj1 = js_dup(JS_MKPTR(JS_TAG_OBJECT, p));
@@ -11343,7 +11356,7 @@ static int delete_property(JSContext *ctx, JSObject *p, JSAtom atom)
                 }
             }
         } else {
-            const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+            const JSClassExoticMethods *em = js_class_get(ctx->rt, p->class_id)->exotic;
             if (em && em->delete_property) {
                 return em->delete_property(ctx, JS_MKPTR(JS_TAG_OBJECT, p), atom);
             }
@@ -11695,7 +11708,7 @@ retry:
                     }
                 }
             } else {
-                const JSClassExoticMethods *em = ctx->rt->class_array[p1->class_id].exotic;
+                const JSClassExoticMethods *em = js_class_get(ctx->rt, p1->class_id)->exotic;
                 if (em) {
                     JSValue obj1;
                     if (em->set_property) {
@@ -12135,7 +12148,7 @@ static int JS_CreateProperty(JSContext *ctx, JSObject *p,
                 return JS_ThrowTypeErrorOrFalse(ctx, flags, "cannot create numeric index in typed array");
             }
         } else if (!(flags & JS_PROP_NO_EXOTIC)) {
-            const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+            const JSClassExoticMethods *em = js_class_get(ctx->rt, p->class_id)->exotic;
             if (em) {
                 if (em->define_own_property) {
                     return em->define_own_property(ctx, JS_MKPTR(JS_TAG_OBJECT, p),
@@ -13019,7 +13032,7 @@ bool JS_IsFunction(JSContext *ctx, JSValueConst val)
     case JS_CLASS_PROXY:
         return js_cload(struct JSProxyData *, p->u.proxy_data)->is_func;
     default:
-        return (ctx->rt->class_array[p->class_id].call != NULL);
+        return (js_class_get(ctx->rt, p->class_id)->call != NULL);
     }
 }
 
@@ -15881,7 +15894,7 @@ static __maybe_unused void JS_DumpObject(JSRuntime *rt, JSObject *p)
         printf("%3s  %14s ", "-", "-");
     }
     printf("%10s ",
-           JS_AtomGetStrRT(rt, atom_buf, sizeof(atom_buf), rt->class_array[p->class_id].class_name));
+           JS_AtomGetStrRT(rt, atom_buf, sizeof(atom_buf), js_class_get(rt, p->class_id)->class_name));
     if (p->is_exotic && p->fast_array) {
         printf("[ ");
         for(i = 0; i < p->u.array.count; i++) {
@@ -16076,7 +16089,7 @@ static __maybe_unused void JS_DumpValue(JSRuntime *rt, JSValueConst val)
     case JS_TAG_OBJECT:
         {
             JSObject *p = JS_VALUE_GET_OBJ(val);
-            JSAtom atom = rt->class_array[p->class_id].class_name;
+            JSAtom atom = js_class_get(rt, p->class_id)->class_name;
             char atom_buf[ATOM_GET_STR_BUF_SIZE];
             printf("[%s %p]",
                    JS_AtomGetStrRT(rt, atom_buf, sizeof(atom_buf), atom), (void *)p);
@@ -18604,7 +18617,7 @@ static __exception int JS_CopyDataProperties(JSContext *ctx,
 
     gpn_flags = JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK | JS_GPN_ENUM_ONLY;
     if (p->is_exotic) {
-        const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+        const JSClassExoticMethods *em = js_class_get(ctx->rt, p->class_id)->exotic;
         /* cannot use JS_GPN_ENUM_ONLY with e.g. proxies because it
            introduces a visible change */
         if (em && em->get_own_property_names) {
@@ -19424,7 +19437,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     p = JS_VALUE_GET_OBJ(func_obj);
     if (unlikely(p->class_id != JS_CLASS_BYTECODE_FUNCTION)) {
         JSClassCall *call_func;
-        call_func = rt->class_array[p->class_id].call;
+        call_func = js_class_get(rt, p->class_id)->call;
         if (!call_func) {
         not_a_function:
             return JS_ThrowTypeErrorNotAFunction(caller_ctx);
@@ -22627,7 +22640,7 @@ static JSValue JS_CallConstructorInternal(JSContext *ctx,
         return JS_ThrowTypeErrorNotAConstructor(ctx, func_obj);
     if (unlikely(p->class_id != JS_CLASS_BYTECODE_FUNCTION)) {
         JSClassCall *call_func;
-        call_func = ctx->rt->class_array[p->class_id].call;
+        call_func = js_class_get(ctx->rt, p->class_id)->call;
         if (!call_func) {
             return JS_ThrowTypeErrorNotAConstructor(ctx, func_obj);
         }
@@ -45728,7 +45741,7 @@ static JSValue js_object_toString(JSContext *ctx, JSValueConst this_val,
             case JS_CLASS_NUMBER:
             case JS_CLASS_DATE:
             case JS_CLASS_REGEXP:
-                atom = ctx->rt->class_array[p->class_id].class_name;
+                atom = js_class_get(ctx->rt, p->class_id)->class_name;
                 break;
             default:
                 atom = JS_ATOM_Object;
@@ -64921,7 +64934,7 @@ static JSValue js_typed_array_get_toStringTag(JSContext *ctx,
     p = JS_VALUE_GET_OBJ(this_val);
     if (!is_typed_array(p->class_id))
         return JS_UNDEFINED;
-    return JS_AtomToString(ctx, ctx->rt->class_array[p->class_id].class_name);
+    return JS_AtomToString(ctx, js_class_get(ctx->rt, p->class_id)->class_name);
 }
 
 static JSValue js_typed_array_set_internal(JSContext *ctx,

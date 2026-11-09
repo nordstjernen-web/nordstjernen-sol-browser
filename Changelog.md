@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a corrupted JavaScript heap can no longer make the engine
+  call a function pointer read from outside its class table. An object's
+  class id, stored in the heap, chose the class whose call, finalizer,
+  garbage-collector and exotic-property hooks the engine runs, and was
+  used without a bounds check; a forged id read those pointers from
+  memory past the table. Class lookups from an object now abort on an
+  unregistered id (`docs/heap-hardening.md`, review finding H1).
 * Security: WebAssembly's runtime structures no longer live in the
   JavaScript heap cage. Every allocation the WebAssembly runtime made came
   from the cage, including the memory instance that holds a module's
