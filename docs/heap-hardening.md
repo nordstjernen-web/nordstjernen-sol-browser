@@ -38,7 +38,7 @@ from upstream keep merging cleanly into `src/quickjs/`.
 | 2c | Inventory of raw host and function pointers left in the heap | **done**, kept current below |
 | 3p | Trusted runtime structures and context table (preparation for 3a and 3b) | **done** |
 | 3a.1 | Caged values: 8-byte `JSValue` holding a 32-bit cage offset, cage owned by the engine | **done** |
-| 3a.2 | Compressed pointer fields inside heap structures | **batches 2 to 6 done**: shape, property array, prototype, shape hash chain, fast-array values, closure variables, home object, bytecode arrays, weak-reference chains, string-slice parents, every internal class structure behind the opaque union and the bytecode pointer of functions. Batch 1 (GC list links) remains |
+| 3a.2 | Compressed pointer fields inside heap structures | **batches 2 to 6 done**: shape, property array, prototype, shape hash chain, fast-array values, closure variables, home object, bytecode arrays, weak-reference chains, string-slice parents, every internal class structure behind the opaque union and the bytecode pointer of functions. Batch 1 (list links) done as safe linking |
 | 3b | Trusted space for bytecode and saved frames | planned |
 
 Stage 1b, moving cookies, HSTS, the HTTP cache and storage behind the
@@ -210,7 +210,7 @@ says which stage removed the item or will.
 | `JSAtomicsWaiter.async_rt` | `JSRuntime *`, tested for non-NULL and compared only | raw pointer in a cage struct, never dereferenced | open, low value |
 | `ctx->class_proto`, `rt->atom_array`, `rt->atom_hash` | arrays owned by trusted structures that point into the cage | trusted memory pointing in, which the model allows | fine |
 | `JSObject` | `shape`, `prop`, `first_weak_ref` | compressed offsets | done (3a.2) |
-| `JSObject`, `JSFunctionBytecode`, `JSTypedArray`, … | GC and bookkeeping `list_head` links | raw; a corrupted link is an unlink write outside the cage | **3a.2 batch 1** |
+| `JSObject`, `JSFunctionBytecode`, `JSTypedArray`, … | GC and bookkeeping `list_head` links | raw, but every insert and unlink verifies both neighbours first, so a corrupted link aborts instead of writing elsewhere | done (3a.2 batch 1) |
 | `JSObject.u.array` | `values` (fast arrays), `var_refs` | compressed offsets | done (3a.2) |
 | `JSObject.u.func` | `function_bytecode`, `var_refs`, `home_object` | compressed offsets; the bytecode they reach is still in-cage and trusted by the interpreter | done (3a.2); trust is **3b** |
 | `JSObject.u.cfunc.realm`, `JSFunctionBytecode.realm`, `JSWrappedFunction.realm` | context-table index; the interpreter switches realm only to a live context | done (3p) |
@@ -226,9 +226,8 @@ says which stage removed the item or will.
 | embedder structs | `ns_node.js_wrapper`, listener records, `ns_js` | outside the cage pointing in; decoded only through the engine | fine |
 
 After 3a.2 the rows that still turn an in-cage write into something
-outside the cage are the GC list links (batch 1) and the two bold `3b`
-rows, bytecode and saved frames; everything else is data corruption
-inside the cage.
+outside the cage are the two bold `3b` rows, bytecode and saved frames;
+everything else is data corruption inside the cage.
 
 ## Stage 3: a real boundary
 
@@ -329,7 +328,7 @@ which a compressed link cannot name (see the design notes under stage
 
 | Field | Sites | Batch |
 |---|---|---|
-| `JSGCObjectHeader.link`, `JSTypedArray.link`, other `list_head` members in cage objects | 20 direct, plus the `list.h` macro uses over those lists | 1 |
+| `JSGCObjectHeader.link`, `JSTypedArray.link`, other `list_head` members in cage objects | 20 direct, plus the `list.h` macro uses over those lists | 1, **done** as safe linking in `list.h` rather than compression |
 | `JSObject.shape`, `JSObject.prop`, `JSShape.proto`, `JSShape.shape_hash_next` | 55, 43, 29, 9 | 2, **done** |
 | `JSObject.u.array.u.values`, `u.array.u.var_refs`, `u.func.var_refs`, `u.func.home_object` | 41, 13, 11 | 3, **done** |
 | `JSFunctionBytecode.cpool`, `byte_code_buf`, `closure_var`, `vardefs`, `pc2line_buf` | 17, 22, 16, 29, 10 | 4, **done** |
@@ -441,13 +440,46 @@ Design notes for 3b, from the tree after 3a.2:
   `alloca` sizing then reads `stack_size`, `var_count` and `arg_count`
   from trusted memory only.
 
-Batch 1 of 3a.2, the GC list links, has a wrinkle of its own: the
-runtime's `gc_obj_list` threads both cage objects and the trusted
-`JSContext` structures, and a compressed link cannot name trusted
-memory. Contexts therefore need a list of their own before the links
-can shrink (the runtime already keeps `context_list`); the GC walk then
-visits both lists. Until then a corrupted link is still an unlink write
-outside the cage.
+Batch 1 of 3a.2, the list links, was done differently from the other
+batches. The runtime's `gc_obj_list` threads both cage objects and the
+trusted `JSContext` structures, and a compressed link cannot name
+trusted memory. Instead of splitting the lists, `list.h` now verifies on
+every insert and unlink that the two neighbours point at each other
+before it writes, the safe-linking rule glibc and the Linux kernel use.
+An attacker with an in-cage write cannot satisfy that check for a target
+outside the cage, because they cannot plant the matching back pointer
+there, so the unlink primitive is gone while the links keep their 64-bit
+form and the mixed trusted-and-caged list keeps working. Two compares per
+list operation; the allocation stress script did not move.
+
+## Maintaining the hardening across upstream refreshes
+
+The fork-local code is kept out of `quickjs.c` where it can be, and the
+rewrites that cannot be are reproducible:
+
+- `src/quickjs/quickjs-cptr.h` holds the compressed-field machinery
+  (`JS_CPTR`, `js_cload`, `js_cstore`, the fail-closed encoder) and
+  `src/quickjs/quickjs-hardening.h` the cage masking, the external and
+  code pointer tables and the context table. `quickjs.c` includes each
+  at one line, so an upstream refresh sees two include lines where it
+  would otherwise see 330 lines of foreign code. `quickjs-cage.c` is a
+  separate file already, and `list.h` carries the safe-linking checks.
+- `scripts/quickjs-cage-rewrite.py` is the single list of compressed
+  fields. `--check` reports every raw access to one of them and exits
+  non-zero; `--apply` rewrites the raw accesses in place, idempotently,
+  and reports the address-taking and slot-move sites that need a hand.
+  Stripping the conversions from the current tree and re-applying
+  reproduces it byte for byte, so after a refresh the procedure is:
+  3-way merge `quickjs.c`, declare any new pointer field in a heap
+  structure `JS_CPTR(T)` and add it to the script's table, run
+  `--apply`, build, run the engine tests and a settled live-site
+  capture. A pointer that escaped the rules fails loudly: the encoder
+  aborts on an out-of-cage pointer and the lists abort on a bad link.
+- The trusted block path in the arena front end, the `JS_NewRuntime`
+  cage path, the Intl and WeakRef sentinel handling and the
+  bytecode-tag sites remain in `quickjs.c` because they are glued to
+  the code around them; they are listed in
+  `docs/vendored-engine-updates.md` for the person doing the refresh.
 
 ## Benchmarks
 
