@@ -3,6 +3,12 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security: `ShadowRealm.prototype.evaluate` and `importValue` no longer
+  crash the renderer. The heap hardening stored the realm as a
+  context-table index, but the getter still read it as a heap offset.
+* Fixed: `Date` setters such as `setMinutes(NaN)` now make the date
+  invalid, and `DataView` `byteOffset`/`byteLength` return 0 for a view
+  whose buffer was detached or shrunk instead of throwing.
 * Security: the engine refuses a SharedArrayBuffer backing store that an
   embedder's allocation hook returns from outside the heap cage, frees it
   through that hook and throws a TypeError. The bundled libc allocates

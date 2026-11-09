@@ -13122,6 +13122,8 @@ void *JS_GetOpaque(JSValueConst obj, JSClassID class_id)
         return js_ept_get((const void *)(uintptr_t)p->u.opaque, class_id);
     if (js_class_is_intl(class_id))
         return js_ept_load((uint32_t)(uintptr_t)p->u.opaque, JS_EPT_TAG_INTL_OPAQUE);
+    if (class_id == JS_CLASS_SHADOW_REALM)
+        return js_ctx_get((uint32_t)(uintptr_t)p->u.opaque);
     return js_cload(void *, p->u.opaque);
 }
 
@@ -13147,6 +13149,8 @@ void *JS_GetAnyOpaque(JSValueConst obj, JSClassID *class_id)
         return js_ept_get((const void *)(uintptr_t)p->u.opaque, p->class_id);
     if (js_class_is_intl(p->class_id))
         return js_ept_load((uint32_t)(uintptr_t)p->u.opaque, JS_EPT_TAG_INTL_OPAQUE);
+    if (p->class_id == JS_CLASS_SHADOW_REALM)
+        return js_ctx_get((uint32_t)(uintptr_t)p->u.opaque);
     return js_cload(void *, p->u.opaque);
 }
 
