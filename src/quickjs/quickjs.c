@@ -4274,6 +4274,16 @@ static void JS_FreeAtomStruct(JSRuntime *rt, JSAtomStruct *p)
 #ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
     list_del(&p->link);
 #endif
+    /* an atom may have been created in place from a slice (see
+       __JS_NewAtom), so release what js_free_string0 would release */
+    switch (p->kind) {
+    case JS_STRING_KIND_SLICE:
+        js_free_string(rt, ((JSStringSlice *)&p[1])->parent);
+        break;
+    case JS_STRING_KIND_INDIRECT:
+        js_free_rt(rt, strv(p));
+        break;
+    }
     js_free_rt(rt, p);
     rt->atom_count--;
     assert(rt->atom_count >= 0);
