@@ -12,7 +12,7 @@ modern HTML, CSS and JavaScript standards.
 
 **Windows:** install Nordstjernen Web Browser from the [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl).
 
-![Nordstjernen 1.0.45 playing a Facebook video in search results](docs/screenshot.png)
+![Nordstjernen 1.0.46 playing a YouTube video](docs/screenshot.png)
 
 **Current release:** **1.0.45** (November 2026) — see [Changelog.md](Changelog.md).
 
