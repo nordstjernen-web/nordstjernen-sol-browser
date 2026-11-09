@@ -3,6 +3,14 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security: the engine refuses a SharedArrayBuffer backing store that an
+  embedder's allocation hook returns from outside the heap cage, frees it
+  through that hook and throws a TypeError. The bundled libc allocates
+  worker SharedArrayBuffers in the cage, so the `qjs` tool and the test262
+  runner no longer crash in the Atomics tests. The browser installs no such
+  hook and was not affected.
+* Build: the QuickJS CMake tree builds the cage allocator, so
+  `run-test262` and `qjs` link again.
 * Security: the engine's intrusive lists (GC object list, typed-array
   views, map records, job queue, module lists) verify that both
   neighbours point back before every insert and unlink, so a corrupted
