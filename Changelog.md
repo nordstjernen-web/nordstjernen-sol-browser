@@ -3,6 +3,11 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security (QuickJS): string concatenation appended in place to a string
+  that was the last reference to a registered property-name atom, leaving
+  the atom table holding the old hash for the new contents; two distinct
+  atoms could then spell the same property name. In-place appends now skip
+  atom strings.
 * Security (QuickJS): a property key taken from a substring longer than
   1 KiB became an atom that still referenced the parent string, and freeing
   the atom never released that reference; a page looping over such keys
