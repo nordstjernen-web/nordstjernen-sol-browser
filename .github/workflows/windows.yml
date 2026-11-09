@@ -48,6 +48,7 @@ jobs:
         uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
           msystem: UCRT64
+          release: false
           update: true
           cache: true
           install: >-
@@ -125,6 +126,11 @@ jobs:
           sed -i "s|^prefix=.*|prefix=$MINGW_PREFIX|" \
               "$MINGW_PREFIX"/lib/pkgconfig/libav*.pc \
               "$MINGW_PREFIX"/lib/pkgconfig/libsw*.pc
+
+      - name: Prefetch wgpu-native through the GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/prefetch-wrap.sh wgpu-native-windows-x86_64-gnu
 
       - name: Build
         id: build

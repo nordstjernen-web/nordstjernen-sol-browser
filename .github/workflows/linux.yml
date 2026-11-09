@@ -112,6 +112,11 @@ jobs:
           pkg-config --modversion libcurl
           pkg-config --modversion libavcodec
 
+      - name: Prefetch wgpu-native through the GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/prefetch-wrap.sh wgpu-native-linux-x86_64
+
       - name: Build
         id: build
         shell: bash

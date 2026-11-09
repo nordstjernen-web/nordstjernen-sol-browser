@@ -62,6 +62,11 @@ jobs:
           echo "tag=$TAG pom=$POM_VERSION"
           [ "${TAG#v}" = "$POM_VERSION" ]
 
+      - name: Prefetch wgpu-native through the GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/prefetch-wrap.sh wgpu-native-linux-x86_64
+
       - name: Build native libraries (engine + JNI bridge)
         run: CC="ccache clang" java/scripts/build-native.sh
 

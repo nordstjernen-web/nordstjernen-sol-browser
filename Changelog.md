@@ -3,6 +3,16 @@ Changelog:
 
 1.0.46-dev:
 ======
+* CI: the Linux, macOS, Windows and Java workflows put the pinned
+  wgpu-native release into meson's package cache through the GitHub REST
+  API (`scripts/prefetch-wrap.sh`) before `meson setup`, because the
+  github.com release-download pages were answering 504. The wrap's
+  checksum is checked first, and on any failure meson downloads the
+  release itself as before.
+* CI: the Windows workflow uses the MSYS2 that the runner image already
+  ships (`release: false`) instead of downloading the MSYS2 installer from
+  its GitHub release, which failed the same way; packages still come from
+  the MSYS2 mirrors.
 * Android: fetch-prebuilt-deps.ps1 fetches the dependency sysroot through
   the GitHub REST API (the release by tag, then each asset by id) instead
   of the github.com release-download pages, which were answering slowly

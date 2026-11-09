@@ -117,6 +117,11 @@ jobs:
           pkg-config --modversion gtk4
           pkg-config --modversion libcurl
 
+      - name: Prefetch wgpu-native through the GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/prefetch-wrap.sh wgpu-native-macos-aarch64
+
       - name: Build
         id: build
         shell: bash
