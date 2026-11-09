@@ -305,5 +305,26 @@ Bypassing the fork's arena allocator while the cage is active costs
 more on the allocation stress script: 0.36 s and 183 MB against 0.32 s
 and 177 MB with the arena, so about 10 % more time on an allocation-bound
 microbenchmark and 3 % more memory from 16-byte size-class rounding of
-the 8-byte block header. Its sitebench A/B is recorded in the next
-entry once it has run.
+the 8-byte block header.
+
+Stage 2b complete (tables and arena bypass), before = stage 2a build
+(2025-11-09):
+
+| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
+|---|---|---|---|---|
+| before (stage 2a) | 83.0 | 1.58× | 3.62× | 0.26× |
+| after (stage 2b complete) | 82.5 | 1.47× | 3.63× | 0.26× |
+
+| Site | CPU before | CPU after | RSS before | RSS after |
+|---|---|---|---|---|
+| google | 295 ms | 259 ms | 78.4 MB | 78.1 MB |
+| anthropic | 779 ms | 739 ms | 139.6 MB | 139.9 MB |
+| bbc | 3024 ms | 3690 ms | 454.3 MB | 450.7 MB |
+| cnn | 7448 ms | 7531 ms | 682.0 MB | 683.1 MB |
+| guardian | 5036 ms | 5014 ms | 382.1 MB | 382.8 MB |
+
+The aggregate is flat. The bbc outlier is run-to-run noise on that
+site, whose CPU has ranged from 2.9 s to 3.7 s across the eight captures
+in this document with no consistent direction; the allocation-bound
+microbenchmark above is the honest measure of the arena bypass, about
+10 % on pure allocation churn and invisible in page loads.
