@@ -11,6 +11,7 @@ nordstjernen_gtk_sources = files(
   'rjson.c',
   'titlerow.c',
   'ns_webauthn.c',
+  'webdriver.c',
   '../rproc_http.c',
   '../ipc_http.c',
   '../threaddump.c',
@@ -60,7 +61,8 @@ executable(
   nordstjernen_app_sources +
     nordstjernen_gtk_sources + nordstjernen_gtk_platform_sources +
     nordstjernen_icon_resources +
-    nordstjernen_win_resources + [polyfills_h, wpt_hook_h, remote_page_h],
+    nordstjernen_win_resources + [polyfills_h, wpt_hook_h, remote_page_h,
+                                  webdriver_page_h],
   link_with: nordstjernen_gtk_link,
   dependencies: nordstjernen_gtk_deps,
   include_directories: include_directories('..', '.'),

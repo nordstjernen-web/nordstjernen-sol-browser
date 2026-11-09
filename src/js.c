@@ -23,6 +23,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "polyfills.h"
 #include "streaming.h"
 #include "remote_page.h"
+#include "webdriver_page.h"
 #include "version.h"
 
 #include <math.h>
@@ -66421,6 +66422,7 @@ ns_js_reset_runtime_state(ns_js *js)
     ns_js_drop_pending_rejections(js);
     ns_js_drop_realm_helpers(js);
     ns_js_drop_remote_helper(js);
+    ns_js_drop_webdriver_helper(js);
     if (js->frame_ctxs) {
         for (guint i = 0; i < js->frame_ctxs->len; i++)
             JS_FreeContext(g_ptr_array_index(js->frame_ctxs, i));
@@ -67461,6 +67463,7 @@ ns_js_free(ns_js *js)
     ns_js_drop_pending_rejections(js);
     ns_js_drop_realm_helpers(js);
     ns_js_drop_remote_helper(js);
+    ns_js_drop_webdriver_helper(js);
     if (js->frame_ctxs) {
         for (guint i = 0; i < js->frame_ctxs->len; i++)
             JS_FreeContext(g_ptr_array_index(js->frame_ctxs, i));
@@ -73587,6 +73590,168 @@ ns_js_remote_call(ns_js *js, const char *request)
             const char *s = JS_ToCString(ctx, reply);
             out = g_strdup(s ? s : "undefined");
             if (s) JS_FreeCString(ctx, s);
+        }
+        JS_FreeValue(ctx, reply);
+    }
+    ns_js_microtask_checkpoint(js);
+    ns_js_budget_pop(js, &bg);
+    return out;
+}
+
+void
+ns_js_drop_webdriver_helper(ns_js *js)
+{
+    if (!js || !js->webdriver_ctx) return;
+    JS_FreeValue(js->webdriver_ctx, js->webdriver_helper);
+    JS_FreeContext(js->webdriver_ctx);
+    js->webdriver_ctx = NULL;
+}
+
+static ns_node *
+ns_wd_frame_arg(int argc, JSValueConst *argv)
+{
+    if (argc < 1) return NULL;
+    ns_node *n = ns_unwrap_element_mut(argv[0]);
+    return n && ns_node_is_element_named(n, "iframe") ? n : NULL;
+}
+
+static JSValue
+ns_wd_frame_document(JSContext *ctx, JSValueConst this_val, int argc,
+                     JSValueConst *argv)
+{
+    (void)this_val;
+    ns_node *n = ns_wd_frame_arg(argc, argv);
+    if (!n || !ns_iframe_ensure_content_root(n)) return JS_NULL;
+    return ns_iframe_content_document(ctx, argv[0], n);
+}
+
+static JSValue
+ns_wd_frame_window(JSContext *ctx, JSValueConst this_val, int argc,
+                   JSValueConst *argv)
+{
+    (void)this_val;
+    ns_node *n = ns_wd_frame_arg(argc, argv);
+    if (!n || !ns_iframe_ensure_content_root(n)) return JS_NULL;
+    return ns_iframe_realm_window(ctx, argv[0], n);
+}
+
+static JSValue
+ns_wd_frame_call(JSContext *ctx, JSValueConst this_val, int argc,
+                 JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *n = ns_wd_frame_arg(argc, argv);
+    if (!js || !n || argc < 2 || !js->frame_contexts) return JS_UNDEFINED;
+    JSContext *fctx = g_hash_table_lookup(js->frame_contexts, n);
+    if (!fctx) return JS_UNDEFINED;
+    size_t len = 0;
+    const char *src = JS_ToCStringLen(ctx, &len, argv[1]);
+    if (!src) return JS_EXCEPTION;
+    JSContext *saved_ctx = js->ctx;
+    ns_node *saved_doc = js->current_doc;
+    ns_node *saved_frame = js->raf_frame_ctx;
+    char *saved_url = js->current_url;
+    ns_node *fdoc = ns_iframe_document_node(n);
+    const char *frame_url = ns_element_get_attr(n, "data-nd-frame-url");
+    js->ctx = fctx;
+    if (fdoc) js->current_doc = fdoc;
+    js->raf_frame_ctx = n;
+    js->current_url = g_strdup(frame_url ? frame_url : "");
+    JSValue fn = JS_Eval(fctx, src, len, "<webdriver>", JS_EVAL_TYPE_GLOBAL);
+    JS_FreeCString(ctx, src);
+    JSValue r = JS_EXCEPTION;
+    if (!JS_IsException(fn)) {
+        JSValueConst arg = argc >= 3 ? argv[2] : JS_UNDEFINED;
+        r = JS_Call(fctx, fn, JS_UNDEFINED, 1, &arg);
+    }
+    JS_FreeValue(fctx, fn);
+    g_free(js->current_url);
+    js->current_url = saved_url;
+    js->raf_frame_ctx = saved_frame;
+    js->current_doc = saved_doc;
+    js->ctx = saved_ctx;
+    return r;
+}
+
+static JSValue
+ns_wd_compile(JSContext *ctx, JSValueConst this_val, int argc,
+              JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || argc < 1) return JS_UNDEFINED;
+    size_t len = 0;
+    const char *src = JS_ToCStringLen(ctx, &len, argv[0]);
+    if (!src) return JS_EXCEPTION;
+    JSValue v = JS_Eval(js->ctx, src, len, "<webdriver-script>",
+                        JS_EVAL_TYPE_GLOBAL);
+    JS_FreeCString(ctx, src);
+    return v;
+}
+
+static gboolean
+ns_js_webdriver_helper_ready(ns_js *js)
+{
+    if (js->webdriver_ctx) return TRUE;
+    JSContext *ctx = JS_NewContext(js->rt);
+    if (!ctx) return FALSE;
+    JS_SetContextOpaque(ctx, js);
+    JSValue factory = JS_Eval(ctx, ns_webdriver_page_src,
+                              strlen(ns_webdriver_page_src), "<webdriver>",
+                              JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(factory)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeContext(ctx);
+        return FALSE;
+    }
+    JSValue natives = JS_NewObject(ctx);
+    ns_bind_fn(ctx, natives, "frameDocument", ns_wd_frame_document, 1);
+    ns_bind_fn(ctx, natives, "frameWindow", ns_wd_frame_window, 1);
+    ns_bind_fn(ctx, natives, "frameCall", ns_wd_frame_call, 3);
+    ns_bind_fn(ctx, natives, "compile", ns_wd_compile, 1);
+    JSValue args[2] = { JS_GetGlobalObject(js->ctx), natives };
+    JSValue helper = JS_Call(ctx, factory, JS_UNDEFINED, 2, args);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, args[1]);
+    JS_FreeValue(ctx, factory);
+    if (JS_IsException(helper) || !JS_IsFunction(ctx, helper)) {
+        if (JS_IsException(helper)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, helper);
+        JS_FreeContext(ctx);
+        return FALSE;
+    }
+    js->webdriver_ctx = ctx;
+    js->webdriver_helper = helper;
+    return TRUE;
+}
+
+char *
+ns_js_webdriver_call(ns_js *js, const char *request)
+{
+    if (!js || !request) return NULL;
+    if (js->halted || js->in_pump) return NULL;
+    ns_budget_guard bg = {0};
+    ns_js_budget_push(js, &bg);
+    char *out = NULL;
+    if (!ns_js_webdriver_helper_ready(js)) {
+        out = g_strdup("error: the WebDriver helper could not start");
+    } else {
+        JSContext *ctx = js->webdriver_ctx;
+        JSValue arg = JS_NewString(ctx, request);
+        JSValue reply = JS_Call(ctx, js->webdriver_helper, JS_UNDEFINED, 1,
+                                &arg);
+        JS_FreeValue(ctx, arg);
+        if (JS_IsException(reply)) {
+            JSValue ex = JS_GetException(ctx);
+            const char *msg = JS_ToCString(ctx, ex);
+            out = g_strdup_printf("error: %s", msg ? msg : "(no message)");
+            if (msg) JS_FreeCString(ctx, msg);
+            JS_FreeValue(ctx, ex);
+        } else {
+            const char *str = JS_ToCString(ctx, reply);
+            out = g_strdup(str ? str : "undefined");
+            if (str) JS_FreeCString(ctx, str);
         }
         JS_FreeValue(ctx, reply);
     }

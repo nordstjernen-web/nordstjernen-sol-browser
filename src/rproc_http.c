@@ -1794,6 +1794,104 @@ ns_rproc_http_remote_call(ns_rproc_http *r, const char *call)
 }
 
 char *
+ns_rproc_http_webdriver(ns_rproc_http *r, const char *request)
+{
+    return text_request(r, "/webdriver", "request", request);
+}
+
+char *
+ns_rproc_http_cookies(ns_rproc_http *r)
+{
+    return r ? request(r, "/cookies", "{\"op\":\"list\"}") : NULL;
+}
+
+int
+ns_rproc_http_cookie_set(ns_rproc_http *r, const char *set_cookie)
+{
+    if (!r || !set_cookie)
+        return 0;
+    char *escaped = json_escape(set_cookie);
+    char *json = NULL;
+    if (asprintf(&json, "{\"op\":\"set\",\"cookie\":\"%s\"}",
+                 escaped ? escaped : "") < 0)
+        json = NULL;
+    free(escaped);
+    char *body = json ? request(r, "/cookies", json) : NULL;
+    free(json);
+    long ok = 0;
+    if (body)
+        json_get_long(body, "ok", &ok);
+    free(body);
+    return ok != 0;
+}
+
+static unsigned char *
+binary_request(ns_rproc_http *r, const char *path, const char *json,
+               size_t *out_len, http_head *out_head)
+{
+    *out_len = 0;
+    if (!r || http_write_request(r->wfd, "POST", path, "application/json",
+                                 json, json ? strlen(json) : 0) != 0)
+        return NULL;
+    if (http_read_head(&r->conn, out_head) != 0 ||
+        out_head->content_length < 0 ||
+        out_head->content_length > NS_HTTP_MAX_REPLY)
+        return NULL;
+    if (out_head->content_length == 0)
+        return NULL;
+    unsigned char *body = malloc((size_t)out_head->content_length);
+    if (!body)
+        return NULL;
+    if (http_read_body(&r->conn, out_head->content_length, body) != 0) {
+        free(body);
+        return NULL;
+    }
+    *out_len = (size_t)out_head->content_length;
+    return body;
+}
+
+unsigned char *
+ns_rproc_http_screenshot(ns_rproc_http *r, double x, double y, double width,
+                         double height, double scale, size_t *out_len,
+                         int *out_w, int *out_h)
+{
+    char json[256];
+    snprintf(json, sizeof json,
+             "{\"x\":%.3f,\"y\":%.3f,\"width\":%.3f,\"height\":%.3f,"
+             "\"scale\":%.3f}", x, y, width, height, scale);
+    http_head head;
+    unsigned char *png = binary_request(r, "/screenshot", json, out_len, &head);
+    if (out_w) *out_w = png ? (int)head.x_w : 0;
+    if (out_h) *out_h = png ? (int)head.x_h : 0;
+    return png;
+}
+
+unsigned char *
+ns_rproc_http_pdf(ns_rproc_http *r, const char *options_json, size_t *out_len)
+{
+    http_head head;
+    return binary_request(r, "/pdf", options_json ? options_json : "{}",
+                          out_len, &head);
+}
+
+void
+ns_rproc_http_frame_clear(ns_rproc_http_frame *out)
+{
+    if (!out)
+        return;
+    free(out->nav);
+    free(out->webgl);
+    free(out->camera);
+    free(out->capability);
+    free(out->download);
+    free(out->config);
+    free(out->audio);
+    free(out->window_action);
+    free(out->tiles);
+    memset(out, 0, sizeof *out);
+}
+
+char *
 ns_rproc_http_dump(ns_rproc_http *r, const char *kind)
 {
     if (!r || !kind)

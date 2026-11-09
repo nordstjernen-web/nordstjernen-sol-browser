@@ -229,6 +229,16 @@ int   ns_rproc_http_set_color_scheme(ns_rproc_http *r, int dark);
 int   ns_rproc_http_audio_event(ns_rproc_http *r, const char *line);
 char *ns_rproc_http_eval(ns_rproc_http *r, const char *src);
 char *ns_rproc_http_remote_call(ns_rproc_http *r, const char *call);
+char *ns_rproc_http_webdriver(ns_rproc_http *r, const char *request);
+char *ns_rproc_http_cookies(ns_rproc_http *r);
+int   ns_rproc_http_cookie_set(ns_rproc_http *r, const char *set_cookie);
+unsigned char *ns_rproc_http_screenshot(ns_rproc_http *r, double x, double y,
+                                        double width, double height,
+                                        double scale, size_t *out_len,
+                                        int *out_w, int *out_h);
+unsigned char *ns_rproc_http_pdf(ns_rproc_http *r, const char *options_json,
+                                 size_t *out_len);
+void  ns_rproc_http_frame_clear(ns_rproc_http_frame *out);
 char *ns_rproc_http_dump(ns_rproc_http *r, const char *kind);
 char *ns_rproc_http_console_poll(ns_rproc_http *r);
 char *ns_rproc_http_media_at(ns_rproc_http *r, int x, int y, int *out_is_video,

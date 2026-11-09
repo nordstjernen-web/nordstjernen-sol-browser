@@ -1454,6 +1454,39 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/webdriver") == 0) {
+        char *request = json_get_str(body, "request");
+        char *res = s->cur && request ? ns_browser_webdriver_call(s->cur, request)
+                                      : NULL;
+        reply_str(ctrl_w, "text", res);
+        free(res);
+        free(request);
+        return 0;
+    }
+
+    if (strcmp(head->path, "/cookies") == 0) {
+        char *op = json_get_str(body, "op");
+        char *page_url = s->cur ? ns_browser_url(s->cur) : NULL;
+        if (op && strcmp(op, "set") == 0) {
+            char *cookie = json_get_str(body, "cookie");
+            int ok = page_url && cookie &&
+                     ns_net_cookie_set_for_webdriver(page_url, cookie);
+            const char *json = ok ? "{\"ok\":1}" : "{\"ok\":0}";
+            http_write_response(ctrl_w, 200, "application/json", NULL, json,
+                                strlen(json));
+            free(cookie);
+        } else {
+            char *list = page_url ? ns_net_cookies_json_for_webdriver(page_url)
+                                  : g_strdup("[]");
+            http_write_response(ctrl_w, 200, "application/json", NULL, list,
+                                strlen(list));
+            g_free(list);
+        }
+        free(page_url);
+        free(op);
+        return 0;
+    }
+
     if (strcmp(head->path, "/remote-call") == 0) {
         char *request = json_get_str(body, "request");
         s->frame_valid = 0;

@@ -17,6 +17,7 @@ reporting in [SECURITY.md](../SECURITY.md), and licensing in
 - [Proxy.md](Proxy.md) — proxies and VPNs.
 - [privacy-policy.md](privacy-policy.md) — what the browser does and does not collect.
 - [remote-control.md](remote-control.md) — let a local agent such as Claude Code drive the browser through the built-in MCP server (`nordstjernen --mcp`).
+- [webdriver.md](webdriver.md) — drive the browser from Selenium, WebdriverIO and other WebDriver clients (`nordstjernen --webdriver`).
 
 ## Install, build & packaging
 

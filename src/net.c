@@ -1708,6 +1708,22 @@ ns_net_cookies_json_for_js(const char *url, const char *top_url)
     return ns_cookie_store_visible_json(site, url);
 }
 
+char *
+ns_net_cookies_json_for_webdriver(const char *url)
+{
+    g_autofree char *site = ns_cookie_js_partition(url, NULL);
+    if (!site || !*site) return g_strdup("[]");
+    return ns_cookie_store_matching_json(site, url, TRUE);
+}
+
+gboolean
+ns_net_cookie_set_for_webdriver(const char *url, const char *set_cookie)
+{
+    g_autofree char *site = ns_cookie_js_partition(url, NULL);
+    if (!site || !*site || !set_cookie) return FALSE;
+    return ns_cookie_store_set(site, url, set_cookie, TRUE);
+}
+
 void
 ns_net_curl_apply_cookies(void *curl_handle, const char *url,
                           const char *origin, const char *top_url)
