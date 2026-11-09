@@ -3,6 +3,11 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security (QuickJS): `dbuf_printf` passed a negative `vsnprintf` result
+  (an oversized width or precision) to the buffer as an unsigned length,
+  which copied until the process faulted; it now records an error instead.
+  `std.sprintf`/`printf` in the `qjs` tool also reject widths and precisions
+  over nine digits.
 * Security (QuickJS): `JS_WriteObject` (structured clone for `postMessage`
   and IndexedDB) fetched array elements with an ordinary property get, so an
   accessor on the array or on `Array.prototype` ran page code while the

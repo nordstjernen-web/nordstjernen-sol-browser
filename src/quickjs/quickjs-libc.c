@@ -284,17 +284,21 @@ static JSValue js_printf_internal(JSContext *ctx,
                     break;
                 }
             }
-            /* width */
+            /* width: at most 9 digits, so that the C library never sees
+               a value that does not fit in an int */
             if (*fmt == '*') {
                 if (i >= argc)
                     goto missing;
                 if (JS_ToInt32(ctx, &int32_arg, argv[i++]))
                     goto fail;
+                if (int32_arg < -999999999 || int32_arg > 999999999)
+                    goto invalid;
                 q += snprintf(q, fmtbuf + sizeof(fmtbuf) - q, "%d", int32_arg);
                 fmt++;
             } else {
+                p = fmt;
                 while (my_isdigit(*fmt)) {
-                    if (q >= fmtbuf + sizeof(fmtbuf) - 1)
+                    if (fmt - p >= 9 || q >= fmtbuf + sizeof(fmtbuf) - 1)
                         goto invalid;
                     *q++ = *fmt++;
                 }
@@ -308,11 +312,14 @@ static JSValue js_printf_internal(JSContext *ctx,
                         goto missing;
                     if (JS_ToInt32(ctx, &int32_arg, argv[i++]))
                         goto fail;
+                    if (int32_arg < -999999999 || int32_arg > 999999999)
+                        goto invalid;
                     q += snprintf(q, fmtbuf + sizeof(fmtbuf) - q, "%d", int32_arg);
                     fmt++;
                 } else {
+                    p = fmt;
                     while (my_isdigit(*fmt)) {
-                        if (q >= fmtbuf + sizeof(fmtbuf) - 1)
+                        if (fmt - p >= 9 || q >= fmtbuf + sizeof(fmtbuf) - 1)
                             goto invalid;
                         *q++ = *fmt++;
                     }
