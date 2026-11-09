@@ -3,6 +3,13 @@ Changelog:
 
 1.0.46-dev:
 ======
+* QuickJS robustness: `BigInt` exponentiation no longer leaks its running
+  product when the result is too large; setting `Error.stackTraceLimit`
+  releases the previous value and a non-function `Error.prepareStackTrace`
+  no longer leaks a reference per error; a failed allocation in
+  `Function.prototype.bind`, in destructuring-label allocation or while
+  emitting a class brand check now fails cleanly instead of dereferencing a
+  null pointer or writing before the label array.
 * Security (QuickJS): the runtime allocators refuse requests above a
   quarter of the address space. Sizes close to `SIZE_MAX` (a negative length
   converted to an unsigned size) wrapped in the arena's header and alignment
