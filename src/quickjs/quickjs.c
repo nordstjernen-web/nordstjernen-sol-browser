@@ -7939,6 +7939,8 @@ static void js_bound_function_finalizer(JSRuntime *rt, JSValueConst val)
     JSBoundFunction *bf = p->u.bound_function;
     int i;
 
+    if (!bf)
+        return;
     JS_FreeValueRT(rt, bf->func_obj);
     JS_FreeValueRT(rt, bf->this_val);
     for(i = 0; i < bf->argc; i++) {
@@ -7954,6 +7956,8 @@ static void js_bound_function_mark(JSRuntime *rt, JSValueConst val,
     JSBoundFunction *bf = p->u.bound_function;
     int i;
 
+    if (!bf)
+        return;
     JS_MarkValue(rt, bf->func_obj, mark_func);
     JS_MarkValue(rt, bf->this_val, mark_func);
     for(i = 0; i < bf->argc; i++)
@@ -9179,6 +9183,8 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
     if (!JS_IsNull(ctx->error_ctor)) {
         prepare = js_dup(ctx->error_prepare_stack);
         has_prepare = JS_IsFunction(ctx, prepare);
+        if (!has_prepare)
+            JS_FreeValue(ctx, prepare);
     }
 
     if (has_prepare) {
@@ -14473,14 +14479,18 @@ static JSBigInt *js_bigint_pow(JSContext *ctx, const JSBigInt *a, JSBigInt *b)
     memcpy(r->tab, a->tab, a->len * sizeof(a->tab[0]));
     for(i = n_bits - 2; i >= 0; i--) {
         r1 = js_bigint_mul(ctx, r, r);
-        if (!r1)
+        if (!r1) {
+            js_free(ctx, r);
             return NULL;
+        }
         js_free(ctx, r);
         r = r1;
         if ((e >> i) & 1) {
             r1 = js_bigint_mul(ctx, r, a);
-            if (!r1)
+            if (!r1) {
+                js_free(ctx, r);
                 return NULL;
+            }
             js_free(ctx, r);
             r = r1;
         }
@@ -28739,6 +28749,8 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
             }
             /* patch the start of the function to enable the
                OP_add_brand_instance code */
+            if (dbuf_error(&cf->fields_init_fd->byte_code))
+                goto fail;
             cf->fields_init_fd->byte_code.buf[cf->brand_push_pos] = OP_push_true;
         }
 
@@ -29403,6 +29415,8 @@ static int js_parse_destructuring_element(JSParseState *s, int tok,
 
     label_parse = new_label(s);
     label_assign = new_label(s);
+    if (label_parse < 0 || label_assign < 0)
+        return -1;
 
     start_addr = s->cur_func->byte_code.size;
     if (hasval) {
@@ -47074,6 +47088,7 @@ static JSValue js_error_set_stackTraceLimit(JSContext *ctx, JSValueConst this_va
 {
     if (JS_IsUndefined(this_val) || JS_IsNull(this_val))
         return JS_ThrowTypeErrorNotAnObject(ctx);
+    JS_FreeValue(ctx, ctx->error_stack_trace_limit);
     ctx->error_stack_trace_limit = js_dup(value);
     return JS_UNDEFINED;
 }
