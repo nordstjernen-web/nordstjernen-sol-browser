@@ -16,7 +16,7 @@ An existing build directory switches with
 |---|---|---|
 | Source | `src/quickjs/`, an in-tree fork of [quickjs-ng](https://github.com/quickjs-ng/quickjs) | [bellard/quickjs](https://github.com/bellard/quickjs), the original engine |
 | How it gets into the build | always in the tree | fetched at configure time by `subprojects/quickjs.wrap`, never vendored |
-| Version | quickjs-ng 0.18.0 (master `1b519fa`, less the commits the refresh log lists as not taken) plus the browser hooks; refresh history in [`vendored-engine-updates.md`](vendored-engine-updates.md) | master `e5ac135` (2026-11-09), pinned by commit, plus four local security patches |
+| Version | quickjs-ng 0.18.0 (master `1b519fa`, less the commits the refresh log lists as not taken) plus the browser hooks; refresh history in [`vendored-engine-updates.md`](vendored-engine-updates.md) | master `e5ac135` (2026-11-09), pinned by commit, plus twelve local security patches |
 | About page | `QuickJS 0.18.0` | `QuickJS 2026-06-04` |
 | CI | every workflow | none; build it locally (see below) |
 
@@ -47,8 +47,9 @@ Master's experimental Temporal and Intl (`CONFIG_TEMPORAL_INTL`, the
 The wrap's `diff_files` applies the patches in
 `subprojects/packagefiles/quickjs-patches/`, in order, on every fresh
 fetch. Each fixes a fault reported upstream that the pinned commit still
-has, in code this build compiles, and each is written to be dropped once
-upstream fixes it:
+has, in code this build compiles, or ports a fix the quickjs-ng fork in
+`src/quickjs/` carries for a fault Bellard's code shares. Each is written
+to be dropped once upstream fixes it:
 
 | Patch | Fault | Reported |
 |---|---|---|
@@ -56,13 +57,23 @@ upstream fixes it:
 | `0002-zero-length-copies` | `memcpy`/`memcmp` with a NULL pointer and length 0, undefined behaviour, in typed-array `slice` after a species constructor shrinks the buffer and in empty `\q{}` alternatives of `v`-flag classes. | #610, points 7 and 8 |
 | `0003-sum-precise-renormalize-before-overflow` | `Math.sumPrecise` let a 56-bit limb pass 2^63 between renormalisations and returned a wrong sum for 300 values near 2^53. | #610, point 9 |
 | `0004-async-generator-drain-queue` | A completed async generator settled one queued request and left the rest pending forever, and `next()` calls queued behind `return()` never settled. | #610, point 5 |
+| `0005-number-parser-clamp-exponent` | `js_atod` overflowed an `int` adjusting a huge decimal exponent, so `"1000000000e2147483639"` parsed as 0. | fork `12bc082` |
+| `0006-normalize-linear-canonical-ordering` | Canonical ordering of combining marks was an insertion sort, so `normalize()` on 200 000 marks took 27 s. Long runs are now counting-sorted. | fork `877dc65` |
+| `0007-allocator-refuse-oversized-requests` | The block allocator's size rounding wrapped for requests near `SIZE_MAX` and returned a tiny block. | fork `55b3317` |
+| `0008-concat-in-place-skip-atoms` | In-place concatenation could grow a string that is also an atom, so property lookups by that atom missed. | fork `d766a7f` |
+| `0009-oom-leaks-and-null-derefs` | A leak in `BigInt` `**` on a thrown RangeError, and NULL dereferences or unchecked buffers on allocation failure in bound functions, class brands and destructuring. | fork `8d4fd06` |
+| `0010-bjson-reset-sab-mark` | Refusing a SharedArrayBuffer left its cycle mark set, so the next write reported a circular reference. | fork `7b714f0` |
+| `0011-bjson-reader-holds-object-refs` | The BJSON reader's back-reference table held no references, so a duplicate key could free an object the table still named. | fork `15a00d4` |
+| `0012-array-loops-poll-interrupts` | The generic `Array.prototype` loops never polled the interrupt handler, so `includes` on `{length: 2**53 - 1}` could not be stopped. | fork `dc611ad` |
 
 The rest of #610 is outside this build: points 1 to 4, 6 and 11 are in
 Temporal, Intl and `quickjs-libc.c`, point 12 is not reachable from
 script, and upstream treats bytecode as trusted. Points 1 and 2, the two
 high-severity Temporal reports, are fixed upstream at `f2e4461`. The
 quickjs-ng fork shared points 5 and 10 and carries the same fixes; it
-already had points 7 and 8.
+already had points 7 and 8. Of the fork's other security fixes, eight
+did not apply: Bellard's code already had the fix, or lacks the feature
+(string slices, the regexp and symbol serializer tags, `prepareStackTrace`).
 
 ### Moving to a newer upstream commit
 

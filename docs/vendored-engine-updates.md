@@ -85,11 +85,14 @@ changes in the files this build compiles are mostly memory-safety fixes:
   compile.
 
 The pin also gains the first local patches since the sort fix went
-upstream. They are four fixes for points of bellard/quickjs#610 that
-master still has: the scope limit, zero-length copies, `Math.sumPrecise`
-and the async generator queue. They are listed in `docs/quickjs.md`,
-"Local patches". The fork shared the scope-limit and async-generator
-faults and is fixed in the same change.
+upstream, twelve of them, listed in `docs/quickjs.md`, "Local patches".
+Four fix points of bellard/quickjs#610 that master still has: the scope
+limit, zero-length copies, `Math.sumPrecise` and the async generator
+queue. The fork shared the scope-limit and async-generator faults and is
+fixed in the same change. The other eight port fork security fixes for
+faults Bellard's code shares. Each of the fork's sixteen fixes was checked
+against master; the other eight were already fixed or are for code
+Bellard does not have.
 
 ## 2026-11-04 — QuickJS 7b5f588 → 1b519fa (0.18.0)
 
