@@ -2779,7 +2779,7 @@ int JS_EnqueueJob(JSContext *ctx, JSJobFunc *job_func,
     if (!e)
         return -1;
     e->ctx = js_ctx_ref(ctx);
-    e->job_func = js_cpt_intern((JSCodePtr)job_func);
+    e->job_func = js_cpt_intern((JSCodePtr)job_func, JS_CPT_KIND_JOB);
     e->argc = argc;
     for(i = 0; i < argc; i++) {
         e->argv[i] = js_dup(argv[i]);
@@ -2850,7 +2850,7 @@ int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
     e = list_entry(rt->job_list.next, JSJobEntry, link);
     list_del(&e->link);
     ctx = js_ctx_get(e->ctx);
-    res = ((JSJobFunc *)js_cpt_get(e->job_func))(ctx, e->argc, vc(e->argv));
+    res = ((JSJobFunc *)js_cpt_fn(e->job_func, JS_CPT_KIND_JOB))(ctx, e->argc, vc(e->argv));
     for(i = 0; i < e->argc; i++)
         JS_FreeValue(ctx, e->argv[i]);
     if (JS_IsException(res))
@@ -6943,7 +6943,7 @@ JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
     p = JS_VALUE_GET_OBJ(func_obj);
     p->is_host_function = ctx->host_functions;
     p->u.cfunc.realm = js_ctx_ref(JS_DupContext(ctx));
-    p->u.cfunc.c_function = js_cpt_intern((JSCodePtr)func);
+    p->u.cfunc.c_function = js_cpt_intern((JSCodePtr)func, JS_CPT_KIND_CFUNC_PROTO(cproto));
     p->u.cfunc.length = length;
     p->u.cfunc.cproto = cproto;
     p->u.cfunc.magic = magic;
@@ -7045,7 +7045,7 @@ static JSValue js_call_c_function_data(JSContext *ctx, JSValueConst func_obj,
     sf->is_constructor = (flags & JS_CALL_FLAG_CONSTRUCTOR) != 0;
     sf->cur_func = unsafe_unconst(func_obj);
     sf->arg_count = argc;
-    ret = ((JSCFunctionData *)js_cpt_get(s->func))(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
+    ret = ((JSCFunctionData *)js_cpt_fn(s->func, JS_CPT_KIND_CFUNC_DATA))(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
     rt->current_stack_frame = sf->prev_frame;
     return ret;
 }
@@ -7360,7 +7360,7 @@ JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
         JS_FreeValue(ctx, func_obj);
         return JS_EXCEPTION;
     }
-    s->func = js_cpt_intern((JSCodePtr)func);
+    s->func = js_cpt_intern((JSCodePtr)func, JS_CPT_KIND_CFUNC_DATA);
     s->length = length;
     s->data_len = data_len;
     s->magic = magic;
@@ -7448,7 +7448,7 @@ static void js_c_closure_finalizer(JSRuntime *rt, JSValueConst val)
 
     if (s) {
         if (s->opaque_finalize)
-           ((JSCClosureFinalizerFunc *)js_cpt_get(s->opaque_finalize))(js_ept_load(s->opaque, JS_EPT_TAG_CCLOSURE_OPAQUE));
+           ((JSCClosureFinalizerFunc *)js_cpt_fn(s->opaque_finalize, JS_CPT_KIND_CCLOSURE_FINALIZER))(js_ept_load(s->opaque, JS_EPT_TAG_CCLOSURE_OPAQUE));
         js_ept_clear(&s->opaque);
         js_free_rt(rt, s);
     }
@@ -7488,7 +7488,7 @@ static JSValue js_call_c_closure(JSContext *ctx, JSValueConst func_obj,
     sf->is_constructor = (flags & JS_CALL_FLAG_CONSTRUCTOR) != 0;
     sf->cur_func = unsafe_unconst(func_obj);
     sf->arg_count = argc;
-    ret = ((JSCClosure *)js_cpt_get(s->func))(ctx, this_val, argc, arg_buf, s->magic, js_ept_load(s->opaque, JS_EPT_TAG_CCLOSURE_OPAQUE));
+    ret = ((JSCClosure *)js_cpt_fn(s->func, JS_CPT_KIND_CCLOSURE))(ctx, this_val, argc, arg_buf, s->magic, js_ept_load(s->opaque, JS_EPT_TAG_CCLOSURE_OPAQUE));
     rt->current_stack_frame = sf->prev_frame;
 
     return ret;
@@ -7512,11 +7512,11 @@ JSValue JS_NewCClosure(JSContext *ctx, JSCClosure *func, const char *name,
         JS_FreeValue(ctx, func_obj);
         return JS_EXCEPTION;
     }
-    s->func = js_cpt_intern((JSCodePtr)func);
+    s->func = js_cpt_intern((JSCodePtr)func, JS_CPT_KIND_CCLOSURE);
     s->length = length;
     s->magic = magic;
     s->opaque = js_ept_store(opaque, JS_EPT_TAG_CCLOSURE_OPAQUE);
-    s->opaque_finalize = js_cpt_intern((JSCodePtr)opaque_finalize);
+    s->opaque_finalize = js_cpt_intern((JSCodePtr)opaque_finalize, JS_CPT_KIND_CCLOSURE_FINALIZER);
     JS_SetOpaqueInternal(func_obj, s);
     name_atom = JS_ATOM_empty_string;
     if (name && *name) {
@@ -18205,7 +18205,8 @@ static JSValue JS_IteratorNext2(JSContext *ctx, JSValueConst enum_obj,
                 args[0] = JS_UNDEFINED;
                 argv = args;
             }
-            func.generic = (JSCFunction *)js_cpt_get(p->u.cfunc.c_function);
+            func.generic = (JSCFunction *)js_cpt_fn(p->u.cfunc.c_function,
+                                                    JS_CPT_KIND_CFUNC_PROTO(JS_CFUNC_iterator_next));
             return func.iterator_next(ctx, enum_obj, argc, argv,
                                       pdone, p->u.cfunc.magic);
         }
@@ -19194,7 +19195,7 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     }
     sf->arg_buf = (JSValue *)arg_buf;
 
-    func.generic = (JSCFunction *)js_cpt_get(p->u.cfunc.c_function);
+    func.generic = (JSCFunction *)js_cpt_fn(p->u.cfunc.c_function, JS_CPT_KIND_CFUNC_PROTO(cproto));
     switch(cproto) {
     case JS_CFUNC_constructor:
     case JS_CFUNC_constructor_or_func:
@@ -33234,7 +33235,7 @@ JSModuleDef *JS_NewCModule(JSContext *ctx, const char *name_str,
     m = js_new_module_def(ctx, name);
     if (!m)
         return NULL;
-    m->init_func = js_cpt_intern((JSCodePtr)func);
+    m->init_func = js_cpt_intern((JSCodePtr)func, JS_CPT_KIND_MODULE_INIT);
     return m;
 }
 
@@ -35145,7 +35146,7 @@ static int js_execute_sync_module(JSContext *ctx, JSModuleDef *m,
 {
     if (m->init_func) {
         /* C module init : no asynchronous execution */
-        if (((JSModuleInitFunc *)js_cpt_get(m->init_func))(ctx, m) < 0)
+        if (((JSModuleInitFunc *)js_cpt_fn(m->init_func, JS_CPT_KIND_MODULE_INIT))(ctx, m) < 0)
             goto fail;
     } else {
         JSValue promise;
@@ -64053,7 +64054,7 @@ static JSValue js_array_buffer_constructor3(JSContext *ctx,
     abuf->immutable = false;
     abuf->shared = (class_id == JS_CLASS_SHARED_ARRAY_BUFFER);
     abuf->opaque = js_ept_store(opaque, JS_EPT_TAG_ABUF_OPAQUE);
-    abuf->realloc_func = js_cpt_intern((JSCodePtr)realloc_func);
+    abuf->realloc_func = js_cpt_intern((JSCodePtr)realloc_func, JS_CPT_KIND_ABUF_REALLOC);
     if (alloc_flag && buf)
         memcpy(abuf->data, buf, len);
     JS_SetOpaqueInternal(obj, abuf);

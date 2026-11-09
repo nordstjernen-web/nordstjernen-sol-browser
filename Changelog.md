@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a corrupted JavaScript heap can no longer call a native
+  function through the wrong signature. The heap names native functions
+  by an index into a table outside the cage, but the table did not record
+  how each function is meant to be called, so a forged index or calling
+  convention could run, say, a script-facing function as an ArrayBuffer
+  reallocation hook, handing it arguments it would read as pointers.
+  Every entry now records its call kind and every call checks it
+  (`docs/heap-hardening.md`, review finding H2).
 * Security: a corrupted JavaScript heap can no longer make the engine
   call a function pointer read from outside its class table. An object's
   class id, stored in the heap, chose the class whose call, finalizer,
