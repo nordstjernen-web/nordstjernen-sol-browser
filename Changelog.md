@@ -3,6 +3,11 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security (QuickJS): `FinalizationRegistry.prototype.unregister` freed each
+  matching entry's held value while still walking the registry's entry list;
+  when that value was the target of the next entry, the next entry was freed
+  under the loop (use-after-free). Matching entries are now unlinked first and
+  freed afterwards, as the registry finalizer already does.
 * Security (QuickJS): a function whose captured-variable count exceeded
   65535 (reachable with a direct `eval` in a function with tens of thousands
   of parameters and locals) had that count and the per-variable indexes
