@@ -77,6 +77,26 @@
 #if !defined(__TINYC__) && !defined(EMSCRIPTEN) && !defined(__wasi__) && !__STDC_NO_ATOMICS__ && !defined(__DJGPP)
 #include "quickjs-c-atomics.h"
 #include "quickjs-cage.h"
+
+static uintptr_t js_heap_cage_base;
+
+#if JS_CAGE_BOXING
+#define JS_CPTR(T) uint32_t
+static inline void *js_cptr_decode(uint32_t off)
+{
+    return off ? (void *)(js_heap_cage_base + off) : NULL;
+}
+static inline uint32_t js_cptr_encode(const void *ptr)
+{
+    return ptr ? (uint32_t)((uintptr_t)ptr - js_heap_cage_base) : 0;
+}
+#define js_cload(T, field) ((T)js_cptr_decode(field))
+#define js_cstore(field, ptr) ((field) = js_cptr_encode(ptr))
+#else
+#define JS_CPTR(T) T
+#define js_cload(T, field) (field)
+#define js_cstore(field, ptr) ((field) = (ptr))
+#endif
 #define CONFIG_ATOMICS
 #endif
 
@@ -937,11 +957,11 @@ typedef struct JSFunctionBytecode {
     uint8_t is_engine_code : 1; /* compiled from hidden-source host code:
                                    kept out of stack traces */
     /* XXX: 4 bits available */
-    uint8_t *byte_code_buf; /* (self pointer) */
+    JS_CPTR(uint8_t *) byte_code_buf; /* (self pointer) */
     int byte_code_len;
     JSAtom func_name;
-    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
-    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    JS_CPTR(JSVarDef *) vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JS_CPTR(JSClosureVar *) closure_var; /* list of variables in the closure (self pointer) */
     uint16_t arg_count;
     uint16_t var_count;
     uint16_t defined_arg_count; /* for length function property */
@@ -950,13 +970,13 @@ typedef struct JSFunctionBytecode {
     uint16_t closure_var_count;
     int cpool_count;
     uint32_t realm; /* function realm */
-    JSValue *cpool; /* constant pool (self pointer) */
+    JS_CPTR(JSValue *) cpool; /* constant pool (self pointer) */
     JSAtom filename;
     int line_num;
     int col_num;
     int source_len;
     int pc2line_len;
-    uint8_t *pc2line_buf;
+    JS_CPTR(uint8_t *) pc2line_buf;
     char *source;
 } JSFunctionBytecode;
 
@@ -1095,23 +1115,6 @@ static inline bool js_in_heap_cage(const void *ptr)
     return ((uintptr_t)ptr & ~js_heap_cage_mask) == js_heap_cage_base;
 }
 
-#if JS_CAGE_BOXING
-#define JS_CPTR(T) uint32_t
-static inline void *js_cptr_decode(uint32_t off)
-{
-    return off ? (void *)(js_heap_cage_base + off) : NULL;
-}
-static inline uint32_t js_cptr_encode(const void *ptr)
-{
-    return ptr ? (uint32_t)((uintptr_t)ptr - js_heap_cage_base) : 0;
-}
-#define js_cload(T, field) ((T)js_cptr_decode(field))
-#define js_cstore(field, ptr) ((field) = js_cptr_encode(ptr))
-#else
-#define JS_CPTR(T) T
-#define js_cload(T, field) (field)
-#define js_cstore(field, ptr) ((field) = (ptr))
-#endif
 
 #define js_abuf_data(abuf) ((uint8_t *)js_caged_ptr((abuf)->data))
 #define js_ta_ptr(p, member) \
@@ -8267,7 +8270,7 @@ static void mark_children(JSRuntime *rt, JSGCObjectHeader *gp,
             JSFunctionBytecode *b = (JSFunctionBytecode *)gp;
             int i;
             for(i = 0; i < b->cpool_count; i++) {
-                JS_MarkValue(rt, b->cpool[i], mark_func);
+                JS_MarkValue(rt, js_cload(JSValue *, b->cpool)[i], mark_func);
             }
             if (b->realm)
                 mark_func(rt, &js_ctx_get(b->realm)->header);
@@ -8498,20 +8501,20 @@ static void compute_bytecode_size(JSFunctionBytecode *b, JSMemoryUsage_helper *h
 
     memory_used_count = 0;
     js_func_size = sizeof(*b);
-    if (b->vardefs) {
-        js_func_size += (b->arg_count + b->var_count) * sizeof(*b->vardefs);
+    if (js_cload(JSVarDef *, b->vardefs)) {
+        js_func_size += (b->arg_count + b->var_count) * sizeof(*js_cload(JSVarDef *, b->vardefs));
     }
-    if (b->cpool) {
-        js_func_size += b->cpool_count * sizeof(*b->cpool);
+    if (js_cload(JSValue *, b->cpool)) {
+        js_func_size += b->cpool_count * sizeof(*js_cload(JSValue *, b->cpool));
         for (i = 0; i < b->cpool_count; i++) {
-            JSValue val = b->cpool[i];
+            JSValue val = js_cload(JSValue *, b->cpool)[i];
             compute_value_size(val, hp);
         }
     }
-    if (b->closure_var) {
-        js_func_size += b->closure_var_count * sizeof(*b->closure_var);
+    if (js_cload(JSClosureVar *, b->closure_var)) {
+        js_func_size += b->closure_var_count * sizeof(*js_cload(JSClosureVar *, b->closure_var));
     }
-    if (b->byte_code_buf) {
+    if (js_cload(uint8_t *, b->byte_code_buf)) {
         hp->js_func_code_size += b->byte_code_len;
     }
     memory_used_count++;
@@ -9052,7 +9055,7 @@ static int find_line_num(JSContext *ctx, JSFunctionBytecode *b,
     unsigned int op;
 
     *col = 1;
-    p = b->pc2line_buf;
+    p = js_cload(uint8_t *, b->pc2line_buf);
     if (!p)
         goto fail;
     p_end = p + b->pc2line_len;
@@ -9278,7 +9281,7 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
                alone, as "    at file:line:col". */
             const char *atom_str;
             int line_num1, col_num1;
-            uint32_t pc = sf->cur_pc - b->byte_code_buf - 1;
+            uint32_t pc = sf->cur_pc - js_cload(uint8_t *, b->byte_code_buf) - 1;
             JS_FreeCString(ctx, func_name_str);
             line_num1 = find_line_num(ctx, b, pc, &col_num1);
             atom_str = b->filename ? JS_AtomToCString(ctx, b->filename) : NULL;
@@ -9303,7 +9306,7 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
                 int line_num1, col_num1;
                 uint32_t pc;
 
-                pc = sf->cur_pc - b->byte_code_buf - 1;
+                pc = sf->cur_pc - js_cload(uint8_t *, b->byte_code_buf) - 1;
                 line_num1 = find_line_num(ctx, b, pc, &col_num1);
                 atom_str = b->filename ? JS_AtomToCString(ctx, b->filename) : NULL;
                 dbuf_printf(&dbuf, " (%s", atom_str ? atom_str : "<null>");
@@ -9596,7 +9599,7 @@ static int ns_extract_callee_src(JSContext *ctx, char *out, int out_size)
     JSFunctionBytecode *b = p->u.func.function_bytecode;
     if (!b || !b->source || b->source_len <= 0)
         return 0;
-    uint32_t pc = sf->cur_pc - b->byte_code_buf - 1;
+    uint32_t pc = sf->cur_pc - js_cload(uint8_t *, b->byte_code_buf) - 1;
     int col;
     int line = find_line_num(ctx, b, pc, &col);
     if (line != b->line_num)
@@ -9703,11 +9706,11 @@ static JSValue JS_ThrowReferenceErrorUninitialized2(JSContext *ctx,
 {
     JSAtom atom = JS_ATOM_NULL;
     if (is_ref) {
-        atom = b->closure_var[idx].var_name;
+        atom = js_cload(JSClosureVar *, b->closure_var)[idx].var_name;
     } else {
         /* not present if the function is stripped and contains no eval() */
-        if (b->vardefs)
-            atom = b->vardefs[b->arg_count + idx].var_name;
+        if (js_cload(JSVarDef *, b->vardefs))
+            atom = js_cload(JSVarDef *, b->vardefs)[b->arg_count + idx].var_name;
     }
     return JS_ThrowReferenceErrorUninitialized(ctx, atom);
 }
@@ -18913,10 +18916,10 @@ static JSVarRef *get_var_ref(JSContext *ctx, JSStackFrame *sf, int var_idx,
     b = p->u.func.function_bytecode;
 
     if (is_arg) {
-        vd = &b->vardefs[var_idx];
+        vd = &js_cload(JSVarDef *, b->vardefs)[var_idx];
         pvalue = &sf->arg_buf[var_idx];
     } else {
-        vd = &b->vardefs[b->arg_count + var_idx];
+        vd = &js_cload(JSVarDef *, b->vardefs)[b->arg_count + var_idx];
         pvalue = &sf->var_buf[var_idx];
     }
 
@@ -18991,7 +18994,7 @@ static JSValue js_closure2(JSContext *ctx, JSValue func_obj,
             goto fail;
         js_cstore(p->u.func.var_refs, var_refs);
         for(i = 0; i < b->closure_var_count; i++) {
-            JSClosureVar *cv = &b->closure_var[i];
+            JSClosureVar *cv = &js_cload(JSClosureVar *, b->closure_var)[i];
             JSVarRef *var_ref;
             switch(cv->closure_type) {
             case JS_CLOSURE_LOCAL:
@@ -19241,7 +19244,7 @@ static void close_lexical_var(JSContext *ctx, JSFunctionBytecode *b,
     JSVarRef *var_ref;
     int var_ref_idx;
 
-    var_ref_idx = b->vardefs[b->arg_count + var_idx].var_ref_idx;
+    var_ref_idx = js_cload(JSVarDef *, b->vardefs)[b->arg_count + var_idx].var_ref_idx;
     var_ref = sf->var_refs[var_ref_idx];
     if (var_ref) {
         close_var_ref(ctx->rt, var_ref);
@@ -19701,7 +19704,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     /* ordinary C-stack frame: not owned by a coroutine GC object */
     sf->cur_gc_obj = NULL;
     sp = stack_buf;
-    pc = b->byte_code_buf;
+    pc = js_cload(uint8_t *, b->byte_code_buf);
     /* sf->cur_pc must we set to pc before any recursive calls to JS_CallInternal. */
     sf->cur_pc = NULL;
     sf->prev_frame = rt->current_stack_frame;
@@ -19728,7 +19731,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             pc += 4;
             BREAK;
         CASE(OP_push_const):
-            *sp++ = js_dup(b->cpool[get_u32(pc)]);
+            *sp++ = js_dup(js_cload(JSValue *, b->cpool)[get_u32(pc)]);
             pc += 4;
             BREAK;
         CASE(OP_push_minus1):
@@ -19751,10 +19754,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             pc += 2;
             BREAK;
         CASE(OP_push_const8):
-            *sp++ = js_dup(b->cpool[*pc++]);
+            *sp++ = js_dup(js_cload(JSValue *, b->cpool)[*pc++]);
             BREAK;
         CASE(OP_fclosure8):
-            *sp++ = js_closure(ctx, js_dup(b->cpool[*pc++]), var_refs, sf);
+            *sp++ = js_closure(ctx, js_dup(js_cload(JSValue *, b->cpool)[*pc++]), var_refs, sf);
             if (unlikely(JS_IsException(sp[-1])))
                 goto exception;
             BREAK;
@@ -20064,7 +20067,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 
         CASE(OP_fclosure):
             {
-                JSValue bfunc = js_dup(b->cpool[get_u32(pc)]);
+                JSValue bfunc = js_dup(js_cload(JSValue *, b->cpool)[get_u32(pc)]);
                 pc += 4;
                 *sp++ = js_closure(ctx, bfunc, var_refs, sf);
                 if (unlikely(JS_IsException(sp[-1])))
@@ -20210,7 +20213,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 var_refs = js_cload(JSVarRef **, p->u.func.var_refs);
                 ctx = js_ctx_get(b->realm);
                 sp = stack_buf;
-                pc = b->byte_code_buf;
+                pc = js_cload(uint8_t *, b->byte_code_buf);
                 if (js_poll_interrupts(ctx))
                     goto exception;
             }
@@ -20889,7 +20892,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             {
                 int32_t diff;
                 diff = get_u32(pc);
-                sp[0] = JS_NewCatchOffset(ctx, pc + diff - b->byte_code_buf);
+                sp[0] = JS_NewCatchOffset(ctx, pc + diff - js_cload(uint8_t *, b->byte_code_buf));
                 sp++;
                 pc += 4;
             }
@@ -20899,7 +20902,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 int32_t diff;
                 diff = get_u32(pc);
                 /* XXX: should have a different tag to avoid security flaw */
-                sp[0] = js_int32(pc + 4 - b->byte_code_buf);
+                sp[0] = js_int32(pc + 4 - js_cload(uint8_t *, b->byte_code_buf));
                 sp++;
                 pc += diff;
             }
@@ -20918,7 +20921,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                     goto exception;
                 }
                 sp--;
-                pc = b->byte_code_buf + pos;
+                pc = js_cload(uint8_t *, b->byte_code_buf) + pos;
             }
             BREAK;
 
@@ -22670,7 +22673,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         CASE(OP_invalid):
         DEFAULT:
             JS_ThrowInternalError(ctx, "invalid opcode: pc=%u opcode=0x%02x",
-                                  (int)(pc - b->byte_code_buf - 1), opcode);
+                                  (int)(pc - js_cload(uint8_t *, b->byte_code_buf) - 1), opcode);
             goto exception;
         }
     }
@@ -22698,7 +22701,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                     JS_FreeValueRT(rt, ctx->error_back_trace);
                     ctx->error_back_trace = JS_UNDEFINED;
                     sf->is_strict_mode = b->is_strict_mode;
-                    pc = b->byte_code_buf + pos;
+                    pc = js_cload(uint8_t *, b->byte_code_buf) + pos;
                     goto restart;
                 }
             }
@@ -22931,7 +22934,7 @@ static __exception int async_func_init(JSContext *ctx, JSAsyncFunctionState *s,
     b = p->u.func.function_bytecode;
     sf->is_strict_mode = b->is_strict_mode;
     sf->is_constructor = false;
-    sf->cur_pc = b->byte_code_buf;
+    sf->cur_pc = js_cload(uint8_t *, b->byte_code_buf);
     arg_buf_len = max_int(b->arg_count, argc);
     local_count = arg_buf_len + b->var_count + b->stack_size;
     alloc_size = sizeof(JSValue) * max_int(local_count, 1) +
@@ -34430,7 +34433,7 @@ static int js_create_module_bytecode_function(JSContext *ctx, JSModuleDef *m)
         /* create the global variables. The other variables are
            imported from other modules */
         for(i = 0; i < b->closure_var_count; i++) {
-            JSClosureVar *cv = &b->closure_var[i];
+            JSClosureVar *cv = &js_cload(JSClosureVar *, b->closure_var)[i];
             JSVarRef *var_ref;
             if (cv->closure_type == JS_CLOSURE_MODULE_DECL) {
                 var_ref = js_create_module_var(ctx, cv->is_lexical);
@@ -36995,14 +36998,14 @@ static __maybe_unused void dump_single_byte_code(JSContext *ctx,
 {
     JSVarDef *args, *vars;
 
-    args = vars = b->vardefs;
+    args = vars = js_cload(JSVarDef *, b->vardefs);
     if (vars)
         vars = &vars[b->arg_count];
 
     dump_byte_code(ctx, /*pass*/3, pc, short_opcode_info(*pc).size,
                    args, b->arg_count, vars, b->var_count,
-                   b->closure_var, b->closure_var_count,
-                   b->cpool, b->cpool_count,
+                   js_cload(JSClosureVar *, b->closure_var), b->closure_var_count,
+                   js_cload(JSValue *, b->cpool), b->cpool_count,
                    NULL, b->line_num,
                    NULL, b, start_pos);
 }
@@ -37083,18 +37086,18 @@ static __maybe_unused void js_dump_function_bytecode(JSContext *ctx, JSFunctionB
     str = JS_AtomGetStr(ctx, atom_buf, sizeof(atom_buf), b->func_name);
     printf("function: %s%s\n", &"*"[b->func_kind != JS_FUNC_GENERATOR], str);
     printf("  mode: %s\n", b->is_strict_mode ? "strict" : "sloppy");
-    if (b->arg_count && b->vardefs) {
+    if (b->arg_count && js_cload(JSVarDef *, b->vardefs)) {
         printf("  args:");
         for(i = 0; i < b->arg_count; i++) {
             printf(" %s", JS_AtomGetStr(ctx, atom_buf, sizeof(atom_buf),
-                                        b->vardefs[i].var_name));
+                                        js_cload(JSVarDef *, b->vardefs)[i].var_name));
         }
         printf("\n");
     }
-    if (b->var_count && b->vardefs) {
+    if (b->var_count && js_cload(JSVarDef *, b->vardefs)) {
         printf("  locals:\n");
         for(i = 0; i < b->var_count; i++) {
-            JSVarDef *vd = &b->vardefs[b->arg_count + i];
+            JSVarDef *vd = &js_cload(JSVarDef *, b->vardefs)[b->arg_count + i];
             printf("%5d: %s %s", i,
                    vd->var_kind == JS_VAR_CATCH ? "catch" :
                    (vd->var_kind == JS_VAR_FUNCTION_DECL ||
@@ -37110,7 +37113,7 @@ static __maybe_unused void js_dump_function_bytecode(JSContext *ctx, JSFunctionB
     if (b->closure_var_count) {
         printf("  closure vars:\n");
         for(i = 0; i < b->closure_var_count; i++) {
-            JSClosureVar *cv = &b->closure_var[i];
+            JSClosureVar *cv = &js_cload(JSClosureVar *, b->closure_var)[i];
             printf("%5d: %s %s",
                    i,
                    cv->is_const ? "const" :
@@ -37149,19 +37152,19 @@ static __maybe_unused void js_dump_function_bytecode(JSContext *ctx, JSFunctionB
     }
     printf("  stack_size: %d\n", b->stack_size);
     printf("  byte_code_len: %d\n", b->byte_code_len);
-    op = b->byte_code_buf;
-    for (i = 0; op < &b->byte_code_buf[b->byte_code_len]; i++)
+    op = js_cload(uint8_t *, b->byte_code_buf);
+    for (i = 0; op < &js_cload(uint8_t *, b->byte_code_buf)[b->byte_code_len]; i++)
         op += short_opcode_info(*op).size;
     printf("  opcodes: %d\n", i);
-    dump_byte_code(ctx, 3, b->byte_code_buf, b->byte_code_len,
-                   b->vardefs, b->arg_count,
-                   b->vardefs ? b->vardefs + b->arg_count : NULL, b->var_count,
-                   b->closure_var, b->closure_var_count,
-                   b->cpool, b->cpool_count,
+    dump_byte_code(ctx, 3, js_cload(uint8_t *, b->byte_code_buf), b->byte_code_len,
+                   js_cload(JSVarDef *, b->vardefs), b->arg_count,
+                   js_cload(JSVarDef *, b->vardefs) ? js_cload(JSVarDef *, b->vardefs) + b->arg_count : NULL, b->var_count,
+                   js_cload(JSClosureVar *, b->closure_var), b->closure_var_count,
+                   js_cload(JSValue *, b->cpool), b->cpool_count,
                    b->source, b->line_num, NULL, b, 0);
 #ifdef ENABLE_DUMPS // JS_DUMP_BYTECODE_PC2LINE
     if (check_dump_flag(ctx->rt, JS_DUMP_BYTECODE_PC2LINE))
-        dump_pc2line(ctx, b->pc2line_buf, b->pc2line_len, b->line_num, b->col_num);
+        dump_pc2line(ctx, js_cload(uint8_t *, b->pc2line_buf), b->pc2line_len, b->line_num, b->col_num);
 #endif
     printf("\n");
 }
@@ -38307,7 +38310,7 @@ static __exception int add_closure_variables(JSContext *ctx, JSFunctionDef *s,
         return -1;
     /* Add lexical variables in scope at the point of evaluation */
     for (i = scope_idx; i >= 0;) {
-        vd = &b->vardefs[b->arg_count + i];
+        vd = &js_cload(JSVarDef *, b->vardefs)[b->arg_count + i];
         if (vd->scope_level > 0) {
             JSClosureVar *cv = &s->closure_var[s->closure_var_count++];
             set_closure_from_var(ctx, cv, vd, i);
@@ -38319,7 +38322,7 @@ static __exception int add_closure_variables(JSContext *ctx, JSFunctionDef *s,
         /* Add argument variables */
         for(i = 0; i < b->arg_count; i++) {
             JSClosureVar *cv = &s->closure_var[s->closure_var_count++];
-            vd = &b->vardefs[i];
+            vd = &js_cload(JSVarDef *, b->vardefs)[i];
             cv->closure_type = JS_CLOSURE_ARG;
             cv->is_const = false;
             cv->is_lexical = false;
@@ -38329,7 +38332,7 @@ static __exception int add_closure_variables(JSContext *ctx, JSFunctionDef *s,
         }
         /* Add local non lexical variables */
         for(i = 0; i < b->var_count; i++) {
-            vd = &b->vardefs[b->arg_count + i];
+            vd = &js_cload(JSVarDef *, b->vardefs)[b->arg_count + i];
             if (vd->scope_level == 0 && vd->var_name != JS_ATOM__ret_) {
                 JSClosureVar *cv = &s->closure_var[s->closure_var_count++];
                 set_closure_from_var(ctx, cv, vd, i);
@@ -38338,7 +38341,7 @@ static __exception int add_closure_variables(JSContext *ctx, JSFunctionDef *s,
     } else {
         /* only add pseudo variables */
         for(i = 0; i < b->var_count; i++) {
-            vd = &b->vardefs[b->arg_count + i];
+            vd = &js_cload(JSVarDef *, b->vardefs)[b->arg_count + i];
             if (vd->scope_level == 0 && is_var_in_arg_scope(vd)) {
                 JSClosureVar *cv = &s->closure_var[s->closure_var_count++];
                 set_closure_from_var(ctx, cv, vd, i);
@@ -38346,7 +38349,7 @@ static __exception int add_closure_variables(JSContext *ctx, JSFunctionDef *s,
         }
     }
     for(i = 0; i < b->closure_var_count; i++) {
-        JSClosureVar *cv0 = &b->closure_var[i];
+        JSClosureVar *cv0 = &js_cload(JSClosureVar *, b->closure_var)[i];
         JSClosureVar *cv = &s->closure_var[s->closure_var_count++];
         cv->closure_type = JS_CLOSURE_REF;
         cv->is_const = cv0->is_const;
@@ -40745,7 +40748,7 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     cpool_offset = (function_size + 7) & ~7;
     function_size = cpool_offset + fd->cpool_count * sizeof(*fd->cpool);
     vardefs_offset = function_size;
-    function_size += (fd->arg_count + fd->var_count) * sizeof(*b->vardefs);
+    function_size += (fd->arg_count + fd->var_count) * sizeof(*js_cload(JSVarDef *, b->vardefs));
     closure_var_offset = function_size;
     function_size += fd->closure_var_count * sizeof(*fd->closure_var);
     byte_code_offset = function_size;
@@ -40756,19 +40759,19 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
         goto fail;
     JS_REF_COUNT(b) = 1;
 
-    b->byte_code_buf = (void *)((uint8_t*)b + byte_code_offset);
+    js_cstore(b->byte_code_buf, (void *)((uint8_t*)b + byte_code_offset));
     b->byte_code_len = fd->byte_code.size;
-    memcpy(b->byte_code_buf, fd->byte_code.buf, fd->byte_code.size);
+    memcpy(js_cload(uint8_t *, b->byte_code_buf), fd->byte_code.buf, fd->byte_code.size);
     js_free(ctx, fd->byte_code.buf);
     fd->byte_code.buf = NULL;
 
     b->func_name = fd->func_name;
     if (fd->arg_count + fd->var_count > 0) {
-        b->vardefs = (void *)((uint8_t*)b + vardefs_offset);
+        js_cstore(b->vardefs, (void *)((uint8_t*)b + vardefs_offset));
         if (fd->arg_count > 0)
-            memcpy(b->vardefs, fd->args, fd->arg_count * sizeof(fd->args[0]));
+            memcpy(js_cload(JSVarDef *, b->vardefs), fd->args, fd->arg_count * sizeof(fd->args[0]));
         if (fd->var_count > 0)
-            memcpy(b->vardefs + fd->arg_count, fd->vars, fd->var_count * sizeof(fd->vars[0]));
+            memcpy(js_cload(JSVarDef *, b->vardefs) + fd->arg_count, fd->vars, fd->var_count * sizeof(fd->vars[0]));
         b->var_count = fd->var_count;
         b->arg_count = fd->arg_count;
         b->defined_arg_count = fd->defined_arg_count;
@@ -40779,8 +40782,8 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     }
     b->cpool_count = fd->cpool_count;
     if (b->cpool_count) {
-        b->cpool = (void *)((uint8_t*)b + cpool_offset);
-        memcpy(b->cpool, fd->cpool, b->cpool_count * sizeof(*b->cpool));
+        js_cstore(b->cpool, (void *)((uint8_t*)b + cpool_offset));
+        memcpy(js_cload(JSValue *, b->cpool), fd->cpool, b->cpool_count * sizeof(*js_cload(JSValue *, b->cpool)));
     }
     js_free(ctx, fd->cpool);
     fd->cpool = NULL;
@@ -40794,9 +40797,9 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     b->line_num = fd->line_num;
     b->col_num = fd->col_num;
 
-    b->pc2line_buf = js_realloc(ctx, fd->pc2line.buf, fd->pc2line.size);
-    if (!b->pc2line_buf)
-        b->pc2line_buf = fd->pc2line.buf;
+    js_cstore(b->pc2line_buf, js_realloc(ctx, fd->pc2line.buf, fd->pc2line.size));
+    if (!js_cload(uint8_t *, b->pc2line_buf))
+        js_cstore(b->pc2line_buf, fd->pc2line.buf);
     b->pc2line_len = fd->pc2line.size;
     b->source = fd->source;
     b->source_len = fd->source_len;
@@ -40806,8 +40809,8 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
 
     b->closure_var_count = fd->closure_var_count;
     if (b->closure_var_count) {
-        b->closure_var = (void *)((uint8_t*)b + closure_var_offset);
-        memcpy(b->closure_var, fd->closure_var, b->closure_var_count * sizeof(*b->closure_var));
+        js_cstore(b->closure_var, (void *)((uint8_t*)b + closure_var_offset));
+        memcpy(js_cload(JSClosureVar *, b->closure_var), fd->closure_var, b->closure_var_count * sizeof(*js_cload(JSClosureVar *, b->closure_var)));
     }
     js_free(ctx, fd->closure_var);
     fd->closure_var = NULL;
@@ -40852,19 +40855,19 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
 {
     int i;
 
-    if (b->byte_code_buf)
-        free_bytecode_atoms(rt, b->byte_code_buf, b->byte_code_len, true);
+    if (js_cload(uint8_t *, b->byte_code_buf))
+        free_bytecode_atoms(rt, js_cload(uint8_t *, b->byte_code_buf), b->byte_code_len, true);
 
-    if (b->vardefs) {
+    if (js_cload(JSVarDef *, b->vardefs)) {
         for(i = 0; i < b->arg_count + b->var_count; i++) {
-            JS_FreeAtomRT(rt, b->vardefs[i].var_name);
+            JS_FreeAtomRT(rt, js_cload(JSVarDef *, b->vardefs)[i].var_name);
         }
     }
     for(i = 0; i < b->cpool_count; i++)
-        JS_FreeValueRT(rt, b->cpool[i]);
+        JS_FreeValueRT(rt, js_cload(JSValue *, b->cpool)[i]);
 
     for(i = 0; i < b->closure_var_count; i++) {
-        JSClosureVar *cv = &b->closure_var[i];
+        JSClosureVar *cv = &js_cload(JSClosureVar *, b->closure_var)[i];
         JS_FreeAtomRT(rt, cv->var_name);
     }
     if (b->realm)
@@ -40872,7 +40875,7 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
 
     JS_FreeAtomRT(rt, b->func_name);
     JS_FreeAtomRT(rt, b->filename);
-    js_free_rt(rt, b->pc2line_buf);
+    js_free_rt(rt, js_cload(uint8_t *, b->pc2line_buf));
     js_free_rt(rt, b->source);
 
     remove_gc_object(&b->header);
@@ -42526,7 +42529,7 @@ static int JS_WriteFunctionBytecode(BCWriterState *s,
     bc_buf = js_malloc(s->ctx, bc_len);
     if (!bc_buf)
         return -1;
-    memcpy(bc_buf, b->byte_code_buf, bc_len);
+    memcpy(bc_buf, js_cload(uint8_t *, b->byte_code_buf), bc_len);
 
     pos = 0;
     while (pos < bc_len) {
@@ -42651,11 +42654,11 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
     bc_put_leb128(s, b->closure_var_count);
     bc_put_leb128(s, b->cpool_count);
     bc_put_leb128(s, b->byte_code_len);
-    if (b->vardefs) {
+    if (js_cload(JSVarDef *, b->vardefs)) {
         /* XXX: this field is redundant */
         bc_put_leb128(s, b->arg_count + b->var_count);
         for(i = 0; i < b->arg_count + b->var_count; i++) {
-            JSVarDef *vd = &b->vardefs[i];
+            JSVarDef *vd = &js_cload(JSVarDef *, b->vardefs)[i];
             bc_put_atom(s, vd->var_name);
             bc_put_leb128(s, vd->scope_level);
             bc_put_leb128(s, vd->scope_next + 1);
@@ -42674,7 +42677,7 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
     }
 
     for(i = 0; i < b->closure_var_count; i++) {
-        JSClosureVar *cv = &b->closure_var[i];
+        JSClosureVar *cv = &js_cload(JSClosureVar *, b->closure_var)[i];
         bc_put_atom(s, cv->var_name);
         bc_put_leb128(s, cv->var_idx);
         flags = idx = 0;
@@ -42689,7 +42692,7 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
     // write constant pool before code so code can be disassembled
     // on the fly at read time
     for(i = 0; i < b->cpool_count; i++) {
-        if (JS_WriteObjectRec(s, b->cpool[i]))
+        if (JS_WriteObjectRec(s, js_cload(JSValue *, b->cpool)[i]))
             goto fail;
     }
 
@@ -42701,7 +42704,7 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
         bc_put_leb128(s, b->line_num);
         bc_put_leb128(s, b->col_num);
         bc_put_leb128(s, b->pc2line_len);
-        dbuf_put(&s->dbuf, b->pc2line_buf, b->pc2line_len);
+        dbuf_put(&s->dbuf, js_cload(uint8_t *, b->pc2line_buf), b->pc2line_len);
         if (s->allow_source && b->source) {
             bc_put_leb128(s, b->source_len);
             dbuf_put(&s->dbuf, b->source, b->source_len);
@@ -43464,7 +43467,7 @@ static int JS_ReadFunctionBytecode(BCReaderState *s, JSFunctionBytecode *b,
     bc_buf = (uint8_t*)b + byte_code_offset;
     if (bc_get_buf(s, bc_buf, bc_len))
         return -1;
-    b->byte_code_buf = bc_buf;
+    js_cstore(b->byte_code_buf, bc_buf);
 
     pos = 0;
     while (pos < bc_len) {
@@ -43630,11 +43633,11 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
 
     function_size = sizeof(*b);
     cpool_offset = (function_size + 7) & ~7;
-    function_size = cpool_offset + bc.cpool_count * sizeof(*bc.cpool);
+    function_size = cpool_offset + bc.cpool_count * sizeof(JSValue);
     vardefs_offset = function_size;
-    function_size += local_count * sizeof(*bc.vardefs);
+    function_size += local_count * sizeof(JSVarDef);
     closure_var_offset = function_size;
-    function_size += bc.closure_var_count * sizeof(*bc.closure_var);
+    function_size += bc.closure_var_count * sizeof(JSClosureVar);
     byte_code_offset = function_size;
     function_size += bc.byte_code_len;
 
@@ -43646,13 +43649,13 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
     bc.func_name = JS_ATOM_NULL;
     JS_REF_COUNT(b) = 1;
     if (local_count != 0) {
-        b->vardefs = (void *)((uint8_t*)b + vardefs_offset);
+        js_cstore(b->vardefs, (void *)((uint8_t*)b + vardefs_offset));
     }
     if (b->closure_var_count != 0) {
-        b->closure_var = (void *)((uint8_t*)b + closure_var_offset);
+        js_cstore(b->closure_var, (void *)((uint8_t*)b + closure_var_offset));
     }
     if (b->cpool_count != 0) {
-        b->cpool = (void *)((uint8_t*)b + cpool_offset);
+        js_cstore(b->cpool, (void *)((uint8_t*)b + cpool_offset));
     }
 
     add_gc_object(ctx->rt, &b->header, JS_GC_OBJ_TYPE_FUNCTION_BYTECODE);
@@ -43678,7 +43681,7 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
         bc_read_trace(s, "vars {\n");
         bc_read_trace(s, "off flags scope name\n");
         for(i = 0; i < local_count; i++) {
-            JSVarDef *vd = &b->vardefs[i];
+            JSVarDef *vd = &js_cload(JSVarDef *, b->vardefs)[i];
             if (bc_get_atom(s, &vd->var_name))
                 goto fail;
             if (bc_get_leb128_int(s, &vd->scope_level))
@@ -43716,7 +43719,7 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
         bc_read_trace(s, "closure vars {\n");
         bc_read_trace(s, "off  flags idx  name\n");
         for(i = 0; i < b->closure_var_count; i++) {
-            JSClosureVar *cv = &b->closure_var[i];
+            JSClosureVar *cv = &js_cload(JSClosureVar *, b->closure_var)[i];
             int var_idx, flags;
             if (bc_get_atom(s, &cv->var_name))
                 goto fail;
@@ -43751,7 +43754,7 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
             val = JS_ReadObjectRec(s);
             if (JS_IsException(val))
                 goto fail;
-            b->cpool[i] = val;
+            js_cload(JSValue *, b->cpool)[i] = val;
         }
         bc_read_trace(s, "}\n");
     }
@@ -43783,10 +43786,10 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
         goto fail;
     if (b->pc2line_len) {
         bc_read_trace(s, "positions: %d bytes\n", b->pc2line_len);
-        b->pc2line_buf = js_mallocz(ctx, b->pc2line_len);
-        if (!b->pc2line_buf)
+        js_cstore(b->pc2line_buf, js_mallocz(ctx, b->pc2line_len));
+        if (!js_cload(uint8_t *, b->pc2line_buf))
             goto fail;
-        if (bc_get_buf(s, b->pc2line_buf, b->pc2line_len))
+        if (bc_get_buf(s, js_cload(uint8_t *, b->pc2line_buf), b->pc2line_len))
             goto fail;
     }
     if (bc_get_leb128_int(s, &b->source_len))
@@ -69317,7 +69320,7 @@ static void js_new_callsite_data(JSContext *ctx, JSCallSiteData *csd, JSStackFra
         JSFunctionBytecode *b = p->u.func.function_bytecode;
         int line_num1, col_num1;
         line_num1 = find_line_num(ctx, b,
-                                  sf->cur_pc - b->byte_code_buf - 1,
+                                  sf->cur_pc - js_cload(uint8_t *, b->byte_code_buf) - 1,
                                   &col_num1);
         csd->native = false;
         csd->line_num = line_num1;

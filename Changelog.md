@@ -7,6 +7,10 @@ Changelog:
   now 32-bit cage offsets rather than raw addresses (stage 3a.2, batches
   2 and 3 of `docs/heap-hardening.md`): an object's shape, property
   array, fast-array values, mapped-arguments and closure variable arrays
+  and home object, a shape's prototype and hash-chain link, and the
+  opcode, constant-pool, closure-variable, variable-definition and line
+  tables of compiled functions. A corrupted field can therefore only name
+  cage memory.
   and home object, and a shape's prototype and hash-chain link. A
   corrupted field can therefore only name cage memory.
 * CI: the scheduled `sysroot-bump` workflow no longer fails when the

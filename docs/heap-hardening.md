@@ -38,7 +38,7 @@ from upstream keep merging cleanly into `src/quickjs/`.
 | 2c | Inventory of raw host and function pointers left in the heap | **done**, kept current below |
 | 3p | Trusted runtime structures and context table (preparation for 3a and 3b) | **done** |
 | 3a.1 | Caged values: 8-byte `JSValue` holding a 32-bit cage offset, cage owned by the engine | **done** |
-| 3a.2 | Compressed pointer fields inside heap structures | **batches 2 and 3 done**: shape, property array, prototype, shape hash chain, fast-array values, closure variables, home object |
+| 3a.2 | Compressed pointer fields inside heap structures | **batches 2, 3 and 4 done**: shape, property array, prototype, shape hash chain, fast-array values, closure variables, home object, bytecode arrays |
 | 3b | Trusted space for bytecode and saved frames | planned |
 
 Stage 1b, moving cookies, HSTS, the HTTP cache and storage behind the
@@ -292,7 +292,7 @@ cage, the same primitive the arena bypass removed.
 | `JSGCObjectHeader.link`, `JSTypedArray.link`, other `list_head` members in cage objects | 20 direct, plus the `list.h` macro uses over those lists | 1 |
 | `JSObject.shape`, `JSObject.prop`, `JSShape.proto`, `JSShape.shape_hash_next` | 55, 43, 29, 9 | 2, **done** |
 | `JSObject.u.array.u.values`, `u.array.u.var_refs`, `u.func.var_refs`, `u.func.home_object` | 41, 13, 11 | 3, **done** |
-| `JSFunctionBytecode.cpool`, `byte_code_buf`, `closure_var`, `vardefs` | 26, 22, and the parser's writers | 4 (overlaps 3b) |
+| `JSFunctionBytecode.cpool`, `byte_code_buf`, `closure_var`, `vardefs`, `pc2line_buf` | 17, 22, 16, 29, 10 | 4, **done** |
 | `JSString.parent` and rope children, `first_weak_ref` on objects and strings | 39, 10 | 5 |
 | internal class structs reached from `u.opaque` (`JSArrayBuffer`, `JSTypedArray`, `JSMapState`, …) | per struct | 6 |
 
@@ -311,6 +311,14 @@ shape field now work on a local and store it back; the shape hash unlink
 walks the chain with explicit previous and current pointers instead of a
 pointer to pointer. The allocation stress script runs in 0.33 s and
 176 MB, down from 179 MB; `qjs -d` reports `JSObject` at 72 bytes.
+
+Batch 4 is done too: the five arrays a `JSFunctionBytecode` carries as
+self pointers into its own allocation (the opcodes, the constant pool,
+the closure-variable and variable-definition tables and the line table)
+are offsets, so the interpreter's `pc` and every constant-pool read start
+from cage memory even if the function object was corrupted. The sizes
+and indexes those arrays are read with are still trusted from in-cage
+data; that is what stage 3b changes.
 
 Trusted bytecode space allocates `JSFunctionBytecode`, its opcode buffer,
 closure tables and the saved frames of generators and async functions
@@ -489,3 +497,22 @@ on real pages is dominated by images, layout and network buffers, so the
 value shrink does not show there. A follow-up worth trying is caching
 the cage base in a local inside the interpreter loop, where most decodes
 happen.
+
+Stage 3a.2 batches 2 and 3, before = stage 3a.1 (2025-11-09):
+
+| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
+|---|---|---|---|---|
+| before (stage 3a.1) | 87.2 | 1.61× | 3.54× | 0.26× |
+| after (batches 2 and 3) | 86.9 | 1.53× | 3.55× | 0.25× |
+
+| Site | CPU before | CPU after | RSS before | RSS after |
+|---|---|---|---|---|
+| google | 247 ms | 249 ms | 77.7 MB | 78.2 MB |
+| anthropic | 704 ms | 694 ms | 139.6 MB | 138.9 MB |
+| bbc | 3064 ms | 3073 ms | 452.5 MB | 453.0 MB |
+| cnn | 7797 ms | 7973 ms | 681.7 MB | 679.8 MB |
+| guardian | 5141 ms | 5248 ms | 382.9 MB | 382.3 MB |
+
+Flat in aggregate; the shape and property-array decodes sit on the
+property access path and cost nothing measurable beyond the value
+decode already paid for in 3a.1.
