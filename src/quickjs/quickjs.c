@@ -47200,6 +47200,8 @@ static int JS_CopySubArray(JSContext *ctx,
             }
             i += l;
         } else {
+            if (js_poll_interrupts(ctx))
+                goto exception;
             fromPresent = JS_TryGetPropertyInt64(ctx, obj, from, &val);
             if (fromPresent < 0)
                 goto exception;
@@ -47604,6 +47606,8 @@ static JSValue js_array_concat(JSContext *ctx, JSValueConst this_val,
                 goto exception;
             }
             for (k = 0; k < len; k++, n++) {
+                if (js_poll_interrupts(ctx))
+                    goto exception;
                 res = JS_TryGetPropertyInt64(ctx, e, k, &val);
                 if (res < 0)
                     goto exception;
@@ -47957,6 +47961,8 @@ static JSValue js_array_fill(JSContext *ctx, JSValueConst this_val,
 
     /* XXX: should special case fast arrays */
     while (start < end) {
+        if (js_poll_interrupts(ctx))
+            goto exception;
         if (JS_SetPropertyInt64(ctx, obj, start, js_dup(argv[0])) < 0)
             goto exception;
         start++;
@@ -48430,6 +48436,8 @@ static JSValue js_array_reverse(JSContext *ctx, JSValueConst this_val,
     }
 
     for (l = 0, h = len - 1; l < h; l++, h--) {
+        if (js_poll_interrupts(ctx))
+            goto exception;
         l_present = JS_TryGetPropertyInt64(ctx, obj, l, &lval);
         if (l_present < 0)
             goto exception;
@@ -48584,6 +48592,8 @@ static JSValue js_array_slice(JSContext *ctx, JSValueConst this_val,
     }
     /* Copy the remaining elements if any (handle case of inherited properties) */
     for (; k < final; k++, n++) {
+        if (js_poll_interrupts(ctx))
+            goto exception;
         kPresent = JS_TryGetPropertyInt64(ctx, obj, k, &val);
         if (kPresent < 0)
             goto exception;
@@ -48753,6 +48763,8 @@ static int64_t JS_FlattenIntoArray(JSContext *ctx, JSValueConst target,
     }
 
     for (sourceIndex = 0; sourceIndex < sourceLen; sourceIndex++) {
+        if (js_poll_interrupts(ctx))
+            return -1;
         present = JS_TryGetPropertyInt64(ctx, source, sourceIndex, &element);
         if (present < 0)
             return -1;
@@ -48952,6 +48964,8 @@ static JSValue js_array_sort(JSContext *ctx, JSValueConst this_val,
             array = new_array;
             array_size = new_size;
         }
+        if (js_poll_interrupts(ctx))
+            goto exception;
         present = JS_TryGetPropertyInt64(ctx, obj, i, &array[pos].val);
         if (present < 0)
             goto exception;

@@ -3,6 +3,10 @@ Changelog:
 
 1.0.46-dev:
 ======
+* QuickJS robustness: `Array.prototype` `copyWithin`, `concat`, `reverse`,
+  `slice`/`splice`, `flat`, `sort` and `fill` now poll the interrupt handler
+  in their generic loops, so an array-like with a length near 2^53 and no
+  elements can no longer spin the renderer past the script watchdog.
 * QuickJS robustness: `BigInt` exponentiation no longer leaks its running
   product when the result is too large; setting `Error.stackTraceLimit`
   releases the previous value and a non-function `Error.prepareStackTrace`
