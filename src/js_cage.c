@@ -28,6 +28,7 @@
 
 static GMutex g_shared_lock;
 static GHashTable *g_shared_sizes;
+static GHashTable *g_heaps;
 
 static void *
 ns_shared_fallback_malloc(size_t size)
@@ -711,6 +712,10 @@ ns_js_runtime_new(void)
         ns_cage_heap_destroy(heap);
         return NULL;
     }
+    g_mutex_lock(&g_shared_lock);
+    if (!g_heaps) g_heaps = g_hash_table_new(NULL, NULL);
+    g_hash_table_insert(g_heaps, rt, heap);
+    g_mutex_unlock(&g_shared_lock);
     return rt;
 }
 
@@ -718,14 +723,12 @@ void
 ns_js_runtime_free(JSRuntime *rt)
 {
     if (!rt) return;
-    ns_cage_chunk *chunk = ns_cage_chunk_of(rt);
-    if (!chunk) {
-        JS_FreeRuntime(rt);
-        return;
-    }
-    ns_cage_heap *heap = chunk->heap;
+    g_mutex_lock(&g_shared_lock);
+    ns_cage_heap *heap = g_heaps ? g_hash_table_lookup(g_heaps, rt) : NULL;
+    if (heap) g_hash_table_remove(g_heaps, rt);
+    g_mutex_unlock(&g_shared_lock);
     JS_FreeRuntime(rt);
-    ns_cage_heap_destroy(heap);
+    if (heap) ns_cage_heap_destroy(heap);
 }
 
 gboolean

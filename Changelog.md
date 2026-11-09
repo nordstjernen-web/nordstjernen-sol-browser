@@ -3,6 +3,15 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security: the JavaScript runtime and every context now live in trusted
+  memory outside the heap cage, and heap objects refer to a context
+  through an index into a trusted context table instead of a raw
+  pointer (C functions, bytecode, wrapped functions, promise jobs,
+  FinalizationRegistry records, Atomics waiters, auto-init property
+  records). The job-queue and C-module init function pointers join the
+  code pointer table. A forged realm can therefore only select a live
+  context, and the class table with its finalizer and call hooks is out
+  of reach of a corrupted heap (stage 3p of `docs/heap-hardening.md`).
 * Security: host objects and native function pointers no longer sit as
   raw addresses in JavaScript heap objects (stage 2b of
   `docs/heap-hardening.md`). `JS_SetOpaque` stores the browser's DOM

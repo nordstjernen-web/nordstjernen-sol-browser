@@ -36,6 +36,7 @@ from upstream keep merging cleanly into `src/quickjs/`.
 | 2a | Bounded, cage-relative ArrayBuffer and TypedArray pointers | **done** |
 | 2b | Tagged external pointer table and code pointer table | **done** |
 | 2c | Inventory of raw host and function pointers left in the heap | **done**, kept current below |
+| 3p | Trusted runtime structures and context table (preparation for 3a and 3b) | **done** |
 | 3a | Pointer compression (8-byte values, 32-bit cage offsets) | planned |
 | 3b | Trusted space for bytecode and saved frames | planned |
 
@@ -187,12 +188,16 @@ compression, *3b* to trusted runtime structures and bytecode space, and
 
 | Where | Pointer | Reach | Stage |
 |---|---|---|---|
-| `JSRuntime` | `mf` allocator hooks, `class_array[]` finalizer / `gc_mark` / `call` / `exotic` methods, interrupt handler, promise-rejection tracker, module loader, `sab_funcs`, job-queue entries | native code pointers in cage memory | **3b** (runtime and contexts in trusted memory) |
-| `JSContext` | `rt`, realm tables, class prototypes, `host_functions` policy bits | in-cage, security-relevant data | 3b |
+| `JSRuntime` | `mf` allocator hooks, `class_array[]` finalizer / `gc_mark` / `call` / `exotic` methods, interrupt handler, promise-rejection tracker, module loader, `sab_funcs` | trusted memory outside the cage | done (3p) |
+| `JSContext` | `rt`, realm tables, class prototypes, `host_functions` policy bits | trusted memory outside the cage, reached from the heap only through the context table | done (3p) |
+| `JSJobEntry` | `ctx`, `job_func` | context-table index, code-table index | done (3p) |
+| `JSModuleDef.init_func`, `JSFinRecEntry.ctx`, `JSFinalizationRegistryData.ctx`, `JSAtomicsWaiter.ctx`, auto-init property realm | native pointer or `JSContext *` | table indices | done (3p) |
+| `JSAtomicsWaiter.async_rt` | `JSRuntime *`, tested for non-NULL and compared only | in-cage | 3a |
+| `ctx->class_proto`, `rt->atom_array`, `rt->atom_hash` | arrays of in-cage pointers owned by trusted structures | in-cage | 3a |
 | `JSObject` | `shape`, `prop`, `first_weak_ref`, GC links | in-cage | 3a |
 | `JSObject.u.array` | `values` (fast arrays), `var_refs` | in-cage, unbounded by cage | 3a |
 | `JSObject.u.func` | `function_bytecode`, `var_refs`, `home_object` | bytecode drives the interpreter's native stack frame | **3b** |
-| `JSObject.u.cfunc.realm` | `JSContext *` | in-cage | 3b |
+| `JSObject.u.cfunc.realm`, `JSFunctionBytecode.realm`, `JSWrappedFunction.realm` | context-table index; the interpreter switches realm only to a live context | done (3p) |
 | internal `u.opaque` structs | `JSArrayBuffer`, `JSTypedArray`, `JSMapState`, `JSProxyData`, `JSPromiseData`, … | in-cage | 3a |
 | `JSArrayBuffer.opaque` | host `void *` handed back to the realloc hook (`src/webgpu.c` held value, in-engine `NULL`) | tagged table entry | done |
 | `JSCClosureRecord.opaque` | host `void *` | tagged table entry | done |
@@ -203,9 +208,10 @@ compression, *3b* to trusted runtime structures and bytecode space, and
 | typed array / buffer lengths | `byte_length`, `offset`, `length`, `count` | bounded by the 32 GB guard | done |
 | embedder structs | `ns_node.js_wrapper`, listener records, `ns_js` | outside the cage pointing in; decoded only through the engine | fine |
 
-The first and the two bold `3b` rows are the ones that still turn an
-in-cage write into native code execution; everything else is data
-corruption inside the cage or a step on the way to those three.
+After 3p the remaining rows that turn an in-cage write into native
+code execution are the two bold `3b` rows, bytecode and saved frames;
+everything else is data corruption inside the cage or a step on the way
+to those two.
 
 ## Stage 3: a real boundary
 
@@ -226,17 +232,38 @@ These two stages are the ones that diverge the fork from upstream for
 good, which is why they come last and only after the earlier stages have
 been measured.
 
-Shared preparation for both, and the first thing to do in stage 3: the
-runtime and context structures must leave the cage. `JSRuntime` holds
+### Stage 3p: trusted runtime structures (done)
+
+Shared preparation for both halves, done first because it closed the
+shortest path from an in-cage write to native code: `JSRuntime` held
 the allocator hooks and the class table with every finalizer, mark and
-call hook, so a write primitive inside the cage reaches native code
-through it in one step today. The plan is to allocate `JSRuntime`,
-`JSContext` and `class_array` from trusted memory (plain libc, outside
-the reservation) and to replace the ten in-cage `JSContext *realm`
-fields (C functions, bytecode, bound functions, proxies, async state)
-with an index into a small trusted context table, so a forged realm can
-only select a live context. That is a few hundred lines and does not
-depend on compression, which is why it goes first.
+call hook, and heap objects held raw realm pointers that the
+interpreter switched to on every call, so a forged realm gave a forged
+runtime gave a code pointer in three dependent reads.
+
+- `JSRuntime`, every `JSContext` and the runtime's `class_array` are
+  allocated from trusted memory (plain libc, outside the reservation)
+  through a trusted block path in the fork's allocator front end: the
+  block keeps the 8-byte header the GC's reference count lives in,
+  carries its size in the 8 bytes before that, and is recognised by a
+  reserved size-class index, so `js_free_rt`, `js_realloc_rt` and the
+  memory accounting keep working on it unchanged.
+- A trusted **context table** (65 536 slots, outside the cage) hands
+  every context an index at creation. The nine heap-resident `JSContext`
+  fields now hold that index instead of a pointer: C-function realm,
+  bytecode realm, wrapped-function realm, job-queue entries,
+  finalization-registry records and entries, async Atomics waiters and
+  auto-init property records. `js_ctx_get()` masks the index and reads
+  the slot, so a forged realm selects a live context or `NULL`, never
+  memory of the attacker's choosing.
+- The two native function pointers still in heap structures after
+  stage 2b, the job-queue function and the C-module init function, are
+  interned in the code pointer table.
+
+Realm fields are still reference counted through `JS_DupContext` /
+`JS_FreeContext` on the decoded pointer. The embedder maps runtime to
+cage heap through a small table of its own now that the runtime no
+longer lives in the cage (`src/js_cage.c`).
 
 ## Benchmarks
 

@@ -90,7 +90,9 @@ Host pointers behind `JS_SetOpaque` live in a class-tagged table outside
 the range, and native function pointers held by heap objects are
 indices into an append-only code pointer table, so a corrupted object
 can name another live object of the same class or another registered
-function at worst, never an arbitrary address.
+function at worst, never an arbitrary address. The runtime and its
+contexts live outside the range and are reached from the heap only
+through a trusted context table.
 This is exploit-cost hardening on the way to a V8-style heap sandbox,
 not yet a boundary of its own; the staged plan and its measurements are
 in `docs/heap-hardening.md`.
