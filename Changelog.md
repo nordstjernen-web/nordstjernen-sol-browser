@@ -3,6 +3,13 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Testing: `scripts/wpt-reftest.py` runs the web-platform-tests reftests,
+  which `wpt-run.sh` skips and which hold most of the CSS layout tests.
+  It renders each test and its references at 800x600 with `--dump=png`
+  and compares them as wptrunner does, `<meta name="fuzzy">` included.
+  `--baseline` lists the tests a change fixed or broke against an earlier
+  run and exits 1 on a newly failing one, and `--chrome` runs the same
+  tests in Chrome to separate Nordstjernen's failures from Chrome's.
 * Security: a web page can no longer take over the remote-control (MCP)
   helper. The helper cached itself under `Symbol.for('nordstjernen.remote')`,
   so a page could plant its own object there and decide what `read_page`,
