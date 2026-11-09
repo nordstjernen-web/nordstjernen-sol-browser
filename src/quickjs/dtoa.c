@@ -1568,6 +1568,11 @@ double js_atod(const char *str, const char **pnext, int radix, int flags,
         a = 0;
     } else {
         int expn1;
+        /* the exponent adjustments below must not overflow an int */
+        if (expn > (1 << 30))
+            expn = 1 << 30;
+        else if (expn < -(1 << 30))
+            expn = -(1 << 30);
         if (radix_bits != 0) {
             if (!is_bin_exp)
                 expn *= radix_bits;

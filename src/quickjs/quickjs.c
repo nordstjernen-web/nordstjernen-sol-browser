@@ -26135,7 +26135,9 @@ static int push_scope(JSParseState *s) {
     if (s->cur_func) {
         JSFunctionDef *fd = s->cur_func;
         int scope = fd->scope_count;
-        /* XXX: should check for scope overflow */
+        /* scope indexes are stored on 16 bits in the bytecode */
+        if (scope >= 65535)
+            return js_parse_error(s, "too many scopes (only 65534 allowed)");
         if ((fd->scope_count + 1) > fd->scope_size) {
             int new_size;
             JSVarScope *new_buf;
@@ -65067,7 +65069,7 @@ uint8_t *JS_GetUint8Array(JSContext *ctx, size_t *psize, JSValueConst obj)
     ta = p->u.typed_array;
     abuf = ta->buffer->u.array_buffer;
 
-    *psize = ta->length;
+    *psize = p->u.array.count;
     return js_abuf_data(abuf) + ta->offset;
  fail:
     *psize = 0;
@@ -67856,7 +67858,9 @@ static JSValue js_atomics_wait(JSContext *ctx,
     }
     if (JS_ToFloat64(ctx, &d, argv[3]))
         return JS_EXCEPTION;
-    if (isnan(d) || d >= 0x1p63)
+    /* the deadline is computed in nanoseconds: anything beyond what fits
+       there waits forever */
+    if (isnan(d) || d >= 0x1p63 / 1000000)
         timeout = INT64_MAX;
     else if (d < 0)
         timeout = 0;

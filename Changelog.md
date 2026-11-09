@@ -3,6 +3,13 @@ Changelog:
 
 1.0.46-dev:
 ======
+* QuickJS robustness: number parsing clamps the decimal exponent before
+  adjusting it, so `Number("0.0000000001e-2147483639")` is 0 rather than
+  the result of a signed overflow; a function with more than 65534 scopes
+  is a SyntaxError instead of wrapping scope indexes; `Atomics.wait`
+  timeouts beyond the nanosecond range wait indefinitely instead of
+  overflowing; `JS_GetUint8Array` reports the current length of a
+  length-tracking view over a shrunk resizable buffer.
 * QuickJS robustness: `Array.prototype` `copyWithin`, `concat`, `reverse`,
   `slice`/`splice`, `flat`, `sort` and `fill` now poll the interrupt handler
   in their generic loops, so an array-like with a length near 2^53 and no
