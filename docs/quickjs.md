@@ -159,9 +159,15 @@ engine code:
 - `JSRuntime`, `JSContext` and `class_array` live outside the cage in
   trusted blocks; a new field that points from a cage object to one of
   them must be a context-table index, not a pointer.
+- The machinery lives in `quickjs-cptr.h` (compressed fields) and
+  `quickjs-hardening.h` (cage masking and the tables), each included
+  from `quickjs.c` at one line, and `scripts/quickjs-cage-rewrite.py`
+  lists the compressed fields and re-applies or checks their accesses
+  (`--apply`, `--check`).
 - The `-Dquickjs=quickjs` configuration has none of this; the adapter
   supplies malloc-backed `JS_Cage*` shims and the browser runs on the
-  process heap there.
+  process heap there. It also has no `Intl`: the original engine's Intl
+  and Temporal are not built (see above), so pages that need them differ.
 
 `docs/heap-hardening.md` has the design, the inventory of what is still
 raw, and the measurements.

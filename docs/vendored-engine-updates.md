@@ -41,11 +41,23 @@ block path in the arena front end, and the mechanical rewrites that
 read and write pointer fields through `js_cload` / `js_cstore`, the
 buffer pointers through `js_abuf_data` / `js_ta_ptr`, and host, code and
 context pointers through their tables. When upstream adds a pointer
-field to a heap structure, declare it `JS_CPTR(T)` and convert its sites
-the same way; when upstream adds a native-pointer or `JSContext *`
-field, route it through the matching table. The encoder aborts on a
-pointer from outside the cage, so a missed conversion fails loudly in
-the first test run rather than silently.
+field to a heap structure, declare it `JS_CPTR(T)`, add it to the table
+in `scripts/quickjs-cage-rewrite.py` and run `--apply`; when upstream
+adds a native-pointer or `JSContext *` field, route it through the
+matching table. The encoder aborts on a pointer from outside the cage
+and the lists abort on a corrupted link, so a missed conversion fails
+loudly in the first test run rather than silently.
+
+Fork-local pieces a QuickJS refresh touches, by file:
+
+| File | What is ours |
+|---|---|
+| `quickjs-cage.c`, `quickjs-cage.h` | the cage allocator; no upstream counterpart |
+| `quickjs-cptr.h`, `quickjs-hardening.h` | compressed fields, masking, pointer and context tables; included from `quickjs.c` |
+| `list.h` | neighbour checks in `__list_add` and `list_del` |
+| `quickjs.h` | `JS_CAGE_BOXING` layout, `js_cage_pointer_base`, `JS_SetHeapCage`, `JS_Cage*` |
+| `quickjs.c` | the two include lines; the trusted block path in the arena front end; `JS_NewRuntime`'s cage heap; `JS_SetOpaque` / `JS_GetOpaque` table paths and the Intl tag; the context-table indices in realm fields; the code-table indices in C function, closure, job and module records; the WeakRef sentinel; and the `js_cload` / `js_cstore` / `js_abuf_data` / `js_ta_ptr` rewrites the script reproduces |
+| `meson.build` | `quickjs-cage.c` in the sources |
 
 ## 2026-11-04 — QuickJS 7b5f588 → 1b519fa (0.18.0)
 
