@@ -3,6 +3,11 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security (QuickJS): `JS_ReadObject` with object references kept only raw
+  pointers to the objects it had created; a serialized object with a repeated
+  property name, or a Map with a repeated key, freed the earlier value while
+  a later back-reference could still name it (use-after-free). The reader
+  now holds a reference to every table entry until it finishes.
 * Security: the JavaScript heap now lives in its own reserved address
   range (`src/js_cage.c`), separate from the process heap that holds the
   DOM, layout, network buffers and IPC framing, with inaccessible guard

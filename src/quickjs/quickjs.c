@@ -43024,6 +43024,10 @@ static JSValue JS_ReadBigInt(BCReaderState *s)
 
 static JSValue JS_ReadObjectRec(BCReaderState *s);
 
+/* The table keeps a reference on each object: a duplicate property name or
+   Map key in the input replaces (and frees) an earlier value that a later
+   BC_TAG_OBJECT_REFERENCE may still name. The references are released in
+   bc_reader_free(). */
 static int BC_add_object_ref1(BCReaderState *s, JSObject *p)
 {
     if (s->allow_reference) {
@@ -43031,6 +43035,8 @@ static int BC_add_object_ref1(BCReaderState *s, JSObject *p)
                             sizeof(s->objects[0]),
                             &s->objects_size, s->objects_count + 1))
             return -1;
+        if (p)
+            js_dup(JS_MKPTR(JS_TAG_OBJECT, p));
         s->objects[s->objects_count++] = p;
     }
     return 0;
@@ -43535,7 +43541,7 @@ static JSValue JS_ReadTypedArray(BCReaderState *s)
     if (JS_IsException(obj))
         goto fail;
     if (s->allow_reference) {
-        s->objects[idx] = JS_VALUE_GET_OBJ(obj);
+        s->objects[idx] = JS_VALUE_GET_OBJ(js_dup(obj));
     }
     JS_FreeValue(ctx, array_buffer);
     return obj;
@@ -43994,6 +44000,10 @@ static void bc_reader_free(BCReaderState *s)
             JS_FreeAtom(s->ctx, s->idx_to_atom[i]);
         }
         js_free(s->ctx, s->idx_to_atom);
+    }
+    for(i = 0; i < s->objects_count; i++) {
+        if (s->objects[i])
+            JS_FreeValue(s->ctx, JS_MKPTR(JS_TAG_OBJECT, s->objects[i]));
     }
     js_free(s->ctx, s->objects);
 }
