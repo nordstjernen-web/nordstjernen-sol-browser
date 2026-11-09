@@ -98,7 +98,13 @@ is masked into the cage (`js_abuf_data()`, `js_ta_ptr()`), and with
 - Code pointer table: every native function pointer a heap object used
   to hold (C functions, function-data and closure records, their
   finalizers, the ArrayBuffer reallocation hook, job functions, C-module
-  init functions) is an index into an append-only table.
+  init functions) is an index into an append-only table. Each entry
+  records the kind of call it was registered for -- a C function under
+  its exact `cproto`, a data record, a closure, a closure finalizer, a
+  job, a module initializer, an ArrayBuffer reallocation hook -- and
+  every call fetches it with `js_cpt_fn(idx, kind)`, which aborts on a
+  mismatch, so a forged index can only reach a function registered for
+  the same signature.
 - Function-list table: an auto-init property (the lazily created
   builtins) names its static `JSCFunctionListEntry` by an index into a
   second append-only table of the same kind (`JSInternTable`). The entry
@@ -176,7 +182,8 @@ the table keeps the ones still open.
 | C2 | `rt->atom_array` (`JSAtomStruct *`) and `rt->shape_hash` (`JSShape *`) were allocated from the cage, so their raw entries were attacker-writable | arbitrary read, reference-count increment and decrement anywhere | fixed: trusted memory, bounded atom lookups |
 | C3 | WebAssembly's runtime allocations (module and memory instances with `memory_data` and bounds, import function pointers, the execution stack) all came from the cage, not only linear memory | arbitrary read and write, native calls | fixed: only linear memory is caged |
 | H1 | `rt->class_array[p->class_id]` indexed trusted memory with the in-cage class id unchecked, and called the `call`, `finalizer`, `gc_mark` and `exotic` pointers it read | function pointers read from the libc heap | fixed: `js_class_get` aborts on an unregistered id |
-| H2 | The code-pointer table is untyped: a forged index calls any registered native function through another signature (an ArrayBuffer realloc hook, a C function under a different `cproto`) | signature confusion | open |
+| H2 | The code-pointer table was untyped: a forged index called any registered native function through another signature (an ArrayBuffer realloc hook, a C function under a different `cproto`) | signature confusion | fixed: entries carry their call kind |
+| H2b | The `magic` of C functions, data records and closures, which many builtins use as an index into their own tables, is still in-cage data the function trusts | out-of-bounds reads in builtin tables | open |
 | H3 | The context table is process-wide and `js_ctx_get` does not check that a context belongs to the caller's runtime | page code running in another runtime's realm (a worker on another thread, the extension host) | open |
 | H4 | `JSArrayBuffer.data` is masked on access but handed unmasked to the realloc and free hooks and `sab_free` | free of an out-of-cage pointer | open |
 | M1 | The engine-private name table and bitmap, the policy that hides embedder names from page scripts, are cage allocations | policy rewrite | open |
