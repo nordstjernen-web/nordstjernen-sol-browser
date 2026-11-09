@@ -3,6 +3,17 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security: the JavaScript heap now lives in its own reserved address
+  range (`src/js_cage.c`), separate from the process heap that holds the
+  DOM, layout, network buffers and IPC framing, with inaccessible guard
+  regions on both sides. Every QuickJS runtime (page, dedicated worker,
+  extension host) allocates from a heap of its own inside that range
+  through the engine's public allocator hook, so the engine source is
+  untouched. The allocator keeps all bookkeeping outside the range,
+  decommits released memory and aborts on foreign, misaligned or repeated
+  frees. This is the first stage of the V8-style heap hardening tracked
+  in `docs/heap-hardening.md`; `NS_JS_HEAP_CAGE=0` falls back to the
+  process heap.
 * Security (QuickJS): a RegExp read back with `JS_ReadObject` (structured
   clone for `postMessage` and IndexedDB) carried its compiled regexp bytecode
   verbatim, and only the header was validated before the regexp executor

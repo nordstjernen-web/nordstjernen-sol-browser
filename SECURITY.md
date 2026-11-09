@@ -74,6 +74,18 @@ GPU API on, the filter must allow executable mappings, because the GPU
 drivers behind them (Mesa's llvmpipe among them) compile shaders to
 machine code; a separate GPU process would lift that.
 
+### JavaScript heap partition (`src/js_cage.c`)
+
+Every QuickJS allocation in a renderer comes from one reserved range of
+address space with inaccessible guard regions on both sides, separate
+from the process heap that holds the DOM, layout state, network buffers
+and IPC framing. The allocator keeps all of its bookkeeping outside that
+range, so a corrupted JavaScript heap cannot steer it, and it aborts on a
+foreign, misaligned or repeated free. Released memory is decommitted and
+made inaccessible. This is exploit-cost hardening on the way to a
+V8-style heap sandbox, not yet a boundary of its own; the staged plan
+and its measurements are in `docs/heap-hardening.md`.
+
 ### GPU shader validation (`src/glsl_validate.c`, `src/webgpu.c`)
 
 Page shaders never reach a GPU driver unchecked. Every WebGL shader is

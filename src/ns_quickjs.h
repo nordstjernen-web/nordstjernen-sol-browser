@@ -50,6 +50,20 @@ JS_SetDefaultLocale(JSRuntime *rt, const char *tag)
     return 0;
 }
 
+typedef JSMallocFunctions ns_quickjs_orig_malloc_functions;
+
+typedef struct NsJSMallocFunctions {
+    void *(*js_calloc)(void *opaque, size_t count, size_t size);
+    void *(*js_malloc)(void *opaque, size_t size);
+    void (*js_free)(void *opaque, void *ptr);
+    void *(*js_realloc)(void *opaque, void *ptr, size_t size);
+    size_t (*js_malloc_usable_size)(const void *ptr);
+} NsJSMallocFunctions;
+#define JSMallocFunctions NsJSMallocFunctions
+
+JSRuntime *ns_quickjs_new_runtime2(const NsJSMallocFunctions *mf, void *opaque);
+#define JS_NewRuntime2(mf, opaque) ns_quickjs_new_runtime2((mf), (opaque))
+
 #define JS_EVAL_OPTIONS_VERSION 1
 
 typedef struct JSEvalOptions {

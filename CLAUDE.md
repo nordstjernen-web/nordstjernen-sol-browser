@@ -96,6 +96,13 @@ Update Changelog.md
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
   `data/i18n/*.lang`); English is the fallback for any string a catalogue
   does not cover. No gettext dependency.
+- The JavaScript heap is partitioned: every QuickJS runtime allocates from
+  the reserved cage in `src/js_cage.c` through `ns_js_runtime_new` /
+  `ns_js_runtime_free`, never `JS_NewRuntime` directly. The staged
+  V8-style heap hardening plan, its invariants (no allocator bookkeeping
+  inside the cage) and its benchmarks live in `docs/heap-hardening.md`;
+  keep engine changes for it small and behind the public QuickJS API so
+  upstream quickjs-ng fixes keep merging.
 - Does not phone home, does not telemeter the user.
 - Make good descriptive commit messages always
 
