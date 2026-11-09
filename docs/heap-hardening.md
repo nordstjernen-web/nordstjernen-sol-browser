@@ -222,6 +222,30 @@ enabling it on 64-bit and decoding the pointer field as base plus offset
 gives compressed values, and the manual work is converting the raw
 object, shape, string and list-link pointers inside heap structures.
 
+Scoping notes for 3a, from reading the tree after 3p:
+
+- The value layout is fully encapsulated. Every pointer enters or leaves
+  a `JSValue` through `JS_MKPTR` / `JS_VALUE_GET_PTR` and their typed
+  wrappers (650 sites in the engine, 199 in the bindings), and no
+  engine or binding code touches the struct's `.tag` or `.u` members
+  directly. A `JS_CAGE_BOXING` mode in `quickjs.h`, the NaN-boxing
+  encoding with the low 32 bits holding `pointer - cage_base`, is
+  therefore a header change plus one exported cage base, and it halves
+  every value to 8 bytes.
+- It makes the cage mandatory in that build: a 32-bit offset cannot name
+  memory outside the reservation, which is the point, so the runtime
+  must refuse to start without one instead of falling back to the
+  process heap. ASan and 32-bit builds keep today's layouts.
+- Offset zero must never be handed out, so that a `NULL` pointer boxed
+  into a value stays distinguishable; the allocator will keep the first
+  chunk of the cage permanently reserved.
+- Step two is the struct fields: 179 `JSObject *`, 75 `JSString *`,
+  33 `JSShape *` and 29 `JSValue *` members, plus the GC list links,
+  converted to 32-bit offsets behind typed accessors the way V8 did it
+  field by field. Until that step the heap still holds raw 64-bit
+  pointers next to compressed values, so step one is a memory and
+  exploit-cost improvement, not yet the boundary.
+
 Trusted bytecode space allocates `JSFunctionBytecode`, its opcode buffer,
 closure tables and the saved frames of generators and async functions
 from memory outside the cage, reached through an indirect table, so the
@@ -355,3 +379,22 @@ site, whose CPU has ranged from 2.9 s to 3.7 s across the eight captures
 in this document with no consistent direction; the allocation-bound
 microbenchmark above is the honest measure of the arena bypass, about
 10 % on pure allocation churn and invisible in page loads.
+
+Stage 3p, before = stage 2b complete (2025-11-09):
+
+| Build | Parity | First paint ÷ Chrome FCP | Main CPU ÷ Chrome | Memory ÷ Chrome |
+|---|---|---|---|---|
+| before (stage 2b) | 85.6 | 1.60× | 3.99× | 0.29× |
+| after (stage 3p) | 85.8 | 1.18× | 3.98× | 0.30× |
+
+| Site | CPU before | CPU after | RSS before | RSS after |
+|---|---|---|---|---|
+| google | 239 ms | 234 ms | 77.5 MB | 79.2 MB |
+| anthropic | 657 ms | 677 ms | 139.6 MB | 139.4 MB |
+| bbc | 3136 ms | 3163 ms | 454.6 MB | 452.5 MB |
+| cnn | 7521 ms | 7086 ms | 682.0 MB | 681.7 MB |
+| guardian | 5161 ms | 5151 ms | 382.4 MB | 382.4 MB |
+
+A context-table read replaces a pointer load on every realm switch;
+flat on every site. The allocation stress script is unchanged at
+0.32 to 0.39 s and 183 MB.

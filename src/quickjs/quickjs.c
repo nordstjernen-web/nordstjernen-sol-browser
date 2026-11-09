@@ -2930,7 +2930,7 @@ bool JS_IsJobPending(JSRuntime *rt)
 JSContext *JS_GetPendingJobContext(JSRuntime *rt)
 {
     if (JS_IsJobPending(rt)) {
-        return list_entry(rt->job_list.next, JSJobEntry, link)->ctx;
+        return js_ctx_get(list_entry(rt->job_list.next, JSJobEntry, link)->ctx);
     }
     return NULL;
 }
