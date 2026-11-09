@@ -42283,9 +42283,32 @@ static int JS_WriteArray(BCWriterState *s, JSValueConst obj)
         goto fail1;
     bc_put_leb128(s, len);
     for(i = 0; i < len; i++) {
-        val = JS_GetPropertyUint32(s->ctx, obj, i);
-        if (JS_IsException(val))
-            goto fail1;
+        /* only own data properties are written: a getter would run user
+           code while the writer holds raw shape and record pointers of
+           the enclosing objects, and a hole must not consult the
+           prototype chain for the same reason. */
+        if (p->fast_array && i < p->u.array.count) {
+            val = js_dup(p->u.array.u.values[i]);
+        } else {
+            JSPropertyDescriptor desc;
+            JSAtom atom = JS_NewAtomUInt32(s->ctx, i);
+            int res;
+            if (atom == JS_ATOM_NULL)
+                goto fail1;
+            res = JS_GetOwnPropertyInternal(s->ctx, &desc, p, atom);
+            JS_FreeAtom(s->ctx, atom);
+            if (res < 0)
+                goto fail1;
+            if (res == 0) {
+                val = JS_UNDEFINED;
+            } else if (desc.flags & JS_PROP_GETSET) {
+                js_free_desc(s->ctx, &desc);
+                JS_ThrowTypeError(s->ctx, "only value properties are supported");
+                goto fail1;
+            } else {
+                val = desc.value;
+            }
+        }
         ret = JS_WriteObjectRec(s, val);
         JS_FreeValue(s->ctx, val);
         if (ret)

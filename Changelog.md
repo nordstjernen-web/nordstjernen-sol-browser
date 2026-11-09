@@ -3,6 +3,12 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security (QuickJS): `JS_WriteObject` (structured clone for `postMessage`
+  and IndexedDB) fetched array elements with an ordinary property get, so an
+  accessor on the array or on `Array.prototype` ran page code while the
+  serializer still held raw shape and Map-record pointers of the enclosing
+  objects (use-after-free). Only own data properties are written now; an
+  accessor element is a TypeError and a hole serializes as `undefined`.
 * Security (QuickJS): `JS_ReadObject` with object references kept only raw
   pointers to the objects it had created; a serialized object with a repeated
   property name, or a Map with a repeated key, freed the earlier value while
