@@ -3,6 +3,12 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security (QuickJS): the rejection handler `AsyncDisposableStack` chains
+  onto a disposer's returned promise was created with length 0 and read its
+  first argument unconditionally; a page that replaced `Promise.prototype.then`
+  and called the handler with no arguments made the engine read past the
+  argument array. The handler is now declared with length 1 and checks the
+  argument count.
 * Security (QuickJS): `FinalizationRegistry.prototype.unregister` freed each
   matching entry's held value while still walking the registry's entry list;
   when that value was the target of the next entry, the next entry was freed
