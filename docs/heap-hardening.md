@@ -78,8 +78,11 @@ compile the classic layouts and use the process heap, and
 **Buffers.** Every ArrayBuffer backing store lives inside the cage: the
 engine refuses a foreign store (`JS_NewArrayBuffer` with an external
 buffer, `JS_RepointArrayBuffer`, a SharedArrayBuffer allocation hook
-returning out-of-cage memory). WebAssembly memory comes from a locked
-shared heap inside the cage (`src/wasm.c`), and WebGPU `getMappedRange()`
+returning out-of-cage memory). WebAssembly linear memory comes from a
+locked shared heap inside the cage (`src/wasm.c`); WAMR's own runtime
+structures (module and memory instances, import tables, the execution
+stack) come from libc, outside it, because they hold raw pointers, bounds
+and native function pointers. WebGPU `getMappedRange()`
 returns a cage copy written back on `unmap()` (`src/webgpu.c`). Every
 read of a buffer data pointer or the cached typed-array element pointer
 is masked into the cage (`js_abuf_data()`, `js_ta_ptr()`), and with
@@ -166,7 +169,7 @@ the table keeps the ones still open.
 |---|---|---|---|
 | C1 | The free, realloc and size paths chose between the cage allocator, libc and the arena by the 8-byte block header inside the cage. A forged "trusted" header made libc `free()` or `realloc()` a cage address (a house-of-spirit on the libc heap); a forged arena header made the free path write and decrement through an address computed from header fields | outside the cage | fixed: the block's address decides |
 | C2 | `rt->atom_array` (`JSAtomStruct *`) and `rt->shape_hash` (`JSShape *`) were allocated from the cage, so their raw entries were attacker-writable | arbitrary read, reference-count increment and decrement anywhere | fixed: trusted memory, bounded atom lookups |
-| C3 | WebAssembly's runtime allocations (module and memory instances with `memory_data` and bounds, import function pointers, the execution stack) all come from the cage, not only linear memory | arbitrary read and write, native calls | open |
+| C3 | WebAssembly's runtime allocations (module and memory instances with `memory_data` and bounds, import function pointers, the execution stack) all came from the cage, not only linear memory | arbitrary read and write, native calls | fixed: only linear memory is caged |
 | H1 | `rt->class_array[p->class_id]` indexes trusted memory with the in-cage class id unchecked, and calls the `call`, `finalizer`, `gc_mark` and `exotic` pointers it reads | function pointers read from the libc heap | open |
 | H2 | The code-pointer table is untyped: a forged index calls any registered native function through another signature (an ArrayBuffer realloc hook, a C function under a different `cproto`) | signature confusion | open |
 | H3 | The context table is process-wide and `js_ctx_get` does not check that a context belongs to the caller's runtime | page code running in another runtime's realm (a worker on another thread, the extension host) | open |
