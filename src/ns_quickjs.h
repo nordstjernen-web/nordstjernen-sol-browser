@@ -64,6 +64,13 @@ typedef struct NsJSMallocFunctions {
 JSRuntime *ns_quickjs_new_runtime2(const NsJSMallocFunctions *mf, void *opaque);
 #define JS_NewRuntime2(mf, opaque) ns_quickjs_new_runtime2((mf), (opaque))
 
+static inline void
+JS_SetHeapCage(uintptr_t base, size_t size)
+{
+    (void)base;
+    (void)size;
+}
+
 #define JS_EVAL_OPTIONS_VERSION 1
 
 typedef struct JSEvalOptions {

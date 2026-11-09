@@ -5,6 +5,7 @@
 
 #include "wasm.h"
 #include "js_classid.h"
+#include "js_cage.h"
 
 #if !defined(NS_HAVE_WAMR)
 
@@ -179,12 +180,45 @@ ns_wasm_linkage_gc_mark(JSRuntime *rt, const ns_wasm_linkage *linkage,
     JS_MarkValue(rt, linkage->provided_table, mark_func);
 }
 
+static void *
+ns_wasm_runtime_alloc(mem_alloc_usage_t usage, unsigned int size)
+{
+    void *p = ns_js_cage_shared_malloc(size);
+    if (p && usage == Alloc_For_LinearMemory)
+        memset(p, 0, ns_js_cage_shared_usable_size(p));
+    return p;
+}
+
+static void *
+ns_wasm_runtime_realloc(mem_alloc_usage_t usage, bool full_size_mmaped,
+                        void *ptr, unsigned int size)
+{
+    (void)full_size_mmaped;
+    size_t old = ptr ? ns_js_cage_shared_usable_size(ptr) : 0;
+    void *p = ns_js_cage_shared_realloc(ptr, size);
+    if (p && usage == Alloc_For_LinearMemory) {
+        size_t now = ns_js_cage_shared_usable_size(p);
+        if (now > old) memset((char *)p + old, 0, now - old);
+    }
+    return p;
+}
+
+static void
+ns_wasm_runtime_free(mem_alloc_usage_t usage, void *ptr)
+{
+    (void)usage;
+    ns_js_cage_shared_free(ptr);
+}
+
 static gpointer
 ns_wasm_runtime_init_once(gpointer data)
 {
     RuntimeInitArgs args;
     memset(&args, 0, sizeof(args));
-    args.mem_alloc_type = Alloc_With_System_Allocator;
+    args.mem_alloc_type = Alloc_With_Allocator;
+    args.mem_alloc_option.allocator.malloc_func = (void *)ns_wasm_runtime_alloc;
+    args.mem_alloc_option.allocator.realloc_func = (void *)ns_wasm_runtime_realloc;
+    args.mem_alloc_option.allocator.free_func = (void *)ns_wasm_runtime_free;
     if (!wasm_runtime_full_init(&args))
         return NULL;
     wasm_runtime_set_log_level(g_getenv("ND_WASM_LOG")
@@ -627,7 +661,7 @@ ns_wasm_memory_finalizer(JSRuntime *rt, JSValue val)
         return;
     ns_wasm_memory_detach_buffer(m);
     JS_FreeValueRT(rt, m->instance);
-    g_free(m->staging);
+    ns_js_cage_shared_free(m->staging);
     g_free(m);
 }
 
@@ -746,7 +780,7 @@ ns_wasm_memory_grow(JSContext *ctx, JSValueConst this_val, int argc,
             guint64 new_size = new_pages * NS_WASM_PAGE_SIZE;
             if (new_size > NS_WASM_MEMORY_MAX_BYTES)
                 return JS_ThrowRangeError(ctx, "wasm memory.grow failed");
-            m->staging = g_realloc(m->staging, new_size);
+            m->staging = ns_js_cage_shared_realloc(m->staging, new_size);
             memset(m->staging + m->staging_size, 0,
                    new_size - m->staging_size);
             m->staging_size = (size_t)new_size;
@@ -1944,7 +1978,7 @@ ns_wasm_adopt_provided_imports(JSContext *ctx, JSValueConst instance_obj,
             } else {
                 ns_wasm_memory_detach_buffer(m);
             }
-            g_free(m->staging);
+            ns_js_cage_shared_free(m->staging);
             m->staging = NULL;
             m->staging_size = 0;
             JS_FreeValue(ctx, m->instance);
@@ -2201,7 +2235,8 @@ ns_wasm_memory_ctor(JSContext *ctx, JSValueConst new_target, int argc,
     m->ctx = ctx;
     m->instance = JS_UNDEFINED;
     m->buffer = JS_UNDEFINED;
-    m->staging = g_malloc0(bytes ? (size_t)bytes : 1);
+    m->staging = ns_js_cage_shared_malloc(bytes ? (size_t)bytes : 1);
+    memset(m->staging, 0, bytes ? (size_t)bytes : 1);
     m->staging_size = (size_t)bytes;
     m->max_pages = maximum;
     JS_SetOpaque(obj, m);

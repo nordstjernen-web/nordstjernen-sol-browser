@@ -33,7 +33,7 @@ from upstream keep merging cleanly into `src/quickjs/`.
 |---|---|---|
 | 1a | Separate allocation partition for the JS heap (the cage) | **done** (`src/js_cage.c`) |
 | 1b | Credential-less renderer broker | skipped for now, see below |
-| 2a | Bounded, cage-relative ArrayBuffer and TypedArray pointers | planned |
+| 2a | Bounded, cage-relative ArrayBuffer and TypedArray pointers | **done** |
 | 2b | Tagged external pointer table and code pointer table | planned |
 | 2c | Inventory of raw host and function pointers left in the heap | planned |
 | 3a | Pointer compression (8-byte values, 32-bit cage offsets) | planned |
@@ -114,13 +114,32 @@ then churns small arrays. Sitebench results are recorded in the
 
 ## Stage 2: buffers and pointer tables
 
-Stage 2a stores the ArrayBuffer data pointer as an offset from the cage
-base, masked on every load, and stores byte lengths and typed-array
-offsets as values bounded to the cage size. A forged buffer with an
-arbitrary address and a huge length then reaches cage or guard memory
-only. The fast-array path for typed arrays, DataView and Atomics follow
-the same rule. WebAssembly linear memory moves into the cage through
-WAMR's custom-allocator mode.
+Stage 2a (done) masks every read of an ArrayBuffer data pointer and of
+the cached typed-array element pointer into the cage: the engine keeps
+the fields as they are and decodes them through `js_abuf_data()` and
+`js_ta_ptr()` as `cage_base | (pointer & (cage_size - 1))`, so a forged
+buffer with an arbitrary address still lands inside the cage, and with
+lengths and offsets of at most 32 bits and elements of at most 8 bytes
+the furthest reach is 32 GB past the end, which is exactly the trailing
+guard region. The embedder hands the engine the cage with
+`JS_SetHeapCage()`; without a cage the mask is the identity, so the
+fallback path and the ASan build run the unmodified arithmetic. The
+engine change is one 20-line block plus mechanical substitutions at the
+read sites (17 buffer reads, 67 typed-array pointer reads), with no
+change to the writers, which keeps the diff against upstream small and
+re-applicable.
+
+The rule that makes this sound is that **every ArrayBuffer backing store
+lives inside the cage**. The engine now refuses a foreign backing store
+outside it (`JS_NewArrayBuffer` with an external buffer, and
+`JS_RepointArrayBuffer`). Two embedder paths had to change to follow the
+rule: WebAssembly linear memory and the runtime's own allocations come
+from a locked shared heap inside the cage through WAMR's allocator hooks
+(`WASM_MEM_ALLOC_WITH_USAGE`, `src/wasm.c`), with linear memory zeroed on
+allocation and growth; and WebGPU `getMappedRange()` returns a cage copy
+of the mapped range that is written back to the GPU buffer on `unmap()`
+for write mappings (`src/webgpu.c`) instead of aliasing wgpu-native's
+memory.
 
 Stage 2b replaces the raw pointer behind `JS_SetOpaque` / `JS_GetOpaque`
 with an index into a table outside the cage whose entries carry the

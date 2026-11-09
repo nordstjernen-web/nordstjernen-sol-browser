@@ -26,6 +26,42 @@
 #endif
 #endif
 
+static GMutex g_shared_lock;
+static GHashTable *g_shared_sizes;
+
+static void *
+ns_shared_fallback_malloc(size_t size)
+{
+    void *p = g_malloc(size ? size : 1);
+    if (!g_shared_sizes) g_shared_sizes = g_hash_table_new(NULL, NULL);
+    g_hash_table_insert(g_shared_sizes, p, GSIZE_TO_POINTER(size));
+    return p;
+}
+
+static size_t
+ns_shared_fallback_usable_size(const void *ptr)
+{
+    if (!g_shared_sizes) return 0;
+    return GPOINTER_TO_SIZE(g_hash_table_lookup(g_shared_sizes, ptr));
+}
+
+static void
+ns_shared_fallback_free(void *ptr)
+{
+    if (g_shared_sizes) g_hash_table_remove(g_shared_sizes, ptr);
+    g_free(ptr);
+}
+
+static void *
+ns_shared_fallback_realloc(void *ptr, size_t size)
+{
+    if (ptr && g_shared_sizes) g_hash_table_remove(g_shared_sizes, ptr);
+    void *p = g_realloc(ptr, size ? size : 1);
+    if (!g_shared_sizes) g_shared_sizes = g_hash_table_new(NULL, NULL);
+    g_hash_table_insert(g_shared_sizes, p, GSIZE_TO_POINTER(size));
+    return p;
+}
+
 #if NS_CAGE_SUPPORTED
 
 #define NS_CAGE_CHUNK_SHIFT 20
@@ -36,7 +72,7 @@
 #define NS_CAGE_SMALL_MAX 32768u
 #define NS_CAGE_MIN_BLOCK 16u
 #define NS_CAGE_BITMAP_WORDS (NS_CAGE_SLAB_SIZE / NS_CAGE_MIN_BLOCK / 64)
-#define NS_CAGE_GUARD_SIZE ((size_t)8 << 30)
+#define NS_CAGE_GUARD_SIZE ((size_t)32 << 30)
 #define NS_CAGE_MAX_SIZE ((size_t)1 << 36)
 #define NS_CAGE_MIN_SIZE ((size_t)1 << 30)
 #define NS_CAGE_COMMITTED_CACHE 32
@@ -243,6 +279,7 @@ ns_cage_init_once(gpointer unused)
     g_cage.committed_bits = g_malloc0(sizeof(uint64_t) * words);
     g_mutex_init(&g_cage.lock);
     g_cage.ready = true;
+    JS_SetHeapCage(g_cage.base, g_cage.size);
     g_info("js heap cage: %zu MiB reserved at %p",
            g_cage.size >> 20, (void *)g_cage.base);
     return NULL;
@@ -726,6 +763,55 @@ ns_js_cage_committed_bytes(void)
     return bytes;
 }
 
+static ns_cage_heap *g_shared_heap;
+
+void *
+ns_js_cage_shared_malloc(size_t size)
+{
+    g_mutex_lock(&g_shared_lock);
+    void *p;
+    if (ns_cage_ready()) {
+        if (!g_shared_heap) g_shared_heap = g_malloc0(sizeof(*g_shared_heap));
+        p = ns_cage_heap_alloc(g_shared_heap, size);
+    } else {
+        p = ns_shared_fallback_malloc(size);
+    }
+    g_mutex_unlock(&g_shared_lock);
+    return p;
+}
+
+void *
+ns_js_cage_shared_realloc(void *ptr, size_t size)
+{
+    if (!ptr) return ns_js_cage_shared_malloc(size);
+    g_mutex_lock(&g_shared_lock);
+    void *p = ns_cage_chunk_of(ptr) ? ns_cage_heap_realloc(g_shared_heap, ptr, size)
+                                    : ns_shared_fallback_realloc(ptr, size);
+    g_mutex_unlock(&g_shared_lock);
+    return p;
+}
+
+void
+ns_js_cage_shared_free(void *ptr)
+{
+    if (!ptr) return;
+    g_mutex_lock(&g_shared_lock);
+    if (ns_cage_chunk_of(ptr)) ns_cage_heap_free(ptr);
+    else ns_shared_fallback_free(ptr);
+    g_mutex_unlock(&g_shared_lock);
+}
+
+size_t
+ns_js_cage_shared_usable_size(const void *ptr)
+{
+    if (!ptr) return 0;
+    g_mutex_lock(&g_shared_lock);
+    size_t n = ns_cage_chunk_of(ptr) ? ns_cage_usable_size(ptr)
+                                     : ns_shared_fallback_usable_size(ptr);
+    g_mutex_unlock(&g_shared_lock);
+    return n;
+}
+
 #else
 
 JSRuntime *
@@ -769,6 +855,43 @@ size_t
 ns_js_cage_committed_bytes(void)
 {
     return 0;
+}
+
+void *
+ns_js_cage_shared_malloc(size_t size)
+{
+    g_mutex_lock(&g_shared_lock);
+    void *p = ns_shared_fallback_malloc(size);
+    g_mutex_unlock(&g_shared_lock);
+    return p;
+}
+
+void *
+ns_js_cage_shared_realloc(void *ptr, size_t size)
+{
+    g_mutex_lock(&g_shared_lock);
+    void *p = ns_shared_fallback_realloc(ptr, size);
+    g_mutex_unlock(&g_shared_lock);
+    return p;
+}
+
+void
+ns_js_cage_shared_free(void *ptr)
+{
+    if (!ptr) return;
+    g_mutex_lock(&g_shared_lock);
+    ns_shared_fallback_free(ptr);
+    g_mutex_unlock(&g_shared_lock);
+}
+
+size_t
+ns_js_cage_shared_usable_size(const void *ptr)
+{
+    if (!ptr) return 0;
+    g_mutex_lock(&g_shared_lock);
+    size_t n = ns_shared_fallback_usable_size(ptr);
+    g_mutex_unlock(&g_shared_lock);
+    return n;
 }
 
 #endif
