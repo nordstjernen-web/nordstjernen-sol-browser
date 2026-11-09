@@ -12,8 +12,12 @@ Supported: **testharness.js tests** — plain `.html` tests and the
 server-generated `.any.html` / `.window.html` wrappers for `.any.js`
 and `.window.js` files.
 
-Not supported: reftests, crashtests, `.worker.js` / service-worker
-tests, wdspec tests, manual tests, and print tests. During enumeration
+Reftests run through a separate runner, `scripts/wpt-reftest.py`; see
+[Reftests](#reftests) below.
+
+Not supported by `wpt-run.sh`: reftests, crashtests, `.worker.js` /
+service-worker tests, wdspec tests, manual tests, and print tests.
+During enumeration
 the runner only picks up `.html`/`.htm`, `.any.js`, and `.window.js`
 files that reference `testharness.js`, and skips `resources/`,
 `support/`, `tools/`, and `crashtests/` directories plus `*-ref.html`
@@ -65,6 +69,38 @@ The runner exits 0 only when every test file ran without failures.
 `NS_BIN` overrides the browser binary (default
 `builddir/src/gtk/nordstjernen`) and `NS_WPT_ROOT` supplies a default
 for `--wpt-root`.
+
+## Reftests
+
+Most CSS layout tests in WPT are reftests: a test page and a reference
+page that must look the same (`<link rel="match">`) or different
+(`<link rel="mismatch">`). `scripts/wpt-reftest.py` renders both with
+`--dump=png` at 800x600 and compares them the way wptrunner does:
+pixel for pixel, or within the ranges of a `<meta name="fuzzy">`. A
+test passes when it matches at least one `match` reference and differs
+from every `mismatch` reference. It needs Python 3 with Pillow.
+
+```sh
+scripts/wpt-reftest.py --wpt-root=~/wpt css/CSS2/floats css/css-flexbox
+scripts/wpt-reftest.py --wpt-root=~/wpt --results=before.tsv css/css-grid
+scripts/wpt-reftest.py --wpt-root=~/wpt --baseline=before.tsv css/css-grid
+```
+
+`--results` writes one tab-separated line per test (path, status,
+largest channel difference, differing pixels, reference, note) as the
+tests finish, and `--resume` continues a run that stopped. With
+`--baseline` the run lists the tests that changed against an earlier
+results file and exits 1 when a test that passed there fails now, so
+it can gate a change. `--diffs=DIR` saves a test | reference |
+difference strip for every failure. `--chrome=PATH` renders with
+Chrome instead, which tells the tests Nordstjernen fails apart from
+the ones Chrome fails too.
+
+The pages are served by a static HTTP server rooted at the checkout,
+so `.sub.` tests, print tests and paged reftests are skipped, and the
+references of a reference are not followed. Nordstjernen's PNG is as
+tall as the document; both images are padded to 800x600 with the
+page's own background colour before they are compared.
 
 ## Related scripts
 
