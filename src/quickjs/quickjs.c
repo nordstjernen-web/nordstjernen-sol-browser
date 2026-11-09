@@ -63915,6 +63915,12 @@ static JSValue js_array_buffer_constructor3(JSContext *ctx,
                                                  max_int(sab_alloc_len, 1));
             if (!abuf->data)
                 goto fail;
+            if (!js_in_heap_cage(abuf->data)) {
+                if (rt->sab_funcs.sab_free)
+                    rt->sab_funcs.sab_free(rt->sab_funcs.sab_opaque, abuf->data);
+                JS_ThrowTypeError(ctx, "SharedArrayBuffer backing store lies outside the heap cage");
+                goto fail;
+            }
             memset(abuf->data, 0, sab_alloc_len);
         } else {
             /* the allocation must be done after the object creation */
