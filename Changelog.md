@@ -3,6 +3,11 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security (QuickJS): the runtime allocators refuse requests above a
+  quarter of the address space. Sizes close to `SIZE_MAX` (a negative length
+  converted to an unsigned size) wrapped in the arena's header and alignment
+  arithmetic and in the memory-limit check, turning such a request into a
+  tiny block instead of an out-of-memory failure.
 * Security (QuickJS): string concatenation appended in place to a string
   that was the last reference to a registered property-name atom, leaving
   the atom table holding the old hash for the new contents; two distinct

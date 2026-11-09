@@ -2421,6 +2421,11 @@ static void js_arena_free_all(JSRuntime *rt)
     }
 }
 
+/* Requests near SIZE_MAX (a negative length converted to size_t) would wrap
+   in the header and alignment arithmetic of the arena and in the memory
+   limit checks of these functions, and hand out a tiny block for a huge request. */
+#define JS_MALLOC_MAX_REQUEST (SIZE_MAX / 4)
+
 void *js_calloc_rt(JSRuntime *rt, size_t count, size_t size)
 {
     void *ptr;
@@ -2432,6 +2437,8 @@ void *js_calloc_rt(JSRuntime *rt, size_t count, size_t size)
     if (size > 0)
         if (unlikely(count != (count * size) / size))
             return NULL;
+    if (unlikely(count * size > JS_MALLOC_MAX_REQUEST))
+        return NULL;
 
     s = &rt->malloc_state;
     /* When malloc_limit is 0 (unlimited), malloc_limit - 1 will be SIZE_MAX. */
@@ -2454,6 +2461,8 @@ void *js_malloc_rt(JSRuntime *rt, size_t size)
 
     /* Do not allocate zero bytes: behavior is platform dependent */
     if (unlikely(size == 0))
+        return NULL;
+    if (unlikely(size > JS_MALLOC_MAX_REQUEST))
         return NULL;
 
     s = &rt->malloc_state;
@@ -2502,6 +2511,8 @@ void *js_realloc_rt(JSRuntime *rt, void *ptr, size_t size)
         js_free_rt(rt, ptr);
         return NULL;
     }
+    if (unlikely(size > JS_MALLOC_MAX_REQUEST))
+        return NULL;
     old_size = js_arena_usable_size(rt, ptr);
     s = &rt->malloc_state;
     /* When malloc_limit is 0 (unlimited), malloc_limit - 1 will be SIZE_MAX. */
