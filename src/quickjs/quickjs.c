@@ -59353,7 +59353,8 @@ static JSValue js_async_dispose_rethrow(JSContext *ctx, JSValueConst this_val,
     if (magic == 0) {
         return JS_Throw(ctx, prev_err);
     } else {
-        JSValue se = js_new_suppressed_error(ctx, argv[0], prev_err);
+        JSValueConst new_err = argc > 0 ? argv[0] : JS_UNDEFINED;
+        JSValue se = js_new_suppressed_error(ctx, new_err, prev_err);
         JS_FreeValue(ctx, prev_err);
         if (JS_IsException(se))
             return JS_EXCEPTION;
@@ -59415,7 +59416,7 @@ static JSValue js_async_dispose_step(JSContext *ctx, JSValueConst this_val,
         JS_FreeValue(ctx, ret);
         if (JS_IsException(ret_promise))
             return JS_EXCEPTION;
-        resolve_fn = JS_NewCFunctionData(ctx, js_async_dispose_rethrow, 0, 0,
+        resolve_fn = JS_NewCFunctionData(ctx, js_async_dispose_rethrow, 1, 0,
                                          1, &prev_err);
         reject_fn = JS_NewCFunctionData(ctx, js_async_dispose_rethrow, 1, 1,
                                         1, &prev_err);
