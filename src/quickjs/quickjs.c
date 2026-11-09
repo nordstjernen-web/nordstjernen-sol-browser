@@ -40228,6 +40228,13 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     if (resolve_labels(ctx, fd))
         goto fail;
 
+    /* the variable reference indexes are stored on 16 bits */
+    if (fd->var_ref_count > JS_MAX_LOCAL_VARS) {
+        JS_ThrowSyntaxError(ctx, "too many captured variables (only %d allowed)",
+                            JS_MAX_LOCAL_VARS);
+        goto fail;
+    }
+
     if (compute_stack_size(ctx, fd, &stack_size) < 0)
         goto fail;
 

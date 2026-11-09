@@ -3,6 +3,12 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security (QuickJS): a function whose captured-variable count exceeded
+  65535 (reachable with a direct `eval` in a function with tens of thousands
+  of parameters and locals) had that count and the per-variable indexes
+  truncated to 16 bits, so the interpreter read and wrote `var_refs` slots
+  outside the frame. Compilation now fails with a SyntaxError, as it already
+  does for too many arguments, locals or closure variables.
 * Security (QuickJS): `for (await using x of y)` inside a non-async function
   (in module code or a class static block) was accepted by the parser; the
   resulting `await` ran in an ordinary frame and left closures pointing at a
