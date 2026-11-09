@@ -33,4 +33,12 @@ static inline uint32_t js_cptr_encode(const void *ptr)
 #define js_cstore(field, ptr) ((field) = (ptr))
 #endif
 
+#define js_resize_cptr_array(ctx, field, T, psize, req) ({                   \
+    T js_resize_array_ = js_cload(T, field);                                 \
+    int js_resize_ret_ = js_resize_array(ctx, (void **)&js_resize_array_,    \
+                                         sizeof(*js_resize_array_), psize, req); \
+    if (!js_resize_ret_)                                                     \
+        js_cstore(field, js_resize_array_);                                  \
+    js_resize_ret_; })
+
 #endif

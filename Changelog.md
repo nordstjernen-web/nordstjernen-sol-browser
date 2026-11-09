@@ -3,6 +3,15 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a corrupted JavaScript heap can no longer make the engine
+  call a native function of its choosing through a lazily created
+  builtin. Such a property kept a raw pointer to its static definition,
+  whose C function pointer the engine registers when the property is
+  first read; it now holds an index into a table outside the heap cage
+  (stage 3a.2 batch 8 of `docs/heap-hardening.md`). Accessor getters and
+  setters, variable references in property slots and every pointer in
+  ES module records are now 32-bit cage offsets as well, which completes
+  stage 3a.2.
 * Security: the last raw pointers inside the JavaScript engine's internal
   structures, other than module records and bytecode, are now 32-bit
   offsets into the heap cage (stage 3a.2 batch 7 of

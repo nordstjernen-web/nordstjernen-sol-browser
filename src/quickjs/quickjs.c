@@ -1062,7 +1062,7 @@ typedef enum JSModulePhaseEnum {
 
 typedef struct JSReqModuleEntry {
     JSAtom module_name;
-    JSModuleDef *module; /* used using resolution */
+    JS_CPTR(JSModuleDef *) module; /* used using resolution */
     JSValue attributes; /* JS_UNDEFINED or an object containing the attributes as key/value */
     JSModulePhaseEnum phase;
 } JSReqModuleEntry;
@@ -1076,7 +1076,7 @@ typedef struct JSExportEntry {
     union {
         struct {
             int var_idx; /* closure variable index */
-            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+            JS_CPTR(JSVarRef *) var_ref; /* if != NULL, reference to the variable */
         } local; /* for local export */
         int req_module_idx; /* module for indirect export */
     } u;
@@ -1109,19 +1109,19 @@ struct JSModuleDef {
     JSAtom module_name;
     struct list_head link;
 
-    JSReqModuleEntry *req_module_entries;
+    JS_CPTR(JSReqModuleEntry *) req_module_entries;
     int req_module_entries_count;
     int req_module_entries_size;
 
-    JSExportEntry *export_entries;
+    JS_CPTR(JSExportEntry *) export_entries;
     int export_entries_count;
     int export_entries_size;
 
-    JSStarExportEntry *star_export_entries;
+    JS_CPTR(JSStarExportEntry *) star_export_entries;
     int star_export_entries_count;
     int star_export_entries_size;
 
-    JSImportEntry *import_entries;
+    JS_CPTR(JSImportEntry *) import_entries;
     int import_entries_count;
     int import_entries_size;
 
@@ -1142,15 +1142,15 @@ struct JSModuleDef {
     JSModuleStatus status : 8;
     /* temp use during js_module_link() & js_module_evaluate() */
     int dfs_index, dfs_ancestor_index;
-    JSModuleDef *stack_prev;
+    JS_CPTR(JSModuleDef *) stack_prev;
     /* temp use during js_module_evaluate() */
-    JSModuleDef **async_parent_modules;
+    JS_CPTR(JSModuleDef **) async_parent_modules;
     int async_parent_modules_count;
     int async_parent_modules_size;
     int pending_async_dependencies;
     bool async_evaluation;
     int64_t async_evaluation_timestamp;
-    JSModuleDef *cycle_root;
+    JS_CPTR(JSModuleDef *) cycle_root;
     JSValue promise; /* corresponds to spec field: capability */
     JSValue resolving_funcs[2]; /* corresponds to spec field: capability */
     /* true if evaluation yielded an exception. It is saved in
@@ -1173,16 +1173,16 @@ typedef struct JSProperty {
     union {
         JSValue value;      /* JS_PROP_NORMAL */
         struct {            /* JS_PROP_GETSET */
-            JSObject *getter; /* NULL if undefined */
-            JSObject *setter; /* NULL if undefined */
+            JS_CPTR(JSObject *) getter; /* NULL if undefined */
+            JS_CPTR(JSObject *) setter; /* NULL if undefined */
         } getset;
-        JSVarRef *var_ref;  /* JS_PROP_VARREF */
+        JS_CPTR(JSVarRef *) var_ref;  /* JS_PROP_VARREF */
         struct {            /* JS_PROP_AUTOINIT */
             /* in order to use only 2 pointers, we compress the realm
                and the init function pointer */
             uintptr_t realm_and_id; /* realm and init_id (JS_AUTOINIT_ID_x)
                                        in the 2 low bits */
-            void *opaque;
+            uintptr_t opaque;
         } init;
     } u;
 } JSProperty;
@@ -7331,6 +7331,26 @@ static JSAutoInitIDEnum js_autoinit_get_id(JSProperty *pr)
     return pr->u.init.realm_and_id & 3;
 }
 
+static uintptr_t js_autoinit_encode_opaque(JSAutoInitIDEnum id, void *opaque)
+{
+    if (id == JS_AUTOINIT_ID_PROP)
+        return js_flt_intern(opaque);
+    return (uintptr_t)opaque;
+}
+
+static void *js_autoinit_get_opaque(JSProperty *pr)
+{
+    uintptr_t v = pr->u.init.opaque;
+    switch (js_autoinit_get_id(pr)) {
+    case JS_AUTOINIT_ID_PROP:
+        return (void *)js_flt_get((uint32_t)v);
+    case JS_AUTOINIT_ID_MODULE_NS:
+        return (void *)((uintptr_t)js_caged_ptr((void *)(v & ~(uintptr_t)3)) | (v & 3));
+    default:
+        return (void *)v;
+    }
+}
+
 static void js_autoinit_free(JSRuntime *rt, JSProperty *pr)
 {
     JS_FreeContext(js_autoinit_get_realm(pr));
@@ -7443,12 +7463,12 @@ static void free_property(JSRuntime *rt, JSProperty *pr, int prop_flags)
 {
     if (unlikely(prop_flags & JS_PROP_TMASK)) {
         if ((prop_flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
-            if (pr->u.getset.getter)
-                JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.getter));
-            if (pr->u.getset.setter)
-                JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.setter));
+            if (js_cload(JSObject *, pr->u.getset.getter))
+                JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, pr->u.getset.getter)));
+            if (js_cload(JSObject *, pr->u.getset.setter))
+                JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, pr->u.getset.setter)));
         } else if ((prop_flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
-            free_var_ref(rt, pr->u.var_ref);
+            free_var_ref(rt, js_cload(JSVarRef *, pr->u.var_ref));
         } else if ((prop_flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
             js_autoinit_free(rt, pr);
         }
@@ -7920,16 +7940,16 @@ static void mark_children(JSRuntime *rt, JSGCObjectHeader *gp,
                 if (prs->atom != JS_ATOM_NULL) {
                     if (prs->flags & JS_PROP_TMASK) {
                         if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
-                            if (pr->u.getset.getter)
-                                mark_func(rt, &pr->u.getset.getter->header);
-                            if (pr->u.getset.setter)
-                                mark_func(rt, &pr->u.getset.setter->header);
+                            if (js_cload(JSObject *, pr->u.getset.getter))
+                                mark_func(rt, &js_cload(JSObject *, pr->u.getset.getter)->header);
+                            if (js_cload(JSObject *, pr->u.getset.setter))
+                                mark_func(rt, &js_cload(JSObject *, pr->u.getset.setter)->header);
                         } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
-                            if (pr->u.var_ref->is_detached ||
-                                pr->u.var_ref->is_coro) {
+                            if (js_cload(JSVarRef *, pr->u.var_ref)->is_detached ||
+                                js_cload(JSVarRef *, pr->u.var_ref)->is_coro) {
                                 /* Note: the tag does not matter
                                    provided it is a GC object */
-                                mark_func(rt, &pr->u.var_ref->header);
+                                mark_func(rt, &js_cload(JSVarRef *, pr->u.var_ref)->header);
                             }
                         } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
                             js_autoinit_mark(rt, pr, mark_func);
@@ -8263,29 +8283,29 @@ void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)
             JSModuleDef *m = list_entry(el1, JSModuleDef, link);
             s->memory_used_count += 1;
             s->memory_used_size += sizeof(*m);
-            if (m->req_module_entries) {
+            if (js_cload(JSReqModuleEntry *, m->req_module_entries)) {
                 s->memory_used_count += 1;
-                s->memory_used_size += m->req_module_entries_count * sizeof(*m->req_module_entries);
+                s->memory_used_size += m->req_module_entries_count * sizeof(*js_cload(JSReqModuleEntry *, m->req_module_entries));
             }
-            if (m->export_entries) {
+            if (js_cload(JSExportEntry *, m->export_entries)) {
                 s->memory_used_count += 1;
-                s->memory_used_size += m->export_entries_count * sizeof(*m->export_entries);
+                s->memory_used_size += m->export_entries_count * sizeof(*js_cload(JSExportEntry *, m->export_entries));
                 for (i = 0; i < m->export_entries_count; i++) {
-                    JSExportEntry *me = &m->export_entries[i];
-                    if (me->export_type == JS_EXPORT_TYPE_LOCAL && me->u.local.var_ref) {
+                    JSExportEntry *me = &js_cload(JSExportEntry *, m->export_entries)[i];
+                    if (me->export_type == JS_EXPORT_TYPE_LOCAL && js_cload(JSVarRef *, me->u.local.var_ref)) {
                         /* potential multiple count */
                         s->memory_used_count += 1;
-                        compute_value_size(me->u.local.var_ref->value, hp);
+                        compute_value_size(js_cload(JSVarRef *, me->u.local.var_ref)->value, hp);
                     }
                 }
             }
-            if (m->star_export_entries) {
+            if (js_cload(JSStarExportEntry *, m->star_export_entries)) {
                 s->memory_used_count += 1;
-                s->memory_used_size += m->star_export_entries_count * sizeof(*m->star_export_entries);
+                s->memory_used_size += m->star_export_entries_count * sizeof(*js_cload(JSStarExportEntry *, m->star_export_entries));
             }
-            if (m->import_entries) {
+            if (js_cload(JSImportEntry *, m->import_entries)) {
                 s->memory_used_count += 1;
-                s->memory_used_size += m->import_entries_count * sizeof(*m->import_entries);
+                s->memory_used_size += m->import_entries_count * sizeof(*js_cload(JSImportEntry *, m->import_entries));
             }
             compute_value_size(m->module_ns, hp);
             compute_value_size(m->func_obj, hp);
@@ -9926,7 +9946,7 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
        belongs to whoever defined the property, whenever it is first used */
     bool host_functions = realm->host_functions;
     realm->host_functions = js_autoinit_is_host(pr);
-    val = func(realm, p, prop, pr->u.init.opaque);
+    val = func(realm, p, prop, js_autoinit_get_opaque(pr));
     realm->host_functions = host_functions;
     js_autoinit_free(ctx->rt, pr);
     prs->flags &= ~JS_PROP_TMASK;
@@ -10027,16 +10047,16 @@ static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
             /* found */
             if (unlikely(prs->flags & JS_PROP_TMASK)) {
                 if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
-                    if (unlikely(!pr->u.getset.getter)) {
+                    if (unlikely(!js_cload(JSObject *, pr->u.getset.getter))) {
                         return JS_UNDEFINED;
                     } else {
-                        JSValue func = JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.getter);
+                        JSValue func = JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, pr->u.getset.getter));
                         /* Note: the field could be removed in the getter */
                         func = js_dup(func);
                         return JS_CallFree(ctx, func, this_obj, 0, NULL);
                     }
                 } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
-                    JSValue val = *pr->u.var_ref->pvalue;
+                    JSValue val = *js_cload(JSVarRef *, pr->u.var_ref)->pvalue;
                     if (unlikely(JS_IsUninitialized(val)))
                         return JS_ThrowReferenceErrorUninitialized(ctx, prs->atom);
                     return js_dup(val);
@@ -10484,7 +10504,7 @@ static int __exception JS_GetOwnPropertyNamesInternal(JSContext *ctx,
                    name space (implicit GetOwnProperty) */
                 if (unlikely((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) &&
                     (flags & (JS_GPN_SET_ENUM | JS_GPN_ENUM_ONLY))) {
-                    JSVarRef *var_ref = js_cload(JSProperty *, p->prop)[i].u.var_ref;
+                    JSVarRef *var_ref = js_cload(JSVarRef *, js_cload(JSProperty *, p->prop)[i].u.var_ref);
                     if (unlikely(JS_IsUninitialized(*var_ref->pvalue))) {
                         JS_ThrowReferenceErrorUninitialized(ctx, prs->atom);
                         return -1;
@@ -10667,12 +10687,12 @@ retry:
             if (unlikely(prs->flags & JS_PROP_TMASK)) {
                 if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
                     desc->flags |= JS_PROP_GETSET;
-                    if (pr->u.getset.getter)
-                        desc->getter = js_dup(JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.getter));
-                    if (pr->u.getset.setter)
-                        desc->setter = js_dup(JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.setter));
+                    if (js_cload(JSObject *, pr->u.getset.getter))
+                        desc->getter = js_dup(JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, pr->u.getset.getter)));
+                    if (js_cload(JSObject *, pr->u.getset.setter))
+                        desc->setter = js_dup(JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, pr->u.getset.setter)));
                 } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
-                    JSValue val = *pr->u.var_ref->pvalue;
+                    JSValue val = *js_cload(JSVarRef *, pr->u.var_ref)->pvalue;
                     if (unlikely(JS_IsUninitialized(val))) {
                         JS_ThrowReferenceErrorUninitialized(ctx, prs->atom);
                         return -1;
@@ -10695,7 +10715,7 @@ retry:
             }
             /* for consistency, send the exception even if desc is NULL */
             if (unlikely((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF)) {
-                if (unlikely(JS_IsUninitialized(*pr->u.var_ref->pvalue))) {
+                if (unlikely(JS_IsUninitialized(*js_cload(JSVarRef *, pr->u.var_ref)->pvalue))) {
                     JS_ThrowReferenceErrorUninitialized(ctx, prs->atom);
                     return -1;
                 }
@@ -11173,7 +11193,7 @@ static no_inline __exception int convert_fast_array_to_array(JSContext *ctx,
             /* add_property cannot fail here but
                __JS_AtomFromUInt32(i) fails for i > INT32_MAX */
             pr = add_property(ctx, p, __JS_AtomFromUInt32(i), JS_PROP_C_W_E | JS_PROP_VARREF);
-            pr->u.var_ref = *tab++;
+            js_cstore(pr->u.var_ref, *tab++);
         }
     } else {
         JSValue *tab = js_cload(JSValue *, p->u.array.u.values);
@@ -11551,14 +11571,14 @@ retry:
             assert(prop == JS_ATOM_length);
             return set_array_length(ctx, p, val, flags);
         } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
-            return call_setter(ctx, pr->u.getset.setter, this_obj, val, flags, prop);
+            return call_setter(ctx, js_cload(JSObject *, pr->u.getset.setter), this_obj, val, flags, prop);
         } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
             /* JS_PROP_WRITABLE is always true for variable
                references, but they are write protected in module name
                spaces. */
             if (p->class_id == JS_CLASS_MODULE_NS)
                 goto read_only_prop;
-            set_value(ctx, pr->u.var_ref->pvalue, val);
+            set_value(ctx, js_cload(JSVarRef *, pr->u.var_ref)->pvalue, val);
             return true;
         } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
             /* Instantiate property and retry (potentially useless) */
@@ -11675,7 +11695,7 @@ retry:
         prs = find_own_property(&pr, p1, prop);
         if (prs) {
             if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
-                return call_setter(ctx, pr->u.getset.setter, this_obj, val, flags, prop);
+                return call_setter(ctx, js_cload(JSObject *, pr->u.getset.setter), this_obj, val, flags, prop);
             } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
                 /* Instantiate property and retry (potentially useless) */
                 if (JS_AutoInitProperty(ctx, p1, prop, pr, prs))
@@ -12086,15 +12106,13 @@ static int JS_CreateProperty(JSContext *ctx, JSObject *p,
     if (unlikely(!pr))
         return -1;
     if (flags & (JS_PROP_HAS_GET | JS_PROP_HAS_SET)) {
-        pr->u.getset.getter = NULL;
+        js_cstore(pr->u.getset.getter, NULL);
         if ((flags & JS_PROP_HAS_GET) && JS_IsFunction(ctx, getter)) {
-            pr->u.getset.getter =
-                JS_VALUE_GET_OBJ(js_dup(getter));
+            js_cstore(pr->u.getset.getter, JS_VALUE_GET_OBJ(js_dup(getter)));
         }
-        pr->u.getset.setter = NULL;
+        js_cstore(pr->u.getset.setter, NULL);
         if ((flags & JS_PROP_HAS_SET) && JS_IsFunction(ctx, setter)) {
-            pr->u.getset.setter =
-                JS_VALUE_GET_OBJ(js_dup(setter));
+            js_cstore(pr->u.getset.setter, JS_VALUE_GET_OBJ(js_dup(setter)));
         }
     } else {
         if (flags & JS_PROP_HAS_VALUE) {
@@ -12253,50 +12271,50 @@ int JS_DefineProperty(JSContext *ctx, JSValueConst this_obj,
                         return -1;
                     /* convert to getset */
                     if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
-                        free_var_ref(ctx->rt, pr->u.var_ref);
+                        free_var_ref(ctx->rt, js_cload(JSVarRef *, pr->u.var_ref));
                     } else {
                         JS_FreeValue(ctx, pr->u.value);
                     }
                     prs->flags = (prs->flags &
                                   (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE)) |
                         JS_PROP_GETSET;
-                    pr->u.getset.getter = NULL;
-                    pr->u.getset.setter = NULL;
+                    js_cstore(pr->u.getset.getter, NULL);
+                    js_cstore(pr->u.getset.setter, NULL);
                 } else {
                     if (!(prs->flags & JS_PROP_CONFIGURABLE)) {
                         if ((flags & JS_PROP_HAS_GET) &&
-                            new_getter != pr->u.getset.getter) {
+                            new_getter != js_cload(JSObject *, pr->u.getset.getter)) {
                             goto not_configurable;
                         }
                         if ((flags & JS_PROP_HAS_SET) &&
-                            new_setter != pr->u.getset.setter) {
+                            new_setter != js_cload(JSObject *, pr->u.getset.setter)) {
                             goto not_configurable;
                         }
                     }
                 }
                 if (flags & JS_PROP_HAS_GET) {
-                    if (pr->u.getset.getter)
-                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.getter));
+                    if (js_cload(JSObject *, pr->u.getset.getter))
+                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, pr->u.getset.getter)));
                     if (new_getter)
                         js_dup(getter);
-                    pr->u.getset.getter = new_getter;
+                    js_cstore(pr->u.getset.getter, new_getter);
                 }
                 if (flags & JS_PROP_HAS_SET) {
-                    if (pr->u.getset.setter)
-                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.setter));
+                    if (js_cload(JSObject *, pr->u.getset.setter))
+                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, pr->u.getset.setter)));
                     if (new_setter)
                         js_dup(setter);
-                    pr->u.getset.setter = new_setter;
+                    js_cstore(pr->u.getset.setter, new_setter);
                 }
             } else {
                 if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
                     /* convert to data descriptor */
                     if (js_shape_prepare_update(ctx, p, &prs))
                         return -1;
-                    if (pr->u.getset.getter)
-                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.getter));
-                    if (pr->u.getset.setter)
-                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.setter));
+                    if (js_cload(JSObject *, pr->u.getset.getter))
+                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, pr->u.getset.getter)));
+                    if (js_cload(JSObject *, pr->u.getset.setter))
+                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, js_cload(JSObject *, pr->u.getset.setter)));
                     prs->flags &= ~(JS_PROP_TMASK | JS_PROP_WRITABLE);
                     pr->u.value = JS_UNDEFINED;
                 } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
@@ -12317,11 +12335,11 @@ int JS_DefineProperty(JSContext *ctx, JSValueConst this_obj,
                             /* JS_PROP_WRITABLE is always true for variable
                                references, but they are write protected in module name
                                spaces. */
-                            if (!js_same_value(ctx, val, *pr->u.var_ref->pvalue))
+                            if (!js_same_value(ctx, val, *js_cload(JSVarRef *, pr->u.var_ref)->pvalue))
                                 goto not_configurable;
                         }
                         /* update the reference */
-                        set_value(ctx, pr->u.var_ref->pvalue, js_dup(val));
+                        set_value(ctx, js_cload(JSVarRef *, pr->u.var_ref)->pvalue, js_dup(val));
                     }
                     /* if writable is set to false, no longer a
                        reference (for mapped arguments) */
@@ -12329,8 +12347,8 @@ int JS_DefineProperty(JSContext *ctx, JSValueConst this_obj,
                         JSValue val1;
                         if (js_shape_prepare_update(ctx, p, &prs))
                             return -1;
-                        val1 = js_dup(*pr->u.var_ref->pvalue);
-                        free_var_ref(ctx->rt, pr->u.var_ref);
+                        val1 = js_dup(*js_cload(JSVarRef *, pr->u.var_ref)->pvalue);
+                        free_var_ref(ctx->rt, js_cload(JSVarRef *, pr->u.var_ref));
                         pr->u.value = val1;
                         prs->flags &= ~(JS_PROP_TMASK | JS_PROP_WRITABLE);
                     }
@@ -12480,7 +12498,7 @@ static int JS_DefineAutoInitProperty(JSContext *ctx, JSValueConst this_obj,
     pr->u.init.realm_and_id |= id;
     if (ctx->host_functions)
         pr->u.init.realm_and_id |= 4;
-    pr->u.init.opaque = opaque;
+    pr->u.init.opaque = js_autoinit_encode_opaque(id, opaque);
     return true;
 }
 
@@ -15849,10 +15867,10 @@ static __maybe_unused void JS_DumpObject(JSRuntime *rt, JSObject *p)
                 printf("%s: ",
                        JS_AtomGetStrRT(rt, atom_buf, sizeof(atom_buf), prs->atom));
                 if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
-                    printf("[getset %p %p]", (void *)pr->u.getset.getter,
-                           (void *)pr->u.getset.setter);
+                    printf("[getset %p %p]", (void *)js_cload(JSObject *, pr->u.getset.getter),
+                           (void *)js_cload(JSObject *, pr->u.getset.setter));
                 } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
-                    printf("[varref %p]", (void *)pr->u.var_ref);
+                    printf("[varref %p]", (void *)js_cload(JSVarRef *, pr->u.var_ref));
                 } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
                     printf("[autoinit %p %d %p]",
                            (void *)js_autoinit_get_realm(pr),
@@ -17713,8 +17731,8 @@ static JSValue js_build_arguments(JSContext *ctx, int argc, JSValueConst *argv)
 
     props[0].u.value = js_int32(argc); /* length */
     props[1].u.value = js_dup(ctx->array_proto_values); /* Symbol.iterator */
-    props[2].u.getset.getter = JS_VALUE_GET_OBJ(js_dup(ctx->throw_type_error)); /* callee */
-    props[2].u.getset.setter = JS_VALUE_GET_OBJ(js_dup(ctx->throw_type_error)); /* callee */
+    js_cstore(props[2].u.getset.getter, JS_VALUE_GET_OBJ(js_dup(ctx->throw_type_error))); /* callee */
+    js_cstore(props[2].u.getset.setter, JS_VALUE_GET_OBJ(js_dup(ctx->throw_type_error))); /* callee */
 
     val = JS_NewObjectFromShape(ctx, js_dup_shape(ctx->arguments_shape),
                                 JS_CLASS_ARGUMENTS, props);
@@ -20474,7 +20492,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                     free_var_ref(rt, var_ref);
                     goto exception;
                 }
-                pr->u.var_ref = var_ref;
+                js_cstore(pr->u.var_ref, var_ref);
                 *sp++ = JS_AtomToValue(ctx, atom);
             }
             BREAK;
@@ -32955,15 +32973,15 @@ static void js_mark_module_def(JSRuntime *rt, JSModuleDef *m,
     int i;
 
     for(i = 0; i < m->req_module_entries_count; i++) {
-        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        JSReqModuleEntry *rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[i];
         JS_MarkValue(rt, rme->attributes, mark_func);
     }
 
     for(i = 0; i < m->export_entries_count; i++) {
-        JSExportEntry *me = &m->export_entries[i];
+        JSExportEntry *me = &js_cload(JSExportEntry *, m->export_entries)[i];
         if (me->export_type == JS_EXPORT_TYPE_LOCAL &&
-            me->u.local.var_ref) {
-            mark_func(rt, &me->u.local.var_ref->header);
+            js_cload(JSVarRef *, me->u.local.var_ref)) {
+            mark_func(rt, &js_cload(JSVarRef *, me->u.local.var_ref)->header);
         }
     }
 
@@ -32987,29 +33005,29 @@ static void js_free_module_def(JSContext *ctx, JSModuleDef *m)
     JS_FreeAtom(ctx, m->module_name);
 
     for(i = 0; i < m->req_module_entries_count; i++) {
-        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        JSReqModuleEntry *rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[i];
         JS_FreeAtom(ctx, rme->module_name);
         JS_FreeValue(ctx, rme->attributes);
     }
-    js_free(ctx, m->req_module_entries);
+    js_free(ctx, js_cload(JSReqModuleEntry *, m->req_module_entries));
 
     for(i = 0; i < m->export_entries_count; i++) {
-        JSExportEntry *me = &m->export_entries[i];
+        JSExportEntry *me = &js_cload(JSExportEntry *, m->export_entries)[i];
         if (me->export_type == JS_EXPORT_TYPE_LOCAL)
-            free_var_ref(ctx->rt, me->u.local.var_ref);
+            free_var_ref(ctx->rt, js_cload(JSVarRef *, me->u.local.var_ref));
         JS_FreeAtom(ctx, me->export_name);
         JS_FreeAtom(ctx, me->local_name);
     }
-    js_free(ctx, m->export_entries);
+    js_free(ctx, js_cload(JSExportEntry *, m->export_entries));
 
-    js_free(ctx, m->star_export_entries);
+    js_free(ctx, js_cload(JSStarExportEntry *, m->star_export_entries));
 
     for(i = 0; i < m->import_entries_count; i++) {
-        JSImportEntry *mi = &m->import_entries[i];
+        JSImportEntry *mi = &js_cload(JSImportEntry *, m->import_entries)[i];
         JS_FreeAtom(ctx, mi->import_name);
     }
-    js_free(ctx, m->import_entries);
-    js_free(ctx, m->async_parent_modules);
+    js_free(ctx, js_cload(JSImportEntry *, m->import_entries));
+    js_free(ctx, js_cload(JSModuleDef **, m->async_parent_modules));
 
     JS_FreeValue(ctx, m->module_ns);
     JS_FreeValue(ctx, m->deferred_module_ns);
@@ -33038,7 +33056,7 @@ static int add_req_module_entry(JSContext *ctx, JSModuleDef *m,
     /* no need to add the module request if an equivalent one (same
        specifier and same import attributes) is already present */
     for(i = 0; i < m->req_module_entries_count; i++) {
-        rme = &m->req_module_entries[i];
+        rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[i];
         if (rme->module_name == module_name && rme->phase == phase) {
             eq = js_module_attributes_equal(ctx, rme->attributes, attributes);
             if (eq < 0)
@@ -33048,14 +33066,13 @@ static int add_req_module_entry(JSContext *ctx, JSModuleDef *m,
         }
     }
 
-    if (js_resize_array(ctx, (void **)&m->req_module_entries,
-                        sizeof(JSReqModuleEntry),
+    if (js_resize_cptr_array(ctx, m->req_module_entries, JSReqModuleEntry *,
                         &m->req_module_entries_size,
                         m->req_module_entries_count + 1))
         return -1;
-    rme = &m->req_module_entries[m->req_module_entries_count++];
+    rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[m->req_module_entries_count++];
     rme->module_name = JS_DupAtom(ctx, module_name);
-    rme->module = NULL;
+    js_cstore(rme->module, NULL);
     rme->attributes = js_dup(attributes);
     rme->phase = phase;
     return i;
@@ -33069,7 +33086,7 @@ static JSExportEntry *find_export_entry(JSContext *ctx, const JSModuleDef *m,
     JSExportEntry *me;
     int i;
     for(i = 0; i < m->export_entries_count; i++) {
-        me = &m->export_entries[i];
+        me = &js_cload(JSExportEntry *, m->export_entries)[i];
         if (me->export_name == export_name)
             return me;
     }
@@ -33094,12 +33111,11 @@ static JSExportEntry *add_export_entry2(JSContext *ctx,
         return NULL;
     }
 
-    if (js_resize_array(ctx, (void **)&m->export_entries,
-                        sizeof(JSExportEntry),
+    if (js_resize_cptr_array(ctx, m->export_entries, JSExportEntry *,
                         &m->export_entries_size,
                         m->export_entries_count + 1))
         return NULL;
-    me = &m->export_entries[m->export_entries_count++];
+    me = &js_cload(JSExportEntry *, m->export_entries)[m->export_entries_count++];
     memset(me, 0, sizeof(*me));
     me->local_name = JS_DupAtom(ctx, local_name);
     me->export_name = JS_DupAtom(ctx, export_name);
@@ -33122,12 +33138,11 @@ static int add_star_export_entry(JSContext *ctx, JSModuleDef *m,
 {
     JSStarExportEntry *se;
 
-    if (js_resize_array(ctx, (void **)&m->star_export_entries,
-                        sizeof(JSStarExportEntry),
+    if (js_resize_cptr_array(ctx, m->star_export_entries, JSStarExportEntry *,
                         &m->star_export_entries_size,
                         m->star_export_entries_count + 1))
         return -1;
-    se = &m->star_export_entries[m->star_export_entries_count++];
+    se = &js_cload(JSStarExportEntry *, m->star_export_entries)[m->star_export_entries_count++];
     se->req_module_idx = req_module_idx;
     return 0;
 }
@@ -33181,7 +33196,7 @@ int JS_SetModuleExport(JSContext *ctx, JSModuleDef *m, const char *export_name,
     JS_FreeAtom(ctx, name);
     if (!me)
         goto fail;
-    set_value(ctx, me->u.local.var_ref->pvalue, val);
+    set_value(ctx, js_cload(JSVarRef *, me->u.local.var_ref)->pvalue, val);
     return 0;
  fail:
     JS_FreeValue(ctx, val);
@@ -33572,8 +33587,8 @@ static void js_resolved_export_binding(JSModuleDef *m, JSExportEntry *me,
                                        JSModulePhaseEnum *pbinding_phase)
 {
     if (me->local_name == JS_ATOM__star_) {
-        JSReqModuleEntry *rme = &m->req_module_entries[me->u.req_module_idx];
-        *pbinding_m = rme->module;
+        JSReqModuleEntry *rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[me->u.req_module_idx];
+        *pbinding_m = js_cload(JSModuleDef *, rme->module);
         *pbinding_name = JS_ATOM__star_;
         *pbinding_phase = rme->phase;
     } else {
@@ -33608,7 +33623,7 @@ static JSResolveResultEnum js_resolve_export1(JSContext *ctx,
         } else {
             /* indirect export */
             JSModuleDef *m1;
-            m1 = m->req_module_entries[me->u.req_module_idx].module;
+            m1 = js_cload(JSModuleDef *, js_cload(JSReqModuleEntry *, m->req_module_entries)[me->u.req_module_idx].module);
             if (me->local_name == JS_ATOM__star_) {
                 /* export ns from */
                 *pmodule = m;
@@ -33625,12 +33640,12 @@ static JSResolveResultEnum js_resolve_export1(JSContext *ctx,
             int i;
 
             for(i = 0; i < m->star_export_entries_count; i++) {
-                JSStarExportEntry *se = &m->star_export_entries[i];
+                JSStarExportEntry *se = &js_cload(JSStarExportEntry *, m->star_export_entries)[i];
                 JSModuleDef *m1, *res_m;
                 JSExportEntry *res_me;
                 JSResolveResultEnum ret;
 
-                m1 = m->req_module_entries[se->req_module_idx].module;
+                m1 = js_cload(JSModuleDef *, js_cload(JSReqModuleEntry *, m->req_module_entries)[se->req_module_idx].module);
                 ret = js_resolve_export1(ctx, &res_m, &res_me, m1,
                                          export_name, s);
                 if (ret == JS_RESOLVE_RES_AMBIGUOUS ||
@@ -33694,7 +33709,7 @@ static JSVarRef *js_get_local_export_var_ref1(JSContext *ctx, JSModuleDef *m,
                                               JSExportEntry *me,
                                               JSResolveState *s)
 {
-    JSVarRef *var_ref = me->u.local.var_ref;
+    JSVarRef *var_ref = js_cload(JSVarRef *, me->u.local.var_ref);
     int i;
 
     if (!var_ref) {
@@ -33706,7 +33721,7 @@ static JSVarRef *js_get_local_export_var_ref1(JSContext *ctx, JSModuleDef *m,
     /* the slot is a re-exported import whose source is not linked yet: follow
        the import alias, guarding against re-export cycles like js_resolve_export1 */
     for(i = 0; i < m->import_entries_count; i++) {
-        JSImportEntry *mi = &m->import_entries[i];
+        JSImportEntry *mi = &js_cload(JSImportEntry *, m->import_entries)[i];
         JSModuleDef *m1, *res_m;
         JSExportEntry *res_me;
 
@@ -33716,7 +33731,7 @@ static JSVarRef *js_get_local_export_var_ref1(JSContext *ctx, JSModuleDef *m,
             return NULL;
         if (add_resolve_entry(ctx, s, m, mi->import_name) < 0)
             return NULL;
-        m1 = m->req_module_entries[mi->req_module_idx].module;
+        m1 = js_cload(JSModuleDef *, js_cload(JSReqModuleEntry *, m->req_module_entries)[mi->req_module_idx].module);
         if (js_resolve_export1(ctx, &res_m, &res_me, m1, mi->import_name, s) ==
                 JS_RESOLVE_RES_FOUND &&
             res_me->local_name != JS_ATOM__star_)
@@ -33830,7 +33845,7 @@ static __exception int get_exported_names(JSContext *ctx,
     s->modules[s->modules_count++] = m;
 
     for(i = 0; i < m->export_entries_count; i++) {
-        JSExportEntry *me = &m->export_entries[i];
+        JSExportEntry *me = &js_cload(JSExportEntry *, m->export_entries)[i];
         if (from_star && me->export_name == JS_ATOM_default)
             continue;
         j = find_exported_name(s, me->export_name);
@@ -33852,9 +33867,9 @@ static __exception int get_exported_names(JSContext *ctx,
         }
     }
     for(i = 0; i < m->star_export_entries_count; i++) {
-        JSStarExportEntry *se = &m->star_export_entries[i];
+        JSStarExportEntry *se = &js_cload(JSStarExportEntry *, m->star_export_entries)[i];
         JSModuleDef *m1;
-        m1 = m->req_module_entries[se->req_module_idx].module;
+        m1 = js_cload(JSModuleDef *, js_cload(JSReqModuleEntry *, m->req_module_entries)[se->req_module_idx].module);
         if (get_exported_names(ctx, s, m1, true))
             return -1;
     }
@@ -33947,7 +33962,7 @@ static JSValue js_build_module_ns(JSContext *ctx, JSModuleDef *m)
                 if (me && me->export_type == JS_EXPORT_TYPE_INDIRECT &&
                     me->local_name != JS_ATOM__star_) {
                     JSModuleDef *m1 =
-                        m->req_module_entries[me->u.req_module_idx].module;
+                        js_cload(JSModuleDef *, js_cload(JSReqModuleEntry *, m->req_module_entries)[me->u.req_module_idx].module);
                     js_resolve_export_throw_error(ctx, res, m1, me->local_name);
                 } else {
                     js_resolve_export_throw_error(ctx, res, m, en->export_name);
@@ -33958,9 +33973,9 @@ static JSValue js_build_module_ns(JSContext *ctx, JSModuleDef *m)
         } else {
             if (res_me->local_name == JS_ATOM__star_) {
                 JSReqModuleEntry *rme =
-                    &res_m->req_module_entries[res_me->u.req_module_idx];
+                    &js_cload(JSReqModuleEntry *, res_m->req_module_entries)[res_me->u.req_module_idx];
                 en->export_type = EXPORTED_NAME_NS;
-                en->u.module = rme->module;
+                en->u.module = js_cload(JSModuleDef *, rme->module);
                 en->phase = rme->phase;
             } else {
                 en->export_type = EXPORTED_NAME_NORMAL;
@@ -33992,7 +34007,7 @@ static JSValue js_build_module_ns(JSContext *ctx, JSModuleDef *m)
                 if (!pr)
                     goto fail;
                 JS_REF_COUNT(var_ref)++;
-                pr->u.var_ref = var_ref;
+                js_cstore(pr->u.var_ref, var_ref);
             }
             break;
         case EXPORTED_NAME_NS:
@@ -34069,13 +34084,13 @@ static int js_resolve_module(JSContext *ctx, JSModuleDef *m)
     m->resolved = true;
     /* resolve each requested module */
     for(i = 0; i < m->req_module_entries_count; i++) {
-        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        JSReqModuleEntry *rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[i];
         m1 = js_host_resolve_imported_module_atom(ctx, m->module_name,
                                                   rme->module_name,
                                                   rme->attributes);
         if (!m1)
             goto fail;
-        rme->module = m1;
+        js_cstore(rme->module, m1);
         /* already done in js_host_resolve_imported_module() except if
            the module was loaded with JS_EvalBinary() */
         if (js_resolve_module(ctx, m1) < 0)
@@ -34178,12 +34193,12 @@ static int js_create_module_function(JSContext *ctx, JSModuleDef *m)
     if (is_c_module) {
         /* initialize the exported variables */
         for(i = 0; i < m->export_entries_count; i++) {
-            JSExportEntry *me = &m->export_entries[i];
+            JSExportEntry *me = &js_cload(JSExportEntry *, m->export_entries)[i];
             if (me->export_type == JS_EXPORT_TYPE_LOCAL) {
                 var_ref = js_create_module_var(ctx, false);
                 if (!var_ref)
                     return -1;
-                me->u.local.var_ref = var_ref;
+                js_cstore(me->u.local.var_ref, var_ref);
             }
         }
     } else {
@@ -34195,8 +34210,8 @@ static int js_create_module_function(JSContext *ctx, JSModuleDef *m)
     /* do it on the dependencies */
 
     for(i = 0; i < m->req_module_entries_count; i++) {
-        JSReqModuleEntry *rme = &m->req_module_entries[i];
-        if (js_create_module_function(ctx, rme->module) < 0)
+        JSReqModuleEntry *rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[i];
+        if (js_create_module_function(ctx, js_cload(JSModuleDef *, rme->module)) < 0)
             return -1;
     }
 
@@ -34241,14 +34256,14 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
     m->dfs_ancestor_index = index;
     index++;
     /* push 'm' on stack */
-    m->stack_prev = *pstack_top;
+    js_cstore(m->stack_prev, *pstack_top);
     *pstack_top = m;
 
     for(i = 0; i < m->req_module_entries_count; i++) {
-        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        JSReqModuleEntry *rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[i];
         if (rme->phase == JS_MODULE_PHASE_SOURCE)
             continue;
-        m1 = rme->module;
+        m1 = js_cload(JSModuleDef *, rme->module);
         index = js_inner_module_linking(ctx, m1, pstack_top, index);
         if (index < 0)
             goto fail;
@@ -34270,13 +34285,13 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
 #endif
     /* check the indirect exports */
     for(i = 0; i < m->export_entries_count; i++) {
-        JSExportEntry *me = &m->export_entries[i];
+        JSExportEntry *me = &js_cload(JSExportEntry *, m->export_entries)[i];
         if (me->export_type == JS_EXPORT_TYPE_INDIRECT &&
             me->local_name != JS_ATOM__star_) {
             JSResolveResultEnum ret;
             JSExportEntry *res_me;
             JSModuleDef *res_m, *m1;
-            m1 = m->req_module_entries[me->u.req_module_idx].module;
+            m1 = js_cload(JSModuleDef *, js_cload(JSReqModuleEntry *, m->req_module_entries)[me->u.req_module_idx].module);
             ret = js_resolve_export(ctx, &res_m, &res_me, m1, me->local_name);
             if (ret != JS_RESOLVE_RES_FOUND) {
                 /* the binding is missing from the re-exported module m1, not
@@ -34292,7 +34307,7 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
     if (check_dump_flag(ctx->rt, JS_DUMP_MODULE_RESOLVE)) {
         printf("exported bindings:\n");
         for(i = 0; i < m->export_entries_count; i++) {
-            JSExportEntry *me = &m->export_entries[i];
+            JSExportEntry *me = &js_cload(JSExportEntry *, m->export_entries)[i];
             printf(" name="); print_atom(ctx, me->export_name);
             printf(" local="); print_atom(ctx, me->local_name);
             printf(" type=%d idx=%d\n", me->export_type, me->u.local.var_idx);
@@ -34307,7 +34322,7 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
         var_refs = js_cload(JSVarRef **, p->u.func.var_refs);
 
         for(i = 0; i < m->import_entries_count; i++) {
-            mi = &m->import_entries[i];
+            mi = &js_cload(JSImportEntry *, m->import_entries)[i];
 #ifdef ENABLE_DUMPS // JS_DUMP_MODULE_RESOLVE
             if (check_dump_flag(ctx->rt, JS_DUMP_MODULE_RESOLVE)) {
                 printf("import var_idx=%d name=", mi->var_idx);
@@ -34315,12 +34330,12 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
                 printf(": ");
             }
 #endif
-            m1 = m->req_module_entries[mi->req_module_idx].module;
+            m1 = js_cload(JSModuleDef *, js_cload(JSReqModuleEntry *, m->req_module_entries)[mi->req_module_idx].module);
             if (mi->import_name == JS_ATOM__star_) {
                 JSValue val;
                 /* name space import */
                 val = js_get_module_phase_value(ctx, m1,
-                    m->req_module_entries[mi->req_module_idx].phase);
+                    js_cload(JSReqModuleEntry *, m->req_module_entries)[mi->req_module_idx].phase);
                 if (JS_IsException(val))
                     goto fail;
                 set_value(ctx, &var_refs[mi->var_idx]->value, val);
@@ -34342,8 +34357,8 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
                     JSValue val;
                     JSReqModuleEntry *rme2;
                     /* name space import from */
-                    rme2 = &res_m->req_module_entries[res_me->u.req_module_idx];
-                    val = js_get_module_phase_value(ctx, rme2->module, rme2->phase);
+                    rme2 = &js_cload(JSReqModuleEntry *, res_m->req_module_entries)[res_me->u.req_module_idx];
+                    val = js_get_module_phase_value(ctx, js_cload(JSModuleDef *, rme2->module), rme2->phase);
                     if (JS_IsException(val))
                         goto fail;
                     var_ref = js_create_module_var(ctx, true);
@@ -34381,11 +34396,11 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
            are used when the eval function is deleted and cannot be
            initialized before in case imports are exported) */
         for(i = 0; i < m->export_entries_count; i++) {
-            JSExportEntry *me = &m->export_entries[i];
+            JSExportEntry *me = &js_cload(JSExportEntry *, m->export_entries)[i];
             if (me->export_type == JS_EXPORT_TYPE_LOCAL) {
                 var_ref = var_refs[me->u.local.var_idx];
                 JS_REF_COUNT(var_ref)++;
-                me->u.local.var_ref = var_ref;
+                js_cstore(me->u.local.var_ref, var_ref);
             }
         }
 
@@ -34401,7 +34416,7 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
         for(;;) {
             /* pop m1 from stack */
             m1 = *pstack_top;
-            *pstack_top = m1->stack_prev;
+            *pstack_top = js_cload(JSModuleDef *, m1->stack_prev);
             m1->status = JS_MODULE_STATUS_LINKED;
             if (m1 == m)
                 break;
@@ -34440,7 +34455,7 @@ static int js_link_module(JSContext *ctx, JSModuleDef *m)
             m1 = stack_top;
             assert(m1->status == JS_MODULE_STATUS_LINKING);
             m1->status = JS_MODULE_STATUS_UNLINKED;
-            stack_top = m1->stack_prev;
+            stack_top = js_cload(JSModuleDef *, m1->stack_prev);
         }
         return -1;
     }
@@ -34871,7 +34886,7 @@ static void js_set_module_evaluated(JSContext *ctx, JSModuleDef *m)
     m->async_evaluation = false;
     if (!JS_IsUndefined(m->promise)) {
         JSValue ret_val;
-        assert(m->cycle_root == m);
+        assert(js_cload(JSModuleDef *, m->cycle_root) == m);
         JSValueConst value = JS_UNDEFINED;
         ret_val = JS_Call(ctx, m->resolving_funcs[0], JS_UNDEFINED, 1, &value);
         JS_FreeValue(ctx, ret_val);
@@ -34899,9 +34914,9 @@ static int gather_available_ancestors(JSContext *ctx, JSModuleDef *module,
         return -1;
     }
     for(i = 0; i < module->async_parent_modules_count; i++) {
-        JSModuleDef *m = module->async_parent_modules[i];
+        JSModuleDef *m = js_cload(JSModuleDef **, module->async_parent_modules)[i];
         if (!find_in_exec_module_list(exec_list, m) &&
-            !m->cycle_root->eval_has_exception) {
+            !js_cload(JSModuleDef *, m->cycle_root)->eval_has_exception) {
             assert(m->status == JS_MODULE_STATUS_EVALUATING_ASYNC);
             assert(!m->eval_has_exception);
             assert(m->async_evaluation);
@@ -34962,14 +34977,14 @@ static JSValue js_async_module_execution_rejected(JSContext *ctx, JSValueConst t
 
     if (!JS_IsUndefined(module->promise)) {
         JSValue ret_val;
-        assert(module->cycle_root == module);
+        assert(js_cload(JSModuleDef *, module->cycle_root) == module);
         ret_val = JS_Call(ctx, module->resolving_funcs[1], JS_UNDEFINED,
                           1, &error);
         JS_FreeValue(ctx, ret_val);
     }
 
     for(i = 0; i < module->async_parent_modules_count; i++) {
-        JSModuleDef *m = module->async_parent_modules[i];
+        JSModuleDef *m = js_cload(JSModuleDef **, module->async_parent_modules)[i];
         JSValue m_obj = JS_NewModuleValue(ctx, m);
         js_async_module_execution_rejected(ctx, JS_UNDEFINED, 1, &error, 0,
                                            vc(&m_obj));
@@ -35134,21 +35149,21 @@ static int js_inner_module_evaluation(JSContext *ctx, JSModuleDef *m,
     m->pending_async_dependencies = 0;
     index++;
     /* push 'm' on stack */
-    m->stack_prev = *pstack_top;
+    js_cstore(m->stack_prev, *pstack_top);
     *pstack_top = m;
 
     evaluation_list.tab = NULL;
     evaluation_list.count = 0;
     evaluation_list.size = 0;
     for(i = 0; i < m->req_module_entries_count; i++) {
-        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        JSReqModuleEntry *rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[i];
         int ret;
         if (rme->phase == JS_MODULE_PHASE_SOURCE)
             continue;
         if (rme->phase == JS_MODULE_PHASE_DEFER)
-            ret = js_module_async_dependencies(ctx, rme->module, &evaluation_list);
+            ret = js_module_async_dependencies(ctx, js_cload(JSModuleDef *, rme->module), &evaluation_list);
         else
-            ret = exec_module_list_add(ctx, &evaluation_list, rme->module);
+            ret = exec_module_list_add(ctx, &evaluation_list, js_cload(JSModuleDef *, rme->module));
         if (ret < 0) {
             js_free(ctx, evaluation_list.tab);
             *pvalue = JS_GetException(ctx);
@@ -35170,7 +35185,7 @@ static int js_inner_module_evaluation(JSContext *ctx, JSModuleDef *m,
             m->dfs_ancestor_index = min_int(m->dfs_ancestor_index,
                                             m1->dfs_ancestor_index);
         } else {
-            m1 = m1->cycle_root;
+            m1 = js_cload(JSModuleDef *, m1->cycle_root);
             assert(m1->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
                    m1->status == JS_MODULE_STATUS_EVALUATED);
             if (m1->eval_has_exception) {
@@ -35181,12 +35196,12 @@ static int js_inner_module_evaluation(JSContext *ctx, JSModuleDef *m,
         }
         if (m1->async_evaluation) {
             m->pending_async_dependencies++;
-            if (js_resize_array(ctx, (void **)&m1->async_parent_modules, sizeof(m1->async_parent_modules[0]), &m1->async_parent_modules_size, m1->async_parent_modules_count + 1)) {
+            if (js_resize_cptr_array(ctx, m1->async_parent_modules, JSModuleDef **, &m1->async_parent_modules_size, m1->async_parent_modules_count + 1)) {
                 js_free(ctx, evaluation_list.tab);
                 *pvalue = JS_GetException(ctx);
                 return -1;
             }
-            m1->async_parent_modules[m1->async_parent_modules_count++] = m;
+            js_cload(JSModuleDef **, m1->async_parent_modules)[m1->async_parent_modules_count++] = m;
         }
     }
     js_free(ctx, evaluation_list.tab);
@@ -35212,14 +35227,14 @@ static int js_inner_module_evaluation(JSContext *ctx, JSModuleDef *m,
         for(;;) {
             /* pop m1 from stack */
             m1 = *pstack_top;
-            *pstack_top = m1->stack_prev;
+            *pstack_top = js_cload(JSModuleDef *, m1->stack_prev);
             if (!m1->async_evaluation) {
                 m1->status = JS_MODULE_STATUS_EVALUATED;
             } else {
                 m1->status = JS_MODULE_STATUS_EVALUATING_ASYNC;
             }
             /* spec bug: cycle_root must be assigned before the test */
-            m1->cycle_root = m;
+            js_cstore(m1->cycle_root, m);
             if (m1 == m)
                 break;
         }
@@ -35240,7 +35255,7 @@ static JSValue js_evaluate_module(JSContext *ctx, JSModuleDef *m)
            m->status == JS_MODULE_STATUS_EVALUATED);
     if (m->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
         m->status == JS_MODULE_STATUS_EVALUATED) {
-        m = m->cycle_root;
+        m = js_cload(JSModuleDef *, m->cycle_root);
     }
     /* a promise may be created only on the cycle_root of a cycle */
     if (!JS_IsUndefined(m->promise))
@@ -35257,8 +35272,8 @@ static JSValue js_evaluate_module(JSContext *ctx, JSModuleDef *m)
             m1->status = JS_MODULE_STATUS_EVALUATED;
             m1->eval_has_exception = true;
             m1->eval_exception = js_dup(result);
-            m1->cycle_root = m; /* spec bug: should be present */
-            stack_top = m1->stack_prev;
+            js_cstore(m1->cycle_root, m); /* spec bug: should be present */
+            stack_top = js_cload(JSModuleDef *, m1->stack_prev);
         }
         JS_FreeValue(ctx, result);
         assert(m->status == JS_MODULE_STATUS_EVALUATED);
@@ -35296,8 +35311,8 @@ static int exec_module_list_add(JSContext *ctx, ExecModuleList *list,
 
 static bool js_module_scc_evaluated(JSModuleDef *m)
 {
-    if (m->cycle_root)
-        return m->cycle_root->status == JS_MODULE_STATUS_EVALUATED;
+    if (js_cload(JSModuleDef *, m->cycle_root))
+        return js_cload(JSModuleDef *, m->cycle_root)->status == JS_MODULE_STATUS_EVALUATED;
     return m->status == JS_MODULE_STATUS_EVALUATED;
 }
 
@@ -35322,10 +35337,10 @@ static int js_ready_for_sync_execution(JSContext *ctx, JSModuleDef *m,
     if (m->has_tla)
         return 0;
     for(i = 0; i < m->req_module_entries_count; i++) {
-        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        JSReqModuleEntry *rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[i];
         if (rme->phase == JS_MODULE_PHASE_SOURCE)
             continue;
-        ret = js_ready_for_sync_execution(ctx, rme->module, seen);
+        ret = js_ready_for_sync_execution(ctx, js_cload(JSModuleDef *, rme->module), seen);
         if (ret <= 0)
             return ret;
     }
@@ -35352,10 +35367,10 @@ static int js_gather_async_transitive_dependencies(JSContext *ctx,
     if (m->has_tla)
         return exec_module_list_add(ctx, result, m);
     for(i = 0; i < m->req_module_entries_count; i++) {
-        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        JSReqModuleEntry *rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[i];
         if (rme->phase == JS_MODULE_PHASE_SOURCE)
             continue;
-        if (js_gather_async_transitive_dependencies(ctx, rme->module,
+        if (js_gather_async_transitive_dependencies(ctx, js_cload(JSModuleDef *, rme->module),
                                                     seen, result))
             return -1;
     }
@@ -35380,7 +35395,7 @@ static int js_evaluate_module_sync(JSContext *ctx, JSModuleDef *m)
     int ret;
 
     if (m->status == JS_MODULE_STATUS_EVALUATED && !m->eval_has_exception &&
-        (!m->cycle_root || !m->cycle_root->eval_has_exception))
+        (!js_cload(JSModuleDef *, m->cycle_root) || !js_cload(JSModuleDef *, m->cycle_root)->eval_has_exception))
         return 0;
     ret = js_ready_for_sync_execution(ctx, m, &seen);
     js_free(ctx, seen.tab);
@@ -35853,7 +35868,7 @@ static __exception int js_parse_export(JSParseState *s)
             if (idx < 0)
                 return -1;
             for(i = first_export; i < m->export_entries_count; i++) {
-                me = &m->export_entries[i];
+                me = &js_cload(JSExportEntry *, m->export_entries)[i];
                 me->export_type = JS_EXPORT_TYPE_INDIRECT;
                 me->u.req_module_idx = idx;
             }
@@ -35979,12 +35994,11 @@ static int add_import(JSParseState *s, JSModuleDef *m,
                               local_name, true, true, JS_VAR_NORMAL);
     if (var_idx < 0)
         return -1;
-    if (js_resize_array(ctx, (void **)&m->import_entries,
-                        sizeof(JSImportEntry),
+    if (js_resize_cptr_array(ctx, m->import_entries, JSImportEntry *,
                         &m->import_entries_size,
                         m->import_entries_count + 1))
         return -1;
-    mi = &m->import_entries[m->import_entries_count++];
+    mi = &js_cload(JSImportEntry *, m->import_entries)[m->import_entries_count++];
     mi->import_name = JS_DupAtom(ctx, import_name);
     mi->var_idx = var_idx;
     return 0;
@@ -36161,7 +36175,7 @@ static __exception int js_parse_import(JSParseState *s)
             return -1;
     }
     for(i = first_import; i < m->import_entries_count; i++)
-        m->import_entries[i].req_module_idx = idx;
+        js_cload(JSImportEntry *, m->import_entries)[i].req_module_idx = idx;
 
     return js_parse_expect_semi(s);
 }
@@ -40295,7 +40309,7 @@ static int add_module_variables(JSContext *ctx, JSFunctionDef *fd)
 
     /* resolve the variable names of the local exports */
     for(i = 0; i < m->export_entries_count; i++) {
-        me = &m->export_entries[i];
+        me = &js_cload(JSExportEntry *, m->export_entries)[i];
         if (me->export_type == JS_EXPORT_TYPE_LOCAL) {
             idx = find_closure_var(ctx, fd, me->local_name);
             if (idx < 0) {
@@ -40313,7 +40327,7 @@ static int add_module_variables(JSContext *ctx, JSFunctionDef *fd)
                ResolveExport sees the shared binding instead of a
                second, spuriously distinct local one. */
             for (j = 0; j < m->import_entries_count; j++) {
-                JSImportEntry *mi = &m->import_entries[j];
+                JSImportEntry *mi = &js_cload(JSImportEntry *, m->import_entries)[j];
                 if (mi->var_idx == idx) {
                     JSAtom new_local_name = JS_DupAtom(ctx, mi->import_name);
                     JS_FreeAtom(ctx, me->local_name);
@@ -42430,14 +42444,14 @@ static int JS_WriteModule(BCWriterState *s, JSValueConst obj)
 
     bc_put_leb128(s, m->req_module_entries_count);
     for(i = 0; i < m->req_module_entries_count; i++) {
-        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        JSReqModuleEntry *rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[i];
         bc_put_atom(s, rme->module_name);
         bc_put_u8(s, rme->phase);
     }
 
     bc_put_leb128(s, m->export_entries_count);
     for(i = 0; i < m->export_entries_count; i++) {
-        JSExportEntry *me = &m->export_entries[i];
+        JSExportEntry *me = &js_cload(JSExportEntry *, m->export_entries)[i];
         bc_put_u8(s, me->export_type);
         if (me->export_type == JS_EXPORT_TYPE_LOCAL) {
             bc_put_leb128(s, me->u.local.var_idx);
@@ -42450,13 +42464,13 @@ static int JS_WriteModule(BCWriterState *s, JSValueConst obj)
 
     bc_put_leb128(s, m->star_export_entries_count);
     for(i = 0; i < m->star_export_entries_count; i++) {
-        JSStarExportEntry *se = &m->star_export_entries[i];
+        JSStarExportEntry *se = &js_cload(JSStarExportEntry *, m->star_export_entries)[i];
         bc_put_leb128(s, se->req_module_idx);
     }
 
     bc_put_leb128(s, m->import_entries_count);
     for(i = 0; i < m->import_entries_count; i++) {
-        JSImportEntry *mi = &m->import_entries[i];
+        JSImportEntry *mi = &js_cload(JSImportEntry *, m->import_entries)[i];
         bc_put_leb128(s, mi->var_idx);
         bc_put_atom(s, mi->import_name);
         bc_put_leb128(s, mi->req_module_idx);
@@ -43547,12 +43561,11 @@ static JSValue JS_ReadModule(BCReaderState *s)
     obj = JS_NewModuleValue(ctx, m);
     if (m->req_module_entries_count != 0) {
         m->req_module_entries_size = m->req_module_entries_count;
-        m->req_module_entries = js_mallocz(ctx, sizeof(m->req_module_entries[0]) * m->req_module_entries_size);
-        if (!m->req_module_entries)
+        js_cstore(m->req_module_entries, js_mallocz(ctx, sizeof(js_cload(JSReqModuleEntry *, m->req_module_entries)[0]) * m->req_module_entries_size));
+        if (!js_cload(JSReqModuleEntry *, m->req_module_entries))
             goto fail;
         for(i = 0; i < m->req_module_entries_count; i++) {
-            JSReqModuleEntry *rme = &m->req_module_entries[i];
-            JSModuleDef **pm = &rme->module;
+            JSReqModuleEntry *rme = &js_cload(JSReqModuleEntry *, m->req_module_entries)[i];
             rme->attributes = JS_UNDEFINED;
             uint8_t phase;
             if (bc_get_atom(s, &rme->module_name))
@@ -43572,11 +43585,12 @@ static JSValue JS_ReadModule(BCReaderState *s)
             // JS_WriteModule() does not serialize modules transitively
             // because that doesn't work for C modules and is also prone
             // to loading the same JS module twice.
-            *pm = js_host_resolve_imported_module_atom(s->ctx, m->module_name,
-                                                       rme->module_name,
-                                                       rme->attributes);
-            if (!*pm)
+            JSModuleDef *resolved = js_host_resolve_imported_module_atom(s->ctx, m->module_name,
+                                                                         rme->module_name,
+                                                                         rme->attributes);
+            if (!resolved)
                 goto fail;
+            js_cstore(rme->module, resolved);
         }
     }
 
@@ -43584,11 +43598,11 @@ static JSValue JS_ReadModule(BCReaderState *s)
         goto fail;
     if (m->export_entries_count != 0) {
         m->export_entries_size = m->export_entries_count;
-        m->export_entries = js_mallocz(ctx, sizeof(m->export_entries[0]) * m->export_entries_size);
-        if (!m->export_entries)
+        js_cstore(m->export_entries, js_mallocz(ctx, sizeof(js_cload(JSExportEntry *, m->export_entries)[0]) * m->export_entries_size));
+        if (!js_cload(JSExportEntry *, m->export_entries))
             goto fail;
         for(i = 0; i < m->export_entries_count; i++) {
-            JSExportEntry *me = &m->export_entries[i];
+            JSExportEntry *me = &js_cload(JSExportEntry *, m->export_entries)[i];
             if (bc_get_u8(s, &v8))
                 goto fail;
             me->export_type = v8;
@@ -43610,11 +43624,11 @@ static JSValue JS_ReadModule(BCReaderState *s)
         goto fail;
     if (m->star_export_entries_count != 0) {
         m->star_export_entries_size = m->star_export_entries_count;
-        m->star_export_entries = js_mallocz(ctx, sizeof(m->star_export_entries[0]) * m->star_export_entries_size);
-        if (!m->star_export_entries)
+        js_cstore(m->star_export_entries, js_mallocz(ctx, sizeof(js_cload(JSStarExportEntry *, m->star_export_entries)[0]) * m->star_export_entries_size));
+        if (!js_cload(JSStarExportEntry *, m->star_export_entries))
             goto fail;
         for(i = 0; i < m->star_export_entries_count; i++) {
-            JSStarExportEntry *se = &m->star_export_entries[i];
+            JSStarExportEntry *se = &js_cload(JSStarExportEntry *, m->star_export_entries)[i];
             if (bc_get_leb128_int(s, &se->req_module_idx))
                 goto fail;
         }
@@ -43624,11 +43638,11 @@ static JSValue JS_ReadModule(BCReaderState *s)
         goto fail;
     if (m->import_entries_count != 0) {
         m->import_entries_size = m->import_entries_count;
-        m->import_entries = js_mallocz(ctx, sizeof(m->import_entries[0]) * m->import_entries_size);
-        if (!m->import_entries)
+        js_cstore(m->import_entries, js_mallocz(ctx, sizeof(js_cload(JSImportEntry *, m->import_entries)[0]) * m->import_entries_size));
+        if (!js_cload(JSImportEntry *, m->import_entries))
             goto fail;
         for(i = 0; i < m->import_entries_count; i++) {
-            JSImportEntry *mi = &m->import_entries[i];
+            JSImportEntry *mi = &js_cload(JSImportEntry *, m->import_entries)[i];
             if (bc_get_leb128_int(s, &mi->var_idx))
                 goto fail;
             if (bc_get_atom(s, &mi->import_name))
@@ -44343,6 +44357,9 @@ static JSValue JS_InstantiateFunctionListItem2(JSContext *ctx, JSObject *p,
 {
     const JSCFunctionListEntry *e = opaque;
     JSValue val, proto;
+
+    if (!e)
+        abort();
 
     switch(e->def_type) {
     case JS_DEF_CFUNC:

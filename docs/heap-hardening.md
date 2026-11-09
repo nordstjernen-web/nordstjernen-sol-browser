@@ -34,7 +34,7 @@ fixes from upstream keep merging cleanly into `src/quickjs/`.
 | 2b | Tagged external pointer table and code pointer table | done |
 | 3p | Trusted runtime structures and context table | done |
 | 3a.1 | Caged values: 8-byte `JSValue` holding a 32-bit cage offset | done |
-| 3a.2 | Compressed pointer fields inside heap structures | batches 1 to 7 done; module records open |
+| 3a.2 | Compressed pointer fields inside heap structures | done (batches 1 to 8) |
 | 3b | Trusted space for bytecode and saved frames | planned |
 
 Stage 1b, moving cookies, HSTS, the HTTP cache and storage behind the
@@ -88,6 +88,14 @@ is masked into the cage (`js_abuf_data()`, `js_ta_ptr()`), and with
   to hold (C functions, function-data and closure records, their
   finalizers, the ArrayBuffer reallocation hook, job functions, C-module
   init functions) is an index into an append-only table.
+- Function-list table: an auto-init property (the lazily created
+  builtins) names its static `JSCFunctionListEntry` by an index into a
+  second append-only table of the same kind (`JSInternTable`). The entry
+  carries a C function pointer that is interned into the code table when
+  the property is first read, so a raw entry pointer in the property
+  slot was a direct route from an in-cage write to a native call. A
+  forged index names another real entry; one that names nothing aborts.
+  A module-namespace auto-init value is masked into the cage on decode.
 - Context table: `JSRuntime`, every `JSContext` and the class table are
   allocated from trusted memory outside the cage, and every heap field
   that named a context (function realms, jobs, finalization records,
@@ -110,7 +118,12 @@ string-slice parents; every member of the object's opaque union and the
 function's bytecode pointer; typed-array back pointers; regexp pattern
 and bytecode; Map hash buckets, record owners and iterator cursors;
 promise resolution state; async-generator back pointers; iterator-helper
-buffers.
+buffers; accessor getters and setters and variable references in
+property slots; and every pointer in module records (the requested
+module, export, star export and import tables, their module and
+variable-reference members, the evaluation stack link, async parents
+and cycle root). `js_resize_cptr_array` grows an array held in a
+compressed field.
 
 **Safe-linked lists.** The `list_head` links stay 64-bit because the
 runtime's GC list threads both cage objects and the trusted contexts,
@@ -132,22 +145,35 @@ the other embedder structures).
 | `JSFunctionBytecode` | opcodes, `cpool`, `closure_var`, `vardefs`, `stack_size`, `var_count`, `arg_count` | sizes and indexes the interpreter trusts for its native frame | **3b** |
 | `JSAsyncFunctionState` (generators, async functions) | saved `JSStackFrame`: `cur_pc`, `arg_buf`, `var_buf`, `var_refs`, `prev_frame` | native stack layout | **3b** |
 | `JSVarRef` | `pvalue`, `stack_frame` of an open reference | points at a live native stack frame or a saved frame | **3b**, with the frames |
-| `JSModuleDef`, `JSReqModuleEntry`, `JSExportEntry` | `req_module_entries`, `export_entries`, `star_export_entries`, `import_entries`, `stack_prev`, `async_parent_modules`, `cycle_root`, `module`, `local.var_ref` | raw pointers in cage structures; about 107 sites, many through `js_resize_array` | 3a.2 batch 8 |
-| regexp bytecode | jump offsets and register indexes `lre_exec` reads from the in-cage bytecode string | reads and capture writes relative to cage buffers; the guard regions bound the reach, but the interpreter has not been reviewed against a corrupted program | review with 3b |
-| `JSAtomicsWaiter.async_rt` | `JSRuntime *`, tested and compared, never dereferenced | none today | low value |
-| `JSRegExp.realm` | `JSContext *`, compared, never dereferenced | none today | low value |
+| in-cage indexes scaled by large elements | `req_module_idx` into the 24-byte requested-module entries, and any other index read from the heap and multiplied by an element over 8 bytes | can step past the 32 GB trailing guard; the module paths only read through such an index, and what they read is decoded back into the cage | bound the index by its count when a write turns up |
+| auto-init host bit | bit 2 of `realm_and_id` marks an embedder-defined builtin (`JS_IsHostAccess`) | a forged bit makes a builtin look embedder-defined | low value |
+| `JSAtomicsWaiter.async_rt`, `JSRegExp.realm` | trusted pointers compared, never dereferenced | none today | low value |
 
-### Next: batch 8, module records
+Two items from the previous pass are closed:
 
-The module structures are cage allocations full of raw pointers:
-corrupting `req_module_entries` or an entry's `module` hands module
-linking and evaluation an arbitrary address to read and write through.
-Convert them the way the other batches went: declare the fields
-`JS_CPTR(T)`, add them to `scripts/quickjs-cage-rewrite.py`, run
-`--apply`, and take the address-of sites (`js_resize_array(ctx, (void
-**)&m->export_entries, …)`) by hand through a local, as batch 7 did for
-the iterator-helper buffer. Verify with the module directories of
-test262 and a site that loads ES modules.
+- **Regexp programs.** `lre_exec` runs the compiled program stored in
+  the regexp's in-cage bytecode string. Read against a corrupted
+  program, it stays inside the cage: back-references check their group
+  number against the header's capture count, `lre_exec` writes `NULL`
+  into every capture slot that count names before it runs, so a
+  back-reference only ever compares against pointers the interpreter
+  itself stored into the subject string; register indexes
+  (`2 * capture_count + pc[0]`) reach at most 255 slots past the capture
+  buffer and are only compared, never dereferenced; jumps are 32-bit
+  relative, inside the cage and its guard. A corrupted program can
+  corrupt the cage, which the model already grants the attacker.
+- **Caching the cage base in the interpreter loop.** Tried in
+  `JS_CallInternal` (a local copy of `js_cage_pointer_base` that
+  `JS_VALUE_GET_PTR`, `JS_MKPTR` and `js_cload` used inside the
+  function): no gain, about 2 % slower across six interleaved runs of an
+  interpreter-bound mix (property reads, calls, closures, allocation,
+  accessors, `reduce`), measured with MinGW GCC on Windows. The base is
+  one RIP-relative load that stays in L1, so the cost of caged values is
+  the add and subtract on every decode and encode, not the load, and a
+  pinned local only adds register pressure in a 3000-line function. Not
+  merged. What would help is fewer round trips, decoding a value once
+  where the interpreter now decodes it per use; that is ordinary
+  interpreter tuning, not hardening, and is left to it.
 
 ### Stage 3b: trusted bytecode space (plan)
 
@@ -179,14 +205,6 @@ reach.
   reads `stack_size`, `var_count` and `arg_count` from trusted memory
   only.
 
-### Performance follow-up
-
-Caging values costs about 2 to 3 % main-thread CPU on script-heavy sites
-(stage 3a.1, below), from the base-plus-offset decode on every pointer
-value. Caching the cage base in a local inside the interpreter loop,
-where most decodes happen, is the obvious thing to try; the compressed
-fields cost nothing measurable on top.
-
 ## Lessons that apply to every batch
 
 - When a slot changes encoding, grep every reader of it, including the
@@ -198,8 +216,13 @@ fields cost nothing measurable on top.
   structures (the Intl case) go through the external pointer table, and
   sentinels (the cleared `WeakRef` marker) are cage allocations.
 - The rewrite script skips comments and cannot see through `&field`:
-  address-taking sites need a local that is stored back, and a
-  `sizeof(x->field[0])` on a compressed field must name the element type.
+  an array resized through `js_resize_array(ctx, (void **)&x->field, …)`
+  goes through `js_resize_cptr_array`, and any other address-taking site
+  through a local that is stored back.
+- A pointer in a heap structure is not always a heap pointer. The
+  auto-init opaque pointed at static data outside the cage; the encoder
+  would have aborted on it, which is the point, but such a field needs a
+  table, not compression.
 - Run test262 as well as browsing captures: the full run found faults
   live sites had not.
 - A full parallel test262 run can report `InternalError: out of memory`
@@ -272,3 +295,13 @@ interleaved runs each, milliseconds, 2026-11-09):
 | mixed churn (objects, Map, typed arrays, strings, regexps, helpers) | 605 to 610 | 587 to 595 |
 
 Flat; the extra decode per access is lost in the noise.
+
+Batch 8, same method, against main (four interleaved runs, 2026-11-09):
+
+| Benchmark | before | after |
+|---|---|---|
+| interpreter mix (property reads, calls, closures, allocation, accessors, `reduce`) | 1906 to 2407 | 2090 to 2203 |
+| 3000 evaluations reading builtins, 200 000 accessor definitions, 3 M getter calls | 305 to 326 | 304 to 311 |
+
+Flat. The function-list table is read once per lazily created builtin,
+and the accessor and module decodes sit off the hot paths.
