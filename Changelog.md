@@ -3,9 +3,12 @@ Changelog:
 
 1.0.46-dev:
 ======
-* Android: fetch-prebuilt-deps.ps1 retries a download that fails with a
-  timeout, a 408/429 or a 5xx response, up to five attempts with growing
-  waits, so one GitHub gateway timeout no longer fails the Android build.
+* Android: fetch-prebuilt-deps.ps1 fetches the dependency sysroot through
+  the GitHub REST API (the release by tag, then each asset by id) instead
+  of the github.com release-download pages, which were answering slowly
+  enough to time out with 504. Each request is retried on a timeout, a
+  408/429 or a 5xx response, up to five attempts with growing waits, and
+  is authenticated with GH_TOKEN when that is set.
 * Testing: `scripts/wpt-reftest.py` runs the web-platform-tests reftests,
   which `wpt-run.sh` skips and which hold most of the CSS layout tests.
   It renders each test and its references at 800x600 with `--dump=png`

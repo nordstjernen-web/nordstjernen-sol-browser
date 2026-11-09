@@ -48,27 +48,54 @@ function Test-BuildProvenance($File, $Digest) {
     Write-Step "verified build provenance of $name"
 }
 
-function Invoke-GitHubDownload($Url, $OutFile) {
+function Get-GitHubHeaders($Accept) {
     $headers = @{
         "User-Agent" = "nordstjernen-android-fetch"
+        "Accept" = $Accept
     }
-    if ($Token) {
-        $headers["Authorization"] = "Bearer $Token"
+    $auth = if ($Token) { $Token } else { $env:GH_TOKEN }
+    if ($auth) {
+        $headers["Authorization"] = "Bearer $auth"
     }
+    return $headers
+}
+
+function Invoke-WithRetry($What, [scriptblock]$Action) {
     $attempts = 5
     for ($attempt = 1; ; $attempt++) {
         try {
-            Invoke-WebRequest -Headers $headers -MaximumRedirection 5 -Uri $Url -OutFile $OutFile
-            return
+            return & $Action
         } catch {
             $status = 0
             if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
             $transient = $status -eq 0 -or $status -eq 408 -or $status -eq 429 -or $status -ge 500
             if (-not $transient -or $attempt -ge $attempts) { throw }
             $delay = [int][math]::Pow(2, $attempt)
-            Write-Step "download of $([System.IO.Path]::GetFileName($OutFile)) failed ($($_.Exception.Message)); retrying in $delay s (attempt $attempt of $attempts)"
+            Write-Step "$What failed ($($_.Exception.Message)); retrying in $delay s (attempt $attempt of $attempts)"
             Start-Sleep -Seconds $delay
         }
+    }
+}
+
+function Get-ReleaseAssets {
+    $uri = "https://api.github.com/repos/$Repo/releases/tags/$Tag"
+    $release = Invoke-WithRetry "release lookup of $Tag" {
+        Invoke-RestMethod -Headers (Get-GitHubHeaders "application/vnd.github+json") -Uri $uri
+    }
+    $assets = @{}
+    foreach ($asset in $release.assets) {
+        $assets[$asset.name] = $asset.url
+    }
+    return $assets
+}
+
+function Invoke-AssetDownload($Assets, $Name, $OutFile) {
+    if (-not $Assets.ContainsKey($Name)) {
+        throw "release $Tag of $Repo has no asset $Name"
+    }
+    $url = $Assets[$Name]
+    Invoke-WithRetry "download of $Name" {
+        Invoke-WebRequest -Headers (Get-GitHubHeaders "application/octet-stream") -MaximumRedirection 5 -Uri $url -OutFile $OutFile
     }
 }
 
@@ -114,9 +141,9 @@ try {
 
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "nordstjernen-android-deps-$stamp"
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-    $baseUrl = "https://github.com/$Repo/releases/download/$Tag"
+    $releaseAssets = Get-ReleaseAssets
     $shaFile = Join-Path $tmp "SHA256SUMS"
-    Invoke-GitHubDownload "$baseUrl/SHA256SUMS" $shaFile
+    Invoke-AssetDownload $releaseAssets "SHA256SUMS" $shaFile
     if ($lockedSumsSha256) {
         $sumsHash = (Get-FileHash -Algorithm SHA256 $shaFile).Hash.ToLowerInvariant()
         if ($sumsHash -ne $lockedSumsSha256) {
@@ -137,7 +164,7 @@ try {
         $archive = Join-Path $tmp $asset
         $unpack = Join-Path $tmp "unpack-$item"
         Write-Step "downloading $asset"
-        Invoke-GitHubDownload "$baseUrl/$asset" $archive
+        Invoke-AssetDownload $releaseAssets $asset $archive
         $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
         if ($actual -ne $expected) {
             throw "checksum mismatch for $asset"
