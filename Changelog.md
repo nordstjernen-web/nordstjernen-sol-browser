@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a native function's `magic` number, declared argument count
+  and `this`-type brand no longer come from the JavaScript heap. Many
+  builtins use the magic number as an index into their own tables, and
+  the brand chose which class a DOM method accepts as `this` through an
+  unchecked index; a corrupted heap could forge any of them. They now
+  live in the trusted code-pointer table entry with the function itself
+  (`docs/heap-hardening.md`, review finding H2b).
 * Security: a corrupted JavaScript heap can no longer run code in another
   JavaScript runtime's realm. Functions name their realm by an index into
   a process-wide table, which a page's heap shares with its workers and

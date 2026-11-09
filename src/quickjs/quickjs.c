@@ -1268,11 +1268,7 @@ struct JSObject {
         struct { /* JS_CLASS_C_FUNCTION: 12/20 bytes */
             uint32_t realm;
             uint32_t c_function;
-            uint8_t length;
             uint8_t cproto;
-            int16_t magic;
-            uint8_t brand;
-            uint8_t brand_mode;
         } cfunc;
         /* array part for fast arrays and typed arrays */
         struct { /* JS_CLASS_ARRAY, JS_CLASS_ARGUMENTS, JS_CLASS_MAPPED_ARGUMENTS, JS_CLASS_UINT8C_ARRAY..JS_CLASS_FLOAT64_ARRAY */
@@ -6943,12 +6939,16 @@ JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
     p = JS_VALUE_GET_OBJ(func_obj);
     p->is_host_function = ctx->host_functions;
     p->u.cfunc.realm = js_ctx_ref(JS_DupContext(ctx));
-    p->u.cfunc.c_function = js_cpt_intern((JSCodePtr)func, JS_CPT_KIND_CFUNC_PROTO(cproto));
-    p->u.cfunc.length = length;
+    JSInternEntry key = {
+        .value = (uintptr_t)func,
+        .kind = JS_CPT_KIND_CFUNC_PROTO(cproto),
+        .magic = (int16_t)magic,
+        .length = (uint8_t)length,
+        .brand = 0,
+        .brand_mode = JS_BRAND_THROW,
+    };
+    p->u.cfunc.c_function = js_cpt_intern_entry(&key);
     p->u.cfunc.cproto = cproto;
-    p->u.cfunc.magic = magic;
-    p->u.cfunc.brand = 0;
-    p->u.cfunc.brand_mode = JS_BRAND_THROW;
     p->is_constructor = (cproto == JS_CFUNC_constructor ||
                          cproto == JS_CFUNC_constructor_magic ||
                          cproto == JS_CFUNC_constructor_or_func ||
@@ -6977,9 +6977,7 @@ JSValue JS_NewCFunction2(JSContext *ctx, JSCFunction *func,
 
 typedef struct JSCFunctionDataRecord {
     uint32_t func;
-    uint8_t length;
     uint8_t data_len;
-    uint16_t magic;
     JSValue data[];
 } JSCFunctionDataRecord;
 
@@ -7025,8 +7023,9 @@ static JSValue js_call_c_function_data(JSContext *ctx, JSValueConst func_obj,
     s = JS_GetOpaque(func_obj, JS_CLASS_C_FUNCTION_DATA);
     if (!s)
         return JS_EXCEPTION; // can't really happen
+    const JSInternEntry *ce = js_cpt_call_entry(s->func, JS_CPT_KIND_CFUNC_DATA);
     arg_buf = argv;
-    arg_count = s->length;
+    arg_count = ce->length;
     if (unlikely(argc < arg_count)) {
         stack_size = arg_count * sizeof(arg_buf[0]);
         if (js_check_stack_overflow(rt, stack_size))
@@ -7045,7 +7044,7 @@ static JSValue js_call_c_function_data(JSContext *ctx, JSValueConst func_obj,
     sf->is_constructor = (flags & JS_CALL_FLAG_CONSTRUCTOR) != 0;
     sf->cur_func = unsafe_unconst(func_obj);
     sf->arg_count = argc;
-    ret = ((JSCFunctionData *)js_cpt_fn(s->func, JS_CPT_KIND_CFUNC_DATA))(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
+    ret = ((JSCFunctionData *)ce->value)(ctx, this_val, argc, arg_buf, ce->magic, vc(s->data));
     rt->current_stack_frame = sf->prev_frame;
     return ret;
 }
@@ -7117,11 +7116,7 @@ JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func)
         q = JS_VALUE_GET_OBJ(func_obj);
         q->u.cfunc.realm = js_ctx_ref(JS_DupContext(ctx));
         q->u.cfunc.c_function = p->u.cfunc.c_function;
-        q->u.cfunc.length = p->u.cfunc.length;
         q->u.cfunc.cproto = p->u.cfunc.cproto;
-        q->u.cfunc.magic = p->u.cfunc.magic;
-        q->u.cfunc.brand = p->u.cfunc.brand;
-        q->u.cfunc.brand_mode = p->u.cfunc.brand_mode;
         q->is_constructor = p->is_constructor;
         q->is_host_function = p->is_host_function;
         return func_obj;
@@ -7142,9 +7137,7 @@ JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func)
             return JS_EXCEPTION;
         }
         dst->func = src->func;
-        dst->length = src->length;
         dst->data_len = src->data_len;
-        dst->magic = src->magic;
         for (i = 0; i < src->data_len; i++)
             dst->data[i] = js_dup(src->data[i]);
         JS_SetOpaqueInternal(func_obj, dst);
@@ -7360,10 +7353,14 @@ JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
         JS_FreeValue(ctx, func_obj);
         return JS_EXCEPTION;
     }
-    s->func = js_cpt_intern((JSCodePtr)func, JS_CPT_KIND_CFUNC_DATA);
-    s->length = length;
+    JSInternEntry key = {
+        .value = (uintptr_t)func,
+        .kind = JS_CPT_KIND_CFUNC_DATA,
+        .magic = (uint16_t)magic,
+        .length = (uint8_t)length,
+    };
+    s->func = js_cpt_intern_entry(&key);
     s->data_len = data_len;
-    s->magic = magic;
     for(i = 0; i < data_len; i++)
         s->data[i] = js_dup(data[i]);
     JS_SetOpaqueInternal(func_obj, s);
@@ -7436,8 +7433,6 @@ static void js_autoinit_mark(JSRuntime *rt, JSProperty *pr,
 
 typedef struct JSCClosureRecord {
     uint32_t func;
-    uint16_t length;
-    uint16_t magic;
     uint32_t opaque;
     uint32_t opaque_finalize;
 } JSCClosureRecord;
@@ -7467,8 +7462,9 @@ static JSValue js_call_c_closure(JSContext *ctx, JSValueConst func_obj,
     int i;
     size_t stack_size;
 
+    const JSInternEntry *ce = js_cpt_call_entry(s->func, JS_CPT_KIND_CCLOSURE);
     arg_buf = argv;
-    arg_count = s->length;
+    arg_count = ce->length;
     if (unlikely(argc < arg_count)) {
         stack_size = arg_count * sizeof(arg_buf[0]);
         if (js_check_stack_overflow(rt, stack_size))
@@ -7488,7 +7484,7 @@ static JSValue js_call_c_closure(JSContext *ctx, JSValueConst func_obj,
     sf->is_constructor = (flags & JS_CALL_FLAG_CONSTRUCTOR) != 0;
     sf->cur_func = unsafe_unconst(func_obj);
     sf->arg_count = argc;
-    ret = ((JSCClosure *)js_cpt_fn(s->func, JS_CPT_KIND_CCLOSURE))(ctx, this_val, argc, arg_buf, s->magic, js_ept_load(s->opaque, JS_EPT_TAG_CCLOSURE_OPAQUE));
+    ret = ((JSCClosure *)ce->value)(ctx, this_val, argc, arg_buf, ce->magic, js_ept_load(s->opaque, JS_EPT_TAG_CCLOSURE_OPAQUE));
     rt->current_stack_frame = sf->prev_frame;
 
     return ret;
@@ -7512,9 +7508,13 @@ JSValue JS_NewCClosure(JSContext *ctx, JSCClosure *func, const char *name,
         JS_FreeValue(ctx, func_obj);
         return JS_EXCEPTION;
     }
-    s->func = js_cpt_intern((JSCodePtr)func, JS_CPT_KIND_CCLOSURE);
-    s->length = length;
-    s->magic = magic;
+    JSInternEntry key = {
+        .value = (uintptr_t)func,
+        .kind = JS_CPT_KIND_CCLOSURE,
+        .magic = (uint16_t)magic,
+        .length = (uint16_t)length,
+    };
+    s->func = js_cpt_intern_entry(&key);
     s->opaque = js_ept_store(opaque, JS_EPT_TAG_CCLOSURE_OPAQUE);
     s->opaque_finalize = js_cpt_intern((JSCodePtr)opaque_finalize, JS_CPT_KIND_CCLOSURE_FINALIZER);
     JS_SetOpaqueInternal(func_obj, s);
@@ -13048,8 +13048,10 @@ static bool JS_IsCFunction(JSContext *ctx, JSValueConst val, JSCFunction *func,
     if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
         return false;
     p = JS_VALUE_GET_OBJ(val);
-    if (p->class_id == JS_CLASS_C_FUNCTION)
-        return (js_cpt_get(p->u.cfunc.c_function) == (JSCodePtr)func && p->u.cfunc.magic == magic);
+    if (p->class_id == JS_CLASS_C_FUNCTION) {
+        const JSInternEntry *e = js_intern_entry(&js_code_table, p->u.cfunc.c_function);
+        return e && e->value == (uintptr_t)func && e->magic == magic;
+    }
     else
         return false;
 }
@@ -18205,10 +18207,12 @@ static JSValue JS_IteratorNext2(JSContext *ctx, JSValueConst enum_obj,
                 args[0] = JS_UNDEFINED;
                 argv = args;
             }
-            func.generic = (JSCFunction *)js_cpt_fn(p->u.cfunc.c_function,
-                                                    JS_CPT_KIND_CFUNC_PROTO(JS_CFUNC_iterator_next));
+            const JSInternEntry *ce =
+                js_cpt_call_entry(p->u.cfunc.c_function,
+                                  JS_CPT_KIND_CFUNC_PROTO(JS_CFUNC_iterator_next));
+            func.generic = (JSCFunction *)ce->value;
             return func.iterator_next(ctx, enum_obj, argc, argv,
-                                      pdone, p->u.cfunc.magic);
+                                      pdone, ce->magic);
         }
     }
     obj = JS_Call(ctx, method, enum_obj, argc, argv);
@@ -19103,19 +19107,24 @@ void JS_SetCFunctionBrand(JSContext *ctx, JSValueConst func, int brand,
     if (p->class_id != JS_CLASS_C_FUNCTION || brand < 0 ||
         brand > ctx->rt->brand_count)
         return;
-    p->u.cfunc.brand = brand;
-    p->u.cfunc.brand_mode = mode;
+    JSInternEntry key = *js_cpt_call_entry(p->u.cfunc.c_function,
+                                           JS_CPT_KIND_CFUNC_PROTO(p->u.cfunc.cproto));
+    key.brand = brand;
+    key.brand_mode = mode;
+    p->u.cfunc.c_function = js_cpt_intern_entry(&key);
 }
 
-static bool js_brand_mismatch(JSRuntime *rt, JSObject *p,
+static bool js_brand_mismatch(JSRuntime *rt, const JSInternEntry *ce,
                               JSValueConst this_obj, int flags)
 {
     const uint16_t *ids;
     int i;
 
-    if (!p->u.cfunc.brand || (flags & JS_CALL_FLAG_CONSTRUCTOR))
+    if (!ce->brand || (flags & JS_CALL_FLAG_CONSTRUCTOR))
         return false;
-    ids = rt->brand_classes[p->u.cfunc.brand - 1];
+    if (ce->brand > rt->brand_count)
+        return true;
+    ids = rt->brand_classes[ce->brand - 1];
     for (i = 0; i < JS_BRAND_SET_SIZE && ids[i]; i++) {
         if (JS_GetOpaque(this_obj, ids[i]))
             return false;
@@ -19123,15 +19132,16 @@ static bool js_brand_mismatch(JSRuntime *rt, JSObject *p,
     return true;
 }
 
-static JSValue js_brand_check_failed(JSRuntime *rt, JSObject *p)
+static JSValue js_brand_check_failed(JSRuntime *rt, JSObject *p,
+                                     const JSInternEntry *ce)
 {
     JSContext *realm = js_ctx_get(rt, p->u.cfunc.realm);
     JSValue err, promise, funcs[2], ret;
 
-    if (p->u.cfunc.brand_mode == JS_BRAND_IGNORE)
+    if (ce->brand_mode == JS_BRAND_IGNORE)
         return JS_UNDEFINED;
     JS_ThrowTypeError(realm, "Illegal invocation");
-    if (p->u.cfunc.brand_mode != JS_BRAND_REJECT)
+    if (ce->brand_mode != JS_BRAND_REJECT)
         return JS_EXCEPTION;
     err = JS_GetException(realm);
     promise = JS_NewPromiseCapability(realm, funcs);
@@ -19162,10 +19172,12 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
 
     p = JS_VALUE_GET_OBJ(func_obj);
     cproto = p->u.cfunc.cproto;
-    arg_count = p->u.cfunc.length;
+    const JSInternEntry *ce = js_cpt_call_entry(p->u.cfunc.c_function,
+                                                JS_CPT_KIND_CFUNC_PROTO(cproto));
+    arg_count = ce->length;
 
-    if (unlikely(js_brand_mismatch(rt, p, this_obj, flags)))
-        return js_brand_check_failed(rt, p);
+    if (unlikely(js_brand_mismatch(rt, ce, this_obj, flags)))
+        return js_brand_check_failed(rt, p, ce);
 
     /* better to always check stack overflow */
     if (js_check_stack_overflow(rt, sizeof(arg_buf[0]) * arg_count))
@@ -19195,7 +19207,7 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     }
     sf->arg_buf = (JSValue *)arg_buf;
 
-    func.generic = (JSCFunction *)js_cpt_fn(p->u.cfunc.c_function, JS_CPT_KIND_CFUNC_PROTO(cproto));
+    func.generic = (JSCFunction *)ce->value;
     switch(cproto) {
     case JS_CFUNC_constructor:
     case JS_CFUNC_constructor_or_func:
@@ -19225,7 +19237,7 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
         /* fall thru */
     case JS_CFUNC_generic_magic:
         ret_val = func.generic_magic(ctx, this_obj, argc, arg_buf,
-                                     p->u.cfunc.magic);
+                                     ce->magic);
         break;
     case JS_CFUNC_getter:
         ret_val = func.getter(ctx, this_obj);
@@ -19234,10 +19246,10 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
         ret_val = func.setter(ctx, this_obj, arg_buf[0]);
         break;
     case JS_CFUNC_getter_magic:
-        ret_val = func.getter_magic(ctx, this_obj, p->u.cfunc.magic);
+        ret_val = func.getter_magic(ctx, this_obj, ce->magic);
         break;
     case JS_CFUNC_setter_magic:
-        ret_val = func.setter_magic(ctx, this_obj, arg_buf[0], p->u.cfunc.magic);
+        ret_val = func.setter_magic(ctx, this_obj, arg_buf[0], ce->magic);
         break;
     case JS_CFUNC_f_f:
         {
@@ -19269,7 +19281,7 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
         {
             int done;
             ret_val = func.iterator_next(ctx, this_obj, argc, arg_buf,
-                                         &done, p->u.cfunc.magic);
+                                         &done, ce->magic);
             if (!JS_IsException(ret_val) && done != 2) {
                 ret_val = js_create_iterator_result(ctx, ret_val, done);
             }

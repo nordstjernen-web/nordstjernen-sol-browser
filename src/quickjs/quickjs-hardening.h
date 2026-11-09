@@ -87,6 +87,10 @@ typedef struct JSExternalPointerEntry {
 typedef struct JSInternEntry {
     uintptr_t value;
     uint32_t kind;
+    int32_t magic;
+    uint16_t length;
+    uint8_t brand;
+    uint8_t brand_mode;
 } JSInternEntry;
 
 typedef struct JSInternTable {
@@ -127,10 +131,19 @@ static inline uintptr_t js_intern_get(JSInternTable *t, uint32_t idx)
     return e ? e->value : 0;
 }
 
-static uint32_t js_intern_hash_slot(uintptr_t v, uint32_t kind, uint32_t size)
+static uint32_t js_intern_hash_slot(const JSInternEntry *k, uint32_t size)
 {
-    uint64_t h = ((uint64_t)v ^ ((uint64_t)kind << 56)) * 0x9E3779B97F4A7C15ull;
+    uint64_t h = (uint64_t)k->value ^ ((uint64_t)k->kind << 56) ^
+                 ((uint64_t)(uint32_t)k->magic << 24) ^ ((uint64_t)k->length << 8) ^
+                 ((uint64_t)k->brand << 48) ^ ((uint64_t)k->brand_mode << 44);
+    h *= 0x9E3779B97F4A7C15ull;
     return (uint32_t)(h >> 32) & (size - 1);
+}
+
+static bool js_intern_same(const JSInternEntry *a, const JSInternEntry *b)
+{
+    return a->value == b->value && a->kind == b->kind && a->magic == b->magic &&
+           a->length == b->length && a->brand == b->brand && a->brand_mode == b->brand_mode;
 }
 
 static void js_intern_rehash(JSInternTable *t, uint32_t new_size)
@@ -140,7 +153,7 @@ static void js_intern_rehash(JSInternTable *t, uint32_t new_size)
         abort();
     for (uint32_t idx = 1; idx < t->count; idx++) {
         const JSInternEntry *e = js_intern_entry(t, idx);
-        uint32_t slot = js_intern_hash_slot(e->value, e->kind, new_size);
+        uint32_t slot = js_intern_hash_slot(e, new_size);
         while (table[slot])
             slot = (slot + 1) & (new_size - 1);
         table[slot] = idx;
@@ -150,20 +163,20 @@ static void js_intern_rehash(JSInternTable *t, uint32_t new_size)
     t->hash_size = new_size;
 }
 
-static uint32_t js_intern_add(JSInternTable *t, uintptr_t v, uint32_t kind)
+static uint32_t js_intern_add(JSInternTable *t, const JSInternEntry *key)
 {
-    if (!v)
+    if (!key->value)
         return 0;
     js_ptr_tables_lock();
     if (t->count * 2 > t->hash_size)
         js_intern_rehash(t, t->hash_size ? t->hash_size * 2 : 4096);
-    uint32_t slot = js_intern_hash_slot(v, kind, t->hash_size);
+    uint32_t slot = js_intern_hash_slot(key, t->hash_size);
     for (;;) {
         uint32_t idx = t->hash[slot];
         if (!idx)
             break;
         const JSInternEntry *e = js_intern_entry(t, idx);
-        if (e->value == v && e->kind == kind) {
+        if (js_intern_same(e, key)) {
             js_ptr_tables_unlock();
             return idx;
         }
@@ -180,8 +193,7 @@ static uint32_t js_intern_add(JSInternTable *t, uintptr_t v, uint32_t kind)
             abort();
         atomic_store(&t->segments[seg], entries);
     }
-    entries[idx & (JS_CPT_SEG_SIZE - 1)].value = v;
-    entries[idx & (JS_CPT_SEG_SIZE - 1)].kind = kind;
+    entries[idx & (JS_CPT_SEG_SIZE - 1)] = *key;
     t->count++;
     t->hash[slot] = idx;
     js_ptr_tables_unlock();
@@ -212,19 +224,39 @@ static inline JSCodePtr js_cpt_get(uint32_t idx)
     return (JSCodePtr)js_intern_get(&js_code_table, idx);
 }
 
-static inline JSCodePtr js_cpt_fn(uint32_t idx, uint32_t kind)
+static inline const JSInternEntry *js_cpt_entry(uint32_t idx, uint32_t kind)
 {
     const JSInternEntry *e = js_intern_entry(&js_code_table, idx);
     if (!e || !e->value)
         return NULL;
     if (unlikely(e->kind != kind))
         js_cpt_kind_mismatch(idx, kind);
-    return (JSCodePtr)e->value;
+    return e;
+}
+
+static inline const JSInternEntry *js_cpt_call_entry(uint32_t idx, uint32_t kind)
+{
+    const JSInternEntry *e = js_cpt_entry(idx, kind);
+    if (unlikely(!e))
+        js_cpt_kind_mismatch(idx, kind);
+    return e;
+}
+
+static inline JSCodePtr js_cpt_fn(uint32_t idx, uint32_t kind)
+{
+    const JSInternEntry *e = js_cpt_entry(idx, kind);
+    return e ? (JSCodePtr)e->value : NULL;
+}
+
+static uint32_t js_cpt_intern_entry(const JSInternEntry *key)
+{
+    return js_intern_add(&js_code_table, key);
 }
 
 static uint32_t js_cpt_intern(JSCodePtr fn, uint32_t kind)
 {
-    return js_intern_add(&js_code_table, (uintptr_t)fn, kind);
+    JSInternEntry key = { .value = (uintptr_t)fn, .kind = kind };
+    return js_cpt_intern_entry(&key);
 }
 
 static inline const JSCFunctionListEntry *js_flt_get(uint32_t idx)
@@ -234,7 +266,8 @@ static inline const JSCFunctionListEntry *js_flt_get(uint32_t idx)
 
 static uint32_t js_flt_intern(const JSCFunctionListEntry *e)
 {
-    return js_intern_add(&js_func_list_table, (uintptr_t)e, JS_CPT_KIND_NONE);
+    JSInternEntry key = { .value = (uintptr_t)e, .kind = JS_CPT_KIND_NONE };
+    return js_intern_add(&js_func_list_table, &key);
 }
 
 static inline JSExternalPointerEntry *js_ept_entry(uint32_t idx)
