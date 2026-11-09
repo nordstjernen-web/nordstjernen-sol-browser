@@ -2121,6 +2121,32 @@ lxb_html_tokenizer_state_char_ref_attr(lxb_html_tokenizer_t *tkz,
     return _lxb_html_tokenizer_state_char_ref(tkz, data, end);
 }
 
+const lxb_char_t *
+lxb_html_tokenizer_named_char_ref(const lxb_char_t *name, size_t len,
+                                  size_t *value_len)
+{
+    const lexbor_sbst_entry_static_t *entry = &lxb_html_tokenizer_res_entities_sbst[1];
+    const lexbor_sbst_entry_static_t *found = NULL;
+
+    for (size_t i = 0; i < len; i++) {
+        found = lexbor_sbst_entry_static_find(lxb_html_tokenizer_res_entities_sbst,
+                                              entry, name[i]);
+        if (found == NULL) {
+            return NULL;
+        }
+
+        entry = &lxb_html_tokenizer_res_entities_sbst[ found->next ];
+    }
+
+    if (found == NULL || found->value == NULL) {
+        return NULL;
+    }
+
+    *value_len = found->value_len;
+
+    return found->value;
+}
+
 static const lxb_char_t *
 _lxb_html_tokenizer_state_char_ref(lxb_html_tokenizer_t *tkz,
                                    const lxb_char_t *data,

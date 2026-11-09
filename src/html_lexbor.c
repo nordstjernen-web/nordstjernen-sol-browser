@@ -11,6 +11,7 @@
 #include <lexbor/dom/dom.h>
 #include <lexbor/html/html.h>
 #include <lexbor/html/interfaces/template_element.h>
+#include <lexbor/html/tokenizer/state.h>
 
 static void
 lxb_doc_destroy_void(void *p)
@@ -732,6 +733,62 @@ ns_node *
 ns_html_parse(const char *input, gssize len)
 {
     return ns_html_parse_with_scripting(input, len, TRUE);
+}
+
+char *
+ns_html_named_char_ref(const char *name, gsize len)
+{
+    size_t value_len = 0;
+    const lxb_char_t *value = lxb_html_tokenizer_named_char_ref(
+        (const lxb_char_t *)name, len, &value_len);
+    return value ? g_strndup((const char *)value, value_len) : NULL;
+}
+
+static gboolean
+ns_mime_is_xhtml(const char *content_type)
+{
+    static const char xhtml[] = "application/xhtml+xml";
+    if (!content_type) return FALSE;
+    while (g_ascii_isspace(*content_type)) content_type++;
+    if (g_ascii_strncasecmp(content_type, xhtml, sizeof xhtml - 1) != 0)
+        return FALSE;
+    char next = content_type[sizeof xhtml - 1];
+    return next == '\0' || next == ';' || g_ascii_isspace(next);
+}
+
+static void
+ns_xml_mark_parser_inserted(ns_node *n, int depth)
+{
+    if (!n || depth >= 512) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling) {
+        c->flags &= ~NS_NODE_NOT_PARSER_INSERTED;
+        ns_xml_mark_parser_inserted(c, depth + 1);
+    }
+}
+
+static ns_node *
+ns_xhtml_parse_document(const char *input, size_t len, gboolean scripting)
+{
+    if (!ns_xml_well_formed(input, (gssize)len, NULL)) return NULL;
+    ns_node *root = ns_xml_parse_html_entities(input, (gssize)len);
+    if (!root) return NULL;
+    root->flags |= NS_NODE_XML_DOC;
+    if (!scripting) root->flags |= NS_NODE_SCRIPTING_DISABLED;
+    ns_xml_mark_parser_inserted(root, 0);
+    ns_html_assign_script_positions(root, input, len);
+    return root;
+}
+
+ns_node *
+ns_parse_document_for_type(const char *input, gssize len,
+                           const char *content_type, gboolean scripting)
+{
+    if (!input) return NULL;
+    size_t n = (len < 0) ? strlen(input) : (size_t)len;
+    ns_node *doc = ns_mime_is_xhtml(content_type)
+        ? ns_xhtml_parse_document(input, n, scripting) : NULL;
+    return doc ? doc : ns_html_parse_with_scripting(input, (gssize)n,
+                                                    scripting);
 }
 
 static lxb_tag_id_t

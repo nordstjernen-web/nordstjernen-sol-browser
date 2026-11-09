@@ -15,8 +15,13 @@ G_BEGIN_DECLS
 ns_node *ns_html_parse(const char *input, gssize len);
 ns_node *ns_html_parse_with_scripting(const char *input, gssize len,
                                       gboolean scripting);
+ns_node *ns_parse_document_for_type(const char *input, gssize len,
+                                    const char *content_type,
+                                    gboolean scripting);
 
 ns_node *ns_xml_parse(const char *input, gssize len);
+ns_node *ns_xml_parse_html_entities(const char *input, gssize len);
+char *ns_html_named_char_ref(const char *name, gsize len);
 const char *ns_xml_declaration_end(const char *p, const char *end);
 ns_node *ns_xml_parse_reporting(const char *input, gssize len,
                                 int *line, int *column);

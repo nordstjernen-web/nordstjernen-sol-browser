@@ -25938,7 +25938,8 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
     }
     if (sel->type && !(sel->type[0] == '*' && sel->type[1] == '\0')) {
         if (!el->name) return FALSE;
-        if (el->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) {
+        if (el->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS |
+                         NS_NODE_KEEP_CASE)) {
             if (strcmp(sel->type_cased ? sel->type_cased : sel->type,
                        el->name) != 0)
                 return FALSE;
@@ -25963,7 +25964,7 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
     }
     if (sel->attrs && sel->attrs->len > 0) {
         guint64 elbloom = ns_node_attr_bloom(el);
-        gboolean html_doc = !(el->flags & NS_NODE_XML_DOC) &&
+        gboolean html_doc = !(el->flags & (NS_NODE_XML_DOC | NS_NODE_KEEP_CASE)) &&
                              !(el->flags & (NS_NODE_FOREIGN_NS | NS_NODE_SVG_NS));
         for (guint i = 0; i < sel->attrs->len; i++) {
             const ns_css_attr_pred *a = &g_array_index(sel->attrs, ns_css_attr_pred, i);
@@ -35496,7 +35497,7 @@ incr_attr_pred_matches(const ns_node *n, const ns_css_attr_pred *wanted)
     if (!value || !wanted->value) return FALSE;
     gsize value_len = strlen(value);
     gsize wanted_len = strlen(wanted->value);
-    gboolean html_doc = !(n->flags & NS_NODE_XML_DOC) &&
+    gboolean html_doc = !(n->flags & (NS_NODE_XML_DOC | NS_NODE_KEEP_CASE)) &&
                         !(n->flags & (NS_NODE_FOREIGN_NS | NS_NODE_SVG_NS));
     gboolean ci = wanted->case_insensitive ||
         (!wanted->case_sensitive && html_doc &&

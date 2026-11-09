@@ -66902,8 +66902,12 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
                               JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, document, "inputEncoding",
                               JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
+    gboolean xml_doc = doc && (doc->flags & NS_NODE_XML_DOC);
     JS_DefinePropertyValueStr(ctx, document, "contentType",
-                              JS_NewString(ctx, "text/html"), JS_PROP_C_W_E);
+        JS_NewString(ctx, xml_doc ? "application/xhtml+xml" : "text/html"),
+        JS_PROP_C_W_E);
+    if (xml_doc)
+        JS_DefinePropertyValueStr(ctx, document, "__ndXmlDoc", JS_TRUE, 0);
     {
         char *dom_host = ns_url_host_from(js->current_url);
         JS_DefinePropertyValueStr(ctx, document, "domain",

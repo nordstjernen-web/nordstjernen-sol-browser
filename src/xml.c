@@ -24,6 +24,7 @@ typedef struct {
     const char *end;
     GPtrArray  *ns_stack;
     gboolean    ok;
+    gboolean    html_entities;
 } xml_parser;
 
 const char *
@@ -101,8 +102,18 @@ xml_append_codepoint(GString *out, guint64 cp)
     g_string_append_len(out, buf, nb);
 }
 
+static gboolean
+xml_append_html_entity(GString *out, const char *name, gsize len)
+{
+    char *value = ns_html_named_char_ref(name, len + 1);
+    if (!value) return FALSE;
+    g_string_append(out, value);
+    g_free(value);
+    return TRUE;
+}
+
 static char *
-xml_decode_text(const char *s, gsize len)
+xml_decode_text(const xml_parser *xp, const char *s, gsize len)
 {
     GString *out = g_string_sized_new(len);
     const char *p = s, *end = s + len;
@@ -129,7 +140,11 @@ xml_decode_text(const char *s, gsize len)
         else if (elen == 4 && strncmp(e, "quot", 4) == 0) g_string_append_c(out, '"');
         else if (elen == 4 && strncmp(e, "apos", 4) == 0) g_string_append_c(out, '\'');
         else if (elen == 4 && strncmp(e, "nbsp", 4) == 0) g_string_append(out, "\xC2\xA0");
-        else { g_string_append_c(out, '&'); p++; continue; }
+        else if (!xp->html_entities || !xml_append_html_entity(out, e, elen)) {
+            g_string_append_c(out, '&');
+            p++;
+            continue;
+        }
         p = semi + 1;
     }
     return g_string_free(out, FALSE);
@@ -256,7 +271,7 @@ xml_parse_attributes(xml_parser *xp,
         const char *vs = xp->p;
         while (xp->p < xp->end && *xp->p != q) xp->p++;
         if (xp->p >= xp->end) { g_free(aname); xp->ok = FALSE; return FALSE; }
-        char *aval = xml_decode_text(vs, (gsize)(xp->p - vs));
+        char *aval = xml_decode_text(xp, vs, (gsize)(xp->p - vs));
         xp->p++;
 
         if (strcmp(aname, "xmlns") == 0) {
@@ -410,7 +425,7 @@ xml_parse_element(xml_parser *xp, ns_node *parent, int depth)
         }
         const char *ts = xp->p;
         while (xp->p < xp->end && *xp->p != '<') xp->p++;
-        char *txt = xml_decode_text(ts, (gsize)(xp->p - ts));
+        char *txt = xml_decode_text(xp, ts, (gsize)(xp->p - ts));
         ns_node_append_child(el, ns_node_new_text(txt));
     }
 
@@ -431,8 +446,9 @@ xml_offset_to_line_column(const char *input, gsize offset, int *line, int *colum
     if (column) *column = col;
 }
 
-ns_node *
-ns_xml_parse_reporting(const char *input, gssize len, int *line, int *column)
+static ns_node *
+xml_parse_with(const char *input, gssize len, gboolean html_entities,
+               int *line, int *column)
 {
     if (line) *line = 1;
     if (column) *column = 1;
@@ -443,6 +459,7 @@ ns_xml_parse_reporting(const char *input, gssize len, int *line, int *column)
         .end = input + n,
         .ns_stack = g_ptr_array_new_with_free_func(xml_binding_free),
         .ok = TRUE,
+        .html_entities = html_entities,
     };
     if (n >= 3 && (unsigned char)xp.p[0] == 0xEF &&
         (unsigned char)xp.p[1] == 0xBB && (unsigned char)xp.p[2] == 0xBF)
@@ -475,7 +492,19 @@ ns_xml_parse_reporting(const char *input, gssize len, int *line, int *column)
 }
 
 ns_node *
+ns_xml_parse_reporting(const char *input, gssize len, int *line, int *column)
+{
+    return xml_parse_with(input, len, FALSE, line, column);
+}
+
+ns_node *
 ns_xml_parse(const char *input, gssize len)
 {
-    return ns_xml_parse_reporting(input, len, NULL, NULL);
+    return xml_parse_with(input, len, FALSE, NULL, NULL);
+}
+
+ns_node *
+ns_xml_parse_html_entities(const char *input, gssize len)
+{
+    return xml_parse_with(input, len, TRUE, NULL, NULL);
 }
