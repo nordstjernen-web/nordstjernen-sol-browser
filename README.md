@@ -191,7 +191,10 @@ system.
   built-in MCP server that lets a local agent read and drive the browser
   window; it is off until allowed in Settings or with `--remote-control`,
   loopback only and token-authenticated
-  ([docs/remote-control.md](docs/remote-control.md)).
+  ([docs/remote-control.md](docs/remote-control.md)). `nordstjernen
+  --webdriver` serves the W3C WebDriver protocol for Selenium, WebdriverIO
+  and other test frameworks, one sandboxed renderer per window
+  ([docs/webdriver.md](docs/webdriver.md)).
 - **Extensions** — initial support for simple, page-facing WebExtensions:
   content scripts, a slice of `browser.*`, and content blocking through
   static `declarativeNetRequest` rules and Adblock Plus/EasyList filter lists

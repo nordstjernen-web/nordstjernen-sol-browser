@@ -70,6 +70,14 @@ remote_page_h = custom_target(
             'ns_remote_page_src'],
 )
 
+webdriver_page_h = custom_target(
+  'webdriver_page.h',
+  input: ['../scripts/embed-text.py', '../data/js/webdriver-page.js'],
+  output: 'webdriver_page.h',
+  command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
+            'ns_webdriver_page_src'],
+)
+
 wpt_hook_h = custom_target(
   'wpt_hook.h',
   input: ['../scripts/embed-text.py', '../data/js/wpt-hook.js'],
@@ -404,7 +412,7 @@ endif
 nordstjernen_embed_sources = nordstjernen_engine_sources + files(
   'embed_shim.c',
   'libnordstjernen.c',
-) + [polyfills_h, streaming_h, remote_page_h]
+) + [polyfills_h, streaming_h, remote_page_h, webdriver_page_h]
 
 if is_android
   nordstjernen_embed_sources += files(

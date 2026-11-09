@@ -33,6 +33,7 @@
 #include "mcp.h"
 #include "proc_limits.h"
 #include "procview.h"
+#include "webdriver.h"
 #include "procwindow.h"
 #include "remotectl.h"
 #include "security.h"
@@ -417,6 +418,55 @@ ns_run_headless_host(int argc, char **argv)
 }
 
 static gboolean
+ns_parse_dimension(const char *text, int *out)
+{
+    char *end = NULL;
+    gint64 n = g_ascii_strtoll(text, &end, 10);
+    if (end == text || n <= 0 || n >= 100000) return FALSE;
+    *out = (int)n;
+    return *end == '\0' || *end == 'x' || *end == 'X';
+}
+
+static int
+ns_run_webdriver_if_wanted(int argc, char **argv)
+{
+    ns_webdriver_opts opts = {
+        .port = -1,
+        .settle_ms = 200,
+    };
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        if (g_strcmp0(a, "--webdriver") == 0) {
+            opts.port = NS_WEBDRIVER_DEFAULT_PORT;
+        } else if (g_str_has_prefix(a, "--webdriver=")) {
+            char *end = NULL;
+            gint64 n = g_ascii_strtoll(a + 12, &end, 10);
+            if (end == a + 12 || *end != '\0' || n < 0 || n > 65535) {
+                g_printerr("nordstjernen: --webdriver wants a port 0-65535, "
+                           "got '%s'\n", a + 12);
+                return 2;
+            }
+            opts.port = (int)n;
+        } else if (g_str_has_prefix(a, "--viewport=")) {
+            const char *spec = a + 11;
+            if (ns_parse_dimension(spec, &opts.viewport_width)) {
+                const char *x = strpbrk(spec, "xX");
+                if (x) ns_parse_dimension(x + 1, &opts.viewport_height);
+            }
+        } else if (g_str_has_prefix(a, "--settle-ms=")) {
+            char *end = NULL;
+            gint64 n = g_ascii_strtoll(a + 12, &end, 10);
+            if (end != a + 12 && *end == '\0' && n >= 0 && n < 600000)
+                opts.settle_ms = (int)n;
+        } else if (g_strcmp0(a, "--debug") == 0 || g_str_has_prefix(a, "--debug=")) {
+            opts.log = TRUE;
+        }
+    }
+    if (opts.port < 0) return -1;
+    return ns_webdriver_run(&opts);
+}
+
+static gboolean
 ns_single_process_wanted(int argc, char **argv)
 {
     for (int i = 1; i < argc; i++)
@@ -443,6 +493,7 @@ ns_print_version_or_help(int argc, char **argv)
                   "  --enable-webgpu        allow WebGPU even when Settings turns it off\n"
                   "  --remote-control       let the MCP server drive this window\n"
                   "  --mcp                  run the MCP server over stdio\n"
+                  "  --webdriver[=PORT]     serve W3C WebDriver on 127.0.0.1 (port 4444)\n"
                   "  --print-config         print the effective configuration and exit\n"
                   "  --headless             load URL without a window\n"
                   "  --dump=text|dom|layout|png:FILE|pdf:FILE|print:FILE\n"
@@ -531,6 +582,13 @@ main(int argc, char **argv)
             ns_config_shutdown();
             return rc;
         }
+    }
+    int webdriver_rc = ns_run_webdriver_if_wanted(argc, argv);
+    if (webdriver_rc >= 0) {
+        g_free(g_self_exe);
+        g_self_exe = NULL;
+        ns_config_shutdown();
+        return webdriver_rc;
     }
 #ifdef G_OS_WIN32
     ns_win32_anchor_gtk_data();

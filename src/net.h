@@ -269,6 +269,8 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(ns_url_parts, ns_url_parts_free)
 
 char *ns_net_cookies_for_js(const char *url, const char *top_url);
 char *ns_net_cookies_json_for_js(const char *url, const char *top_url);
+char *ns_net_cookies_json_for_webdriver(const char *url);
+gboolean ns_net_cookie_set_for_webdriver(const char *url, const char *set_cookie);
 void  ns_net_cookie_store_from_js(const char *url, const char *top_url,
                                   const char *cookie);
 void  ns_net_cookies_clear(void);

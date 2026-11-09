@@ -1334,6 +1334,13 @@ ns_cookie_store_site_json(const char *partition)
 char *
 ns_cookie_store_visible_json(const char *partition, const char *url)
 {
+    return ns_cookie_store_matching_json(partition, url, FALSE);
+}
+
+char *
+ns_cookie_store_matching_json(const char *partition, const char *url,
+                              gboolean include_httponly)
+{
     if (!partition || !*partition || !url) return g_strdup("[]");
     ns_request_url req;
     if (!request_url_parse(url, &req)) return g_strdup("[]");
@@ -1342,7 +1349,8 @@ ns_cookie_store_visible_json(const char *partition, const char *url)
     store_open_locked();
     store_check_external_writes_locked();
     ns_cookie_partition *p = partition_get_locked(partition);
-    GPtrArray *matches = partition_matches_locked(p, &req, 0, FALSE);
+    GPtrArray *matches = partition_matches_locked(p, &req, 0,
+                                                  include_httponly);
     for (guint i = 0; i < matches->len; i++) {
         if (i) g_string_append_c(out, ',');
         json_append_cookie(out, g_ptr_array_index(matches, i));
