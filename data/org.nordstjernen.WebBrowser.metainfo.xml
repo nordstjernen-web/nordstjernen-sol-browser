@@ -60,6 +60,17 @@
   </branding>
 
   <releases>
+    <release version="1.0.46" date="2026-11-09">
+      <description>
+        <p>JavaScript heap hardening and compatibility release.</p>
+        <ul>
+          <li>The JavaScript heap lives in its own reserved address range, with compact 8-byte values and no raw host pointers inside it.</li>
+          <li>Many QuickJS security and robustness fixes in structured clone, string handling, allocators and async generators.</li>
+          <li>Pages served as application/xhtml+xml are parsed as XML.</li>
+          <li>A W3C WebDriver server, and the browser version shown in the title bar.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.45" date="2026-11-08">
       <description>
         <p>Safe Browsing, security and interface release.</p>

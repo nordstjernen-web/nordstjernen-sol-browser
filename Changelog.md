@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.46-dev:
+1.0.46:
 ======
 * Build: `-Dquickjs=quickjs` builds Bellard's newest QuickJS (`e5ac135`),
   which brings seventeen upstream fixes, most for memory safety, and
