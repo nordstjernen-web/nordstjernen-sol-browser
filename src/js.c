@@ -9266,12 +9266,30 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_node_in_html_document(const ns_node *n)
+{
+    if (n->flags & (NS_NODE_XML_DOC | NS_NODE_KEEP_CASE)) return FALSE;
+    const ns_node *p = n->parent;
+    for (int depth = 0; p && p->kind != NS_NODE_DOCUMENT &&
+                        depth < NS_DOM_MAX_DEPTH; depth++)
+        p = p->parent;
+    return !(p && (p->flags & NS_NODE_XML_DOC));
+}
+
+static gboolean
+ns_node_is_html_in_html_document(const ns_node *n)
+{
+    return !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) &&
+           ns_node_in_html_document(n);
+}
+
 static inline const char *
 ns_attr_name_normalize(const ns_node *n, const char *raw_name, char **out_lowered)
 {
     *out_lowered = NULL;
     if (!n || !raw_name) return raw_name;
-    if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS))
+    if (!ns_node_is_html_in_html_document(n))
         return raw_name;
     gboolean needs_lower = FALSE;
     for (const char *p = raw_name; *p; p++) {
@@ -39243,9 +39261,7 @@ ns_element_getAttributeNode(JSContext *ctx, JSValueConst this_val,
     const char *want = JS_ToCString(ctx, argv[0]);
     if (!want) return JS_NULL;
     char *lowered = NULL;
-    if (!(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
-        lowered = g_ascii_strdown(want, -1);
-    const char *name = lowered ? lowered : want;
+    const char *name = ns_attr_name_normalize(n, want, &lowered);
     JSValue out = JS_NULL;
     for (const ns_attr *a = n->attrs; a; a = a->next) {
         if (a->name && strcmp(a->name, name) == 0) {
@@ -45847,7 +45863,7 @@ ns_live_named(JSContext *ctx, ns_live_back *b, JSValueConst snap, uint32_t len,
     if (b->kind == NS_LIVE_ATTRIBUTES) {
         const ns_node *root = ns_unwrap_element(b->owner);
         gboolean is_html_in_html = root &&
-            !(root->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS | NS_NODE_XML_DOC));
+            ns_node_is_html_in_html_document(root);
         if (is_html_in_html && !ns_is_all_ascii_lower(name))
             return JS_UNDEFINED;
         for (uint32_t i = 0; i < len; i++) {
@@ -45950,7 +45966,7 @@ ns_live_get_own_names(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen,
         if (b->kind == NS_LIVE_ATTRIBUTES) {
             const ns_node *root = ns_unwrap_element(b->owner);
             gboolean is_html_in_html = root &&
-                !(root->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS | NS_NODE_XML_DOC));
+                ns_node_is_html_in_html_document(root);
             for (uint32_t i = 0; i < len; i++) {
                 JSValue el = JS_GetPropertyUint32(ctx, snap, i);
                 JSValue name_value = JS_GetPropertyStr(ctx, el, "name");

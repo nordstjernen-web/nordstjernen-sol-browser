@@ -3033,7 +3033,9 @@ xml_serialize_node(const ns_node *n, GString *out, const char *parent_ns,
         g_string_append_c(out, '"');
     }
     gboolean html = strcmp(ns, NS_HTML_NAMESPACE) == 0;
-    if (!n->first_child) {
+    const ns_node *kids = n->tpl_content ? n->tpl_content->first_child
+                                         : n->first_child;
+    if (!kids) {
         if (html && !is_void_tag(n->name)) {
             g_string_append(out, "></");
             if (prefix && *prefix) {
@@ -3048,7 +3050,7 @@ xml_serialize_node(const ns_node *n, GString *out, const char *parent_ns,
         return;
     }
     g_string_append_c(out, '>');
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+    for (const ns_node *c = kids; c; c = c->next_sibling)
         if (!ns_node_is_embedded_doc(c))
             xml_serialize_node(c, out, ns, depth + 1);
     g_string_append(out, "</");

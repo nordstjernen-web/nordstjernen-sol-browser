@@ -815,6 +815,8 @@ typedef enum ns_css_attr_op {
 
 typedef struct ns_css_attr_pred {
     char *name;
+    char *name_cased;
+    guint64 name_cased_bit;
     ns_css_attr_op op;
     char *value;
     gboolean case_insensitive;

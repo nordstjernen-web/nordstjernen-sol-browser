@@ -763,6 +763,7 @@ ns_xml_mark_parser_inserted(ns_node *n, int depth)
     for (ns_node *c = n->first_child; c; c = c->next_sibling) {
         c->flags &= ~NS_NODE_NOT_PARSER_INSERTED;
         ns_xml_mark_parser_inserted(c, depth + 1);
+        ns_xml_mark_parser_inserted(c->tpl_content, depth + 1);
     }
 }
 
@@ -776,6 +777,7 @@ ns_xhtml_parse_document(const char *input, size_t len, gboolean scripting)
     if (!scripting) root->flags |= NS_NODE_SCRIPTING_DISABLED;
     ns_xml_mark_parser_inserted(root, 0);
     ns_html_assign_script_positions(root, input, len);
+    ns_media_extract_standard(root);
     return root;
 }
 

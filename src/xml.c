@@ -112,13 +112,20 @@ xml_append_html_entity(GString *out, const char *name, gsize len)
     return TRUE;
 }
 
+static void
+xml_append_literal(GString *out, char c, gboolean attr)
+{
+    g_string_append_c(out, attr && xml_is_space(c) ? ' ' : c);
+}
+
 static char *
-xml_decode_text(const xml_parser *xp, const char *s, gsize len)
+xml_decode_text(const xml_parser *xp, const char *s, gsize len,
+                gboolean attr)
 {
     GString *out = g_string_sized_new(len);
     const char *p = s, *end = s + len;
     while (p < end) {
-        if (*p != '&') { g_string_append_c(out, *p++); continue; }
+        if (*p != '&') { xml_append_literal(out, *p++, attr); continue; }
         const char *semi = memchr(p, ';', (gsize)(end - p));
         if (!semi) { g_string_append_c(out, *p++); continue; }
         gsize elen = (gsize)(semi - p - 1);
@@ -186,6 +193,56 @@ xml_binding_free(gpointer p)
 
 static gboolean xml_parse_element(xml_parser *xp, ns_node *parent, int depth);
 
+static char *
+xml_doctype_literal(const char **pp, const char *end)
+{
+    const char *p = *pp;
+    while (p < end && xml_is_space(*p)) p++;
+    if (p >= end || (*p != '"' && *p != '\'')) return NULL;
+    char q = *p++;
+    const char *v = p;
+    while (p < end && *p != q) p++;
+    if (p >= end) return NULL;
+    if (pp) *pp = p + 1;
+    return g_strndup(v, (gsize)(p - v));
+}
+
+static gboolean
+xml_doctype_keyword(const char **pp, const char *end, const char *kw)
+{
+    const char *p = *pp;
+    while (p < end && xml_is_space(*p)) p++;
+    gsize kl = strlen(kw);
+    if ((gsize)(end - p) < kl || strncmp(p, kw, kl) != 0) return FALSE;
+    if (pp) *pp = p + kl;
+    return TRUE;
+}
+
+static void
+xml_append_doctype(ns_node *doc, const char *t, const char *e)
+{
+    while (t < e && xml_is_space(*t)) t++;
+    const char *tn = t;
+    while (tn < e && !xml_is_space(*tn) && *tn != '>' && *tn != '[') tn++;
+    if (tn == t) return;
+    char *pub = NULL, *sys = NULL;
+    const char *p = tn;
+    if (xml_doctype_keyword(&p, e, "PUBLIC")) {
+        pub = xml_doctype_literal(&p, e);
+        if (pub) sys = xml_doctype_literal(&p, e);
+    } else if (xml_doctype_keyword(&p, e, "SYSTEM")) {
+        sys = xml_doctype_literal(&p, e);
+    }
+    ns_node *dt = ns_node_new_element(NULL);
+    ns_node_set_name_owned(dt, g_strndup(t, (gsize)(tn - t)));
+    ns_element_set_attr(dt, "publicId", pub ? pub : "");
+    ns_element_set_attr(dt, "systemId", sys ? sys : "");
+    dt->kind = NS_NODE_DOCTYPE;
+    ns_node_append_child(doc, dt);
+    g_free(pub);
+    g_free(sys);
+}
+
 static void
 xml_skip_misc_and_doctype(xml_parser *xp, ns_node *doc)
 {
@@ -227,20 +284,7 @@ xml_skip_misc_and_doctype(xml_parser *xp, ns_node *doc)
             }
             if (xp->end - xp->p >= 9 && g_ascii_strncasecmp(xp->p, "<!DOCTYPE", 9) == 0) {
                 const char *e = ns_xml_declaration_end(xp->p + 9, xp->end);
-                if (doc) {
-                    const char *t = xp->p + 9;
-                    while (t < e && xml_is_space(*t)) t++;
-                    const char *tn = t;
-                    while (tn < e && !xml_is_space(*tn) && *tn != '>' && *tn != '[') tn++;
-                    if (tn > t) {
-                        ns_node *dt = ns_node_new_element(NULL);
-                        ns_node_set_name_owned(dt, g_strndup(t, (gsize)(tn - t)));
-                        ns_element_set_attr(dt, "publicId", "");
-                        ns_element_set_attr(dt, "systemId", "");
-                        dt->kind = NS_NODE_DOCTYPE;
-                        ns_node_append_child(doc, dt);
-                    }
-                }
+                if (doc) xml_append_doctype(doc, xp->p + 9, e);
                 xp->p = (e < xp->end) ? e + 1 : xp->end;
                 continue;
             }
@@ -271,7 +315,7 @@ xml_parse_attributes(xml_parser *xp,
         const char *vs = xp->p;
         while (xp->p < xp->end && *xp->p != q) xp->p++;
         if (xp->p >= xp->end) { g_free(aname); xp->ok = FALSE; return FALSE; }
-        char *aval = xml_decode_text(xp, vs, (gsize)(xp->p - vs));
+        char *aval = xml_decode_text(xp, vs, (gsize)(xp->p - vs), TRUE);
         xp->p++;
 
         if (strcmp(aname, "xmlns") == 0) {
@@ -425,7 +469,7 @@ xml_parse_element(xml_parser *xp, ns_node *parent, int depth)
         }
         const char *ts = xp->p;
         while (xp->p < xp->end && *xp->p != '<') xp->p++;
-        char *txt = xml_decode_text(xp, ts, (gsize)(xp->p - ts));
+        char *txt = xml_decode_text(xp, ts, (gsize)(xp->p - ts), FALSE);
         ns_node_append_child(el, ns_node_new_text(txt));
     }
 
@@ -446,14 +490,54 @@ xml_offset_to_line_column(const char *input, gsize offset, int *line, int *colum
     if (column) *column = col;
 }
 
-static ns_node *
-xml_parse_with(const char *input, gssize len, gboolean html_entities,
-               int *line, int *column)
+static GString *
+xml_normalize_newlines(const char *input, gsize n)
 {
-    if (line) *line = 1;
-    if (column) *column = 1;
-    if (!input) return NULL;
-    gsize n = (len < 0) ? strlen(input) : (gsize)len;
+    GString *out = g_string_sized_new(n);
+    for (gsize i = 0; i < n; i++) {
+        if (input[i] != '\r') { g_string_append_c(out, input[i]); continue; }
+        g_string_append_c(out, '\n');
+        if (i + 1 < n && input[i + 1] == '\n') i++;
+    }
+    return out;
+}
+
+static gboolean
+xml_is_xhtml_template(const ns_node *n)
+{
+    return n->kind == NS_NODE_ELEMENT && n->name &&
+           strcmp(n->name, "template") == 0 &&
+           !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS));
+}
+
+static ns_node *
+xml_take_template_children(ns_node *tpl)
+{
+    ns_node *content = ns_template_content_get(tpl);
+    if (!content) return tpl;
+    while (tpl->first_child) {
+        ns_node *c = tpl->first_child;
+        ns_node_remove(c);
+        ns_node_append_child(content, c);
+    }
+    return content;
+}
+
+static void
+xml_move_template_contents(ns_node *n, int depth)
+{
+    if (!n || depth > XML_MAX_DEPTH) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling) {
+        ns_node *inner = xml_is_xhtml_template(c)
+            ? xml_take_template_children(c) : c;
+        xml_move_template_contents(inner, depth + 1);
+    }
+}
+
+static ns_node *
+xml_parse_buffer(const char *input, gsize n, gboolean html_entities,
+                 int *line, int *column)
+{
     xml_parser xp = {
         .p = input,
         .end = input + n,
@@ -488,6 +572,24 @@ xml_parse_with(const char *input, gssize len, gboolean html_entities,
         ns_node_free(doc);
         return NULL;
     }
+    xml_move_template_contents(doc, 0);
+    return doc;
+}
+
+static ns_node *
+xml_parse_with(const char *input, gssize len, gboolean html_entities,
+               int *line, int *column)
+{
+    if (line) *line = 1;
+    if (column) *column = 1;
+    if (!input) return NULL;
+    gsize n = (len < 0) ? strlen(input) : (gsize)len;
+    if (!memchr(input, '\r', n))
+        return xml_parse_buffer(input, n, html_entities, line, column);
+    GString *normalized = xml_normalize_newlines(input, n);
+    ns_node *doc = xml_parse_buffer(normalized->str, normalized->len,
+                                    html_entities, line, column);
+    g_string_free(normalized, TRUE);
     return doc;
 }
 

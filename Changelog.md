@@ -9,13 +9,19 @@ Changelog:
   dropped, `<script><![CDATA[` was a syntax error, `&gt;` inside a style
   sheet stayed `&gt;`, and `document.contentType` said `text/html`. Now
   CDATA sections and character references are decoded, the HTML named
-  entities (`&times;`, `&mdash;`) resolve as under an XHTML doctype, type
-  and attribute selectors match case-sensitively, and `contentType` is
-  `application/xhtml+xml`. A document that is not well-formed still falls
-  back to the HTML parser instead of Chrome's error page. Example: the
-  shared WPT reference `ref-filled-green-100px-square.xht` shows its green
-  square; in css/CSS2/margin-padding-clear and css/CSS2/abspos 578 more
-  reftests pass (606 of 711, was 29).
+  entities (`&times;`, `&mdash;`) resolve as under an XHTML doctype,
+  `<template>` children go into its `content`, the doctype keeps its
+  public and system identifiers, type selectors and attribute selector
+  names and values in style sheets match case-sensitively,
+  `getAttribute` and `setAttribute` keep the case of attribute names, and
+  `contentType` is `application/xhtml+xml`. The XML parser, which
+  `DOMParser` and XML iframes share, now also turns `\r\n` and a lone `\r`
+  into `\n` and a tab or newline inside an attribute value into a space.
+  A document that is not well-formed still falls back to the HTML parser
+  instead of Chrome's error page. Example: the shared WPT reference
+  `ref-filled-green-100px-square.xht` shows its green square; in
+  css/CSS2/margin-padding-clear and css/CSS2/abspos 578 more reftests
+  pass (606 of 711, was 29).
 * WebDriver: `nordstjernen --webdriver[=PORT]` serves the W3C WebDriver
   protocol on the loopback interface, so Selenium, WebdriverIO and other
   clients can drive the browser (`browserName: "nordstjernen"`). The server
