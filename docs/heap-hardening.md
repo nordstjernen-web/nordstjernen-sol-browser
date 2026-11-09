@@ -452,6 +452,39 @@ there, so the unlink primitive is gone while the links keep their 64-bit
 form and the mixed trusted-and-caged list keeps working. Two compares per
 list operation; the allocation stress script did not move.
 
+### Review findings: test262 over the caged engine
+
+A full test262 run (tc39 main, `run-test262 -a` from `src/quickjs`)
+after stage 3a.2 found three faults the browsing captures had not:
+
+- **ShadowRealm crashed on first use.** Batch 6 stored the realm's
+  context as a context-table index in the opaque slot, but the getter
+  behind `evaluate` and `importValue` still decoded the slot as a cage
+  offset. The resulting address lies in the cage's first chunk, which is
+  never mapped, so a page calling `new ShadowRealm().evaluate("1")`
+  killed its renderer: a reliable crash, not a read of other data.
+  `JS_GetOpaque` and `JS_GetAnyOpaque` now decode the slot by class, so
+  each encoding (cage offset, external-pointer-table index, Intl entry,
+  context index) is chosen in one place. Lesson for later batches: when
+  a slot changes encoding, grep every reader of it, including the
+  generic opaque getters.
+- **The test262 runner's SharedArrayBuffers lay outside the cage.** The
+  runner installs SharedArrayBuffer allocation hooks that used `malloc`.
+  The engine now refuses an out-of-cage backing store from such a hook
+  with a TypeError, and the bundled libc allocates through
+  `JS_CageMalloc`. The browser installs no such hook.
+- **The CMake build lacked `quickjs-cage.c`**, so `run-test262` did not
+  link.
+
+The same run found two conformance gaps that predate the hardening, now
+fixed: the Date field setters did not store NaN for a non-finite
+argument, and the DataView `byteOffset`/`byteLength` getters threw for
+an out-of-bounds view where the current specification returns 0. With
+these fixes every directory of test262 runs to completion without a
+crash. The remaining unexpected results are two Temporal tests: one
+extreme-year PlainMonthDay overflow case, and a time-zone link test that
+depends on the system's tz database.
+
 ## Maintaining the hardening across upstream refreshes
 
 The fork-local code is kept out of `quickjs.c` where it can be, and the
