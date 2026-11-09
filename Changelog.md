@@ -3,6 +3,24 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security: the pointer fields inside JavaScript objects and shapes are
+  now 32-bit cage offsets rather than raw addresses (stage 3a.2, batches
+  2 and 3 of `docs/heap-hardening.md`): an object's shape, property
+  array, fast-array values, mapped-arguments and closure variable arrays
+  and home object, a shape's prototype and hash-chain link, and the
+  opcode, constant-pool, closure-variable, variable-definition and line
+  tables of compiled functions, the weak-reference chains of objects and
+  symbols, string-slice parents, and every internal class structure
+  behind the object's opaque slot (ArrayBuffer, typed arrays, Map and
+  Set, Proxy, promises, generators, iterators, bound functions and the
+  bytecode pointer of functions). A corrupted field can therefore only
+  name cage memory, and the encoder refuses a pointer from outside the
+  cage instead of truncating it. Intl objects keep their libc-allocated
+  structure in the tagged pointer table.
+  tables of compiled functions. A corrupted field can therefore only name
+  cage memory.
+  and home object, and a shape's prototype and hash-chain link. A
+  corrupted field can therefore only name cage memory.
 * CI: the scheduled `sysroot-bump` workflow no longer fails when the
   repository forbids GitHub Actions from opening pull requests; it pushes the
   bump branch, warns with the compare link and the two ways to enable the
