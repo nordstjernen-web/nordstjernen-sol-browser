@@ -187,6 +187,8 @@ guint64 ns_js_mutation_serial(const ns_js *js);
 
 char  *ns_js_eval_source(ns_js *js, const char *src, const char *origin);
 char  *ns_js_remote_call(ns_js *js, const char *request);
+char  *ns_js_webdriver_call(ns_js *js, const char *request);
+void   ns_js_drop_webdriver_helper(ns_js *js);
 void   ns_js_drop_remote_helper(ns_js *js);
 
 gboolean ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type,

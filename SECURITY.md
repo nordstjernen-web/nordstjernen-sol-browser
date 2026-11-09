@@ -571,6 +571,31 @@ The `document.cookie` setter:
   against the document host before it widens scope; absent, the cookie
   is stored host-only. `Path` defaults to `/`.
 
+### WebDriver server
+
+`nordstjernen --webdriver` (`src/gtk/webdriver.c`, see
+[docs/webdriver.md](docs/webdriver.md)) exists to let a program drive the
+browser, so its defence is about who can connect. Nothing listens unless the
+browser was started with the flag. The server binds the loopback interface
+only, never a public address, and refuses requests whose `Host` header is not
+`localhost`, `127.0.0.1` or `[::1]` (DNS rebinding), requests carrying an
+`Origin` header (a web page in another browser on the machine), and `POST`
+bodies of the types a page can send without a CORS preflight
+(`application/x-www-form-urlencoded`, `multipart/form-data`, `text/plain`).
+Beyond that there is no authentication: a local program that can reach the
+port can run script in any page, read and set its cookies (HttpOnly ones
+included) and take screenshots, so the port must not be forwarded.
+
+The server is a shell that never parses page content. Each window is a
+renderer spawned like a tab, under the same sandbox, and sessions are private
+by default, so nothing a test does reaches the profile unless the client asks
+for `ns:options` `{"private": false}`. The page-side helper runs in its own
+QuickJS context; its natives (a frame's document and window past the
+cross-origin checks, compiling a script in a page or frame realm) exist only
+in its closure, so page script cannot reach them, and the renderer's
+`/webdriver` and `/cookies` endpoints answer only the shell on the other end
+of its control socket.
+
 ## Known gaps
 
 - **Iframe isolation is a realm boundary, not a runtime or process

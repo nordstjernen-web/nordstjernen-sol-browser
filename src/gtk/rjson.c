@@ -310,3 +310,114 @@ rj_write(GString *out, const RjValue *v)
         break;
     }
 }
+
+char *
+rj_to_string(const RjValue *v)
+{
+    GString *out = g_string_new(NULL);
+    rj_write(out, v);
+    return g_string_free(out, FALSE);
+}
+
+RjValue *
+rj_new_null(void)
+{
+    return rj_new(RJ_NULL);
+}
+
+RjValue *
+rj_new_bool(gboolean b)
+{
+    RjValue *v = rj_new(RJ_BOOL);
+    v->b = b ? TRUE : FALSE;
+    return v;
+}
+
+RjValue *
+rj_new_num(double num)
+{
+    RjValue *v = rj_new(RJ_NUM);
+    v->num = isfinite(num) ? num : 0;
+    return v;
+}
+
+RjValue *
+rj_new_str_take(char *s)
+{
+    RjValue *v = rj_new(RJ_STR);
+    v->str = s ? s : g_strdup("");
+    return v;
+}
+
+RjValue *
+rj_new_str(const char *s)
+{
+    return rj_new_str_take(g_strdup(s ? s : ""));
+}
+
+static RjValue *
+rj_new_container(gboolean object)
+{
+    RjValue *v = rj_new(object ? RJ_OBJ : RJ_ARR);
+    v->items = g_ptr_array_new_with_free_func((GDestroyNotify)rj_free);
+    if (object)
+        v->keys = g_ptr_array_new_with_free_func(g_free);
+    return v;
+}
+
+RjValue *
+rj_new_arr(void)
+{
+    return rj_new_container(FALSE);
+}
+
+RjValue *
+rj_new_obj(void)
+{
+    return rj_new_container(TRUE);
+}
+
+RjValue *
+rj_copy(const RjValue *v)
+{
+    if (!v)
+        return NULL;
+    RjValue *c = v->type == RJ_ARR || v->type == RJ_OBJ
+        ? rj_new_container(v->type == RJ_OBJ) : rj_new(v->type);
+    c->b = v->b;
+    c->num = v->num;
+    c->str = g_strdup(v->str);
+    for (guint i = 0; v->items && i < v->items->len; i++)
+        g_ptr_array_add(c->items, rj_copy(g_ptr_array_index(v->items, i)));
+    for (guint i = 0; v->keys && i < v->keys->len; i++)
+        g_ptr_array_add(c->keys, g_strdup(g_ptr_array_index(v->keys, i)));
+    return c;
+}
+
+void
+rj_arr_add(RjValue *arr, RjValue *item)
+{
+    if (!arr || arr->type != RJ_ARR || !item) {
+        rj_free(item);
+        return;
+    }
+    g_ptr_array_add(arr->items, item);
+}
+
+void
+rj_obj_set(RjValue *obj, const char *key, RjValue *item)
+{
+    if (!obj || obj->type != RJ_OBJ || !key || !item) {
+        rj_free(item);
+        return;
+    }
+    for (guint i = 0; i < obj->keys->len; i++) {
+        if (strcmp(g_ptr_array_index(obj->keys, i), key) == 0) {
+            rj_free(g_ptr_array_index(obj->items, i));
+            g_ptr_array_index(obj->items, i) = item;
+            return;
+        }
+    }
+    g_ptr_array_add(obj->keys, g_strdup(key));
+    g_ptr_array_add(obj->items, item);
+}

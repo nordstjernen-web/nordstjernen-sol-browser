@@ -3932,6 +3932,16 @@ ns_browser_remote_call(ns_browser *browser, const char *request)
     return res;
 }
 
+char *
+ns_browser_webdriver_call(ns_browser *browser, const char *request)
+{
+    if (!browser || !browser->js || !request) return NULL;
+    browser_damp_reset(browser);
+    char *res = ns_js_webdriver_call(browser->js, request);
+    browser_settle_eval(browser);
+    return res;
+}
+
 static int
 browser_context_field(ns_browser *browser, int x, int y)
 {

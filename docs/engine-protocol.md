@@ -51,10 +51,10 @@ Every request is `POST <path>` with an `application/json` body. The reply is
 | Navigation and rendering | `/open`, `/render`, `/tick`, `/favicon`, `/dump`, `/export`, `/print`, `/screenshot`, `/pdf` |
 | Pointer and keyboard | `/click`, `/hover`, `/scroll`, `/scrollbar-press`, `/scrollbar-drag`, `/scrollbar-release`, `/release`, `/key`, `/select`, `/link`, `/dropfiles`, `/contextmenu` |
 | Editing | `/focused-editable`, `/focused-editable-state`, `/focused-editable-selection`, `/clipboard`, `/find` |
-| Scripting and diagnostics | `/eval`, `/console` |
+| Scripting and diagnostics | `/eval`, `/console`, `/remote-call`, `/webdriver` |
 | Popups and downloads | `/popup-poll`, `/popup-deliver`, `/download-start`, `/download-poll`, `/download-cancel` |
 | Permissions and capabilities | `/permission`, `/capability` (`/camera` and `/webgl` are deprecated aliases) |
-| Storage | `/session-storage` |
+| Storage | `/session-storage`, `/cookies` |
 | Media | `/media`, `/audio-event` |
 
 `/render` and `/tick` are the heartbeat: the shell calls them from its frame
@@ -135,6 +135,24 @@ for one purpose, rasterising its own SVG icons through the engine's SVG
 renderer (`src/gtk/icons.c`); that is the remaining coupling to remove, by
 moving icon rasterisation behind the protocol or pre-rendering the icons at
 build time.
+
+## WebDriver and cookies
+
+`POST /webdriver` with `{"request": "<json>"}` runs one command of the
+WebDriver helper (`data/js/webdriver-page.js`) in the current page and
+answers `{"text": "<json>"}`: `{"value": ...}`, `{"pending": token}` for a
+script still waiting on a promise, or `{"error", "message"}`. The helper runs
+in a QuickJS context of its own beside the page; see
+[webdriver.md](webdriver.md).
+
+`POST /cookies` with `{"op": "list"}` answers the JSON array of the cookies
+the current page's URL would send, HttpOnly ones included, each as
+`{"name", "value", "domain", "hostOnly", "path", "expires", "secure",
+"httpOnly", "sameSite", "source"}` (`expires` in milliseconds or `null`).
+`{"op": "set", "cookie": "<Set-Cookie value>"}` stores a cookie for the
+current page as an HTTP response would, so `HttpOnly` is allowed, and
+answers `{"ok": 0|1}`; a `Max-Age=0` value deletes one. Both act only on
+the partition of the page the renderer shows.
 
 ## Screenshots
 

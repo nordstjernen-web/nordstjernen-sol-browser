@@ -3,6 +3,23 @@ Changelog:
 
 1.0.46-dev:
 ======
+* WebDriver: `nordstjernen --webdriver[=PORT]` serves the W3C WebDriver
+  protocol on the loopback interface, so Selenium, WebdriverIO and other
+  clients can drive the browser (`browserName: "nordstjernen"`). The server
+  (`src/gtk/webdriver.c`) is an engine-protocol shell: each WebDriver window
+  is a sandboxed renderer of its own, ticked and rendered on a frame cadence
+  as a tab is. Sessions and capabilities, navigation and history, windows,
+  frames and window rects, element lookup by every strategy with implicit
+  waits and shadow roots, element state, click, clear and send keys through
+  the renderer's own input path, sync and async scripts with promise
+  results, cookies (HttpOnly included), the actions API with real double
+  clicks, context clicks and trusted wheel events, screenshots of the
+  viewport or an element, and print to PDF. Sessions are private unless
+  `ns:options` asks for the profile. The page-side helper
+  (`data/js/webdriver-page.js`) runs in a QuickJS context of its own beside
+  the page, reached through the new `/webdriver` renderer endpoint; cookies
+  go through the new `/cookies` endpoint. Requests with a foreign `Host`, an
+  `Origin` header or a form-style body are refused. See docs/webdriver.md.
 * CI: the Linux, macOS, Windows and Java workflows put the pinned
   wgpu-native release into meson's package cache through the GitHub REST
   API (`scripts/prefetch-wrap.sh`) before `meson setup`, because the
