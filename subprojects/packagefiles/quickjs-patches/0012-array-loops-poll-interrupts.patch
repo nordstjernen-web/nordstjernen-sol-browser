@@ -1,0 +1,133 @@
+diff --git a/quickjs.c b/quickjs.c
+index 79e970b..67d5c7e 100644
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -42941,6 +42966,8 @@ static int JS_CopySubArray(JSContext *ctx,
+             }
+             i += l;
+         } else {
++            if (js_poll_interrupts(ctx))
++                goto exception;
+             fromPresent = JS_TryGetPropertyInt64(ctx, obj, from, &val);
+             if (fromPresent < 0)
+                 goto exception;
+@@ -43884,6 +43911,8 @@ static JSValue js_array_concat(JSContext *ctx, JSValueConst this_val,
+                 goto exception;
+             }
+             for (k = 0; k < len; k++, n++) {
++                if (js_poll_interrupts(ctx))
++                    goto exception;
+                 res = JS_TryGetPropertyInt64(ctx, e, k, &val);
+                 if (res < 0)
+                     goto exception;
+@@ -43992,6 +44021,8 @@ static JSValue js_array_every(JSContext *ctx, JSValueConst this_val,
+     n = 0;
+ 
+     for(k = 0; k < len; k++) {
++        if (js_poll_interrupts(ctx))
++            goto exception;
+         if (special & special_TA) {
+             val = JS_GetPropertyInt64(ctx, obj, k);
+             if (JS_IsException(val))
+@@ -44119,6 +44150,8 @@ static JSValue js_array_reduce(JSContext *ctx, JSValueConst this_val,
+                 JS_ThrowTypeError(ctx, "empty array");
+                 goto exception;
+             }
++            if (js_poll_interrupts(ctx))
++                goto exception;
+             k1 = (special & special_reduceRight) ? len - k - 1 : k;
+             k++;
+             if (special & special_TA) {
+@@ -44136,6 +44169,8 @@ static JSValue js_array_reduce(JSContext *ctx, JSValueConst this_val,
+         }
+     }
+     for (; k < len; k++) {
++        if (js_poll_interrupts(ctx))
++            goto exception;
+         k1 = (special & special_reduceRight) ? len - k - 1 : k;
+         if (special & special_TA) {
+             val = JS_GetPropertyInt64(ctx, obj, k1);
+@@ -44199,6 +44234,8 @@ static JSValue js_array_fill(JSContext *ctx, JSValueConst this_val,
+ 
+     /* XXX: should special case fast arrays */
+     while (start < end) {
++        if (js_poll_interrupts(ctx))
++            goto exception;
+         if (JS_SetPropertyInt64(ctx, obj, start,
+                                 JS_DupValue(ctx, argv[0])) < 0)
+             goto exception;
+@@ -44241,6 +44278,8 @@ static JSValue js_array_includes(JSContext *ctx, JSValueConst this_val,
+             }
+         }
+         for (; n < len; n++) {
++            if (js_poll_interrupts(ctx))
++                goto exception;
+             val = JS_GetPropertyInt64(ctx, obj, n);
+             if (JS_IsException(val))
+                 goto exception;
+@@ -44290,7 +44329,10 @@ static JSValue js_array_indexOf(JSContext *ctx, JSValueConst this_val,
+             }
+         }
+         for (; n < len; n++) {
+-            int present = JS_TryGetPropertyInt64(ctx, obj, n, &val);
++            int present;
++            if (js_poll_interrupts(ctx))
++                goto exception;
++            present = JS_TryGetPropertyInt64(ctx, obj, n, &val);
+             if (present < 0)
+                 goto exception;
+             if (present) {
+@@ -44332,6 +44374,8 @@ static JSValue js_array_lastIndexOf(JSContext *ctx, JSValueConst this_val,
+         }
+         /* XXX: should special case fast arrays */
+         for (; n >= 0; n--) {
++            if (js_poll_interrupts(ctx))
++                goto exception;
+             present = JS_TryGetPropertyInt64(ctx, obj, n, &val);
+             if (present < 0)
+                 goto exception;
+@@ -44658,6 +44702,8 @@ static JSValue js_array_reverse(JSContext *ctx, JSValueConst this_val,
+     }
+ 
+     for (l = 0, h = len - 1; l < h; l++, h--) {
++        if (js_poll_interrupts(ctx))
++            goto exception;
+         l_present = JS_TryGetPropertyInt64(ctx, obj, l, &lval);
+         if (l_present < 0)
+             goto exception;
+@@ -44788,6 +44834,8 @@ static JSValue js_array_slice(JSContext *ctx, JSValueConst this_val,
+ 
+         n = 0;
+         for (k = start; k < final; k++, n++) {
++            if (js_poll_interrupts(ctx))
++                goto exception;
+             kPresent = JS_TryGetPropertyInt64(ctx, obj, k, &val);
+             if (kPresent < 0)
+                 goto exception;
+@@ -44896,6 +44944,8 @@ static JSValue js_array_splice(JSContext *ctx, JSValueConst this_val,
+         
+         n = 0;
+         for (k = start; k < final; k++, n++) {
++            if (js_poll_interrupts(ctx))
++                goto exception;
+             kPresent = JS_TryGetPropertyInt64(ctx, obj, k, &val);
+             if (kPresent < 0)
+                 goto exception;
+@@ -45065,6 +45115,8 @@ static int64_t JS_FlattenIntoArray(JSContext *ctx, JSValueConst target,
+     }
+ 
+     for (sourceIndex = 0; sourceIndex < sourceLen; sourceIndex++) {
++        if (js_poll_interrupts(ctx))
++            return -1;
+         present = JS_TryGetPropertyInt64(ctx, source, sourceIndex, &element);
+         if (present < 0)
+             return -1;
+@@ -45257,6 +45309,8 @@ static JSValue js_array_sort(JSContext *ctx, JSValueConst this_val,
+             array = new_array;
+             array_size = new_size;
+         }
++        if (js_poll_interrupts(ctx))
++            goto exception;
+         present = JS_TryGetPropertyInt64(ctx, obj, i, &array[pos].val);
+         if (present < 0)
+             goto exception;

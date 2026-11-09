@@ -1,5 +1,6 @@
 [wrap-git]
 url = https://github.com/bellard/quickjs.git
-revision = 712e8c0ca26949477c38f91dbaf955cc48e2f261
+revision = e5ac135f8db58f8d6b7b5862b8263ce6ba9c5ab6
 depth = 1
 patch_directory = quickjs
+diff_files = quickjs-patches/0001-parser-stop-at-scope-limit.patch, quickjs-patches/0002-zero-length-copies.patch, quickjs-patches/0003-sum-precise-renormalize-before-overflow.patch, quickjs-patches/0004-async-generator-drain-queue.patch, quickjs-patches/0005-number-parser-clamp-exponent.patch, quickjs-patches/0006-normalize-linear-canonical-ordering.patch, quickjs-patches/0007-allocator-refuse-oversized-requests.patch, quickjs-patches/0008-concat-in-place-skip-atoms.patch, quickjs-patches/0009-oom-leaks-and-null-derefs.patch, quickjs-patches/0010-bjson-reset-sab-mark.patch, quickjs-patches/0011-bjson-reader-holds-object-refs.patch, quickjs-patches/0012-array-loops-poll-interrupts.patch

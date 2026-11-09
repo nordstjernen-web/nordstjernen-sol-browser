@@ -59,6 +59,41 @@ Fork-local pieces a QuickJS refresh touches, by file:
 | `quickjs.c` | the two include lines; the trusted block path in the arena front end; `JS_NewRuntime`'s cage heap; `JS_SetOpaque` / `JS_GetOpaque` table paths and the Intl tag; the context-table indices in realm fields; the code-table indices in C function, closure, job and module records; the WeakRef sentinel; and the `js_cload` / `js_cstore` / `js_abuf_data` / `js_ta_ptr` rewrites the script reproduces |
 | `meson.build` | `quickjs-cage.c` in the sources |
 
+## 2026-11-09 — original QuickJS 712e8c0 → e5ac135
+
+The `-Dquickjs=quickjs` pin moves to the newest `master`, `e5ac135`
+("test_worker.js: explicitly terminate the worker"), seventeen commits on.
+`scripts/bump-bellard-quickjs.sh` now does this step. Upstream's
+changes in the files this build compiles are mostly memory-safety fixes:
+
+- `ArrayBuffer` release callbacks ran twice (`813636e`, #606).
+  `JS_GetTypedArrayBuffer` reported a stale length for resizable buffers
+  (`56d38b8`, #608).
+- Allocation failures are now handled in `JS_DefineProperty` (`e36f864`,
+  #604), in `add_fast_array_element` (`b25da59`, #576) and in several
+  `JS_DefinePropertyValue` callers (`0943061`).
+- `js_get_length32` was misused (`e25861c`, #597). The deserializer now
+  checks for NULL object references (`f68db0e`) and seals template objects
+  (`88130c0`, #598).
+- Generic arrays now get the missing extensibility test in
+  `JS_CreateProperty` (`af2e282`, #593), and the regexp lexer no longer
+  skips after a template or private field (`673c622`, #596).
+- `ArrayBuffer`'s `maxByteLength` goes through `ToIndex` (`66fdddf`), and
+  `js_append_enumerate` reads the iterator once (`092277a`).
+- The Temporal date bound checks (`f2e4461`, #610 points 1 and 2) and the
+  libc worker fixes (`3cddd4c`, `014389e`) are in code this build does not
+  compile.
+
+The pin also gains the first local patches since the sort fix went
+upstream, twelve of them, listed in `docs/quickjs.md`, "Local patches".
+Four fix points of bellard/quickjs#610 that master still has: the scope
+limit, zero-length copies, `Math.sumPrecise` and the async generator
+queue. The fork shared the scope-limit and async-generator faults and is
+fixed in the same change. The other eight port fork security fixes for
+faults Bellard's code shares. Each of the fork's sixteen fixes was checked
+against master; the other eight were already fixed or are for code
+Bellard does not have.
+
 ## 2026-11-04 — QuickJS 7b5f588 → 1b519fa (0.18.0)
 
 | | value |

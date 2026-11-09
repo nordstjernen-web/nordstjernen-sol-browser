@@ -3,6 +3,22 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Build: `-Dquickjs=quickjs` builds Bellard's newest QuickJS (`e5ac135`),
+  which brings seventeen upstream fixes, most for memory safety, and
+  applies twelve local security patches: four for faults reported
+  upstream that it still has, and eight ports of the fork's own fixes for
+  faults its code shares. `scripts/bump-bellard-quickjs.sh` moves the pin to
+  upstream's newest commit and checks that the patches still apply.
+* Fixed: an async generator answers every request queued while it was
+  running or returning. Once it had finished, it settled one queued
+  `next()` and left the rest pending forever, keeping the generator
+  alive; `next()` calls queued behind a `return()` never settled at all.
+* Security: a function with more than 65534 block scopes (for example
+  33000 `for` loops) no longer crashes the renderer. The scope limit
+  raised a SyntaxError that most callers ignored, so parsing went on and
+  unwound the scope stack past its bottom, reading outside the parser's
+  scope array. The parser now stops at the next token once the limit is
+  reached.
 * The browser name in the title bar now carries the running version,
   "Nordstjernen Web Browser 1.0.x", as the window title already did.
 * Pages served as `application/xhtml+xml` are parsed as XML, as Chrome

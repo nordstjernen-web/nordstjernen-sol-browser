@@ -16,7 +16,7 @@ An existing build directory switches with
 |---|---|---|
 | Source | `src/quickjs/`, an in-tree fork of [quickjs-ng](https://github.com/quickjs-ng/quickjs) | [bellard/quickjs](https://github.com/bellard/quickjs), the original engine |
 | How it gets into the build | always in the tree | fetched at configure time by `subprojects/quickjs.wrap`, never vendored |
-| Version | quickjs-ng 0.18.0 (master `1b519fa`, less the commits the refresh log lists as not taken) plus the browser hooks; refresh history in [`vendored-engine-updates.md`](vendored-engine-updates.md) | master `712e8c0` (2026-11-02), pinned by commit, unpatched |
+| Version | quickjs-ng 0.18.0 (master `1b519fa`, less the commits the refresh log lists as not taken) plus the browser hooks; refresh history in [`vendored-engine-updates.md`](vendored-engine-updates.md) | master `e5ac135` (2026-11-09), pinned by commit, plus twelve local security patches |
 | About page | `QuickJS 0.18.0` | `QuickJS 2026-06-04` |
 | CI | every workflow | none; build it locally (see below) |
 
@@ -27,29 +27,68 @@ engine gets that API through a small adapter instead of a second binding.
 ## How the original engine is built
 
 `subprojects/quickjs.wrap` pins a commit on the upstream `master` branch,
-currently `19d6bd8` (2026-10-26), eighty-one commits past the 2026-06-04 release.
-Upstream has not changed `VERSION` since, so the About page still reads
-`QuickJS 2026-06-04`. Upstream ships only a Makefile, so the wrap's
-`patch_directory` overlays `subprojects/packagefiles/quickjs/meson.build`,
-which compiles the library objects the Makefile builds (`quickjs.c`,
-`dtoa.c`, `libregexp.c`, `libunicode.c`, `cutils.c`) with the same defines
-(`_GNU_SOURCE`, `CONFIG_VERSION`, `-fwrapv`) into a static library with
-hidden symbols. Master's experimental Temporal and Intl
-(`CONFIG_TEMPORAL_INTL`, the `intl/` and `temporal/` directories) are not
-compiled; the browser never calls `JS_AddIntrinsicTemporal` or
+currently `e5ac135` (2026-11-09), the newest at the time of writing.
+Upstream has not changed `VERSION` since the 2026-06-04 release, so the
+About page still reads `QuickJS 2026-06-04`. Upstream ships only a
+Makefile, so the wrap's `patch_directory` overlays
+`subprojects/packagefiles/quickjs/meson.build`, which compiles the library
+objects the Makefile builds (`quickjs.c`, `dtoa.c`, `libregexp.c`,
+`libunicode.c`, `cutils.c`) with the same defines (`_GNU_SOURCE`,
+`CONFIG_VERSION`, `-fwrapv`) into a static library with hidden symbols.
+Master's experimental Temporal and Intl (`CONFIG_TEMPORAL_INTL`, the
+`intl/` and `temporal/` directories) are not compiled, and neither is
+`quickjs-libc.c`; the browser never calls `JS_AddIntrinsicTemporal` or
 `JS_AddIntrinsicIntl`. Nothing is installed. A build with
 `--wrap-mode=nodownload` needs the checkout already in
 `subprojects/quickjs/`.
 
-No source patch rides on top. The one this build used to carry, making
-`Array.prototype.sort` call its comparator for identical values (jQuery 4's
-`uniqueSort` relies on it), is upstream since `1cc74460cb`. A future local
-patch goes in `subprojects/packagefiles/` and is named by `diff_files` in the
-wrap.
+### Local patches
 
-To move forward, point `revision` in the wrap at a newer `master` commit,
-delete `subprojects/quickjs/`, reconfigure, drop any adapter shim for a call upstream now exports (as
-`JS_ToObject` was dropped at `84e723f`), and rerun the checks below.
+The wrap's `diff_files` applies the patches in
+`subprojects/packagefiles/quickjs-patches/`, in order, on every fresh
+fetch. Each fixes a fault reported upstream that the pinned commit still
+has, in code this build compiles, or ports a fix the quickjs-ng fork in
+`src/quickjs/` carries for a fault Bellard's code shares. Each is written
+to be dropped once upstream fixes it:
+
+| Patch | Fault | Reported |
+|---|---|---|
+| `0001-parser-stop-at-scope-limit` | Scope indexes are 16-bit operands with no limit, so a function with more than 65535 block scopes resolved variables against the wrong scope (an initialised `let` read as uninitialised). The parser now raises a SyntaxError and stops at the next token. | bellard/quickjs#610, point 10 |
+| `0002-zero-length-copies` | `memcpy`/`memcmp` with a NULL pointer and length 0, undefined behaviour, in typed-array `slice` after a species constructor shrinks the buffer and in empty `\q{}` alternatives of `v`-flag classes. | #610, points 7 and 8 |
+| `0003-sum-precise-renormalize-before-overflow` | `Math.sumPrecise` let a 56-bit limb pass 2^63 between renormalisations and returned a wrong sum for 300 values near 2^53. | #610, point 9 |
+| `0004-async-generator-drain-queue` | A completed async generator settled one queued request and left the rest pending forever, and `next()` calls queued behind `return()` never settled. | #610, point 5 |
+| `0005-number-parser-clamp-exponent` | `js_atod` overflowed an `int` adjusting a huge decimal exponent, so `"1000000000e2147483639"` parsed as 0. | fork `12bc082` |
+| `0006-normalize-linear-canonical-ordering` | Canonical ordering of combining marks was an insertion sort, so `normalize()` on 200 000 marks took 27 s. Long runs are now counting-sorted. | fork `877dc65` |
+| `0007-allocator-refuse-oversized-requests` | The block allocator's size rounding wrapped for requests near `SIZE_MAX` and returned a tiny block. | fork `55b3317` |
+| `0008-concat-in-place-skip-atoms` | In-place concatenation could grow a string that is also an atom, so property lookups by that atom missed. | fork `d766a7f` |
+| `0009-oom-leaks-and-null-derefs` | A leak in `BigInt` `**` on a thrown RangeError, and NULL dereferences or unchecked buffers on allocation failure in bound functions, class brands and destructuring. | fork `8d4fd06` |
+| `0010-bjson-reset-sab-mark` | Refusing a SharedArrayBuffer left its cycle mark set, so the next write reported a circular reference. | fork `7b714f0` |
+| `0011-bjson-reader-holds-object-refs` | The BJSON reader's back-reference table held no references, so a duplicate key could free an object the table still named. | fork `15a00d4` |
+| `0012-array-loops-poll-interrupts` | The generic `Array.prototype` loops never polled the interrupt handler, so `includes` on `{length: 2**53 - 1}` could not be stopped. | fork `dc611ad` |
+
+The rest of #610 is outside this build: points 1 to 4, 6 and 11 are in
+Temporal, Intl and `quickjs-libc.c`, point 12 is not reachable from
+script, and upstream treats bytecode as trusted. Points 1 and 2, the two
+high-severity Temporal reports, are fixed upstream at `f2e4461`. The
+quickjs-ng fork shared points 5 and 10 and carries the same fixes; it
+already had points 7 and 8. Of the fork's other security fixes, eight
+did not apply: Bellard's code already had the fix, or lacks the feature
+(string slices, the regexp and symbol serializer tags, `prepareStackTrace`).
+
+### Moving to a newer upstream commit
+
+```sh
+scripts/bump-bellard-quickjs.sh            # newest master
+scripts/bump-bellard-quickjs.sh <commit>   # a given commit
+```
+
+The script rewrites `revision` in the wrap, deletes `subprojects/quickjs/`
+and fetches again, which applies the patches. It fails when a patch no
+longer applies: that is usually upstream having fixed the same fault, so
+check the upstream commit, drop the patch from `diff_files` and the table
+above, and rerun. Then reconfigure, drop any adapter shim for a call
+upstream now exports (as `JS_ToObject` was dropped at `84e723f`), and rerun
+the checks below.
 
 ## The adapter: `src/ns_quickjs.h`
 
