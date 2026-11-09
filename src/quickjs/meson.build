@@ -37,6 +37,7 @@ qjs_srcs = files(
   'libregexp.c',
   'libunicode.c',
   'quickjs.c',
+  'quickjs-cage.c',
   'quickjs-temporal.c',
   'quickjs-temporal-calendar.c',
   'quickjs-temporal-calendars.c',
