@@ -3,6 +3,13 @@ Changelog:
 
 1.0.46-dev:
 ======
+* QuickJS robustness: `JS_ReadObject` rejects a symbol tag that names a
+  string atom and no longer leaks an atom reference per symbol read; the
+  writer clears its cycle mark when it refuses a SharedArrayBuffer, so the
+  next serialization of that buffer does not report a false circular
+  reference, and skips the tombstone records a suspended Map/Set iterator
+  leaves behind instead of misaligning the stream; shrinking `length` on a
+  sparse array with many index properties now removes all of them.
 * QuickJS robustness: number parsing clamps the decimal exponent before
   adjusting it, so `Number("0.0000000001e-2147483639")` is 0 rather than
   the result of a signed overflow; a function with more than 65534 scopes

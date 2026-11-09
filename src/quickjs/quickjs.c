@@ -11647,8 +11647,13 @@ static int set_array_length(JSContext *ctx, JSObject *p, JSValue val,
                     }
                 }
 
-                for(i = 0, pr = get_shape_prop(sh); i < sh->prop_count;
-                    i++, pr++) {
+                /* iterate downwards: delete_property() may compact the
+                   shape, which renumbers the remaining properties; after a
+                   compaction the already visited (higher) entries are the
+                   ones that moved, so resuming below the new count never
+                   skips an entry. */
+                for(i = sh->prop_count - 1; i >= 0; i--) {
+                    pr = &get_shape_prop(sh)[i];
                     if (pr->atom != JS_ATOM_NULL &&
                         JS_AtomIsArrayIndex(ctx, &idx, pr->atom)) {
                         if (idx >= cur_len) {
@@ -11656,7 +11661,8 @@ static int set_array_length(JSContext *ctx, JSObject *p, JSValue val,
                             delete_property(ctx, p, pr->atom);
                             /* WARNING: the shape may have been modified */
                             sh = p->shape;
-                            pr = &get_shape_prop(sh)[i];
+                            if (i > sh->prop_count)
+                                i = sh->prop_count;
                         }
                     }
                 }
@@ -42989,8 +42995,10 @@ static int JS_WriteObjectRec(BCWriterState *s, JSValueConst obj)
                 ret = JS_WriteArrayBuffer(s, obj);
                 break;
             case JS_CLASS_SHARED_ARRAY_BUFFER:
-                if (!s->allow_sab)
+                if (!s->allow_sab) {
+                    p->tmp_mark = 0;
                     goto invalid_tag;
+                }
                 ret = JS_WriteSharedArrayBuffer(s, obj);
                 break;
             case JS_CLASS_REGEXP:
@@ -44377,8 +44385,14 @@ static JSValue JS_ReadObjectRec(BCReaderState *s)
                 obj = JS_AtomToValue(s->ctx, atom);
             } else {
                 JSAtomStruct *p = s->ctx->rt->atom_array[atom];
+                if (p->atom_type != JS_ATOM_TYPE_SYMBOL &&
+                    p->atom_type != JS_ATOM_TYPE_GLOBAL_SYMBOL) {
+                    JS_FreeAtom(s->ctx, atom);
+                    return JS_ThrowSyntaxError(ctx, "invalid symbol atom");
+                }
                 obj = JS_NewSymbolFromAtom(s->ctx, atom, p->atom_type);
             }
+            JS_FreeAtom(s->ctx, atom);
         }
         break;
     default:
@@ -58820,6 +58834,8 @@ static int js_map_write(BCWriterState *s, struct JSMapState *map_state,
     if (map_state) {
         list_for_each(el, &map_state->records) {
             mr = list_entry(el, JSMapRecord, link);
+            if (mr->empty)
+                continue;
             if (JS_WriteObjectRec(s, mr->key))
                 return -1;
             // mr->value is always JS_UNDEFINED for sets
