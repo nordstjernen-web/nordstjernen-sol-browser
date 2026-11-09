@@ -38,7 +38,7 @@ from upstream keep merging cleanly into `src/quickjs/`.
 | 2c | Inventory of raw host and function pointers left in the heap | **done**, kept current below |
 | 3p | Trusted runtime structures and context table (preparation for 3a and 3b) | **done** |
 | 3a.1 | Caged values: 8-byte `JSValue` holding a 32-bit cage offset, cage owned by the engine | **done** |
-| 3a.2 | Compressed pointer fields inside heap structures | planned |
+| 3a.2 | Compressed pointer fields inside heap structures | **batches 2 and 3 done**: shape, property array, prototype, shape hash chain, fast-array values, closure variables, home object |
 | 3b | Trusted space for bytecode and saved frames | planned |
 
 Stage 1b, moving cookies, HSTS, the HTTP cache and storage behind the
@@ -290,16 +290,27 @@ cage, the same primitive the arena bypass removed.
 | Field | Sites | Batch |
 |---|---|---|
 | `JSGCObjectHeader.link`, `JSTypedArray.link`, other `list_head` members in cage objects | 20 direct, plus the `list.h` macro uses over those lists | 1 |
-| `JSObject.shape`, `JSObject.prop`, `JSShape.proto`, `JSShape.shape_hash_next` | 55, 43, 29, 9 | 2 |
-| `JSObject.u.array.u.values`, `u.array.u.var_refs`, `u.func.var_refs`, `u.func.home_object` | 41, 13, 11 | 3 |
+| `JSObject.shape`, `JSObject.prop`, `JSShape.proto`, `JSShape.shape_hash_next` | 55, 43, 29, 9 | 2, **done** |
+| `JSObject.u.array.u.values`, `u.array.u.var_refs`, `u.func.var_refs`, `u.func.home_object` | 41, 13, 11 | 3, **done** |
 | `JSFunctionBytecode.cpool`, `byte_code_buf`, `closure_var`, `vardefs` | 26, 22, and the parser's writers | 4 (overlaps 3b) |
 | `JSString.parent` and rope children, `first_weak_ref` on objects and strings | 39, 10 | 5 |
 | internal class structs reached from `u.opaque` (`JSArrayBuffer`, `JSTypedArray`, `JSMapState`, …) | per struct | 6 |
 
 Each batch is a mechanical rewrite in the style of stage 2a: the field
-becomes `uint32_t`, reads go through `js_cptr_T(field)` and writes
-through `js_cref(ptr)`, with offset zero meaning `NULL`. Each batch is
-benchmarked with sitebench before it merges.
+is declared `JS_CPTR(T)`, which is `uint32_t` under cage boxing and `T`
+otherwise, reads go through `js_cload(T, field)` and writes through
+`js_cstore(field, ptr)`, with offset zero meaning `NULL` (the allocator
+never hands out offset zero). Each batch is benchmarked with sitebench
+before it merges.
+
+Batches 2 and 3 are done: every `JSObject` now holds its shape, property
+array, fast-array values, mapped-arguments and closure variable arrays
+and home object as 32-bit offsets, and every `JSShape` its prototype and
+hash-chain link. The two engine paths that took the address of the
+shape field now work on a local and store it back; the shape hash unlink
+walks the chain with explicit previous and current pointers instead of a
+pointer to pointer. The allocation stress script runs in 0.33 s and
+176 MB, down from 179 MB; `qjs -d` reports `JSObject` at 72 bytes.
 
 Trusted bytecode space allocates `JSFunctionBytecode`, its opcode buffer,
 closure tables and the saved frames of generators and async functions

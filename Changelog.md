@@ -3,6 +3,12 @@ Changelog:
 
 1.0.46-dev:
 ======
+* Security: the pointer fields inside JavaScript objects and shapes are
+  now 32-bit cage offsets rather than raw addresses (stage 3a.2, batches
+  2 and 3 of `docs/heap-hardening.md`): an object's shape, property
+  array, fast-array values, mapped-arguments and closure variable arrays
+  and home object, and a shape's prototype and hash-chain link. A
+  corrupted field can therefore only name cage memory.
 * CI: the scheduled `sysroot-bump` workflow no longer fails when the
   repository forbids GitHub Actions from opening pull requests; it pushes the
   bump branch, warns with the compare link and the two ways to enable the
