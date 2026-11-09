@@ -109,6 +109,15 @@ is masked into the cage (`js_abuf_data()`, `js_ta_ptr()`), and with
   that named a context (function realms, jobs, finalization records,
   Atomics waiters, ShadowRealm) holds a masked index instead.
 
+**Runtime tables.** The atom table, the atom hash and the shape hash
+hold raw pointers or indexes the engine trusts, so they are trusted
+blocks outside the cage like the runtime itself. Atom indexes still
+arrive from the cage (in shapes, in an atom's hash chain), so every
+lookup that can be reached from heap data goes through
+`js_atom_struct`, which aborts on an index past the table or on a free
+slot, and releasing a symbol atom checks that the index its in-cage
+header names really holds it before writing the slot.
+
 **Caged values.** Under `JS_CAGE_BOXING` (default on 64-bit builds
 without ASan) a `JSValue` is 8 bytes whose pointer payload is a 32-bit
 cage offset, so no property slot, array element, stack slot, constant
@@ -156,7 +165,7 @@ the table keeps the ones still open.
 | # | Finding | Reach | State |
 |---|---|---|---|
 | C1 | The free, realloc and size paths chose between the cage allocator, libc and the arena by the 8-byte block header inside the cage. A forged "trusted" header made libc `free()` or `realloc()` a cage address (a house-of-spirit on the libc heap); a forged arena header made the free path write and decrement through an address computed from header fields | outside the cage | fixed: the block's address decides |
-| C2 | `rt->atom_array` (`JSAtomStruct *`) and `rt->shape_hash` (`JSShape *`) are allocated from the cage, so their raw entries are attacker-writable | arbitrary read, reference-count increment and decrement anywhere | open |
+| C2 | `rt->atom_array` (`JSAtomStruct *`) and `rt->shape_hash` (`JSShape *`) were allocated from the cage, so their raw entries were attacker-writable | arbitrary read, reference-count increment and decrement anywhere | fixed: trusted memory, bounded atom lookups |
 | C3 | WebAssembly's runtime allocations (module and memory instances with `memory_data` and bounds, import function pointers, the execution stack) all come from the cage, not only linear memory | arbitrary read and write, native calls | open |
 | H1 | `rt->class_array[p->class_id]` indexes trusted memory with the in-cage class id unchecked, and calls the `call`, `finalizer`, `gc_mark` and `exotic` pointers it reads | function pointers read from the libc heap | open |
 | H2 | The code-pointer table is untyped: a forged index calls any registered native function through another signature (an ArrayBuffer realloc hook, a C function under a different `cproto`) | signature confusion | open |

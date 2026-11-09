@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: the JavaScript engine's atom table, atom hash and shape hash
+  now live outside the heap cage. The atom table and shape hash hold raw
+  pointers the engine reads strings through and counts references on, so
+  a corrupted heap that overwrote one entry had an arbitrary read and an
+  increment or decrement anywhere in the process. Atom indexes read from
+  the heap are now bounds-checked against the table
+  (`docs/heap-hardening.md`, review finding C2).
 * Security: a corrupted JavaScript heap can no longer make the engine
   hand heap memory to the C library's `free()`. The engine chose how to
   release a block from a header stored inside the heap cage; a forged
