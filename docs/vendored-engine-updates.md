@@ -33,6 +33,20 @@ not compiled; the build is the final gate. After a QuickJS refresh, also build
 `-Dquickjs=quickjs` and fix the adapter if the binding changed (see
 [`quickjs.md`](quickjs.md)).
 
+The QuickJS fork carries the heap hardening described in
+[`heap-hardening.md`](heap-hardening.md), which touches `quickjs.c` in a
+way a refresh has to re-apply by hand on every hunk upstream changes:
+the cage and pointer-table block near the top of the file, the trusted
+block path in the arena front end, and the mechanical rewrites that
+read and write pointer fields through `js_cload` / `js_cstore`, the
+buffer pointers through `js_abuf_data` / `js_ta_ptr`, and host, code and
+context pointers through their tables. When upstream adds a pointer
+field to a heap structure, declare it `JS_CPTR(T)` and convert its sites
+the same way; when upstream adds a native-pointer or `JSContext *`
+field, route it through the matching table. The encoder aborts on a
+pointer from outside the cage, so a missed conversion fails loudly in
+the first test run rather than silently.
+
 ## 2026-11-04 — QuickJS 7b5f588 → 1b519fa (0.18.0)
 
 | | value |

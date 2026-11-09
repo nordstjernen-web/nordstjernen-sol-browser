@@ -980,33 +980,78 @@ static int unicode_get_cc(uint32_t c)
     }
 }
 
-static void sort_cc(int *buf, int len)
+static void sort_cc_run_insertion(int *buf, int start, int end)
 {
-    int i, j, k, cc, cc1, start, ch1;
+    int j, k, cc1, ch1;
+
+    for(j = start + 1; j < end; j++) {
+        ch1 = buf[j];
+        cc1 = unicode_get_cc(ch1);
+        k = j - 1;
+        while (k >= start && unicode_get_cc(buf[k]) > cc1) {
+            buf[k + 1] = buf[k];
+            k--;
+        }
+        buf[k + 1] = ch1;
+    }
+}
+
+/* stable counting sort on the combining class (< 256); 'tmp' holds
+   2 * (end - start) entries */
+static void sort_cc_run_counting(int *buf, int start, int end, int *tmp)
+{
+    int count[257], i, len, *ccs, *out;
+
+    len = end - start;
+    ccs = tmp;
+    out = tmp + len;
+    memset(count, 0, sizeof(count));
+    for(i = 0; i < len; i++) {
+        ccs[i] = unicode_get_cc(buf[start + i]);
+        count[ccs[i] + 1]++;
+    }
+    for(i = 1; i < 257; i++)
+        count[i] += count[i - 1];
+    for(i = 0; i < len; i++)
+        out[count[ccs[i]]++] = buf[start + i];
+    memcpy(buf + start, out, len * sizeof(*buf));
+}
+
+#define SORT_CC_SMALL_RUN 32
+
+/* Canonical ordering: stable sort of each run of non-starters by combining
+   class. The insertion sort is quadratic in the run length, which a string
+   of alternating combining marks turns into an uninterruptible CPU sink, so
+   long runs use a linear counting sort when a temporary buffer can be
+   allocated. */
+static void sort_cc(int *buf, int len, void *opaque,
+                    DynBufReallocFunc *realloc_func)
+{
+    int i, j, run_len, *tmp = NULL, tmp_len = 0;
 
     for(i = 0; i < len; i++) {
-        cc = unicode_get_cc(buf[i]);
-        if (cc != 0) {
-            start = i;
-            j = i + 1;
-            while (j < len) {
-                ch1 = buf[j];
-                cc1 = unicode_get_cc(ch1);
-                if (cc1 == 0)
-                    break;
-                k = j - 1;
-                while (k >= start) {
-                    if (unicode_get_cc(buf[k]) <= cc1)
-                        break;
-                    buf[k + 1] = buf[k];
-                    k--;
-                }
-                buf[k + 1] = ch1;
-                j++;
+        if (unicode_get_cc(buf[i]) == 0)
+            continue;
+        j = i + 1;
+        while (j < len && unicode_get_cc(buf[j]) != 0)
+            j++;
+        run_len = j - i;
+        if (run_len > SORT_CC_SMALL_RUN && tmp_len < run_len) {
+            int *p = realloc_func(opaque, tmp,
+                                  2 * (size_t)run_len * sizeof(*tmp));
+            if (p) {
+                tmp = p;
+                tmp_len = run_len;
             }
-            i = j;
         }
+        if (run_len > SORT_CC_SMALL_RUN && tmp_len >= run_len)
+            sort_cc_run_counting(buf, i, j, tmp);
+        else
+            sort_cc_run_insertion(buf, i, j);
+        i = j;
     }
+    if (tmp)
+        realloc_func(opaque, tmp, 0);
 }
 
 static void to_nfd_rec(DynBuf *dbuf,
@@ -1094,7 +1139,7 @@ int unicode_normalize(uint32_t **pdst, const uint32_t *src, int src_len,
     buf = (int *)dbuf->buf;
     buf_len = dbuf->size / sizeof(int);
 
-    sort_cc(buf, buf_len);
+    sort_cc(buf, buf_len, opaque, realloc_func);
 
     if (buf_len <= 1 || (n_type & 1) != 0) {
         /* NFD / NFKD */

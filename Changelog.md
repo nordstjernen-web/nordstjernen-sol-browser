@@ -22,6 +22,166 @@ Changelog:
   `ref-filled-green-100px-square.xht` shows its green square; in
   css/CSS2/margin-padding-clear and css/CSS2/abspos 578 more reftests
   pass (606 of 711, was 29).
+* Security: the pointer fields inside JavaScript objects and shapes are
+  now 32-bit cage offsets rather than raw addresses (stage 3a.2, batches
+  2 and 3 of `docs/heap-hardening.md`): an object's shape, property
+  array, fast-array values, mapped-arguments and closure variable arrays
+  and home object, a shape's prototype and hash-chain link, and the
+  opcode, constant-pool, closure-variable, variable-definition and line
+  tables of compiled functions, the weak-reference chains of objects and
+  symbols, string-slice parents, and every internal class structure
+  behind the object's opaque slot (ArrayBuffer, typed arrays, Map and
+  Set, Proxy, promises, generators, iterators, bound functions and the
+  bytecode pointer of functions). A corrupted field can therefore only
+  name cage memory, and the encoder refuses a pointer from outside the
+  cage instead of truncating it. Intl objects keep their libc-allocated
+  structure in the tagged pointer table.
+  tables of compiled functions. A corrupted field can therefore only name
+  cage memory.
+  and home object, and a shape's prototype and hash-chain link. A
+  corrupted field can therefore only name cage memory.
+* CI: the scheduled `sysroot-bump` workflow no longer fails when the
+  repository forbids GitHub Actions from opening pull requests; it pushes the
+  bump branch, warns with the compare link and the two ways to enable the
+  pull request (the Actions workflow-permission setting or the
+  `SYSROOT_BUMP_TOKEN` secret), and ends green.
+* QuickJS robustness: `String.prototype.normalize` and `localeCompare`
+  sorted each run of combining marks with an insertion sort, so a string of
+  alternating marks cost time quadratic in its length (200,000 marks took
+  29 s, with no way to interrupt it). Long runs now use a linear counting
+  sort on the combining class (8 ms for the same input).
+* QuickJS robustness: `JS_ReadObject` rejects a symbol tag that names a
+  string atom and no longer leaks an atom reference per symbol read; the
+  writer clears its cycle mark when it refuses a SharedArrayBuffer, so the
+  next serialization of that buffer does not report a false circular
+  reference, and skips the tombstone records a suspended Map/Set iterator
+  leaves behind instead of misaligning the stream; shrinking `length` on a
+  sparse array with many index properties now removes all of them.
+* QuickJS robustness: number parsing clamps the decimal exponent before
+  adjusting it, so `Number("0.0000000001e-2147483639")` is 0 rather than
+  the result of a signed overflow; a function with more than 65534 scopes
+  is a SyntaxError instead of wrapping scope indexes; `Atomics.wait`
+  timeouts beyond the nanosecond range wait indefinitely instead of
+  overflowing; `JS_GetUint8Array` reports the current length of a
+  length-tracking view over a shrunk resizable buffer.
+* QuickJS robustness: `Array.prototype` `copyWithin`, `concat`, `reverse`,
+  `slice`/`splice`, `flat`, `sort` and `fill` now poll the interrupt handler
+  in their generic loops, so an array-like with a length near 2^53 and no
+  elements can no longer spin the renderer past the script watchdog.
+* QuickJS robustness: `BigInt` exponentiation no longer leaks its running
+  product when the result is too large; setting `Error.stackTraceLimit`
+  releases the previous value and a non-function `Error.prepareStackTrace`
+  no longer leaks a reference per error; a failed allocation in
+  `Function.prototype.bind`, in destructuring-label allocation or while
+  emitting a class brand check now fails cleanly instead of dereferencing a
+  null pointer or writing before the label array.
+* Security (QuickJS): the runtime allocators refuse requests above a
+  quarter of the address space. Sizes close to `SIZE_MAX` (a negative length
+  converted to an unsigned size) wrapped in the arena's header and alignment
+  arithmetic and in the memory-limit check, turning such a request into a
+  tiny block instead of an out-of-memory failure.
+* Security (QuickJS): string concatenation appended in place to a string
+  that was the last reference to a registered property-name atom, leaving
+  the atom table holding the old hash for the new contents; two distinct
+  atoms could then spell the same property name. In-place appends now skip
+  atom strings.
+* Security (QuickJS): a property key taken from a substring longer than
+  1 KiB became an atom that still referenced the parent string, and freeing
+  the atom never released that reference; a page looping over such keys
+  grew memory without bound and the engine could not reclaim it.
+* Security: JavaScript values are now 8 bytes and hold a 32-bit offset
+  into the heap cage instead of a raw pointer (`JS_CAGE_BOXING`, stage
+  3a.1 of `docs/heap-hardening.md`), so a property slot, array element,
+  stack slot or constant can only ever name memory inside the cage, and
+  all of them take half the space. The cage moved into the engine
+  (`src/quickjs/quickjs-cage.c`): `JS_NewRuntime()` reserves it on first
+  use and the in-tree `qjs`/`qjsc` tools run the same layout as the
+  browser. It is 4 GB per process and the runtime refuses to start
+  without it; AddressSanitizer and 32-bit builds keep the classic
+  layouts. `NS_JS_HEAP_CAGE=0` is gone.
+* Security: the JavaScript runtime and every context now live in trusted
+  memory outside the heap cage, and heap objects refer to a context
+  through an index into a trusted context table instead of a raw
+  pointer (C functions, bytecode, wrapped functions, promise jobs,
+  FinalizationRegistry records, Atomics waiters, auto-init property
+  records). The job-queue and C-module init function pointers join the
+  code pointer table. A forged realm can therefore only select a live
+  context, and the class table with its finalizer and call hooks is out
+  of reach of a corrupted heap (stage 3p of `docs/heap-hardening.md`).
+* Security: host objects and native function pointers no longer sit as
+  raw addresses in JavaScript heap objects (stage 2b of
+  `docs/heap-hardening.md`). `JS_SetOpaque` stores the browser's DOM
+  nodes, WebGPU handles, workers, sockets and other host pointers in a
+  table outside the heap cage tagged with the class id, and
+  `JS_GetOpaque` returns nothing when the tag does not match; C function
+  objects, C-function data records, C closures and ArrayBuffer
+  reallocation hooks hold an index into an append-only code pointer
+  table instead of a code address. A corrupted heap can therefore at
+  most name another live object of the same class or another registered
+  function, never an arbitrary address. The document gains an inventory
+  of the raw pointers that remain and the stage that removes each.
+* Security: ArrayBuffer data pointers and the cached typed-array element
+  pointers are now masked into the JavaScript heap cage on every read, so
+  a forged buffer with an arbitrary address and length reaches cage or
+  guard memory only (stage 2a of `docs/heap-hardening.md`). Every
+  ArrayBuffer backing store must now lie inside the cage: WebAssembly
+  linear memory and WAMR's own allocations come from a shared heap inside
+  it, and WebGPU `getMappedRange()` returns a cage copy that is written
+  back on `unmap()` instead of aliasing the driver's memory.
+* Security (QuickJS): `dbuf_printf` passed a negative `vsnprintf` result
+  (an oversized width or precision) to the buffer as an unsigned length,
+  which copied until the process faulted; it now records an error instead.
+  `std.sprintf`/`printf` in the `qjs` tool also reject widths and precisions
+  over nine digits.
+* Security (QuickJS): `JS_WriteObject` (structured clone for `postMessage`
+  and IndexedDB) fetched array elements with an ordinary property get, so an
+  accessor on the array or on `Array.prototype` ran page code while the
+  serializer still held raw shape and Map-record pointers of the enclosing
+  objects (use-after-free). Only own data properties are written now; an
+  accessor element is a TypeError and a hole serializes as `undefined`.
+* Security (QuickJS): `JS_ReadObject` with object references kept only raw
+  pointers to the objects it had created; a serialized object with a repeated
+  property name, or a Map with a repeated key, freed the earlier value while
+  a later back-reference could still name it (use-after-free). The reader
+  now holds a reference to every table entry until it finishes.
+* Security: the JavaScript heap now lives in its own reserved address
+  range (`src/js_cage.c`), separate from the process heap that holds the
+  DOM, layout, network buffers and IPC framing, with inaccessible guard
+  regions on both sides. Every QuickJS runtime (page, dedicated worker,
+  extension host) allocates from a heap of its own inside that range
+  through the engine's public allocator hook, so the engine source is
+  untouched. The allocator keeps all bookkeeping outside the range,
+  decommits released memory and aborts on foreign, misaligned or repeated
+  frees. This is the first stage of the V8-style heap hardening tracked
+  in `docs/heap-hardening.md`; `NS_JS_HEAP_CAGE=0` falls back to the
+  process heap.
+* Security (QuickJS): a RegExp read back with `JS_ReadObject` (structured
+  clone for `postMessage` and IndexedDB) carried its compiled regexp bytecode
+  verbatim, and only the header was validated before the regexp executor
+  ran it. The reader now keeps the pattern and flags and recompiles the
+  expression, so no bytecode from the serialized form is ever executed.
+* Security (QuickJS): the rejection handler `AsyncDisposableStack` chains
+  onto a disposer's returned promise was created with length 0 and read its
+  first argument unconditionally; a page that replaced `Promise.prototype.then`
+  and called the handler with no arguments made the engine read past the
+  argument array. The handler is now declared with length 1 and checks the
+  argument count.
+* Security (QuickJS): `FinalizationRegistry.prototype.unregister` freed each
+  matching entry's held value while still walking the registry's entry list;
+  when that value was the target of the next entry, the next entry was freed
+  under the loop (use-after-free). Matching entries are now unlinked first and
+  freed afterwards, as the registry finalizer already does.
+* Security (QuickJS): a function whose captured-variable count exceeded
+  65535 (reachable with a direct `eval` in a function with tens of thousands
+  of parameters and locals) had that count and the per-variable indexes
+  truncated to 16 bits, so the interpreter read and wrote `var_refs` slots
+  outside the frame. Compilation now fails with a SyntaxError, as it already
+  does for too many arguments, locals or closure variables.
+* Security (QuickJS): `for (await using x of y)` inside a non-async function
+  (in module code or a class static block) was accepted by the parser; the
+  resulting `await` ran in an ordinary frame and left closures pointing at a
+  dead C stack. The parser now rejects it with a SyntaxError, as it already
+  did for the other `await using` forms.
 * WebDriver: `nordstjernen --webdriver[=PORT]` serves the W3C WebDriver
   protocol on the loopback interface, so Selenium, WebdriverIO and other
   clients can drive the browser (`browserName: "nordstjernen"`). The server

@@ -4,6 +4,7 @@
  */
 
 #include "js.h"
+#include "js_cage.h"
 #include "js_classid.h"
 #include "capability.h"
 
@@ -30369,7 +30370,7 @@ ns_worker_js_new(ns_worker_host *host)
     js->pinned_wrappers_set = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->perf_entries = g_ptr_array_new_with_free_func(ns_perf_entry_free);
 
-    js->rt = JS_NewRuntime();
+    js->rt = ns_js_runtime_new();
     if (!js->rt) {
         ns_worker_js_abandon(js);
         return NULL;
@@ -30387,7 +30388,7 @@ ns_worker_js_new(ns_worker_host *host)
     js->ctx = JS_NewContext(js->rt);
     if (js->ctx) ns_js_add_engine_private_names(js->ctx);
     if (!js->ctx) {
-        JS_FreeRuntime(js->rt);
+        ns_js_runtime_free(js->rt);
         ns_worker_js_abandon(js);
         return NULL;
     }
@@ -63242,7 +63243,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     }
     ns_js_coarsen_navigation_timing(js);
     js->perf_entries         = g_ptr_array_new_with_free_func(ns_perf_entry_free);
-    js->rt = JS_NewRuntime();
+    js->rt = ns_js_runtime_new();
     if (js->rt) {
         const ns_config *c = ns_config_get();
         int mb = c ? c->js_memory_cap_mb : 2048;
@@ -63258,7 +63259,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     if (!js->rt) { g_free(js); return NULL; }
     js->ctx = JS_NewContext(js->rt);
     if (js->ctx) ns_js_add_engine_private_names(js->ctx);
-    if (!js->ctx) { JS_FreeRuntime(js->rt); g_free(js); return NULL; }
+    if (!js->ctx) { ns_js_runtime_free(js->rt); g_free(js); return NULL; }
     JS_AddEnginePrivateName(js->ctx, "__ndRealmDoc");
     JS_AddEnginePrivateName(js->ctx, "__ndRealmWindow");
     js->main_realm_ctx = js->ctx;
@@ -67491,7 +67492,7 @@ ns_js_free(ns_js *js)
         js->frame_ctxs = NULL;
     }
     JS_FreeContext(js->ctx);
-    JS_FreeRuntime(js->rt);
+    ns_js_runtime_free(js->rt);
     ns_set_active_js(resume_active);
     g_free(js);
 }

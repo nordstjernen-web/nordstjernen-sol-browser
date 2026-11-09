@@ -74,6 +74,31 @@ GPU API on, the filter must allow executable mappings, because the GPU
 drivers behind them (Mesa's llvmpipe among them) compile shaders to
 machine code; a separate GPU process would lift that.
 
+### JavaScript heap cage (`src/quickjs/quickjs-cage.c`)
+
+Every QuickJS allocation in a renderer comes from one reserved 4 GB range
+of address space with inaccessible guard regions on both sides, separate
+from the process heap that holds the DOM, layout state, network buffers
+and IPC framing. The allocator keeps all of its bookkeeping outside that
+range, so a corrupted JavaScript heap cannot steer it, and it aborts on a
+foreign, misaligned or repeated free. Released memory is decommitted and
+made inaccessible. ArrayBuffer data pointers and typed-array element
+pointers are masked into the range on every read, and every backing
+store (WebAssembly linear memory and WebGPU mapped ranges included) must
+lie inside it, so a forged buffer reaches cage or guard memory only.
+Host pointers behind `JS_SetOpaque` live in a class-tagged table outside
+the range, and native function pointers held by heap objects are
+indices into an append-only code pointer table, so a corrupted object
+can name another live object of the same class or another registered
+function at worst, never an arbitrary address. The runtime and its
+contexts live outside the range and are reached from the heap only
+through a trusted context table. JavaScript values are 8-byte words whose
+pointer half is a 32-bit offset into the range, so a value can only name
+cage memory.
+This is exploit-cost hardening on the way to a V8-style heap sandbox,
+not yet a boundary of its own; the staged plan and its measurements are
+in `docs/heap-hardening.md`.
+
 ### GPU shader validation (`src/glsl_validate.c`, `src/webgpu.c`)
 
 Page shaders never reach a GPU driver unchecked. Every WebGL shader is

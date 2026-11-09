@@ -67,7 +67,8 @@ typedef struct {
 
 typedef struct { WGPUErrorType type; char *message; } ns_wg_pending_error;
 typedef struct { WGPUQueue queue; ns_wg_error_sink *sink; } ns_wg_queue;
-typedef struct { WGPUBuffer buffer; uint64_t size; uint32_t usage; WGPUDevice device; GArray *mapped_ranges; gboolean range_escaped; gboolean mapped; uint64_t map_offset; uint64_t map_size; } ns_wg_buffer;
+typedef struct { JSValue ab; uint8_t *mapped; size_t size; } ns_wg_mapped_range;
+typedef struct { WGPUBuffer buffer; uint64_t size; uint32_t usage; WGPUDevice device; GArray *mapped_ranges; gboolean mapped; uint64_t map_offset; uint64_t map_size; uint32_t map_mode; } ns_wg_buffer;
 typedef struct { WGPUQuerySet qs; } ns_wg_queryset;
 typedef struct { WGPUComputePipeline pipe; } ns_wg_compute_pipe;
 typedef struct { WGPUComputePassEncoder pass; } ns_wg_compute_pass;
@@ -719,18 +720,19 @@ wg_buffer_detach_ranges(JSContext *ctx, ns_wg_buffer *b)
     if (!b) return FALSE;
     if (b->mapped_ranges) {
         for (guint i = 0; i < b->mapped_ranges->len; i++) {
-            JSValue ab = g_array_index(b->mapped_ranges, JSValue, i);
+            ns_wg_mapped_range *r = &g_array_index(b->mapped_ranges, ns_wg_mapped_range, i);
             size_t len = 0;
-            if (!JS_GetArrayBuffer(ctx, &len, ab)) {
+            uint8_t *data = JS_GetArrayBuffer(ctx, &len, r->ab);
+            if (!data)
                 JS_FreeValue(ctx, JS_GetException(ctx));
-                b->range_escaped = TRUE;
-            }
-            JS_DetachArrayBuffer(ctx, ab);
-            JS_FreeValue(ctx, ab);
+            else if (b->map_mode == WGPUMapMode_Write && len == r->size)
+                memcpy(r->mapped, data, len);
+            JS_DetachArrayBuffer(ctx, r->ab);
+            JS_FreeValue(ctx, r->ab);
         }
         g_array_set_size(b->mapped_ranges, 0);
     }
-    return !b->range_escaped;
+    return TRUE;
 }
 
 static void
@@ -740,7 +742,7 @@ wg_buffer_finalizer(JSRuntime *rt, JSValue val)
     if (!b) return;
     if (b->mapped_ranges) {
         for (guint i = 0; i < b->mapped_ranges->len; i++)
-            JS_FreeValueRT(rt, g_array_index(b->mapped_ranges, JSValue, i));
+            JS_FreeValueRT(rt, g_array_index(b->mapped_ranges, ns_wg_mapped_range, i).ab);
         g_array_free(b->mapped_ranges, TRUE);
     }
     if (b->buffer) wgpuBufferRelease(b->buffer);
@@ -764,9 +766,9 @@ wg_buffer_destroy(JSContext *ctx, JSValueConst this_val,
 static void *
 wg_ab_free(JSRuntime *rt, void *opaque, void *ptr, size_t size)
 {
-    (void)ptr;
     if (size != 0)
         return NULL;
+    js_free_rt(rt, ptr);
     if (opaque) {
         JSValue *held = opaque;
         JS_FreeValueRT(rt, *held);
@@ -802,19 +804,24 @@ wg_buffer_getMappedRange(JSContext *ctx, JSValueConst this_val,
             "within the mapped range");
     void *p = wgpuBufferGetMappedRange(b->buffer, (size_t)offset, (size_t)sz);
     if (!p) return JS_ThrowRangeError(ctx, "getMappedRange failed");
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    uint8_t *copy = js_malloc_rt(rt, sz ? (size_t)sz : 1);
+    if (!copy) return JS_ThrowOutOfMemory(ctx);
+    memcpy(copy, p, (size_t)sz);
     JSValue *held = g_new(JSValue, 1);
     *held = JS_DupValue(ctx, this_val);
-    JSValue ab = JS_NewArrayBuffer(ctx, (uint8_t *)p, (size_t)sz, 0, wg_ab_free,
+    JSValue ab = JS_NewArrayBuffer(ctx, copy, (size_t)sz, 0, wg_ab_free,
                                    held, false);
     if (JS_IsException(ab)) {
         JS_FreeValue(ctx, *held);
         g_free(held);
+        js_free_rt(rt, copy);
         return ab;
     }
     if (!b->mapped_ranges)
-        b->mapped_ranges = g_array_new(FALSE, FALSE, sizeof(JSValue));
-    JSValue keep = JS_DupValue(ctx, ab);
-    g_array_append_val(b->mapped_ranges, keep);
+        b->mapped_ranges = g_array_new(FALSE, FALSE, sizeof(ns_wg_mapped_range));
+    ns_wg_mapped_range range = { JS_DupValue(ctx, ab), (uint8_t *)p, (size_t)sz };
+    g_array_append_val(b->mapped_ranges, range);
     return ab;
 }
 
@@ -863,6 +870,7 @@ wg_buffer_mapAsync(JSContext *ctx, JSValueConst this_val,
     b->mapped = TRUE;
     b->map_offset = (uint64_t)offset;
     b->map_size = sz;
+    b->map_mode = (uint32_t)mode;
     return wg_promise_resolved(ctx, JS_UNDEFINED);
 }
 
@@ -911,6 +919,7 @@ wg_device_createBuffer(JSContext *ctx, JSValueConst this_val,
         b->mapped = TRUE;
         b->map_offset = 0;
         b->map_size = desc.size;
+        b->map_mode = WGPUMapMode_Write;
     }
     JS_SetOpaque(obj, b);
     JS_SetPropertyStr(ctx, obj, "size", JS_NewFloat64(ctx, (double)desc.size));

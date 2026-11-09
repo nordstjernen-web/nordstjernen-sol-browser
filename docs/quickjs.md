@@ -134,6 +134,38 @@ engine lacks. On `-Dquickjs=quickjs` these differ from the default build:
 - **Speed.** `JS_AtomIsArrayIndex` goes through a string, so indexed access
   on host objects (collections, `frames[i]`) is slower.
 
+## Heap cage and compressed pointers
+
+The fork keeps every GC allocation inside a 4 GB reserved address range
+(`quickjs-cage.c`) and, in 64-bit builds without AddressSanitizer,
+boxes `JSValue` as an 8-byte word whose pointer half is a 32-bit offset
+into that range (`JS_CAGE_BOXING` in `quickjs.h`). Pointer fields inside
+heap structures are declared `JS_CPTR(T)` and read and written through
+`js_cload(T, field)` and `js_cstore(field, ptr)`. Rules when touching
+engine code:
+
+- A compressed slot can hold cage memory only. The encoder aborts with a
+  message when handed a pointer from outside the cage, so a structure
+  stored in a `JS_CPTR` field, in `u.opaque` through
+  `JS_SetOpaqueInternal`, or in a `JSValue` must come from `js_malloc`
+  or `js_cage_shared_malloc`, never from libc `malloc`, a static, or a
+  trusted block. The Intl classes, which allocate with libc, keep their
+  structure in the external pointer table instead; follow that pattern
+  for anything else that cannot live in the cage.
+- Native code pointers and host pointers never sit in heap objects: C
+  functions go through the code pointer table, host opaques through the
+  external pointer table, contexts through the context table. Add a
+  new native-pointer field only behind one of those tables.
+- `JSRuntime`, `JSContext` and `class_array` live outside the cage in
+  trusted blocks; a new field that points from a cage object to one of
+  them must be a context-table index, not a pointer.
+- The `-Dquickjs=quickjs` configuration has none of this; the adapter
+  supplies malloc-backed `JS_Cage*` shims and the browser runs on the
+  process heap there.
+
+`docs/heap-hardening.md` has the design, the inventory of what is still
+raw, and the measurements.
+
 ## Checking a change
 
 Build both configurations with no warnings, GCC and Clang:
@@ -147,3 +179,10 @@ NS_BIN=$PWD/builddir-quickjs/src/gtk/nordstjernen ./scripts/dev.sh smoke
 A binding change that calls a quickjs-ng function the original engine lacks
 fails to compile in `builddir-quickjs`; add the function to
 `src/ns_quickjs.c` rather than an `#ifdef` at the call site.
+
+After an engine change, run the in-tree test files through the host
+tool and the headless pages the hardening work uses (`qjs
+src/quickjs/tests/test_*.js`, then a settled live-site capture with
+`--timing --settle-ms=2000 --time-ms=1000 --dump=png:…`): a pointer
+stored outside the cage shows up as an abort naming it, which is the
+intended failure mode.
