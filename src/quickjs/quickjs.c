@@ -1940,6 +1940,13 @@ static void *js_trusted_mallocz_rt(JSRuntime *rt, size_t size)
     return ptr;
 }
 
+static void *js_trusted_realloc_rt(JSRuntime *rt, void *ptr, size_t size)
+{
+    if (!ptr)
+        return js_trusted_mallocz_rt(rt, size);
+    return js_realloc_rt(rt, ptr, size);
+}
+
 static void *js_arena_malloc(JSRuntime *rt, size_t size)
 {
     size_t total_size;
@@ -2858,6 +2865,24 @@ static inline JSAtomStruct *atom_set_free(uint32_t v)
     return (JSAtomStruct *)(((uintptr_t)v << 1) | 1);
 }
 
+static no_inline __attribute__((noreturn)) void js_atom_corrupt(uint32_t i)
+{
+    fprintf(stderr, "quickjs heap cage: atom index %u does not name a live atom\n", i);
+    abort();
+}
+
+static inline JSAtomStruct *js_atom_struct(JSRuntime *rt, uint32_t i)
+{
+    JSAtomStruct *p;
+
+    if (unlikely(i >= (uint32_t)rt->atom_size))
+        js_atom_corrupt(i);
+    p = rt->atom_array[i];
+    if (unlikely(atom_is_free(p)))
+        js_atom_corrupt(i);
+    return p;
+}
+
 /* Note: the string contents are uninitialized */
 static JSString *js_alloc_string_rt(JSRuntime *rt, int max_len, int is_wide_char)
 {
@@ -3674,13 +3699,13 @@ static int JS_ResizeAtomHash(JSRuntime *rt, int new_hash_size)
 
     assert((new_hash_size & (new_hash_size - 1)) == 0); /* power of two */
     new_hash_mask = new_hash_size - 1;
-    new_hash = js_mallocz_rt(rt, sizeof(rt->atom_hash[0]) * new_hash_size);
+    new_hash = js_trusted_mallocz_rt(rt, sizeof(rt->atom_hash[0]) * new_hash_size);
     if (!new_hash)
         return -1;
     for(i = 0; i < rt->atom_hash_size; i++) {
         h = rt->atom_hash[i];
         while (h != 0) {
-            p = rt->atom_array[h];
+            p = js_atom_struct(rt, h);
             hash_next1 = p->hash_next;
             /* add in new hash table */
             j = p->hash & new_hash_mask;
@@ -3731,7 +3756,7 @@ JSAtom JS_DupAtomRT(JSRuntime *rt, JSAtom v)
     JSAtomStruct *p;
 
     if (!__JS_AtomIsConst(v)) {
-        p = rt->atom_array[v];
+        p = js_atom_struct(rt, v);
         JS_REF_COUNT(p)++;
     }
     return v;
@@ -3744,7 +3769,7 @@ JSAtom JS_DupAtom(JSContext *ctx, JSAtom v)
 
     if (!__JS_AtomIsConst(v)) {
         rt = ctx->rt;
-        p = rt->atom_array[v];
+        p = js_atom_struct(rt, v);
         JS_REF_COUNT(p)++;
     }
     return v;
@@ -3758,7 +3783,7 @@ static JSAtomKindEnum JS_AtomGetKind(JSContext *ctx, JSAtom v)
     rt = ctx->rt;
     if (__JS_AtomIsTaggedInt(v))
         return JS_ATOM_KIND_STRING;
-    p = rt->atom_array[v];
+    p = js_atom_struct(rt, v);
     switch(p->atom_type) {
     case JS_ATOM_TYPE_STRING:
         return JS_ATOM_KIND_STRING;
@@ -3786,11 +3811,11 @@ static JSAtom js_get_atom_index(JSRuntime *rt, JSAtomStruct *p)
         JSAtomStruct *p1;
 
         i = rt->atom_hash[p->hash & (rt->atom_hash_size - 1)];
-        p1 = rt->atom_array[i];
+        p1 = js_atom_struct(rt, i);
         while (p1 != p) {
             assert(i != 0);
             i = p1->hash_next;
-            p1 = rt->atom_array[i];
+            p1 = js_atom_struct(rt, i);
         }
     }
     return i;
@@ -3821,7 +3846,7 @@ static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
         h1 = h & (rt->atom_hash_size - 1);
         i = rt->atom_hash[h1];
         while (i != 0) {
-            p = rt->atom_array[i];
+            p = js_atom_struct(rt, i);
             if (p->hash == h &&
                 p->atom_type == atom_type &&
                 p->len == len &&
@@ -3854,7 +3879,7 @@ static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
         new_size = max_int(711, rt->atom_size * 3 / 2);
         if (new_size > JS_ATOM_MAX)
             goto fail;
-        new_array = js_realloc_rt(rt, rt->atom_array, sizeof(*new_array) * new_size);
+        new_array = js_trusted_realloc_rt(rt, rt->atom_array, sizeof(*new_array) * new_size);
         if (!new_array)
             goto fail;
         /* Note: the atom 0 is not used */
@@ -3978,7 +4003,7 @@ static JSAtom __JS_FindAtom(JSRuntime *rt, const char *str, size_t len,
     h1 = h & (rt->atom_hash_size - 1);
     i = rt->atom_hash[h1];
     while (i != 0) {
-        p = rt->atom_array[i];
+        p = js_atom_struct(rt, i);
         if (p->hash == h &&
             p->atom_type == JS_ATOM_TYPE_STRING &&
             p->len == len &&
@@ -4002,7 +4027,7 @@ static void JS_FreeAtomStruct(JSRuntime *rt, JSAtomStruct *p)
 
         h0 = p->hash & (rt->atom_hash_size - 1);
         i = rt->atom_hash[h0];
-        p1 = rt->atom_array[i];
+        p1 = js_atom_struct(rt, i);
         if (p1 == p) {
             rt->atom_hash[h0] = p1->hash_next;
         } else {
@@ -4010,7 +4035,7 @@ static void JS_FreeAtomStruct(JSRuntime *rt, JSAtomStruct *p)
                 assert(i != 0);
                 p0 = p1;
                 i = p1->hash_next;
-                p1 = rt->atom_array[i];
+                p1 = js_atom_struct(rt, i);
                 if (p1 == p) {
                     p0->hash_next = p1->hash_next;
                     break;
@@ -4018,7 +4043,8 @@ static void JS_FreeAtomStruct(JSRuntime *rt, JSAtomStruct *p)
             }
         }
     }
-    /* insert in free atom list */
+    if (js_atom_struct(rt, i) != p)
+        js_atom_corrupt(i);
     rt->atom_array[i] = atom_set_free(rt->atom_free_index);
     rt->atom_free_index = i;
     if (unlikely(p->first_weak_ref)) {
@@ -4047,7 +4073,7 @@ static void __JS_FreeAtom(JSRuntime *rt, uint32_t i)
 {
     JSAtomStruct *p;
 
-    p = rt->atom_array[i];
+    p = js_atom_struct(rt, i);
     if (--JS_REF_COUNT(p) > 0)
         return;
     JS_FreeAtomStruct(rt, p);
@@ -4130,7 +4156,7 @@ static JSValue JS_NewSymbolInternal(JSContext *ctx, JSString *p, int atom_type)
     atom = __JS_NewAtom(rt, p, atom_type);
     if (atom == JS_ATOM_NULL)
         return JS_ThrowOutOfMemory(ctx);
-    return JS_MKPTR(JS_TAG_SYMBOL, rt->atom_array[atom]);
+    return JS_MKPTR(JS_TAG_SYMBOL, js_atom_struct(rt, atom));
 }
 
 /* descr must be a non-numeric string atom */
@@ -4142,7 +4168,7 @@ static JSValue JS_NewSymbolFromAtom(JSContext *ctx, JSAtom descr,
 
     assert(!__JS_AtomIsTaggedInt(descr));
     assert(descr < rt->atom_size);
-    p = rt->atom_array[descr];
+    p = js_atom_struct(rt, descr);
     js_dup(JS_MKPTR(JS_TAG_STRING, p));
     return JS_NewSymbolInternal(ctx, p, atom_type);
 }
@@ -4196,7 +4222,7 @@ static const char *JS_AtomGetStrRT(JSRuntime *rt, char *buf, int buf_size,
         assert(atom < rt->atom_size);
         snprintf(buf, buf_size, "<invalid %x>", atom);
     } else {
-        JSAtomStruct *p = rt->atom_array[atom];
+        JSAtomStruct *p = js_atom_struct(rt, atom);
         *buf = '\0';
         if (atom_is_free(p)) {
             snprintf(buf, buf_size, "<free %x>", atom);
@@ -4229,7 +4255,7 @@ static JSValue __JS_AtomToValue(JSContext *ctx, JSAtom atom, bool force_string)
         JSRuntime *rt = ctx->rt;
         JSAtomStruct *p;
         assert(atom < rt->atom_size);
-        p = rt->atom_array[atom];
+        p = js_atom_struct(rt, atom);
         if (p->atom_type == JS_ATOM_TYPE_STRING) {
             goto ret_string;
         } else if (force_string) {
@@ -4268,7 +4294,7 @@ bool JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom)
         uint32_t val;
 
         assert(atom < rt->atom_size);
-        p = rt->atom_array[atom];
+        p = js_atom_struct(rt, atom);
         if (p->atom_type == JS_ATOM_TYPE_STRING &&
             is_num_string(&val, p) && val != -1) {
             *pval = val;
@@ -4294,7 +4320,7 @@ static JSValue JS_AtomIsNumericIndex1(JSContext *ctx, JSAtom atom)
     if (__JS_AtomIsTaggedInt(atom))
         return js_int32(__JS_AtomToUInt32(atom));
     assert(atom < rt->atom_size);
-    p1 = rt->atom_array[atom];
+    p1 = js_atom_struct(rt, atom);
     if (p1->atom_type != JS_ATOM_TYPE_STRING)
         return JS_UNDEFINED;
     p = p1;
@@ -4397,7 +4423,7 @@ static bool JS_AtomSymbolHasDescription(JSContext *ctx, JSAtom v)
     rt = ctx->rt;
     if (__JS_AtomIsTaggedInt(v))
         return false;
-    p = rt->atom_array[v];
+    p = js_atom_struct(rt, v);
     return (((p->atom_type == JS_ATOM_TYPE_SYMBOL &&
               p->hash == JS_ATOM_HASH_SYMBOL) ||
              p->atom_type == JS_ATOM_TYPE_GLOBAL_SYMBOL) &&
@@ -5967,7 +5993,7 @@ static int init_shape_hash(JSRuntime *rt)
     rt->shape_hash_bits = 6;   /* 64 shapes */
     rt->shape_hash_size = 1 << rt->shape_hash_bits;
     rt->shape_hash_count = 0;
-    rt->shape_hash = js_mallocz_rt(rt, sizeof(rt->shape_hash[0]) *
+    rt->shape_hash = js_trusted_mallocz_rt(rt, sizeof(rt->shape_hash[0]) *
                                    rt->shape_hash_size);
     if (!rt->shape_hash)
         return -1;
@@ -6007,7 +6033,7 @@ static int resize_shape_hash(JSRuntime *rt, int new_shape_hash_bits)
     JSShape **new_shape_hash, *sh, *sh_next;
 
     new_shape_hash_size = 1 << new_shape_hash_bits;
-    new_shape_hash = js_mallocz_rt(rt, sizeof(rt->shape_hash[0]) *
+    new_shape_hash = js_trusted_mallocz_rt(rt, sizeof(rt->shape_hash[0]) *
                                    new_shape_hash_size);
     if (!new_shape_hash)
         return -1;
@@ -10431,7 +10457,7 @@ static bool js_atom_is_engine_internal(JSRuntime *rt, JSAtom atom)
 
     if (__JS_AtomIsTaggedInt(atom))
         return false;
-    str = rt->atom_array[atom];
+    str = js_atom_struct(rt, atom);
     if (!str || str->atom_type != JS_ATOM_TYPE_STRING || str->is_wide_char ||
         str->len < 4)
         return false;
@@ -10452,7 +10478,7 @@ static bool js_filename_is_engine_code(JSRuntime *rt, JSAtom filename)
 
     if (filename == JS_ATOM_NULL || __JS_AtomIsTaggedInt(filename))
         return false;
-    str = rt->atom_array[filename];
+    str = js_atom_struct(rt, filename);
     if (!str || str->is_wide_char || str->len < 2)
         return false;
     name = (const char *)str8(str);
@@ -42870,7 +42896,7 @@ static int JS_WriteObjectAtoms(BCWriterState *s)
                 bc_put_leb128(s, atom >> 6);
             }
         } else {
-            JSAtomStruct *p = rt->atom_array[atom];
+            JSAtomStruct *p = js_atom_struct(rt, atom);
             uint8_t type = p->atom_type;
             assert(type != JS_ATOM_TYPE_PRIVATE);
             bc_put_u8(s, type);
@@ -44165,7 +44191,7 @@ static JSValue JS_ReadObjectRec(BCReaderState *s)
             if (__JS_AtomIsConst(atom)) {
                 obj = JS_AtomToValue(s->ctx, atom);
             } else {
-                JSAtomStruct *p = s->ctx->rt->atom_array[atom];
+                JSAtomStruct *p = js_atom_struct(s->ctx->rt, atom);
                 if (p->atom_type != JS_ATOM_TYPE_SYMBOL &&
                     p->atom_type != JS_ATOM_TYPE_GLOBAL_SYMBOL) {
                     JS_FreeAtom(s->ctx, atom);
@@ -44373,7 +44399,7 @@ static JSAtom find_atom(JSContext *ctx, const char *name)
         /* We assume 8 bit non null strings, which is the case for these
            symbols */
         for(atom = JS_ATOM_Symbol_toPrimitive; atom < JS_ATOM_END; atom++) {
-            JSAtomStruct *p = ctx->rt->atom_array[atom];
+            JSAtomStruct *p = js_atom_struct(ctx->rt, atom);
             JSString *str = p;
             if (str->len == len && !memcmp(str8(str), name, len))
                 return JS_DupAtom(ctx, atom);
