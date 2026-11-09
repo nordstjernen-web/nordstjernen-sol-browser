@@ -18,6 +18,11 @@ uintptr_t  ns_js_cage_base(void);
 size_t     ns_js_cage_size(void);
 size_t     ns_js_cage_committed_bytes(void);
 
+void      *ns_js_cage_shared_malloc(size_t size);
+void      *ns_js_cage_shared_realloc(void *ptr, size_t size);
+void       ns_js_cage_shared_free(void *ptr);
+size_t     ns_js_cage_shared_usable_size(const void *ptr);
+
 G_END_DECLS
 
 #endif
