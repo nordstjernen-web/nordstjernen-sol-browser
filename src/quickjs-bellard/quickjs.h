@@ -27,6 +27,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 
 #ifdef __cplusplus
@@ -1263,6 +1264,31 @@ int js_string_get_len(JSValueConst val);
 int js_string_getc(JSValueConst val, int *pidx);
 JSValue js_sub_string_val(JSContext *ctx, JSValueConst val, int start, int end);
 #endif /* CONFIG_TEMPORAL_INTL */
+
+/* Browser hooks (see docs/quickjs.md) */
+typedef bool JSCanCompileStrings(JSContext *ctx);
+void JS_SetCanCompileStrings(JSRuntime *rt, JSCanCompileStrings *fn);
+JSContext *JS_GetCallerRealm(JSContext *ctx);
+JSContext *JS_GetFunctionRealm(JSContext *ctx, JSValueConst func_obj);
+JSContext *JS_GetPendingJobRealm(JSRuntime *rt);
+void JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj);
+JS_BOOL JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom);
+JS_BOOL JS_IsDate(JSValueConst val);
+JS_BOOL JS_IsRegExp(JSValueConst val);
+JS_BOOL JS_IsMap(JSValueConst val);
+JS_BOOL JS_IsSet(JSValueConst val);
+JS_BOOL JS_IsProxy(JSValueConst val);
+JS_BOOL JS_IsDataView(JSValueConst val);
+JS_BOOL JS_IsErrorObject(JSValueConst val);
+JS_BOOL JS_IsArrayObject(JSValueConst val);
+enum {
+    JS_BOXED_NONE, JS_BOXED_NUMBER, JS_BOXED_STRING, JS_BOXED_BOOLEAN,
+    JS_BOXED_BIGINT, JS_BOXED_SYMBOL,
+};
+int JS_GetBoxedPrimitiveKind(JSValueConst val);
+JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func);
+int JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
+                          size_t byte_length);
 
 /* C module definition */
 

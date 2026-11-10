@@ -389,6 +389,10 @@ struct JSRuntime {
     BOOL can_block : 8; /* TRUE if Atomics.wait can block */
     /* used to allocate, free and clone SharedArrayBuffers */
     JSSharedArrayBufferFunctions sab_funcs;
+    /* realm of the code that called the running C function */
+    JSContext *cfunc_caller_realm;
+    /* asked before eval() or Function() compiles a string */
+    JSCanCompileStrings *can_compile_strings;
     /* see JS_SetStripInfo() */
     uint8_t strip_flags;
     
@@ -3951,7 +3955,7 @@ JSValue JS_AtomToString(JSContext *ctx, JSAtom atom)
 
 /* return TRUE if the atom is an array index (i.e. 0 <= index <=
    2^32-2 and return its value */
-static BOOL JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom)
+BOOL JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom)
 {
     if (__JS_AtomIsTaggedInt(atom)) {
         *pval = __JS_AtomToUInt32(atom);
@@ -8289,7 +8293,7 @@ static inline __exception int js_poll_interrupts(JSContext *ctx)
     }
 }
 
-static void JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj)
+void JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj)
 {
     JSObject *p;
     if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
@@ -18381,6 +18385,7 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     JSCFunctionEnum cproto;
     const JSInternEntry *fe;
     int magic;
+    JSContext *prev_caller_realm;
 
     p = JS_VALUE_GET_OBJ(func_obj);
     fe = js_cfunc_entry(p);
@@ -18395,6 +18400,8 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     prev_sf = rt->current_stack_frame;
     sf->prev_frame = prev_sf;
     rt->current_stack_frame = sf;
+    prev_caller_realm = rt->cfunc_caller_realm;
+    rt->cfunc_caller_realm = ctx;
     ctx = js_ctx_get(rt, p->u.cfunc.realm); /* change the current realm */
     sf->js_mode = 0;
     sf->cur_func = (JSValue)func_obj;
@@ -18499,6 +18506,7 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
         abort();
     }
 
+    rt->cfunc_caller_realm = prev_caller_realm;
     rt->current_stack_frame = sf->prev_frame;
     return ret_val;
 }
@@ -21669,7 +21677,7 @@ static JSValue JS_CallFree(JSContext *ctx, JSValue func_obj, JSValueConst this_o
 
 /* warning: the refcount of the context is not incremented. Return
    NULL in case of exception (case of revoked proxy only) */
-static JSContext *JS_GetFunctionRealm(JSContext *ctx, JSValueConst func_obj)
+JSContext *JS_GetFunctionRealm(JSContext *ctx, JSValueConst func_obj)
 {
     JSObject *p;
     JSContext *realm;
@@ -38851,6 +38859,25 @@ static JSValue JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     return ret;
 }
 
+/* TRUE, with an EvalError pending, when the embedder (a Content Security
+   Policy without 'unsafe-eval') refuses to compile a string */
+static BOOL js_compile_strings_refused(JSContext *ctx)
+{
+    JSValue err;
+    if (!ctx->rt->can_compile_strings || ctx->rt->can_compile_strings(ctx))
+        return FALSE;
+    err = JS_NewError(ctx);
+    if (!JS_IsException(err)) {
+        JS_DefinePropertyValueStr(ctx, err, "name", JS_NewString(ctx, "EvalError"),
+                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        JS_DefinePropertyValueStr(ctx, err, "message",
+                                  JS_NewString(ctx, "code generation from strings is disallowed in this context"),
+                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        JS_Throw(ctx, err);
+    }
+    return TRUE;
+}
+
 static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
                              JSValueConst val, int flags, int scope_idx)
 {
@@ -38860,6 +38887,8 @@ static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
 
     if (!JS_IsString(val))
         return JS_DupValue(ctx, val);
+    if (js_compile_strings_refused(ctx))
+        return JS_EXCEPTION;
     str = JS_ToCStringLen(ctx, &len, val);
     if (!str)
         return JS_EXCEPTION;
@@ -42609,6 +42638,8 @@ static JSValue js_function_constructor(JSContext *ctx, JSValueConst new_target,
     JSValue s, proto, obj = JS_UNDEFINED;
     StringBuffer b_s, *b = &b_s;
 
+    if (js_compile_strings_refused(ctx))
+        return JS_EXCEPTION;
     string_buffer_init(ctx, b, 0);
     string_buffer_putc8(b, '(');
 
@@ -66180,5 +66211,164 @@ int JS_AddIntrinsicWeakRef(JSContext *ctx)
     if (JS_IsException(obj))
         return -1;
     JS_FreeValue(ctx, obj);
+    return 0;
+}
+
+/* Browser hooks: entry points the embedding browser needs and the
+   original engine does not export. */
+
+void JS_SetCanCompileStrings(JSRuntime *rt, JSCanCompileStrings *fn)
+{
+    rt->can_compile_strings = fn;
+}
+
+JSContext *JS_GetCallerRealm(JSContext *ctx)
+{
+    JSContext *caller = ctx->rt->cfunc_caller_realm;
+    return caller ? caller : ctx;
+}
+
+/* The realm the next pending job runs in: for a promise reaction, the
+   realm of its handler. */
+JSContext *JS_GetPendingJobRealm(JSRuntime *rt)
+{
+    JSJobEntry *e;
+    JSContext *ectx, *realm;
+
+    if (list_empty(&rt->job_list))
+        return NULL;
+    e = list_entry(rt->job_list.next, JSJobEntry, link);
+    ectx = js_ctx_get(rt, e->realm);
+    if (ectx && js_cpt_get(e->job_func) == (JSCodePtr)promise_reaction_job &&
+        e->argc >= 3 && JS_IsFunction(ectx, e->argv[2])) {
+        realm = JS_GetFunctionRealm(ectx, e->argv[2]);
+        if (realm)
+            return realm;
+        JS_FreeValue(ectx, JS_GetException(ectx));
+    }
+    return ectx;
+}
+
+static BOOL js_value_has_class(JSValueConst val, JSClassID class_id)
+{
+    return JS_VALUE_GET_TAG(val) == JS_TAG_OBJECT &&
+        JS_VALUE_GET_OBJ(val)->class_id == class_id;
+}
+
+BOOL JS_IsDate(JSValueConst val)
+{
+    return js_value_has_class(val, JS_CLASS_DATE);
+}
+
+BOOL JS_IsRegExp(JSValueConst val)
+{
+    return js_value_has_class(val, JS_CLASS_REGEXP);
+}
+
+BOOL JS_IsMap(JSValueConst val)
+{
+    return js_value_has_class(val, JS_CLASS_MAP);
+}
+
+BOOL JS_IsSet(JSValueConst val)
+{
+    return js_value_has_class(val, JS_CLASS_SET);
+}
+
+BOOL JS_IsProxy(JSValueConst val)
+{
+    return js_value_has_class(val, JS_CLASS_PROXY);
+}
+
+BOOL JS_IsDataView(JSValueConst val)
+{
+    return js_value_has_class(val, JS_CLASS_DATAVIEW);
+}
+
+BOOL JS_IsErrorObject(JSValueConst val)
+{
+    return js_value_has_class(val, JS_CLASS_ERROR);
+}
+
+BOOL JS_IsArrayObject(JSValueConst val)
+{
+    return js_value_has_class(val, JS_CLASS_ARRAY);
+}
+
+int JS_GetBoxedPrimitiveKind(JSValueConst val)
+{
+    if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
+        return JS_BOXED_NONE;
+    switch(JS_VALUE_GET_OBJ(val)->class_id) {
+    case JS_CLASS_NUMBER: return JS_BOXED_NUMBER;
+    case JS_CLASS_STRING: return JS_BOXED_STRING;
+    case JS_CLASS_BOOLEAN: return JS_BOXED_BOOLEAN;
+    case JS_CLASS_BIG_INT: return JS_BOXED_BIGINT;
+    case JS_CLASS_SYMBOL: return JS_BOXED_SYMBOL;
+    default: return JS_BOXED_NONE;
+    }
+}
+
+/* A copy of a native function whose realm is 'ctx', so that a frame runs
+   its own copy of an interface in its own realm. JS_UNDEFINED if 'func'
+   is not a native function. */
+JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func)
+{
+    JSObject *p, *q;
+    JSValue func_obj;
+
+    if (JS_VALUE_GET_TAG(func) != JS_TAG_OBJECT)
+        return JS_UNDEFINED;
+    p = JS_VALUE_GET_OBJ(func);
+    if (p->class_id == JS_CLASS_C_FUNCTION) {
+        func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
+                                          JS_CLASS_C_FUNCTION);
+        if (JS_IsException(func_obj))
+            return func_obj;
+        q = JS_VALUE_GET_OBJ(func_obj);
+        q->u.cfunc.realm = js_ctx_ref(JS_DupContext(ctx));
+        q->u.cfunc.c_function = p->u.cfunc.c_function;
+        q->is_constructor = p->is_constructor;
+        return func_obj;
+    }
+    if (p->class_id == JS_CLASS_C_FUNCTION_DATA) {
+        JSCFunctionDataRecord *src = JS_GetOpaque(func, JS_CLASS_C_FUNCTION_DATA);
+        JSCFunctionDataRecord *dst;
+        int i;
+        if (!src)
+            return JS_UNDEFINED;
+        func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
+                                          JS_CLASS_C_FUNCTION_DATA);
+        if (JS_IsException(func_obj))
+            return func_obj;
+        dst = js_malloc(ctx, sizeof(*dst) + src->data_len * sizeof(JSValue));
+        if (!dst) {
+            JS_FreeValue(ctx, func_obj);
+            return JS_EXCEPTION;
+        }
+        dst->func = src->func;
+        dst->data_len = src->data_len;
+        for (i = 0; i < src->data_len; i++)
+            dst->data[i] = JS_DupValue(ctx, src->data[i]);
+        JS_SetOpaque(func_obj, dst);
+        JS_VALUE_GET_OBJ(func_obj)->is_constructor = p->is_constructor;
+        return func_obj;
+    }
+    return JS_UNDEFINED;
+}
+
+/* Point an ArrayBuffer the engine does not own at new storage inside the
+   heap cage (WebAssembly memory after instantiation or grow). */
+int JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
+                          size_t byte_length)
+{
+    JSArrayBuffer *abuf = JS_GetOpaque(obj, JS_CLASS_ARRAY_BUFFER);
+    if (!abuf || abuf->detached || byte_length > INT32_MAX ||
+        js_abuf_free_func(abuf) == js_array_buffer_free ||
+        (js_heap_cage_active && !js_in_heap_cage(data)))
+        return -1;
+    js_cstore(abuf->data, data);
+    abuf->byte_length = byte_length;
+    js_array_buffer_update_typed_arrays(abuf);
     return 0;
 }
