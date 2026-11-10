@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: `Range.prototype.toString` stays inside one document. The
+  native text walk climbed out of a frame's document into the embedding
+  page and descended into embedded frames and shadow trees, so a page
+  could read a cross-origin frame's text and a frame could read the page
+  around it.
 * Security: the table methods (`createTHead`, `createCaption`,
   `insertRow`, `deleteRow` and the rest) and a NodeIterator's reference
   node no longer reach into an embedded frame's document or a shadow

@@ -57426,14 +57426,25 @@ ns_range_text_walk(ns_node *n, ns_range_text_ctx *c, int depth)
     gboolean is_start_el = (n == c->start);
     gboolean is_end_el   = (n == c->end);
     int idx = 0;
-    for (ns_node *ch = n->first_child; ch; ch = ch->next_sibling, idx++) {
+    for (ns_node *ch = n->first_child; ch; ch = ch->next_sibling) {
+        if (ns_node_is_embedded_doc(ch) || ns_node_is_shadow_root(ch)) continue;
         if (is_start_el && c->state == 0 && idx == c->soff) c->state = 1;
         if (is_end_el && idx == c->eoff) { c->state = 2; return; }
         ns_range_text_walk(ch, c, depth + 1);
         if (c->state == 2) return;
+        idx++;
     }
     if (is_start_el && c->state == 0 && c->soff >= idx) c->state = 1;
     if (is_end_el && c->eoff >= idx) c->state = 2;
+}
+
+static ns_node *
+ns_range_tree_root(ns_node *n)
+{
+    while (n->parent && n->kind != NS_NODE_DOCUMENT &&
+           !ns_node_is_shadow_root(n))
+        n = n->parent;
+    return n;
 }
 
 static JSValue
@@ -57468,8 +57479,8 @@ ns_range_toString_impl(JSContext *ctx, JSValueConst this_val,
         return JS_NewStringLen(ctx, p, (size_t)(q - p));
     }
 
-    ns_node *root = start;
-    while (root->parent) root = root->parent;
+    ns_node *root = ns_range_tree_root(start);
+    if (ns_range_tree_root(end) != root) return JS_NewString(ctx, "");
 
     ns_range_text_ctx c = { start, end, (int)soff, (int)eoff, g_string_new(NULL), 0 };
     ns_range_text_walk(root, &c, 0);
