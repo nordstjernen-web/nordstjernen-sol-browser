@@ -24278,6 +24278,7 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
         size_t tlen = 0;
         uint8_t *tp = JS_GetArrayBuffer(ctx, &tlen, tail);
         if (tp && tlen) g_byte_array_append(buf, tp, tlen);
+        else if (!tp) JS_FreeValue(ctx, JS_GetException(ctx));
     }
     JS_FreeValue(ctx, tail);
 
@@ -71978,8 +71979,9 @@ ns_frame_response_is_download(const ns_response *resp)
 }
 
 static void
-ns_js_collect_frame_images(ns_node *n, GPtrArray *out)
+ns_js_collect_frame_images(ns_node *n, GPtrArray *out, int depth)
 {
+    if (depth >= NS_DOM_MAX_DEPTH) return;
     for (ns_node *c = n ? n->first_child : NULL; c; c = c->next_sibling) {
         if (ns_node_is_element_named(c, "iframe") ||
             ns_node_is_element_named(c, "frame") ||
@@ -71990,7 +71992,7 @@ ns_js_collect_frame_images(ns_node *n, GPtrArray *out)
             if (!loading || g_ascii_strcasecmp(loading, "lazy") != 0)
                 g_ptr_array_add(out, c);
         }
-        ns_js_collect_frame_images(c, out);
+        ns_js_collect_frame_images(c, out, depth + 1);
     }
 }
 
@@ -72010,7 +72012,7 @@ ns_js_wait_for_frame_images(ns_js *js, ns_node *content_root)
 {
     if (!js || !content_root || js->halted) return;
     g_autoptr(GPtrArray) imgs = g_ptr_array_new();
-    ns_js_collect_frame_images(content_root, imgs);
+    ns_js_collect_frame_images(content_root, imgs, 0);
     for (guint i = 0; i < imgs->len; i++) {
         ns_node *img = imgs->pdata[i];
         const char *src = ns_element_get_attr(img, "src");

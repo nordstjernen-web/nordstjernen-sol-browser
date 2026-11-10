@@ -3,6 +3,36 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security hardening: decoded video frames start from a zeroed buffer,
+  so a short colour conversion cannot leave uninitialised memory in a
+  frame a page can read back through a canvas; an SVG mask whose surface
+  failed to render is skipped instead of dereferenced; and
+  `TextDecoder` no longer leaves a stray exception pending when its
+  stream state is not a buffer.
+* Security: WebGPU operations that wait for a driver callback
+  (`mapAsync`, `requestAdapter`, `requestDevice`, `popErrorScope`,
+  `onSubmittedWorkDone` and canvas readback) no longer hand the driver a
+  pointer into their own stack frame. If the wait timed out, a callback
+  delivered later would have written into a dead frame (`docs/security-
+  review-2026-11.md`, M4).
+* Security: SVG files used as images or as external `<use>` targets are
+  now made valid UTF-8 before they are parsed, like every other
+  document. Several text walkers assume valid UTF-8 and could read a few
+  bytes past the end of a string that ended in a truncated multi-byte
+  sequence (`docs/security-review-2026-11.md`, M3).
+* Security: a zstd-compressed response is no longer cut short when the
+  decoder still holds output after consuming the last input bytes
+  (`docs/security-review-2026-11.md`, M5).
+* Security: `new WebAssembly.Memory()` and `memory.grow()` now throw
+  `RangeError` when the JavaScript heap cage cannot supply the memory,
+  instead of writing through a null pointer and crashing the renderer
+  (`docs/security-review-2026-11.md`, M2).
+* Security: two DOM walkers that recursed without a depth limit — the
+  one collecting `<foreignObject>` elements under an inline `<svg>` and
+  the one collecting an iframe document's images — now stop at the same
+  depth as every other walker, so a very deeply nested document cannot
+  exhaust the renderer's stack through them (`docs/security-
+  review-2026-11.md`, M1).
 * Docs: SECURITY.md is brought back in line with the code — the SQLite
   cookie store, FTP top-level navigations, the audio helper's socket
   rules and its retained sound-server connection, and the list of

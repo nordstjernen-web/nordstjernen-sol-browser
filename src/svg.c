@@ -2014,6 +2014,11 @@ svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     }
     const unsigned char *src = cairo_image_surface_get_data(rgb);
     unsigned char *dst = cairo_image_surface_get_data(a8);
+    if (!src || !dst || cairo_surface_status(rgb) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(rgb);
+        cairo_surface_destroy(a8);
+        return NULL;
+    }
     int sstride = cairo_image_surface_get_stride(rgb);
     int dstride = cairo_image_surface_get_stride(a8);
     gboolean alpha_mask = svg_mask_type_is_alpha(mask);
@@ -3835,12 +3840,21 @@ struct ns_svg_doc {
     const ns_node *root;
 };
 
+ns_node *
+ns_svg_parse_bytes(const guchar *data, gsize len)
+{
+    if (g_utf8_validate((const char *)data, (gssize)len, NULL))
+        return ns_html_parse((const char *)data, (gssize)len);
+    g_autofree char *valid = g_utf8_make_valid((const char *)data, (gssize)len);
+    return ns_html_parse(valid, -1);
+}
+
 ns_svg_doc *
 ns_svg_doc_parse(const guchar *data, gsize len)
 {
     if (!data || len == 0 || len > NS_SVG_MAX_INPUT_BYTES) return NULL;
     if (!ns_svg_bytes_look_like_svg(data, len)) return NULL;
-    ns_node *doc = ns_html_parse((const char *)data, (gssize)len);
+    ns_node *doc = ns_svg_parse_bytes(data, len);
     if (!doc) return NULL;
     const ns_node *root = svg_find_root(doc);
     if (!root) {
@@ -3888,7 +3902,7 @@ ns_svg_decode_bytes_ratio(const guchar *data, gsize len, int *out_w, int *out_h,
     if (!data || len == 0 || len > NS_SVG_MAX_INPUT_BYTES) return NULL;
     if (!ns_svg_bytes_look_like_svg(data, len)) return NULL;
 
-    ns_node *doc = ns_html_parse((const char *)data, (gssize)len);
+    ns_node *doc = ns_svg_parse_bytes(data, len);
     if (!doc) return NULL;
     const ns_node *root = svg_find_root(doc);
     if (!root) {

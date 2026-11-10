@@ -14,6 +14,24 @@ attacker controls everything fetched from the network, and a second
 tier of findings assumes the attacker already has code execution inside
 a sandboxed renderer.
 
+## Status after the fixes
+
+Fourteen of the nineteen findings are fixed and two are partly fixed;
+the table's Status column and a note under each finding say what
+changed.
+
+- **Fixed:** W1–W5, S2, S5, S6, S8, M1–M5.
+- **Partly fixed:** S1 (scheduling calls on other processes remain) and
+  S3 (the XDG runtime directory and outbound network remain).
+- **Open:** S4 (capture devices), S7 (shared profile and popup relay)
+  and S9 (audio helper's sound-server connection, now documented). S4
+  and S7 need the shell to broker devices, network and storage for the
+  renderer.
+
+The fixes were checked in headless and windowed runs in a container
+with software rendering. They were not run on real GPU drivers, with a
+camera or microphone, or on macOS and Windows.
+
 ## Summary
 
 - **No attacker-reachable heap or stack corruption was found** in the
@@ -48,11 +66,11 @@ a sandboxed renderer.
 | S7 | `shared-profile-lets-one-renderer-persist-into-other-sites` | Medium | yes | open |
 | S8 | `seccomp-best-effort-and-socket-fallback` | Low | yes | **fixed** |
 | S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | open (documented) |
-| M1 | `unbounded-dom-recursion-svg-foreign-and-frame-images` | Low (DoS) | no | confirmed |
-| M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | confirmed |
-| M3 | `raw-svg-bytes-break-utf8-invariant` | Low | no | plausible |
-| M4 | `webgpu-map-wait-stack-userdata` | Low | no | plausible |
-| M5 | `zstd-final-flush-truncation` | Info | no | plausible |
+| M1 | `unbounded-dom-recursion-svg-foreign-and-frame-images` | Low (DoS) | no | **fixed** |
+| M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | **fixed** |
+| M3 | `raw-svg-bytes-break-utf8-invariant` | Low | no | **fixed** |
+| M4 | `webgpu-map-wait-stack-userdata` | Low | no | **fixed** |
+| M5 | `zstd-final-flush-truncation` | Info | no | **fixed** |
 
 The slugs are meant to be used as `Security-Fix:` trailers when the
 fixes land.
@@ -425,6 +443,11 @@ A document or script that nests on the order of 10^5 elements under an
 inline `<svg>`, or inside an iframe, exhausts the stack and crashes the
 renderer. The guard page makes it a clean fault.
 
+**Fixed.** Both walkers take a depth argument and stop at
+`NS_DOM_MAX_DEPTH`. The crash itself was not reproduced: a 100,000-deep
+parsed document and a script-built one both ran without a fault before
+and after the change.
+
 **Fix.** Add a depth parameter with the `NS_DOM_MAX_DEPTH` guard the
 neighbouring walkers use, or make both iterative.
 
@@ -438,6 +461,10 @@ result and then zero-fills from `m->staging + m->staging_size`, which
 with NULL is a write starting at an address between 64 KiB and 512 MiB.
 Script reaches both by filling the cage with buffers first. The old
 block is leaked rather than freed, so there is no use-after-free.
+
+**Fixed.** The constructor allocates before it creates the object and
+throws on failure; `grow` reallocates into a temporary and leaves the
+memory untouched on failure.
 
 **Fix.** Check both results. Throw `RangeError` from the constructor; in
 `grow`, realloc into a temporary and leave `m->staging` untouched on
@@ -457,6 +484,10 @@ the terminator and read adjacent heap until a zero byte. The result
 feeds only a boolean or a colour. Not verified: that lexbor passes
 invalid bytes through unchanged.
 
+**Fixed.** The three call sites go through `ns_svg_parse_bytes`, which
+validates the bytes and repairs them with `g_utf8_make_valid` when
+needed. The walkers themselves are unchanged.
+
 **Fix.** Validate, or run `g_utf8_make_valid` over, the bytes at those
 three call sites, and clamp the listed walkers as `src/dom.c:2461` does.
 
@@ -470,6 +501,11 @@ without cancelling if it has not fired. A callback delivered on a later
 same shape is at `:615`, `:1191`, `:1288`, `:3726` and `:3757`. Whether
 wgpu-native can leave a request pending that long was not established.
 
+**Fixed.** All seven sites heap-allocate the wait record; on timeout it
+is marked abandoned and the callback frees it, releasing any adapter or
+device it was handed. The normal paths were exercised on lavapipe; the
+timeout path was not.
+
 **Fix.** Heap-allocate the wait record and free it from the callback,
 or on timeout unmap and keep pumping until the callback has fired.
 
@@ -480,9 +516,17 @@ The zstd case of `stage_feed` in `src/content_decode.c` loops while
 can consume all input while still holding output, and the decoder has no
 finish step, so the tail of a body can be dropped. No memory impact.
 
+**Fixed.** The decode loop keeps draining while the output buffer comes
+back full.
+
 **Fix.** Loop while `in.pos < in.size || o.pos == o.size`.
 
 ### Hardening notes
+
+The first, second and fourth notes are addressed: the frame buffer is
+zero-initialised, the mask surface is checked before its pixels are
+read, and the TextDecoder path clears the exception. The grid line-name
+interning is unchanged.
 
 - `src/video_decode.c:473-488`, `:550-568`: the BGRA buffer comes from
   `av_malloc` and the `sws_scale` return value is ignored. A short
