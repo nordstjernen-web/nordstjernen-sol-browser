@@ -96,8 +96,8 @@ Update Changelog.md
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
   `data/i18n/*.lang`); English is the fallback for any string a catalogue
   does not cover. No gettext dependency.
-- The JavaScript heap lives in a cage: `JS_NewRuntime()` reserves one
-  4 GB address range per process (`src/quickjs/quickjs-cage.c`) and
+- The JavaScript heap lives in a cage, in both engines: `JS_NewRuntime()`
+  reserves one 4 GB address range per process (`quickjs-cage.c`) and
   `JSValue` holds a 32-bit offset into it (`JS_CAGE_BOXING` in
   `quickjs.h`). Browser code creates runtimes through `ns_js_runtime_new`
   / `ns_js_runtime_free` (`src/js_cage.c`) and takes ArrayBuffer backing
@@ -105,10 +105,11 @@ Update Changelog.md
   `g_malloc`. The staged V8-style heap hardening plan, its invariants (no
   allocator bookkeeping inside the cage, no raw host or code pointers in
   heap objects) and its benchmarks live in `docs/heap-hardening.md`; keep
-  engine changes for it small and grouped so upstream quickjs-ng fixes
-  keep merging. The machinery lives in `src/quickjs/quickjs-cptr.h`,
-  `quickjs-hardening.h` and `quickjs-cage.c`; after touching engine
-  pointer fields run `scripts/quickjs-cage-rewrite.py --check`.
+  engine changes for it small and grouped so upstream fixes keep merging.
+  The machinery lives in `quickjs-cptr.h`, `quickjs-hardening.h` and
+  `quickjs-cage.c` in `src/quickjs-bellard/` and `src/quickjs/`; after
+  touching engine pointer fields run
+  `scripts/quickjs-cage-rewrite.py --check`, which covers both.
 - Does not phone home, does not telemeter the user.
 - Make good descriptive commit messages always
 
@@ -174,32 +175,32 @@ meson compile -C builddir
 ./builddir/src/gtk/nordstjernen
 ```
 
-The QuickJS engine is integrated into the main tree at `src/quickjs/`
-(forked from [quickjs-ng](https://github.com/quickjs-ng/quickjs); we
-modify it freely — JIT, profiling, and other browser-side hooks live
-there). It is not a meson subproject — `src/quickjs/meson.build` is
-loaded via `subdir()` from the top-level and exposes `libquickjs` as
-a declared dependency directly in the parent scope.
+Two QuickJS engines are integrated into the main tree, and the `quickjs`
+meson option picks one (`docs/quickjs.md`):
 
-### Original QuickJS: `-Dquickjs=quickjs`
+- `quickjs` (default): `src/quickjs-bellard/`, a fork of Fabrice Bellard's
+  [QuickJS](https://github.com/bellard/quickjs). It carries the heap
+  hardening and the browser hooks, and upstream's `Intl` and `Temporal`.
+- `quickjs-ng`: `src/quickjs/`, a fork of
+  [quickjs-ng](https://github.com/quickjs-ng/quickjs) with the same
+  hardening, its own `Intl`/`Temporal` and a few hooks not ported yet.
 
-The `quickjs` meson option picks the engine under the QuickJS binding:
-`quickjs-ng` (default) is the in-tree fork above; `quickjs` is Fabrice
-Bellard's original [QuickJS](https://github.com/bellard/quickjs), fetched at
-configure time by `subprojects/quickjs.wrap` (pinned to a `master` commit,
-built by the overlay in `subprojects/packagefiles/quickjs/`, never vendored).
-See `docs/quickjs.md`.
+We modify both freely. Neither is a meson subproject: each directory's
+`meson.build` is loaded via `subdir()` from the top-level and exposes
+`libquickjs` as a declared dependency directly in the parent scope.
 
-- **Engine code includes `"ns_quickjs.h"`, never `<quickjs.h>`.** On the
-  original engine (`NS_QUICKJS_ORIGINAL`) that header and `src/ns_quickjs.c`
-  supply the quickjs-ng API the binding is written against.
-- **A new quickjs-ng-only call goes into the adapter**, not behind an
-  `#ifdef` at the call site: build `-Dquickjs=quickjs` after binding changes,
-  and add whatever fails to compile to `src/ns_quickjs.c`. Only the fork's own
-  hooks with no equivalent (the receiver-aware `get_own_property_receiver`)
-  are guarded in place.
-- CI does not build it: build both configurations locally after binding
-  changes (`docs/quickjs.md`, "Checking a change").
+### Two engines, one binding
+
+- **Engine code includes `"ns_quickjs.h"`, never `<quickjs.h>`.** The
+  binding is written against the quickjs-ng API. On Bellard's engine
+  (`NS_QUICKJS_ORIGINAL`) the engine exports the browser hooks itself and
+  `src/ns_quickjs.h` / `src/ns_quickjs.c` supply the rest.
+- **A new quickjs-ng-only call goes into Bellard's engine or the adapter**,
+  not behind an `#ifdef` at the call site: the default build fails to
+  compile until it exists. Only the fork's own hooks with no equivalent yet
+  (the receiver-aware `get_own_property_receiver`) are guarded in place.
+- CI builds the default only: build `-Dquickjs=quickjs-ng` locally after
+  binding changes (`docs/quickjs.md`, "Checking a change").
 
 ### Text layout: web-text-lib
 

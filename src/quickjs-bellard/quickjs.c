@@ -5564,7 +5564,7 @@ static void js_shape_hash_unlink(JSRuntime *rt, JSShape *sh)
         cur = js_cload(JSShape *, cur->shape_hash_next);
     }
     if (prev)
-        prev->shape_hash_next = sh->shape_hash_next;
+        js_cstore(prev->shape_hash_next, js_cload(JSShape *, sh->shape_hash_next));
     else
         rt->shape_hash[h] = js_cload(JSShape *, sh->shape_hash_next);
     rt->shape_hash_count--;

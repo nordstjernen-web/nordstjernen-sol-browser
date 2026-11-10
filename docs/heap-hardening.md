@@ -23,8 +23,16 @@ also differs in a way that makes it harder: the binding layer
 (`src/js.c`) is as large as the engine.
 
 Each change is benchmarked before it merges and kept as small and
-isolated from upstream quickjs-ng as the design allows, so security
-fixes from upstream keep merging cleanly into `src/quickjs/`.
+isolated from upstream as the design allows, so security fixes from
+upstream keep merging cleanly.
+
+Both in-tree engines carry the hardening: the default, the fork of
+Bellard's QuickJS in `src/quickjs-bellard/`, and the quickjs-ng fork in
+`src/quickjs/`. The stages were built in the quickjs-ng fork and ported;
+this document describes the design with the fork's file and function
+names, and [`quickjs-bellard-default.md`](quickjs-bellard-default.md)
+lists, stage by stage, how Bellard's engine implements it and where it
+differs. The files have the same names in both directories.
 
 ## Status
 
@@ -69,8 +77,7 @@ outside it must be one of the engine's trusted blocks, and anything else
 aborts. The first chunk
 is never handed out, so offset zero means `NULL`. The engine refuses to
 create a runtime without a cage; AddressSanitizer and 32-bit builds
-compile the classic layouts and use the process heap, and
-`-Dquickjs=quickjs` (Bellard's original engine) has no cage at all.
+compile the classic layouts and use the process heap.
 `src/js_cage.c` wraps it for browser code (`ns_js_runtime_new`,
 `ns_js_cage_shared_malloc`) and logs the reservation under
 `G_MESSAGES_DEBUG=all`.
@@ -306,7 +313,8 @@ rewrites that cannot be are reproducible:
   `quickjs-cage.c` is a separate file, and `list.h` carries the
   safe-linking checks.
 - `scripts/quickjs-cage-rewrite.py` is the single list of compressed
-  fields. `--check` reports every raw access to one of them outside
+  fields, with one table per engine (`--engine quickjs` or
+  `--engine quickjs-ng`; both when omitted). `--check` reports every raw access to one of them outside
   comments and exits non-zero; `--apply` rewrites them in place,
   idempotently, and reports the address-taking and slot-move sites that
   need a hand. After a refresh: 3-way merge `quickjs.c`, declare any new

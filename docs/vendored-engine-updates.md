@@ -29,9 +29,9 @@ is classified:
 
 Sources are listed explicitly in each `meson.build` (`src/quickjs/meson.build`,
 `src/lexbor/meson.build`), so new upstream files in unused areas are simply
-not compiled; the build is the final gate. After a QuickJS refresh, also build
-`-Dquickjs=quickjs` and fix the adapter if the binding changed (see
-[`quickjs.md`](quickjs.md)).
+not compiled; the build is the final gate. After a refresh of either QuickJS,
+build both `-Dquickjs` configurations and fix the adapter if the binding
+changed (see [`quickjs.md`](quickjs.md)).
 
 The QuickJS fork carries the heap hardening described in
 [`heap-hardening.md`](heap-hardening.md), which touches `quickjs.c` in a
@@ -58,6 +58,17 @@ Fork-local pieces a QuickJS refresh touches, by file:
 | `quickjs.h` | `JS_CAGE_BOXING` layout, `js_cage_pointer_base`, `JS_SetHeapCage`, `JS_Cage*` |
 | `quickjs.c` | the two include lines; the trusted block path in the arena front end; `JS_NewRuntime`'s cage heap; `JS_SetOpaque` / `JS_GetOpaque` table paths and the Intl tag; the context-table indices in realm fields; the code-table indices in C function, closure, job and module records; the WeakRef sentinel; the hand conversions around compressed fields (`JSMapState.hash_buckets`, renamed from upstream's `hash_table` so the rewrite script can tell it from `JSObjectList`'s, its element-typed `sizeof`, the iterator-helper buffer resized through a local, `JS_WriteRegExp` taking a pointer, `js_resize_cptr_array` at the module-table resize sites, and the requested-module resolution in the bytecode reader storing through a local); the auto-init opaque encoding (`js_autoinit_encode_opaque` / `js_autoinit_get_opaque`, the function-list `JSInternTable`); and the `js_cload` / `js_cstore` / `js_abuf_data` / `js_ta_ptr` rewrites the script reproduces |
 | `meson.build` | `quickjs-cage.c` in the sources |
+
+## 2026-11-10 — Bellard's QuickJS e5ac135 → e585640, vendored
+
+The engine moves from `subprojects/quickjs.wrap` into `src/quickjs-bellard/`
+and becomes the default (`docs/quickjs-bellard-default.md`). The base is
+master `e585640` ("intl: fixed DateTimeFormat OOM leaks"), five commits on:
+the object-spread fix for strings (#611), stricter Temporal time zone
+validation and three Intl fixes for #610 points 3, 4 and 11. All twelve
+local patches still applied and are part of the sources now.
+`scripts/bump-bellard-quickjs.sh` is gone; later refreshes are 3-way
+merges like the other engines'.
 
 ## 2026-11-09 — original QuickJS 712e8c0 → e5ac135
 

@@ -30,7 +30,8 @@ reporting in [SECURITY.md](../SECURITY.md), and licensing in
 - [Embedding.md](Embedding.md) — embedding the engine in a C application.
 - [engine-protocol.md](engine-protocol.md) — the versioned shell/renderer contract: handshake, endpoints, side channels.
 - [Direction.md](Direction.md) — who the browser is for, what sets it apart, and the architectural commitments.
-- [quickjs.md](quickjs.md) — building on Fabrice Bellard's original QuickJS instead of the in-tree quickjs-ng fork (`-Dquickjs=quickjs`).
+- [quickjs.md](quickjs.md) — the two in-tree JavaScript engines: the default fork of Fabrice Bellard's QuickJS and the quickjs-ng fork (`-Dquickjs=quickjs-ng`).
+- [quickjs-bellard-default.md](quickjs-bellard-default.md) — what changed when Bellard's QuickJS became the default: the in-tree fork, the heap hardening port, the browser hooks, verification and cost.
 - [vendored-engine-updates.md](vendored-engine-updates.md) — pulling upstream into the in-tree QuickJS and lexbor forks.
 
 ## Architecture & internals

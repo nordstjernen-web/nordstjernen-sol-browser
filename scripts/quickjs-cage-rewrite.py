@@ -150,7 +150,6 @@ BELLARD_FIELDS = [
     (r"re1?", r"(?:pattern|bytecode)", "JSString *"),
     (BELLARD_OBJECT_HEAD, r"u\.regexp\.(?:pattern|bytecode)", "JSString *"),
     (BELLARD_ABUF_HEAD, r"data", "uint8_t *"),
-    (r"(?:mr|mr1)", r"hash_next", "struct JSMapRecord *"),
     (r"it", r"cur_record", "JSMapRecord *"),
     (r"it", r"tab_atom", "JSPropertyEnum *"),
     (r"it", r"(?:iters|nexts|padding)", "JSValue *"),
@@ -174,7 +173,7 @@ BELLARD_FIELDS = [
     (r"(?:me|res_me|me1)", r"u\.local\.var_ref", "JSVarRef *"),
 ] + [(BELLARD_OBJECT_HEAD, r"u\." + m, t) for m, t in BELLARD_UNION_MEMBERS.items()]
 
-BELLARD_MANUAL_FIELDS = []
+BELLARD_MANUAL_FIELDS = ["hash_next", "hash_table"]
 
 ENGINES = {
     "quickjs": (SRC / "quickjs-bellard" / "quickjs.c", BELLARD_FIELDS, BELLARD_MANUAL_FIELDS),
@@ -186,6 +185,7 @@ MANUAL_FIELDS = NG_MANUAL_FIELDS
 
 HOST_INDEX_IDIOMS = (
     r"\(uintptr_t\)\w+->u\.opaque",
+    r"\(uintptr_t\)JS_VALUE_GET_OBJ\(\w+\)->u\.opaque",
     r"u\.opaque = \(JS_CPTR\(void \*\)\)",
     r"js_ept_get\(\(const void \*\)",
 )

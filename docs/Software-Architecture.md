@@ -360,10 +360,12 @@ plugin-loaded decoder.
 
 ## 8. The JavaScript engine
 
-The engine is an in-tree fork of **quickjs-ng** (`src/quickjs/`, version
-0.18.0), a compact **bytecode interpreter with no JIT**. `-Dquickjs=quickjs`
-builds the same binding on Fabrice Bellard's original QuickJS instead,
-through the `src/ns_quickjs.h` adapter ([quickjs.md](quickjs.md)). Each browsing
+The engine is an in-tree fork of Fabrice Bellard's **QuickJS**
+(`src/quickjs-bellard/`), a compact **bytecode interpreter with no JIT**.
+`-Dquickjs=quickjs-ng` builds the same binding on the in-tree fork of
+quickjs-ng 0.18.0 (`src/quickjs/`) instead; the binding is written against
+the quickjs-ng API, which Bellard's engine gets from its own browser hooks
+and the `src/ns_quickjs.h` adapter ([quickjs.md](quickjs.md)). Each browsing
 context gets one `JSRuntime` + `JSContext`, created in `ns_js_new`
 (`src/js.c:57052`) with a 2 GB memory cap (`js_memory_cap_mb`) and a
 5 MB stack.
@@ -412,7 +414,7 @@ window, frame and worker realm. Native builds embed it (and
 `data/js/streaming.js`) as bytecode compiled by the in-tree `qjsc -H`
 (hidden source, like the runtime compile), so a new process reads 370 KB
 of bytecode instead of parsing the source: about 11 ms less per page load
-and per renderer. Cross builds and `-Dquickjs=quickjs` embed the source
+and per renderer. Cross builds and the default engine, Bellard's QuickJS, embed the source
 and compile it on first use in each process. It builds
 higher-level spec object models over thin native backends (the whole
 IndexedDB interface over `__nd_idb`), and adds faithfulness shims (making
