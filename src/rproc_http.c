@@ -73,6 +73,54 @@ open_fb_fd(size_t size)
     return fd;
 }
 
+static int
+child_env_name_allowed(const char *entry)
+{
+    static const char *const names[] = {
+        "HOME", "USER", "LOGNAME", "PATH", "LANG", "LANGUAGE", "TZ", "TERM",
+        "TMPDIR", "TMP", "TEMP", "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY",
+        "http_proxy", "https_proxy", "ftp_proxy", "all_proxy", "no_proxy",
+        "HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "ALL_PROXY", "NO_PROXY",
+        "LD_LIBRARY_PATH", "LD_PRELOAD", "DRI_PRIME", "vblank_mode",
+        "ORC_CODE", "RUST_BACKTRACE", "LOCPATH", "GCONV_PATH", "RES_OPTIONS",
+        "LOCALDOMAIN", "HOSTALIASES", "APPDIR", "APPIMAGE", "container",
+        "VDPAU_DRIVER", "__CF_USER_TEXT_ENCODING",
+    };
+    static const char *const prefixes[] = {
+        "LC_", "XDG_", "NS_", "FONTCONFIG_", "FC_", "G_", "GLIB_", "GIO_",
+        "PANGO_", "MESA_", "LIBGL_", "EGL_", "GBM_", "GALLIUM_", "LP_",
+        "ZINK_", "RADV_", "ANV_", "INTEL_", "AMD_", "NOUVEAU_", "__GL",
+        "__NV", "__EGL_", "NVIDIA_", "VK_", "WGPU_", "GST_", "LIBVA_", "SDL_",
+        "ALSA_", "PULSE_", "PIPEWIRE_", "ASAN_", "UBSAN_", "LSAN_", "TSAN_",
+        "MSAN_", "MALLOC_", "GLIBC_", "CURL_", "SSL_", "OPENSSL_", "SNAP",
+        "FLATPAK_", "NIX_", "DYLD_",
+    };
+    const char *eq = strchr(entry, '=');
+    if (!eq) return 0;
+    size_t len = (size_t)(eq - entry);
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++)
+        if (strlen(names[i]) == len && strncmp(entry, names[i], len) == 0)
+            return 1;
+    for (size_t i = 0; i < sizeof prefixes / sizeof prefixes[0]; i++) {
+        size_t plen = strlen(prefixes[i]);
+        if (len >= plen && strncmp(entry, prefixes[i], plen) == 0) return 1;
+    }
+    return 0;
+}
+
+char **
+ns_rproc_child_environ(void)
+{
+    char **all = g_get_environ();
+    size_t n = 0;
+    for (char **e = all; e && *e; e++) {
+        if (child_env_name_allowed(*e)) all[n++] = *e;
+        else g_free(*e);
+    }
+    if (all) all[n] = NULL;
+    return all;
+}
+
 static void
 close_inherited_fds(long max_fd)
 {
@@ -191,8 +239,10 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
         goto fail;
     fcntl(sv[0], F_SETFD, FD_CLOEXEC);
-    pid_t pid = fork();
+    char **child_env = ns_rproc_child_environ();
+    pid_t pid = child_env ? fork() : -1;
     if (pid < 0) {
+        g_strfreev(child_env);
         close(sv[0]);
         close(sv[1]);
         goto fail;
@@ -215,13 +265,14 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
         if (shm) argv[ai++] = (char *)"shm";
         if (priv) argv[ai++] = (char *)"private";
         argv[ai] = NULL;
-        execv(renderer_path, argv);
+        execve(renderer_path, argv, child_env);
         static const char exec_failed[] =
             "nordstjernen: cannot execute the renderer\n";
         ssize_t ignored = write(2, exec_failed, sizeof exec_failed - 1);
         (void)ignored;
         _exit(127);
     }
+    g_strfreev(child_env);
     close(sv[1]);
     if (shm) {
         http_send_fd(sv[0], mapfd);

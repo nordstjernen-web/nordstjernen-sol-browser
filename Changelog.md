@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: renderers and the audio helper are started with an allow-
+  listed environment — locale, home and XDG directories, display, proxy
+  and certificate settings, graphics, media and `NS_*` variables —
+  instead of everything the browser was launched with, so API tokens,
+  `SSH_AUTH_SOCK` and the session bus address are no longer in a
+  renderer's memory (`docs/security-review-2026-11.md`, S6).
 * Security: a sandboxed Linux renderer no longer connects to the
   desktop's X11 or Wayland display to get an OpenGL context for WebGL.
   When the EGL stack lacks the surfaceless platform it now tries the EGL

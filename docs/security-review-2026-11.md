@@ -44,7 +44,7 @@ a sandboxed renderer.
 | S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | confirmed |
 | S4 | `capture-devices-pregranted-to-every-renderer` | Low–Medium | yes | confirmed |
 | S5 | `renderer-holds-display-connection-without-surfaceless-egl` | Medium, configuration-dependent | yes | **fixed** |
-| S6 | `renderer-inherits-shell-environment` | Low | yes | confirmed |
+| S6 | `renderer-inherits-shell-environment` | Low | yes | **fixed** |
 | S7 | `shared-profile-lets-one-renderer-persist-into-other-sites` | Medium | yes | confirmed |
 | S8 | `seccomp-best-effort-and-socket-fallback` | Low | yes | **fixed** |
 | S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | plausible |
@@ -321,6 +321,10 @@ The renderer is started with `execv` and an untouched environment
 `SSH_AUTH_SOCK`, `DBUS_SESSION_BUS_ADDRESS` and `XAUTHORITY` from its
 own memory with no filesystem access. Terminal injection through the
 inherited tty is already blocked (`src/security.c:1030-1046`).
+
+**Fixed.** On POSIX the renderer is started with `execve` and an allow-
+listed environment, and the audio helper gets the same list. Descriptors
+0–2 are still inherited, for logging.
 
 **Fix.** Use `execve` with an allow-listed environment (locale, `HOME`,
 `XDG_*`, fontconfig, `NS_*`, proxy and CA variables), and point
