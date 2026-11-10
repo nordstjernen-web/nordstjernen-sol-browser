@@ -41,7 +41,7 @@ a sandboxed renderer.
 | W5 | `download-gate-gaps` | Low | partly | **fixed** |
 | S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | **partly fixed** |
 | S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | **fixed** |
-| S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | confirmed |
+| S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | **partly fixed** |
 | S4 | `capture-devices-pregranted-to-every-renderer` | Low–Medium | yes | confirmed |
 | S5 | `renderer-holds-display-connection-without-surfaceless-egl` | Medium, configuration-dependent | yes | **fixed** |
 | S6 | `renderer-inherits-shell-environment` | Low | yes | **fixed** |
@@ -273,6 +273,13 @@ It can also connect to any loopback or LAN TCP service, including the
 unauthenticated `--webdriver` port when that is running: its `Host` and
 `Origin` checks do not stop a raw client. SECURITY.md documents part of
 this; the reach is wider than it suggests.
+
+**Partly fixed.** The renderer and audio helper get an allow-list of
+subdirectories under the three XDG roots and under `/run` in place of
+the roots themselves; the shell is unchanged. Still open: the XDG
+runtime directory stays readable (including GVFS mounts under it), and
+the renderer keeps unrestricted outbound network access until fetching
+moves to a broker.
 
 **Fix.** Replace the three XDG roots with the specific paths the engine
 needs (fontconfig, its own directories), and `/run` with the specific

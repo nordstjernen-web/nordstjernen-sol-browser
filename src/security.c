@@ -440,6 +440,42 @@ ns_security_require_landlock(void)
 }
 
 static void
+add_user_subdirs(int rfd, guint64 access, const char *root,
+                 const char *const *subdirs)
+{
+    for (gsize i = 0; subdirs[i]; i++) {
+        g_autofree char *p = g_build_filename(root, subdirs[i], NULL);
+        if (g_file_test(p, G_FILE_TEST_EXISTS))
+            add_path_rw(rfd, access, p);
+    }
+}
+
+static void
+add_user_dirs(int rfd, guint64 fs_read)
+{
+    if (ns_config_dir_writable) {
+        add_path_rw(rfd, fs_read, g_get_user_config_dir());
+        add_path_rw(rfd, fs_read, g_get_user_data_dir());
+        add_path_rw(rfd, fs_read, g_get_user_cache_dir());
+        return;
+    }
+    static const char *const config_subdirs[] = {
+        "fontconfig", "vulkan", "enchant", "gstreamer-1.0", NULL,
+    };
+    static const char *const data_subdirs[] = {
+        "fonts", "vulkan", "gstreamer-1.0", "mime", "hunspell", "myspell",
+        "enchant", NULL,
+    };
+    static const char *const cache_subdirs[] = {
+        "fontconfig", "mesa_shader_cache", "mesa_shader_cache_db",
+        "gstreamer-1.0", "nvidia", "radv_builtin_shaders", NULL,
+    };
+    add_user_subdirs(rfd, fs_read, g_get_user_config_dir(), config_subdirs);
+    add_user_subdirs(rfd, fs_read, g_get_user_data_dir(), data_subdirs);
+    add_user_subdirs(rfd, fs_read, g_get_user_cache_dir(), cache_subdirs);
+}
+
+static void
 ns_seccomp_filter_missing(const char *what)
 {
 #ifdef __ANDROID__
@@ -537,7 +573,7 @@ ns_security_sandbox_init(const char *self_exe)
     };
     static const char *const system_read_dirs[] = {
         "/etc", "/var/lib/ca-certificates", "/var/cache/fontconfig",
-        "/proc", "/sys", "/run",
+        "/proc", "/sys",
         "/dev/shm", "/dev/dri",
         "/tmp/.X11-unix", "/tmp/.ICE-unix",
         NULL,
@@ -550,6 +586,16 @@ ns_security_sandbox_init(const char *self_exe)
         add_path_rw(rfd, fs_read | fs_exec, system_exec_dirs[i]);
     for (gsize i = 0; system_read_dirs[i]; i++)
         add_path_rw(rfd, fs_read, system_read_dirs[i]);
+    static const char *const content_process_run_dirs[] = {
+        "/run/systemd/resolve", "/run/NetworkManager", "/run/resolvconf",
+        "/run/connman", "/run/udev", "/run/opengl-driver",
+        "/run/opengl-driver-32", "/run/current-system", "/run/host", NULL,
+    };
+    if (ns_config_dir_writable)
+        add_path_rw(rfd, fs_read, "/run");
+    else
+        for (gsize i = 0; content_process_run_dirs[i]; i++)
+            add_path_rw(rfd, fs_read, content_process_run_dirs[i]);
 
     guint64 fs_dev = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE;
     for (int vi = 0; vi < 64; vi++) {
@@ -578,9 +624,7 @@ ns_security_sandbox_init(const char *self_exe)
 
     const char *home = g_get_home_dir();
 
-    add_path_rw(rfd, fs_read, g_get_user_config_dir());
-    add_path_rw(rfd, fs_read, g_get_user_data_dir());
-    add_path_rw(rfd, fs_read, g_get_user_cache_dir());
+    add_user_dirs(rfd, fs_read);
     add_path_rw(rfd, ns_runtime_dir_writable ? fs_rw : fs_read,
                 g_get_user_runtime_dir());
 

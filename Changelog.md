@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: on Linux a renderer or media helper can no longer read all
+  of `~/.config`, `~/.local/share`, `~/.cache` and `/run`. It now gets
+  only the font, graphics-cache, media-plugin, MIME and spell-check
+  directories it uses there and the resolver, udev and driver
+  directories under `/run`, so other applications' credentials,
+  removable media and other browsers' profiles are out of a compromised
+  renderer's reach (`docs/security-review-2026-11.md`, S3).
 * Security: renderers and the audio helper are started with an allow-
   listed environment — locale, home and XDG directories, display, proxy
   and certificate settings, graphics, media and `NS_*` variables —
