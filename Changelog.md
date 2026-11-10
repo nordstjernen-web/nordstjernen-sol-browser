@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: on Linux the audio helper now runs as two processes. The one
+  that decodes media files never opens a sound device and holds no
+  socket; it writes mixed PCM into a pipe. A second process owns the
+  PulseAudio, PipeWire or ALSA connection and only copies range-checked
+  samples from the pipe to the device, so a decoder compromised through
+  a media file cannot reach the sound server. Audio output gains roughly
+  30–40 ms of latency (`docs/security-review-2026-11.md`, S9).
 * Security: on Linux a renderer can open the camera and sound devices
   only when it was started for a tab whose site holds the camera
   permission and has asked for the camera. Every other renderer's

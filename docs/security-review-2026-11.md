@@ -65,7 +65,7 @@ camera or microphone, or on macOS and Windows.
 | S6 | `renderer-inherits-shell-environment` | Low | yes | **fixed** |
 | S7 | `shared-profile-lets-one-renderer-persist-into-other-sites` | Medium | yes | open |
 | S8 | `seccomp-best-effort-and-socket-fallback` | Low | yes | **fixed** |
-| S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | open (documented) |
+| S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | **fixed** |
 | M1 | `unbounded-dom-recursion-svg-foreign-and-frame-images` | Low (DoS) | no | **fixed** |
 | M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | **fixed** |
 | M3 | `raw-svg-bytes-break-utf8-invariant` | Low | no | **fixed** |
@@ -425,8 +425,13 @@ connection after new `AF_UNIX` sockets are denied. A helper compromised
 through a decoder might use it for microphone capture or to load server
 modules; the server side was not examined.
 
-**Still open, documented.** SECURITY.md now records the retained sound-
-server connection as a residual risk of the audio helper.
+**Fixed.** The helper forks before it initialises SDL. The parent keeps
+the command protocol, decodes under the sandbox with SDL's dummy audio
+driver and feeds 256-frame chunks into a pipe, paced by back-pressure;
+the child opens the device, applies the same sandbox and queues the
+samples. Checked with SDL's disk driver for PCM streams and an MP3; not
+listened to on real hardware. macOS and Windows keep the single-process
+helper.
 
 **Fix.** Document it as residual risk at minimum. Ideally the shell owns
 audio output and the helper only decodes to PCM.

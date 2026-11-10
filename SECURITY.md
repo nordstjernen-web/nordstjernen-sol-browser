@@ -208,10 +208,13 @@ compromised renderer cannot truncate the shell's mapping from under it.
   `CLONE_NEW*` namespace flags and `clone3` returns `ENOSYS` (so libc
   falls back to `clone`), and `socket` only creates `AF_INET`,
   `AF_INET6` and `AF_NETLINK` sockets in the renderer and in the audio
-  helper. The helper opens its sound device before the filter loads, so
-  it keeps the connection to PulseAudio or PipeWire it already has; a
-  helper compromised through a decoder could misuse that connection,
-  which is a residual risk. `kill`, `tgkill`, `rt_sigqueueinfo`,
+  helper. The helper runs as two processes: the one that reads commands
+  and decodes media never opens a sound device and holds no socket, and
+  writes mixed PCM into a pipe; a second process opens the sound device,
+  keeps the PulseAudio or PipeWire connection, and only copies
+  range-checked samples from the pipe to the device. A decoder
+  compromised through a media file therefore has no connection to the
+  sound server. `kill`, `tgkill`, `rt_sigqueueinfo`,
   `rt_tgsigqueueinfo` and `prlimit64` are allowed only with the
   process's own PID as the target (what `abort()`, `pthread_kill` and
   the thread-dump signal need), and `fcntl` is refused the
