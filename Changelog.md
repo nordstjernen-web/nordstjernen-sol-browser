@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: WebGPU operations that wait for a driver callback
+  (`mapAsync`, `requestAdapter`, `requestDevice`, `popErrorScope`,
+  `onSubmittedWorkDone` and canvas readback) no longer hand the driver a
+  pointer into their own stack frame. If the wait timed out, a callback
+  delivered later would have written into a dead frame (`docs/security-
+  review-2026-11.md`, M4).
 * Security: SVG files used as images or as external `<use>` targets are
   now made valid UTF-8 before they are parsed, like every other
   document. Several text walkers assume valid UTF-8 and could read a few

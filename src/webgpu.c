@@ -220,13 +220,21 @@ ns_webgpu_instance(void)
     return g_wg_instance;
 }
 
-typedef struct { int done; WGPUMapAsyncStatus status; } wg_map_wait;
+typedef struct {
+    int done;
+    int abandoned;
+    WGPUMapAsyncStatus status;
+} wg_map_wait;
 
 static void
 wg_on_map(WGPUMapAsyncStatus status, WGPUStringView message, void *u1, void *u2)
 {
     (void)message; (void)u2;
     wg_map_wait *w = u1;
+    if (w->abandoned) {
+        g_free(w);
+        return;
+    }
     w->status = status;
     w->done = 1;
 }
@@ -590,14 +598,19 @@ wg_queue_writeBuffer(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-typedef struct { int done; } wg_work_wait;
+typedef struct { int done; int abandoned; } wg_work_wait;
 
 static void
 wg_on_work_done(WGPUQueueWorkDoneStatus status, WGPUStringView message,
                 void *u1, void *u2)
 {
     (void)status; (void)message; (void)u2;
-    ((wg_work_wait *)u1)->done = 1;
+    wg_work_wait *w = u1;
+    if (w->abandoned) {
+        g_free(w);
+        return;
+    }
+    w->done = 1;
 }
 
 static JSValue
@@ -607,15 +620,17 @@ wg_queue_onSubmittedWorkDone(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     ns_wg_queue *q = wg_queue_unwrap(this_val);
     if (!q) return wg_promise_rejected(ctx, "onSubmittedWorkDone: queue");
-    wg_work_wait wait = { 0 };
+    wg_work_wait *pending = g_new0(wg_work_wait, 1);
     WGPUQueueWorkDoneCallbackInfo ci;
     memset(&ci, 0, sizeof ci);
     ci.mode = WGPUCallbackMode_AllowProcessEvents;
     ci.callback = wg_on_work_done;
-    ci.userdata1 = &wait;
+    ci.userdata1 = pending;
     wgpuQueueOnSubmittedWorkDone(q->queue, ci);
-    for (int i = 0; i < 4000 && !wait.done; i++)
+    for (int i = 0; i < 4000 && !pending->done; i++)
         wgpuInstanceProcessEvents(ns_webgpu_instance());
+    if (pending->done) g_free(pending);
+    else pending->abandoned = 1;
     return wg_promise_resolved(ctx, JS_UNDEFINED);
 }
 
@@ -852,19 +867,22 @@ wg_buffer_mapAsync(JSContext *ctx, JSValueConst this_val,
         return wg_promise_rejected(ctx, "mapAsync: range");
     size_t sz = size < 0 ? (size_t)(b->size - (uint64_t)offset) : (size_t)size;
 
-    wg_map_wait wait = { 0 };
+    if (mode != WGPUMapMode_Read && mode != WGPUMapMode_Write)
+        return wg_promise_rejected(ctx, "OperationError: mapAsync: invalid mode");
+    wg_map_wait *pending = g_new0(wg_map_wait, 1);
     WGPUBufferMapCallbackInfo mci;
     memset(&mci, 0, sizeof mci);
     mci.mode = WGPUCallbackMode_AllowProcessEvents;
     mci.callback = wg_on_map;
-    mci.userdata1 = &wait;
-    if (mode != WGPUMapMode_Read && mode != WGPUMapMode_Write)
-        return wg_promise_rejected(ctx, "OperationError: mapAsync: invalid mode");
+    mci.userdata1 = pending;
     wgpuBufferMapAsync(b->buffer, (WGPUMapMode)mode, (size_t)offset, sz, mci);
-    for (int i = 0; i < 4000 && !wait.done; i++) {
+    for (int i = 0; i < 4000 && !pending->done; i++) {
         if (b->device) wgpuDevicePoll(b->device, 1, NULL);
         wgpuInstanceProcessEvents(ns_webgpu_instance());
     }
+    wg_map_wait wait = *pending;
+    if (pending->done) g_free(pending);
+    else pending->abandoned = 1;
     if (!wait.done || wait.status != WGPUMapAsyncStatus_Success)
         return wg_promise_rejected(ctx, "OperationError: mapAsync failed");
     b->mapped = TRUE;
@@ -1037,7 +1055,7 @@ wg_make_device(JSContext *ctx, WGPUDevice device, ns_wg_error_sink *sink,
     return obj;
 }
 
-typedef struct { WGPUDevice device; int done; } wg_device_wait;
+typedef struct { WGPUDevice device; int done; int abandoned; } wg_device_wait;
 
 static void
 wg_on_device(WGPURequestDeviceStatus status, WGPUDevice device,
@@ -1045,6 +1063,12 @@ wg_on_device(WGPURequestDeviceStatus status, WGPUDevice device,
 {
     (void)message; (void)u2;
     wg_device_wait *w = u1;
+    if (w->abandoned) {
+        if (status == WGPURequestDeviceStatus_Success && device)
+            wgpuDeviceRelease(device);
+        g_free(w);
+        return;
+    }
     w->device = (status == WGPURequestDeviceStatus_Success) ? device : NULL;
     w->done = 1;
 }
@@ -1184,11 +1208,11 @@ wg_adapter_requestDevice(JSContext *ctx, JSValueConst this_val,
         JS_FreeValue(ctx, jlim);
     }
 
-    wg_device_wait wait; memset(&wait, 0, sizeof wait);
+    wg_device_wait *pending = g_new0(wg_device_wait, 1);
     WGPURequestDeviceCallbackInfo ci; memset(&ci, 0, sizeof ci);
     ci.mode = WGPUCallbackMode_AllowProcessEvents;
     ci.callback = wg_on_device;
-    ci.userdata1 = &wait;
+    ci.userdata1 = pending;
     WGPUDeviceDescriptor dd; memset(&dd, 0, sizeof dd);
     ns_wg_error_sink *sink = g_new0(ns_wg_error_sink, 1);
     sink->device_obj = JS_UNDEFINED;
@@ -1198,8 +1222,11 @@ wg_adapter_requestDevice(JSContext *ctx, JSValueConst this_val,
     dd.requiredFeatures = required_count ? required : NULL;
     dd.requiredLimits = have_limits ? &limits : NULL;
     wgpuAdapterRequestDevice(a->adapter, &dd, ci);
-    for (int i = 0; i < 2000 && !wait.done; i++)
+    for (int i = 0; i < 2000 && !pending->done; i++)
         wgpuInstanceProcessEvents(ns_webgpu_instance());
+    wg_device_wait wait = *pending;
+    if (pending->done) g_free(pending);
+    else pending->abandoned = 1;
     if (!wait.device)
         return wg_promise_rejected(ctx, "requestDevice: no device");
     return wg_promise_resolved(ctx, wg_make_device(ctx, wait.device, sink,
@@ -1258,7 +1285,7 @@ wg_make_adapter(JSContext *ctx, WGPUAdapter adapter)
     return obj;
 }
 
-typedef struct { WGPUAdapter adapter; int done; } wg_adapter_wait;
+typedef struct { WGPUAdapter adapter; int done; int abandoned; } wg_adapter_wait;
 
 static void
 wg_on_adapter(WGPURequestAdapterStatus status, WGPUAdapter adapter,
@@ -1266,6 +1293,12 @@ wg_on_adapter(WGPURequestAdapterStatus status, WGPUAdapter adapter,
 {
     (void)message; (void)u2;
     wg_adapter_wait *w = u1;
+    if (w->abandoned) {
+        if (status == WGPURequestAdapterStatus_Success && adapter)
+            wgpuAdapterRelease(adapter);
+        g_free(w);
+        return;
+    }
     w->adapter = (status == WGPURequestAdapterStatus_Success) ? adapter : NULL;
     w->done = 1;
 }
@@ -1281,14 +1314,17 @@ wg_gpu_requestAdapter(JSContext *ctx, JSValueConst this_val,
     if (!inst)
         return wg_promise_resolved(ctx, JS_NULL);
 
-    wg_adapter_wait wait; memset(&wait, 0, sizeof wait);
+    wg_adapter_wait *pending = g_new0(wg_adapter_wait, 1);
     WGPURequestAdapterCallbackInfo ci; memset(&ci, 0, sizeof ci);
     ci.mode = WGPUCallbackMode_AllowProcessEvents;
     ci.callback = wg_on_adapter;
-    ci.userdata1 = &wait;
+    ci.userdata1 = pending;
     wgpuInstanceRequestAdapter(inst, NULL, ci);
-    for (int i = 0; i < 2000 && !wait.done; i++)
+    for (int i = 0; i < 2000 && !pending->done; i++)
         wgpuInstanceProcessEvents(inst);
+    wg_adapter_wait wait = *pending;
+    if (pending->done) g_free(pending);
+    else pending->abandoned = 1;
     if (!wait.adapter)
         return wg_promise_resolved(ctx, JS_NULL);
     return wg_promise_resolved(ctx, wg_make_adapter(ctx, wait.adapter));
@@ -3697,6 +3733,7 @@ wg_device_pushErrorScope(JSContext *ctx, JSValueConst this_val,
 
 typedef struct {
     int done;
+    int abandoned;
     WGPUPopErrorScopeStatus status;
     WGPUErrorType type;
     char *message;
@@ -3708,6 +3745,10 @@ wg_on_pop_scope(WGPUPopErrorScopeStatus status, WGPUErrorType type,
 {
     (void)u2;
     wg_scope_wait *w = u1;
+    if (w->abandoned) {
+        g_free(w);
+        return;
+    }
     w->status = status;
     w->type = type;
     w->message = wg_sv_dup(message);
@@ -3717,16 +3758,18 @@ wg_on_pop_scope(WGPUPopErrorScopeStatus status, WGPUErrorType type,
 static gboolean
 wg_pop_internal_scope(WGPUDevice device, WGPUErrorType *type, char **message)
 {
-    wg_scope_wait wait;
-    memset(&wait, 0, sizeof wait);
+    wg_scope_wait *pending = g_new0(wg_scope_wait, 1);
     WGPUPopErrorScopeCallbackInfo ci;
     memset(&ci, 0, sizeof ci);
     ci.mode = WGPUCallbackMode_AllowProcessEvents;
     ci.callback = wg_on_pop_scope;
-    ci.userdata1 = &wait;
+    ci.userdata1 = pending;
     wgpuDevicePopErrorScope(device, ci);
-    for (int i = 0; i < 2000 && !wait.done; i++)
+    for (int i = 0; i < 2000 && !pending->done; i++)
         wgpuInstanceProcessEvents(ns_webgpu_instance());
+    wg_scope_wait wait = *pending;
+    if (pending->done) g_free(pending);
+    else pending->abandoned = 1;
     *type = wait.type;
     *message = wait.message;
     return wait.done && wait.status == WGPUPopErrorScopeStatus_Success;
@@ -3748,16 +3791,18 @@ wg_device_popErrorScope(JSContext *ctx, JSValueConst this_val,
         g_byte_array_set_size(d->scope_internal, top);
         if (internal) return wg_promise_resolved(ctx, JS_NULL);
     }
-    wg_scope_wait wait;
-    memset(&wait, 0, sizeof wait);
+    wg_scope_wait *pending = g_new0(wg_scope_wait, 1);
     WGPUPopErrorScopeCallbackInfo ci;
     memset(&ci, 0, sizeof ci);
     ci.mode = WGPUCallbackMode_AllowProcessEvents;
     ci.callback = wg_on_pop_scope;
-    ci.userdata1 = &wait;
+    ci.userdata1 = pending;
     wgpuDevicePopErrorScope(d->device, ci);
-    for (int i = 0; i < 2000 && !wait.done; i++)
+    for (int i = 0; i < 2000 && !pending->done; i++)
         wgpuInstanceProcessEvents(ns_webgpu_instance());
+    wg_scope_wait wait = *pending;
+    if (pending->done) g_free(pending);
+    else pending->abandoned = 1;
     JSValue result;
     if (!wait.done || wait.status != WGPUPopErrorScopeStatus_Success)
         result = wg_promise_rejected(ctx, "OperationError: popErrorScope: the error scope stack is empty");
@@ -4987,17 +5032,20 @@ ns_webgpu_canvas_surface(const ns_node *canvas)
     }
     wgpuQueueSubmit(c->queue, 1, &cmd);
 
-    wg_map_wait wait = { 0 };
+    wg_map_wait *pending = g_new0(wg_map_wait, 1);
     WGPUBufferMapCallbackInfo mci;
     memset(&mci, 0, sizeof mci);
     mci.mode = WGPUCallbackMode_AllowProcessEvents;
     mci.callback = wg_on_map;
-    mci.userdata1 = &wait;
+    mci.userdata1 = pending;
     wgpuBufferMapAsync(rb, WGPUMapMode_Read, 0, (size_t)buf_size, mci);
-    for (int i = 0; i < 4000 && !wait.done; i++) {
+    for (int i = 0; i < 4000 && !pending->done; i++) {
         wgpuDevicePoll(c->device, 1, NULL);
         wgpuInstanceProcessEvents(ns_webgpu_instance());
     }
+    wg_map_wait wait = *pending;
+    if (pending->done) g_free(pending);
+    else pending->abandoned = 1;
 
     const uint8_t *map = wait.done && wait.status == WGPUMapAsyncStatus_Success
         ? wgpuBufferGetConstMappedRange(rb, 0, (size_t)buf_size) : NULL;

@@ -51,7 +51,7 @@ a sandboxed renderer.
 | M1 | `unbounded-dom-recursion-svg-foreign-and-frame-images` | Low (DoS) | no | **fixed** |
 | M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | **fixed** |
 | M3 | `raw-svg-bytes-break-utf8-invariant` | Low | no | **fixed** |
-| M4 | `webgpu-map-wait-stack-userdata` | Low | no | plausible |
+| M4 | `webgpu-map-wait-stack-userdata` | Low | no | **fixed** |
 | M5 | `zstd-final-flush-truncation` | Info | no | **fixed** |
 
 The slugs are meant to be used as `Security-Fix:` trailers when the
@@ -482,6 +482,11 @@ without cancelling if it has not fired. A callback delivered on a later
 `wgpuInstanceProcessEvents` would write through a dead stack frame. The
 same shape is at `:615`, `:1191`, `:1288`, `:3726` and `:3757`. Whether
 wgpu-native can leave a request pending that long was not established.
+
+**Fixed.** All seven sites heap-allocate the wait record; on timeout it
+is marked abandoned and the callback frees it, releasing any adapter or
+device it was handed. The normal paths were exercised on lavapipe; the
+timeout path was not.
 
 **Fix.** Heap-allocate the wait record and free it from the callback,
 or on timeout unmap and keep pumping until the callback has fired.
