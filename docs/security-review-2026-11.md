@@ -38,7 +38,7 @@ a sandboxed renderer.
 | W2 | `pna-bypass-via-opaque-top-level-document` | Medium | no | **fixed** |
 | W3 | `address-bar-userinfo-and-decoded-url-spoofing` | Medium | no | **fixed** |
 | W4 | `csp-unsupported-directives-fail-open` | Low | no | **fixed** |
-| W5 | `download-gate-gaps` | Low | partly | confirmed / plausible |
+| W5 | `download-gate-gaps` | Low | partly | **fixed** |
 | S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | confirmed |
 | S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | confirmed (impact plausible) |
 | S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | confirmed |
@@ -195,6 +195,10 @@ minimum, and split on all ASCII whitespace.
   under a race).
 
 Name sanitisation, traversal handling and origin stamping are sound.
+
+**Fixed.** The extension list is extended, and the staged file is opened
+without following links, checked, and compared by device and inode after
+the rename; a mismatch moves it back and fails the download.
 
 **Fix.** Extend the list, or prompt for anything outside a safe-type
 allow-list. Open the staged file with `O_NOFOLLOW`, `fstat` the

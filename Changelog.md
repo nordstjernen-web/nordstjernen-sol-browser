@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: more file types prompt before they are saved — disk images,
+  Office macro documents, Windows shell and installer formats, and
+  further shell and macOS script types. The move of a finished download
+  out of the staging directory now checks that the file it moved is the
+  regular file it inspected, so a compromised renderer cannot swap in a
+  directory (`docs/security-review-2026-11.md`, W5).
 * Security: Content-Security-Policy now honours `script-src-elem`,
   `script-src-attr`, `style-src-elem` and `style-src-attr`; a policy
   that restricted scripts only through `script-src-elem` used to enforce

@@ -1213,17 +1213,20 @@ download_move_posix(NsDownload *d, const char *tmp_path, const char *final_url)
     int dfd = open(staging, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (dfd < 0)
         return FALSE;
-    struct stat st;
-    gboolean ok = fstatat(dfd, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0 &&
-                  S_ISREG(st.st_mode) &&
+    struct stat st, moved;
+    int fd = openat(dfd, leaf, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    gboolean ok = fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
                   renameat(dfd, leaf, AT_FDCWD, d->path) == 0;
-    if (!ok)
+    if (!ok) {
         unlinkat(dfd, leaf, 0);
-    close(dfd);
-    if (ok && g_lstat(d->path, &st) == 0 && S_ISLNK(st.st_mode)) {
-        g_unlink(d->path);
+    } else if (g_lstat(d->path, &moved) != 0 || moved.st_dev != st.st_dev ||
+               moved.st_ino != st.st_ino) {
+        if (renameat(AT_FDCWD, d->path, dfd, leaf) != 0)
+            g_unlink(d->path);
         ok = FALSE;
     }
+    if (fd >= 0) close(fd);
+    close(dfd);
     if (ok)
         ns_security_mark_download_origin(
             d->path, final_url && *final_url ? final_url : d->url);
@@ -1423,6 +1426,14 @@ download_name_is_executable(const char *name)
         ".desktop", ".sh", ".bash", ".zsh", ".run", ".bin", ".appimage",
         ".deb", ".rpm", ".flatpakref", ".dmg", ".pkg", ".app", ".command",
         ".jar", ".py", ".pl", ".rb", ".php", ".apk", ".xpi", ".crx",
+        ".scf", ".jnlp", ".application", ".appref-ms", ".gadget", ".msp",
+        ".mst", ".psm1", ".psd1", ".vb", ".chm", ".hlp", ".iso", ".img",
+        ".vhd", ".vhdx", ".docm", ".dotm", ".xlsm", ".xltm", ".xlam",
+        ".pptm", ".potm", ".ppam", ".library-ms", ".search-ms",
+        ".settingcontent-ms", ".website", ".diagcab", ".appx", ".appxbundle",
+        ".msixbundle", ".service", ".csh", ".ksh", ".fish", ".terminal",
+        ".workflow", ".action", ".scpt", ".mobileconfig", ".snap",
+        ".flatpak",
     };
     const char *dot = strrchr(name, '.');
     if (!dot) return FALSE;
