@@ -16,21 +16,21 @@ a sandboxed renderer.
 
 ## Status after the fixes
 
-Fourteen of the nineteen findings are fixed and two are partly fixed;
+Sixteen of the nineteen findings are fixed and two are partly fixed;
 the table's Status column and a note under each finding say what
 changed.
 
-- **Fixed:** W1–W5, S2, S5, S6, S8, M1–M5.
+- **Fixed:** W1–W5, S2, S4, S5, S6, S8, S9, M1–M5.
 - **Partly fixed:** S1 (scheduling calls on other processes remain) and
   S3 (the XDG runtime directory and outbound network remain).
-- **Open:** S4 (capture devices), S7 (shared profile and popup relay)
-  and S9 (audio helper's sound-server connection, now documented). S4
-  and S7 need the shell to broker devices, network and storage for the
-  renderer.
+- **Open:** S7 (shared profile and popup relay). It needs one renderer
+  per site and per-site storage; its section says why nothing smaller
+  closes it.
 
 The fixes were checked in headless and windowed runs in a container
-with software rendering. They were not run on real GPU drivers, with a
-camera or microphone, or on macOS and Windows.
+with software rendering, a placeholder camera node and SDL's file
+audio driver. They were not run on real GPU drivers, with a real camera,
+microphone or sound server, or on macOS and Windows.
 
 ## Summary
 
@@ -387,12 +387,34 @@ are worth recording.
   popup renderer whose opener is another site can thus run script in
   that site's renderer.
 
-**Still open.** Both paths need the planned network and storage broker.
-Stamping the popup relay's `origin` in the shell was tried and dropped:
-the shell only knows a tab's URL from what its renderer reports, and
-learns a redirected URL after the page's scripts have already run, so
-the check would either trust the compromised renderer or break popups
-that call their opener during load.
+**Still open.** This one cannot be closed by a check; it needs each
+renderer process to serve one site and to have write access to that
+site's storage only.
+
+- Today a renderer serves a tab, follows the tab across sites, and has
+  write access to the whole profile. Any integrity key or tag a renderer
+  could verify, it could also forge, and the shell cannot vouch for
+  content it never fetched.
+- The popup relay has the same root. The shell knows a tab's URL only
+  from its renderer, and learns the final URL of a redirect chain after
+  the page's scripts have run. A rule based on the URLs the shell itself
+  requested (never relay a call from a popup that has been asked to load
+  another origin) is sound, but it drops the opener call at the end of
+  an OAuth popup, which returns to the opener's origin through a
+  redirect from the identity provider.
+- Keeping scripts, stylesheets and documents out of the shared disk
+  cache would stop code planting, but the engine has no per-process
+  cache to fall back on, so every navigation would refetch them.
+
+What it takes: replace the renderer on every cross-site top-level
+navigation, including redirects, which the renderer would hand back to
+the shell instead of following; and store cookies, cache, localStorage
+and IndexedDB per top-level site, so Landlock can give a renderer its
+own site's directory and nothing else. The first half now has a
+foundation: the S4 fix can replace a tab's renderer mid-session and
+carry the pending form body, the initiator and session storage across.
+The storage half is a redesign of `src/cookies.c` and `src/cache.c`,
+which keep one database per profile.
 
 **Fix.** For the cache, authenticate each entry with a key the shell
 holds or serve it through a shell broker; short term, give each renderer
