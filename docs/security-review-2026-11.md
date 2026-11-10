@@ -43,7 +43,7 @@ a sandboxed renderer.
 | S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | **fixed** |
 | S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | confirmed |
 | S4 | `capture-devices-pregranted-to-every-renderer` | Low–Medium | yes | confirmed |
-| S5 | `renderer-holds-display-connection-without-surfaceless-egl` | Medium, configuration-dependent | yes | confirmed (prevalence unknown) |
+| S5 | `renderer-holds-display-connection-without-surfaceless-egl` | Medium, configuration-dependent | yes | **fixed** |
 | S6 | `renderer-inherits-shell-environment` | Low | yes | confirmed |
 | S7 | `shared-profile-lets-one-renderer-persist-into-other-sites` | Medium | yes | confirmed |
 | S8 | `seccomp-best-effort-and-socket-fallback` | Low | yes | **fixed** |
@@ -302,6 +302,12 @@ X11 or Wayland connection for its lifetime. On X11 that is a fully
 trusted client — keystroke capture, input injection, screen capture —
 which amounts to a sandbox escape. Which drivers lack the extension was
 not checked.
+
+**Fixed.** The display is chosen from the surfaceless platform, then
+`EGL_EXT_platform_device`; under the sandbox the default-display
+fallback is refused unless `NS_WEBGL_ALLOW_DISPLAY` is set. Verified
+only on Mesa's surfaceless path; the device-platform and refusal paths
+were not exercised.
 
 **Fix.** Try `EGL_EXT_platform_device` or GBM next, and if neither
 works disable WebGL in that renderer rather than connect to the user's

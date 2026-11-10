@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a sandboxed Linux renderer no longer connects to the
+  desktop's X11 or Wayland display to get an OpenGL context for WebGL.
+  When the EGL stack lacks the surfaceless platform it now tries the EGL
+  device platform (which also covers the NVIDIA driver), and if neither
+  exists WebGL is off in that renderer instead of handing it a display
+  connection. `NS_WEBGL_ALLOW_DISPLAY=1` restores the old fallback
+  (`docs/security-review-2026-11.md`, S5).
 * Security: the Linux renderer's seccomp filter no longer allows System
   V shared memory, semaphores or message queues, so a compromised
   renderer cannot attach other applications' shared-memory segments. The
