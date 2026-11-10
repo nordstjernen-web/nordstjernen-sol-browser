@@ -66668,13 +66668,21 @@ ns_js_reset_runtime_state(ns_js *js)
             ns_js_fetch_state *st = g_ptr_array_index(js->pending_fetches, i);
             JS_FreeValue(js->ctx, st->resolve);
             JS_FreeValue(js->ctx, st->reject);
+            JS_FreeValue(js->ctx, st->signal);
+            JS_FreeValue(js->ctx, st->abort_handler);
+            JS_FreeValue(js->ctx, st->promise);
             st->resolve = JS_UNDEFINED;
             st->reject  = JS_UNDEFINED;
+            st->signal = JS_UNDEFINED;
+            st->abort_handler = JS_UNDEFINED;
+            st->promise = JS_UNDEFINED;
             st->ctx = NULL;
             st->js  = NULL;
         }
         g_ptr_array_set_size(js->pending_fetches, 0);
     }
+    if (js->fetch_states_by_id)
+        g_hash_table_remove_all(js->fetch_states_by_id);
 
     if (js->pending_xhrs) {
         for (guint i = 0; i < js->pending_xhrs->len; i++) {

@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a navigation that reuses the JavaScript runtime drops its
+  record of fetches that are still in flight. Their entries stayed in the
+  table that an `AbortSignal` handler looks requests up in, and each
+  entry pointed at request state that was freed when the response
+  arrived, so a handler kept from the previous document could reach
+  freed memory.
 * Security: settling a WebAuthn request no longer uses its pending
   record after page script may have freed it. A getter the page put on
   `Object.prototype`, or a replaced `DOMException`, ran while the reply
