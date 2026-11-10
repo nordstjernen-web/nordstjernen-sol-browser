@@ -39,15 +39,15 @@ a sandboxed renderer.
 | W3 | `address-bar-userinfo-and-decoded-url-spoofing` | Medium | no | **fixed** |
 | W4 | `csp-unsupported-directives-fail-open` | Low | no | **fixed** |
 | W5 | `download-gate-gaps` | Low | partly | **fixed** |
-| S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | confirmed |
-| S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | confirmed (impact plausible) |
-| S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | confirmed |
-| S4 | `capture-devices-pregranted-to-every-renderer` | Low–Medium | yes | confirmed |
-| S5 | `renderer-holds-display-connection-without-surfaceless-egl` | Medium, configuration-dependent | yes | confirmed (prevalence unknown) |
-| S6 | `renderer-inherits-shell-environment` | Low | yes | confirmed |
-| S7 | `shared-profile-lets-one-renderer-persist-into-other-sites` | Medium | yes | confirmed |
-| S8 | `seccomp-best-effort-and-socket-fallback` | Low | yes | confirmed |
-| S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | plausible |
+| S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | **partly fixed** |
+| S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | **fixed** |
+| S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | **partly fixed** |
+| S4 | `capture-devices-pregranted-to-every-renderer` | Low–Medium | yes | open |
+| S5 | `renderer-holds-display-connection-without-surfaceless-egl` | Medium, configuration-dependent | yes | **fixed** |
+| S6 | `renderer-inherits-shell-environment` | Low | yes | **fixed** |
+| S7 | `shared-profile-lets-one-renderer-persist-into-other-sites` | Medium | yes | open |
+| S8 | `seccomp-best-effort-and-socket-fallback` | Low | yes | **fixed** |
+| S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | open (documented) |
 | M1 | `unbounded-dom-recursion-svg-foreign-and-frame-images` | Low (DoS) | no | confirmed |
 | M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | confirmed |
 | M3 | `raw-svg-bytes-break-utf8-invariant` | Low | no | plausible |
@@ -227,6 +227,13 @@ renderers or any other process of the user. The allow-list in
 (kernel 6.12) and later only (`:490`); nothing covers `prlimit64` or
 the scheduler calls.
 
+**Partly fixed.** `rt_sigqueueinfo`, `rt_tgsigqueueinfo` and `prlimit64`
+are allowed only for the process's own pid, and `fcntl` with `F_SETOWN`,
+`F_SETOWN_EX` or `F_SETSIG` is denied. Still open: `sched_set*` and
+`setpriority` on other pids, because threads call them with their own
+thread id, which a filter built at startup cannot tell from a foreign
+pid.
+
 **Fix.** Drop `rt_sigqueueinfo` or filter its first argument to the own
 pid as for `kill`; filter `rt_tgsigqueueinfo` on tgid; restrict
 `prlimit64`, `sched_set*` and `setpriority` to pid 0 or self; deny
@@ -241,6 +248,9 @@ argument filters, and `/proc` is readable (`:513`), so
 governs SysV IPC, so a compromised renderer can attach any same-uid
 segment read-write. The concrete impact (MIT-SHM buffers of X11 clients,
 other applications' shared state) was not demonstrated.
+
+**Fixed.** The renderer drops every SysV IPC call from its allow-list.
+The audio helper keeps them, because ALSA's dmix plugin needs them.
 
 **Fix.** Remove the SysV calls from the renderer and audio-helper lists
 — the framebuffer is a memfd — or allow `shmget` only with
@@ -264,6 +274,13 @@ unauthenticated `--webdriver` port when that is running: its `Host` and
 `Origin` checks do not stop a raw client. SECURITY.md documents part of
 this; the reach is wider than it suggests.
 
+**Partly fixed.** The renderer and audio helper get an allow-list of
+subdirectories under the three XDG roots and under `/run` in place of
+the roots themselves; the shell is unchanged. Still open: the XDG
+runtime directory stays readable (including GVFS mounts under it), and
+the renderer keeps unrestricted outbound network access until fetching
+moves to a broker.
+
 **Fix.** Replace the three XDG roots with the specific paths the engine
 needs (fontconfig, its own directories), and `/run` with the specific
 files needed. Add Landlock ABI 4 TCP rules, or move fetching to the
@@ -277,6 +294,12 @@ read-write to every sandboxed process, and `ioctl` is unfiltered
 microphone access, but at the OS level any renderer can open the devices
 whatever `permissions.ini` says, so a compromised renderer can capture
 silently for any site.
+
+**Still open.** Closing this needs the shell to open the device after a
+grant and hand the descriptor to the renderer, or to respawn the tab's
+renderer with the device rule. Both change the permission flow, which
+could not be exercised without a camera and an interactive session, so
+it was not attempted blind.
 
 **Fix.** Leave capture devices out of the default ruleset. Have the
 shell open the device after a grant and pass the descriptor over the
@@ -293,6 +316,12 @@ trusted client — keystroke capture, input injection, screen capture —
 which amounts to a sandbox escape. Which drivers lack the extension was
 not checked.
 
+**Fixed.** The display is chosen from the surfaceless platform, then
+`EGL_EXT_platform_device`; under the sandbox the default-display
+fallback is refused unless `NS_WEBGL_ALLOW_DISPLAY` is set. Verified
+only on Mesa's surfaceless path; the device-platform and refusal paths
+were not exercised.
+
 **Fix.** Try `EGL_EXT_platform_device` or GBM next, and if neither
 works disable WebGL in that renderer rather than connect to the user's
 display. Show the state in `about:nordstjernen`.
@@ -305,6 +334,10 @@ The renderer is started with `execv` and an untouched environment
 `SSH_AUTH_SOCK`, `DBUS_SESSION_BUS_ADDRESS` and `XAUTHORITY` from its
 own memory with no filesystem access. Terminal injection through the
 inherited tty is already blocked (`src/security.c:1030-1046`).
+
+**Fixed.** On POSIX the renderer is started with `execve` and an allow-
+listed environment, and the audio helper gets the same list. Descriptors
+0–2 are still inherited, for logging.
 
 **Fix.** Use `execve` with an allow-listed environment (locale, `HOME`,
 `XDG_*`, fontconfig, `NS_*`, proxy and CA variables), and point
@@ -332,6 +365,13 @@ are worth recording.
   popup renderer whose opener is another site can thus run script in
   that site's renderer.
 
+**Still open.** Both paths need the planned network and storage broker.
+Stamping the popup relay's `origin` in the shell was tried and dropped:
+the shell only knows a tab's URL from what its renderer reports, and
+learns a redirected URL after the page's scripts have already run, so
+the check would either trust the compromised renderer or break popups
+that call their opener during load.
+
 **Fix.** For the cache, authenticate each entry with a key the shell
 holds or serve it through a shell broker; short term, give each renderer
 a per-site cache directory. For the relay, have the shell stamp `origin`
@@ -347,6 +387,10 @@ every `seccomp_rule_add` result is discarded. Without the filter the
 renderer keeps `execve` and `AF_UNIX`, so the session D-Bus is
 reachable. Landlock failure is already fatal.
 
+**Fixed.** A failed filter load exits with code 70 unless
+`NS_ALLOW_NO_SECCOMP` is set (Android stays best-effort), and the allow-
+all `socket` fallback is gone.
+
 **Fix.** Make seccomp failure fatal in the renderer and audio helper by
 default, with an opt-out, and deny rather than allow all when a socket
 rule cannot be added.
@@ -358,6 +402,9 @@ The audio helper opens its SDL device before `sandbox_self`
 connection after new `AF_UNIX` sockets are denied. A helper compromised
 through a decoder might use it for microphone capture or to load server
 modules; the server side was not examined.
+
+**Still open, documented.** SECURITY.md now records the retained sound-
+server connection as a residual risk of the audio helper.
 
 **Fix.** Document it as residual risk at minimum. Ideally the shell owns
 audio output and the helper only decodes to PCM.
@@ -450,6 +497,8 @@ finish step, so the tail of a body can be dropped. No memory impact.
   leaves a pending exception when the value is not an ArrayBuffer.
 
 ## Documentation drift in SECURITY.md
+
+The four items below are corrected in SECURITY.md.
 
 - It names `http` and `https` as the only protocols; `src/net.c:2025`
   also enables `ftp` when libcurl has it (top-level navigations only;

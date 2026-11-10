@@ -222,6 +222,7 @@ ns_security_sri_check(const char *integrity_attr,
 
 #ifdef NS_SECCOMP_FILTER_ARGS
 static gboolean ns_seccomp_unix_sockets = TRUE;
+static gboolean ns_seccomp_sysv_ipc_denied;
 static gboolean ns_seccomp_exec_memory_denied;
 #endif
 
@@ -230,6 +231,14 @@ ns_security_seccomp_deny_exec_memory(void)
 {
 #ifdef NS_SECCOMP_FILTER_ARGS
     ns_seccomp_exec_memory_denied = TRUE;
+#endif
+}
+
+void
+ns_security_seccomp_deny_sysv_ipc(void)
+{
+#ifdef NS_SECCOMP_FILTER_ARGS
+    ns_seccomp_sysv_ipc_denied = TRUE;
 #endif
 }
 
@@ -431,6 +440,60 @@ ns_security_require_landlock(void)
 }
 
 static void
+add_user_subdirs(int rfd, guint64 access, const char *root,
+                 const char *const *subdirs)
+{
+    for (gsize i = 0; subdirs[i]; i++) {
+        g_autofree char *p = g_build_filename(root, subdirs[i], NULL);
+        if (g_file_test(p, G_FILE_TEST_EXISTS))
+            add_path_rw(rfd, access, p);
+    }
+}
+
+static void
+add_user_dirs(int rfd, guint64 fs_read)
+{
+    if (ns_config_dir_writable) {
+        add_path_rw(rfd, fs_read, g_get_user_config_dir());
+        add_path_rw(rfd, fs_read, g_get_user_data_dir());
+        add_path_rw(rfd, fs_read, g_get_user_cache_dir());
+        return;
+    }
+    static const char *const config_subdirs[] = {
+        "fontconfig", "vulkan", "enchant", "gstreamer-1.0", NULL,
+    };
+    static const char *const data_subdirs[] = {
+        "fonts", "vulkan", "gstreamer-1.0", "mime", "hunspell", "myspell",
+        "enchant", NULL,
+    };
+    static const char *const cache_subdirs[] = {
+        "fontconfig", "mesa_shader_cache", "mesa_shader_cache_db",
+        "gstreamer-1.0", "nvidia", "radv_builtin_shaders", NULL,
+    };
+    add_user_subdirs(rfd, fs_read, g_get_user_config_dir(), config_subdirs);
+    add_user_subdirs(rfd, fs_read, g_get_user_data_dir(), data_subdirs);
+    add_user_subdirs(rfd, fs_read, g_get_user_cache_dir(), cache_subdirs);
+}
+
+static void
+ns_seccomp_filter_missing(const char *what)
+{
+#ifdef __ANDROID__
+    (void)what;
+#else
+    if (ns_security_env_flag("NS_ALLOW_NO_SECCOMP")) {
+        g_warning("seccomp: %s; continuing without a syscall filter because "
+                  "NS_ALLOW_NO_SECCOMP is set", what);
+        return;
+    }
+    g_printerr("nordstjernen: %s, so this process would run untrusted "
+               "content without a syscall filter. Refusing to continue; set "
+               "NS_ALLOW_NO_SECCOMP=1 to run without it.\n", what);
+    _exit(70);
+#endif
+}
+
+static void
 ns_sandbox_require_or_die(const char *what)
 {
     if (!ns_security_env_flag("NS_REQUIRE_SANDBOX"))
@@ -510,7 +573,7 @@ ns_security_sandbox_init(const char *self_exe)
     };
     static const char *const system_read_dirs[] = {
         "/etc", "/var/lib/ca-certificates", "/var/cache/fontconfig",
-        "/proc", "/sys", "/run",
+        "/proc", "/sys",
         "/dev/shm", "/dev/dri",
         "/tmp/.X11-unix", "/tmp/.ICE-unix",
         NULL,
@@ -523,6 +586,16 @@ ns_security_sandbox_init(const char *self_exe)
         add_path_rw(rfd, fs_read | fs_exec, system_exec_dirs[i]);
     for (gsize i = 0; system_read_dirs[i]; i++)
         add_path_rw(rfd, fs_read, system_read_dirs[i]);
+    static const char *const content_process_run_dirs[] = {
+        "/run/systemd/resolve", "/run/NetworkManager", "/run/resolvconf",
+        "/run/connman", "/run/udev", "/run/opengl-driver",
+        "/run/opengl-driver-32", "/run/current-system", "/run/host", NULL,
+    };
+    if (ns_config_dir_writable)
+        add_path_rw(rfd, fs_read, "/run");
+    else
+        for (gsize i = 0; content_process_run_dirs[i]; i++)
+            add_path_rw(rfd, fs_read, content_process_run_dirs[i]);
 
     guint64 fs_dev = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE;
     for (int vi = 0; vi < 64; vi++) {
@@ -551,9 +624,7 @@ ns_security_sandbox_init(const char *self_exe)
 
     const char *home = g_get_home_dir();
 
-    add_path_rw(rfd, fs_read, g_get_user_config_dir());
-    add_path_rw(rfd, fs_read, g_get_user_data_dir());
-    add_path_rw(rfd, fs_read, g_get_user_cache_dir());
+    add_user_dirs(rfd, fs_read);
     add_path_rw(rfd, ns_runtime_dir_writable ? fs_rw : fs_read,
                 g_get_user_runtime_dir());
 
@@ -846,7 +917,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "pread64",
     "preadv",
     "preadv2",
-    "prlimit64",
     "pselect6",
     "pselect6_time64",
     "pwrite64",
@@ -872,12 +942,10 @@ static const char *const ns_seccomp_allowed_names[] = {
     "rt_sigaction",
     "rt_sigpending",
     "rt_sigprocmask",
-    "rt_sigqueueinfo",
     "rt_sigreturn",
     "rt_sigsuspend",
     "rt_sigtimedwait",
     "rt_sigtimedwait_time64",
-    "rt_tgsigqueueinfo",
     "sched_getaffinity",
     "sched_getattr",
     "sched_getparam",
@@ -963,6 +1031,19 @@ static const char *const ns_seccomp_allowed_names[] = {
 };
 
 static gboolean
+ns_seccomp_is_sysv_ipc_call(const char *name)
+{
+    static const char *const calls[] = {
+        "semctl", "semget", "semop", "semtimedop",
+        "shmat", "shmctl", "shmdt", "shmget",
+        "msgctl", "msgget", "msgrcv", "msgsnd", "ipc",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(calls); i++)
+        if (strcmp(name, calls[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
 ns_seccomp_is_exec_memory_call(const char *name)
 {
     static const char *const calls[] = {
@@ -1010,21 +1091,45 @@ ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
     if (clone3_nr != __NR_SCMP_ERROR)
         (void)seccomp_rule_add(ctx, SCMP_ACT_ERRNO(ENOSYS), clone3_nr, 0);
     static const int domains[] = { AF_UNIX, AF_INET, AF_INET6, AF_NETLINK };
-    int sock_rc = 0;
     for (gsize i = 0; i < G_N_ELEMENTS(domains); i++) {
         if (domains[i] == AF_UNIX && !ns_seccomp_unix_sockets) continue;
-        int rc = seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
-                                  SCMP_A0(SCMP_CMP_EQ,
-                                          (scmp_datum_t)domains[i], 0));
-        if (rc != 0) sock_rc = rc;
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
+                               SCMP_A0(SCMP_CMP_EQ,
+                                       (scmp_datum_t)domains[i], 0));
     }
-    if (sock_rc != 0)
-        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 0);
     const scmp_datum_t self_pid = (scmp_datum_t)getpid();
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(kill), 1,
                            SCMP_A0(SCMP_CMP_EQ, self_pid, 0));
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 1,
                            SCMP_A0(SCMP_CMP_EQ, self_pid, 0));
+    static const char *const own_process_only[] = {
+        "rt_sigqueueinfo", "rt_tgsigqueueinfo", "prlimit64",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(own_process_only); i++) {
+        int nr = seccomp_syscall_resolve_name(own_process_only[i]);
+        if (nr == __NR_SCMP_ERROR) continue;
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 1,
+                               SCMP_A0(SCMP_CMP_EQ, self_pid, 0));
+    }
+    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(prlimit64), 1,
+                           SCMP_A0(SCMP_CMP_EQ, 0, 0));
+}
+
+static int
+ns_seccomp_deny_signal_owner_fcntl(scmp_filter_ctx ctx)
+{
+    static const int commands[] = { F_SETOWN, F_SETOWN_EX, F_SETSIG };
+    static const char *const calls[] = { "fcntl", "fcntl64" };
+    int rc = 0;
+    for (gsize c = 0; rc == 0 && c < G_N_ELEMENTS(calls); c++) {
+        int nr = seccomp_syscall_resolve_name(calls[c]);
+        if (nr == __NR_SCMP_ERROR || nr < 0) continue;
+        for (gsize i = 0; rc == 0 && i < G_N_ELEMENTS(commands); i++)
+            rc = seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), nr, 1,
+                                  SCMP_A1(SCMP_CMP_MASKED_EQ, 0xFFFFFFFFu,
+                                          (scmp_datum_t)commands[i]));
+    }
+    return rc;
 }
 
 static int
@@ -1039,6 +1144,8 @@ ns_seccomp_deny_tty_injection(void)
         rc = seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS(ioctl), 1,
                               SCMP_A1(SCMP_CMP_MASKED_EQ, 0xFFFFFFFFu,
                                       (scmp_datum_t)denied[i]));
+    if (rc == 0)
+        rc = ns_seccomp_deny_signal_owner_fcntl(ctx);
     if (rc == 0)
         rc = seccomp_load(ctx);
     seccomp_release(ctx);
@@ -1059,6 +1166,7 @@ ns_security_seccomp_init(void)
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
         g_info("seccomp: PR_SET_NO_NEW_PRIVS failed: %s", g_strerror(errno));
         ns_sandbox_require_or_die("seccomp prerequisite (no_new_privs) failed");
+        ns_seccomp_filter_missing("the seccomp prerequisite (no_new_privs) failed");
         return;
     }
 
@@ -1067,22 +1175,28 @@ ns_security_seccomp_init(void)
         g_warning("seccomp: terminal-injection filter failed to load: %s",
                   g_strerror(-tty_rc));
         ns_sandbox_require_or_die("seccomp terminal-injection filter failed to load");
+        ns_seccomp_filter_missing("the seccomp terminal-injection filter failed to load");
     }
 
     scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_ERRNO(EPERM));
     if (!ctx) {
         g_info("seccomp: seccomp_init failed");
         ns_sandbox_require_or_die("seccomp syscall filter could not be created");
+        ns_seccomp_filter_missing("the seccomp syscall filter could not be created");
         return;
     }
     (void)seccomp_attr_set(ctx, SCMP_FLTATR_CTL_TSYNC, 1);
 
     gboolean deny_exec = FALSE;
+    gboolean deny_sysv = FALSE;
 #ifdef NS_SECCOMP_FILTER_ARGS
     deny_exec = ns_seccomp_exec_memory_denied;
+    deny_sysv = ns_seccomp_sysv_ipc_denied;
 #endif
     for (size_t i = 0; i < G_N_ELEMENTS(ns_seccomp_allowed_names); i++) {
         if (deny_exec && ns_seccomp_is_exec_memory_call(ns_seccomp_allowed_names[i]))
+            continue;
+        if (deny_sysv && ns_seccomp_is_sysv_ipc_call(ns_seccomp_allowed_names[i]))
             continue;
         int nr = seccomp_syscall_resolve_name(ns_seccomp_allowed_names[i]);
         if (nr == __NR_SCMP_ERROR) continue;
@@ -1097,6 +1211,7 @@ ns_security_seccomp_init(void)
         g_warning("seccomp: load failed, process is NOT syscall-sandboxed: %s",
                   g_strerror(-rc));
         ns_sandbox_require_or_die("seccomp syscall filter failed to load");
+        ns_seccomp_filter_missing("the seccomp syscall filter failed to load");
     }
     seccomp_release(ctx);
 #endif

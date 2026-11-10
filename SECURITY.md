@@ -196,21 +196,33 @@ compromised renderer cannot truncate the shell's mapping from under it.
   local server for other processes or pages to reach. `clone` is allowed only without the
   `CLONE_NEW*` namespace flags and `clone3` returns `ENOSYS` (so libc
   falls back to `clone`), and `socket` only creates `AF_INET`,
-  `AF_INET6` and `AF_NETLINK` sockets in the renderer (the audio
-  helper also keeps `AF_UNIX` for the sound server). `kill` and
-  `tgkill` are allowed only with the process's own PID as the target
-  (what `abort()`, `pthread_kill` and the thread-dump signal need);
-  `tkill` and `pidfd_send_signal` are not on the list, so a compromised
-  renderer cannot signal the shell, other renderers or any other
-  process of the user. On kernels with Landlock ABI 6 or newer the
+  `AF_INET6` and `AF_NETLINK` sockets in the renderer and in the audio
+  helper. The helper opens its sound device before the filter loads, so
+  it keeps the connection to PulseAudio or PipeWire it already has; a
+  helper compromised through a decoder could misuse that connection,
+  which is a residual risk. `kill`, `tgkill`, `rt_sigqueueinfo`,
+  `rt_tgsigqueueinfo` and `prlimit64` are allowed only with the
+  process's own PID as the target (what `abort()`, `pthread_kill` and
+  the thread-dump signal need), and `fcntl` is refused the
+  `F_SETOWN`, `F_SETOWN_EX` and `F_SETSIG` commands; `tkill` and
+  `pidfd_send_signal` are not on the list, so a compromised renderer
+  cannot signal the shell, other renderers or any other process of the
+  user, nor change their resource limits. It can still change another
+  process's scheduling priority and CPU affinity (`sched_set*`,
+  `setpriority`), which threads need for themselves. The renderer has
+  no System V IPC calls; the audio helper keeps them for ALSA's dmix.
+  On kernels with Landlock ABI 6 or newer the
   ruleset additionally scopes signals (every sandboxed process) and
   abstract UNIX sockets (renderers) to the sandbox domain, so the same
   holds on architectures where seccomp argument filtering is not
   compiled in. Landlock does
   not govern `connect()` to a UNIX socket, so without that rule a
   compromised renderer could reach the session D-Bus and have it start
-  programs outside the sandbox. On setups whose EGL lacks the surfaceless
-  platform, the renderer opens its display before the filter loads.
+  programs outside the sandbox. WebGL contexts come from an offscreen
+  EGL platform (surfaceless, else `EGL_EXT_platform_device`); on a stack
+  with neither, WebGL is off in the sandboxed renderer rather than
+  giving it a connection to the desktop display
+  (`NS_WEBGL_ALLOW_DISPLAY=1` restores the old fallback).
   TSYNC propagates the filter to every thread.
 - **Media decoding.** Nordstjernen decodes a fixed, in-tree set of media
   rather than shelling out to an external player: MPEG-1 (pl_mpeg) and
@@ -248,9 +260,12 @@ on a kernel without it — older than Linux 5.13, built without
 parameter — and a renderer or media helper whose Landlock ruleset cannot be
 created or enforced exits the same way instead of running unconfined. Only
 `NS_NO_SANDBOX=1` overrides this. Android keeps the best-effort behaviour.
-The seccomp filter stays best-effort: a process that cannot load it logs a
-warning and continues. Set `NS_REQUIRE_SANDBOX=1` to make that fail-closed
-too. `about:nordstjernen` shows, in its Security section, the kernel's
+The seccomp filter is mandatory in the same way: a process that cannot
+load it exits (code 70) instead of running untrusted content without a
+syscall filter, and a `socket` rule that cannot be installed leaves that
+socket family denied rather than opening every family. `NS_NO_SECCOMP=1`
+skips the filter and `NS_ALLOW_NO_SECCOMP=1` tolerates a failed load;
+Android keeps the best-effort behaviour. `about:nordstjernen` shows, in its Security section, the kernel's
 Landlock ABI and whether Landlock, seccomp and `no_new_privs` are actually
 in force in the renderer that drew the page (read from
 `/proc/self/status`), along with the macOS Seatbelt or Windows mitigation
@@ -385,7 +400,9 @@ The whole mitigation suite can be disabled for debugging with
 libcurl drives every fetch with TLS verification enabled
 (`CURLOPT_SSL_VERIFYPEER=1`, `CURLOPT_SSL_VERIFYHOST=2`), TLS 1.2 as the
 minimum protocol version, `http,https`
-as the only allowed protocols, redirects clamped to HTTPS once the
+as the only allowed protocols (plus `ftp` for top-level navigations when
+libcurl is built with it; a page that is not itself FTP cannot load FTP
+subresources), redirects clamped to HTTPS once the
 initial scheme is HTTPS, max ten redirects, an explicit response-size
 cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
 `CURLOPT_HSTS`, but a `Strict-Transport-Security` header is stored only
@@ -569,24 +586,22 @@ dialog that names the file and the host it comes from.
 
 ### Cookies and the `document.cookie` surface
 
-Network cookies live in a per-site, Netscape-format cookie jar on disk.
-libcurl reads the jar when a transfer starts and sends its cookies,
-honouring `Secure`, `Path`, `Domain`, and expiry; each `Set-Cookie`
-header is stored by the engine (`ns_cookie_store_impl`, from the curl
-header callback or the HTTP/2 backend) into the request's partition jar.
-libcurl never writes the jar itself. Every jar write holds a
-process-wide mutex and an exclusive lock on `cookies/.lock`, so
-concurrent responses and renderer processes cannot overwrite each
-other's cookies. At navigation the non-`HttpOnly` cookies for the
+Network cookies live in one browser-owned SQLite database per profile
+(`src/cookies.c`, `docs/cookies.md`), partitioned by top-level site. The
+in-memory cookie set is the source of truth and the database a
+write-behind store. libcurl neither reads nor writes cookies: the engine
+builds each `Cookie` header itself, honouring `Secure`, `Path`,
+`Domain`, SameSite and expiry, and parses each `Set-Cookie` header into
+the request's partition. "Jar" below means that partition. At navigation the non-`HttpOnly` cookies for the
 document's origin are read back out of the jar (`ns_net_cookies_for_js`)
 and seeded into `document.cookie`, and the `document.cookie` setter
 writes back into that same per-site jar (`ns_net_cookie_store_from_js`)
 — so a cookie set from JS is sent on the next request. A
 `document.cookie` read re-reads the jar whenever
 `ns_net_cookie_jar_version` says it changed, so a cookie set or deleted
-over the network is visible to the next read. `HttpOnly` cookies are
-written with a `#HttpOnly_` line prefix that the JS read path skips, so
-they stay invisible to script.
+over the network is visible to the next read. `HttpOnly` is a column
+of the store that the JS read path filters on, so those cookies stay
+invisible to script.
 
 The `document.cookie` setter:
 
@@ -646,7 +661,7 @@ of its control socket.
   for it); it proposes the new text over the `X-Config` side channel and
   the UI process writes the file. Every changed key except a short
   cosmetic allow-list (`window_width_px`, `window_height_px`,
-  `layout_viewport_px`, `gsk_renderer`, `speculative_preload`,
+  `layout_viewport_px`, `speculative_preload`,
   `async_image_decode`, `images_enabled`, `cache_cap_mb`) is shown in a
   confirmation dialog in the UI process before it is applied, with the
   values sanitised and truncated for display. The residual gap is that

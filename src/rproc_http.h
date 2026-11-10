@@ -92,6 +92,7 @@ typedef struct ns_rproc_http_engine {
 
 int ns_rproc_http_hello(ns_rproc_http *r, ns_rproc_http_engine *out);
 
+char **ns_rproc_child_environ(void);
 ns_rproc_http *ns_rproc_http_spawn(const char *renderer_path, int max_width,
                                    int max_height);
 ns_rproc_http *ns_rproc_http_spawn_shm(const char *renderer_path,

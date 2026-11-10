@@ -232,29 +232,69 @@ struct ns_gl_context {
     EGLSurface surface;
 };
 
+static gboolean ns_gl_sandboxed;
+
+static EGLDisplay
+ns_gl_initialized(EGLDisplay d)
+{
+    EGLint major = 0, minor = 0;
+    if (d == EGL_NO_DISPLAY || !eglInitialize(d, &major, &minor))
+        return EGL_NO_DISPLAY;
+    return d;
+}
+
+static EGLDisplay
+ns_gl_offscreen_display(const char *exts)
+{
+    PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display =
+        (PFNEGLGETPLATFORMDISPLAYEXTPROC)
+            eglGetProcAddress("eglGetPlatformDisplayEXT");
+    if (!exts || !get_platform_display) return EGL_NO_DISPLAY;
+    if (strstr(exts, "EGL_MESA_platform_surfaceless")) {
+        EGLDisplay d = ns_gl_initialized(get_platform_display(
+            EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL));
+        if (d != EGL_NO_DISPLAY) return d;
+    }
+    PFNEGLQUERYDEVICESEXTPROC query_devices =
+        (PFNEGLQUERYDEVICESEXTPROC)eglGetProcAddress("eglQueryDevicesEXT");
+    if (!query_devices || !strstr(exts, "EGL_EXT_platform_device") ||
+        !strstr(exts, "EGL_EXT_device_enumeration"))
+        return EGL_NO_DISPLAY;
+    EGLDeviceEXT devices[16];
+    EGLint count = 0;
+    if (!query_devices(G_N_ELEMENTS(devices), devices, &count))
+        return EGL_NO_DISPLAY;
+    for (EGLint i = 0; i < count; i++) {
+        EGLDisplay d = ns_gl_initialized(get_platform_display(
+            EGL_PLATFORM_DEVICE_EXT, devices[i], NULL));
+        if (d != EGL_NO_DISPLAY) return d;
+    }
+    return EGL_NO_DISPLAY;
+}
+
+static gboolean
+ns_gl_may_use_user_display(void)
+{
+    const char *allow = g_getenv("NS_WEBGL_ALLOW_DISPLAY");
+    return !ns_gl_sandboxed || (allow && *allow && strcmp(allow, "0") != 0);
+}
+
 static EGLDisplay
 ns_gl_shared_display(void)
 {
     static gsize once = 0;
     static EGLDisplay shared = EGL_NO_DISPLAY;
     if (g_once_init_enter(&once)) {
-        EGLDisplay d = EGL_NO_DISPLAY;
-        const char *exts = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-        if (exts && strstr(exts, "EGL_MESA_platform_surfaceless")) {
-            PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display =
-                (PFNEGLGETPLATFORMDISPLAYEXTPROC)
-                    eglGetProcAddress("eglGetPlatformDisplayEXT");
-            if (get_platform_display)
-                d = get_platform_display(EGL_PLATFORM_SURFACELESS_MESA,
-                                         EGL_DEFAULT_DISPLAY, NULL);
-        }
-        if (d == EGL_NO_DISPLAY)
-            d = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-        if (d != EGL_NO_DISPLAY) {
-            EGLint major = 0, minor = 0;
-            if (eglInitialize(d, &major, &minor))
-                shared = d;
-        }
+        EGLDisplay d = ns_gl_offscreen_display(
+            eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS));
+        if (d == EGL_NO_DISPLAY && ns_gl_may_use_user_display())
+            d = ns_gl_initialized(eglGetDisplay(EGL_DEFAULT_DISPLAY));
+        if (d == EGL_NO_DISPLAY && ns_gl_sandboxed)
+            g_warning("webgl: no offscreen EGL platform (surfaceless or "
+                      "device); WebGL is off in this sandboxed renderer "
+                      "rather than connecting it to the desktop display. "
+                      "NS_WEBGL_ALLOW_DISPLAY=1 overrides this.");
+        shared = d;
         g_once_init_leave(&once, 1);
     }
     return shared;
@@ -380,6 +420,7 @@ ns_gl_context_destroy(ns_gl_context *c)
 void
 ns_gl_prepare_for_sandbox(void)
 {
+    ns_gl_sandboxed = TRUE;
     const char *exts = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
     if (!exts || !strstr(exts, "EGL_MESA_platform_surfaceless"))
         (void)ns_gl_shared_display();

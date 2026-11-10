@@ -3,6 +3,47 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Docs: SECURITY.md is brought back in line with the code — the SQLite
+  cookie store, FTP top-level navigations, the audio helper's socket
+  rules and its retained sound-server connection, and the list of
+  settings that apply without a prompt.
+* Security: on Linux a renderer or media helper can no longer read all
+  of `~/.config`, `~/.local/share`, `~/.cache` and `/run`. It now gets
+  only the font, graphics-cache, media-plugin, MIME and spell-check
+  directories it uses there and the resolver, udev and driver
+  directories under `/run`, so other applications' credentials,
+  removable media and other browsers' profiles are out of a compromised
+  renderer's reach (`docs/security-review-2026-11.md`, S3).
+* Security: renderers and the audio helper are started with an allow-
+  listed environment — locale, home and XDG directories, display, proxy
+  and certificate settings, graphics, media and `NS_*` variables —
+  instead of everything the browser was launched with, so API tokens,
+  `SSH_AUTH_SOCK` and the session bus address are no longer in a
+  renderer's memory (`docs/security-review-2026-11.md`, S6).
+* Security: a sandboxed Linux renderer no longer connects to the
+  desktop's X11 or Wayland display to get an OpenGL context for WebGL.
+  When the EGL stack lacks the surfaceless platform it now tries the EGL
+  device platform (which also covers the NVIDIA driver), and if neither
+  exists WebGL is off in that renderer instead of handing it a display
+  connection. `NS_WEBGL_ALLOW_DISPLAY=1` restores the old fallback
+  (`docs/security-review-2026-11.md`, S5).
+* Security: the Linux renderer's seccomp filter no longer allows System
+  V shared memory, semaphores or message queues, so a compromised
+  renderer cannot attach other applications' shared-memory segments. The
+  audio helper keeps them for ALSA's dmix; microphone capture through an
+  ALSA dsnoop device no longer works inside the renderer
+  (`docs/security-review-2026-11.md`, S2).
+* Security: on Linux a renderer or media helper that cannot load its
+  seccomp filter now exits instead of continuing with a warning, as it
+  already did for Landlock, and a socket rule that fails to install no
+  longer opens every socket family. `NS_ALLOW_NO_SECCOMP=1` restores the
+  old tolerance (`docs/security-review-2026-11.md`, S8).
+* Security: on Linux a compromised renderer can no longer signal other
+  processes through `rt_sigqueueinfo`, `rt_tgsigqueueinfo` or
+  `fcntl(F_SETOWN/F_SETSIG)`, nor change another process's resource
+  limits through `prlimit64`; the seccomp filter now restricts those
+  calls to the renderer's own process (`docs/security-
+  review-2026-11.md`, S1).
 * Security: more file types prompt before they are saved — disk images,
   Office macro documents, Windows shell and installer formats, and
   further shell and macOS script types. The move of a finished download

@@ -950,6 +950,11 @@ pv_audio_pump(NsProcView *v, const char *commands)
         GSubprocessLauncher *launcher = g_subprocess_launcher_new(
             G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_PIPE |
             G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+#ifndef _WIN32
+        char **helper_env = ns_rproc_child_environ();
+        if (helper_env) g_subprocess_launcher_set_environ(launcher, helper_env);
+        g_strfreev(helper_env);
+#endif
         ns_proc_audio_apply_proxy_env(launcher);
         v->audio_proc = g_subprocess_launcher_spawn(launcher, &err, path, NULL);
         g_object_unref(launcher);
