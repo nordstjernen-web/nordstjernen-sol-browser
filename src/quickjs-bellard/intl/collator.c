@@ -135,7 +135,7 @@ static JSValue js_collator_constructor(JSContext *ctx,
     if (!s)
         return JS_EXCEPTION;
 
-    s->locale = js_strdup(ctx, "en-US");
+    s->locale = js_strdup(ctx, JS_GetDefaultLocale(JS_GetRuntime(ctx)));
     s->usage = COLLATOR_USAGE_SORT;
     s->sensitivity = COLLATOR_SENSITIVITY_VARIANT;
     s->caseFirst = COLLATOR_CASEFIRST_FALSE;

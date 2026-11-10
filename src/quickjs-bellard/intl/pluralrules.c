@@ -161,7 +161,7 @@ static JSValue js_pluralrules_constructor(JSContext *ctx,
     if (!s)
         return JS_EXCEPTION;
 
-    s->locale = js_strdup(ctx, "en-US");
+    s->locale = js_strdup(ctx, JS_GetDefaultLocale(JS_GetRuntime(ctx)));
     s->type = PR_TYPE_CARDINAL;
     s->notation = PR_NOTATION_STANDARD;
     s->minimumIntegerDigits = 1;

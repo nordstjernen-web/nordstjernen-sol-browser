@@ -22,7 +22,7 @@ endif
 # The engine's own scripts run in every realm and every worker. A native
 # build compiles them to bytecode once, here, so a new process reads
 # bytecode instead of parsing 670 KB of JavaScript before the page starts.
-engine_bytecode = not meson.is_cross_build() and not quickjs_original
+engine_bytecode = not meson.is_cross_build()
 engine_bundles = {}
 foreach name, src : {'polyfills': '../data/js/polyfills.js',
                      'streaming': '../data/js/streaming.js'}
@@ -31,8 +31,10 @@ foreach name, src : {'polyfills': '../data/js/polyfills.js',
       name + '.bc',
       input: src,
       output: name + '.bc',
-      command: [qjsc_exe, '-b', '-C', '-H', '-n', '<' + name + '>',
-                '-o', '@OUTPUT@', '@INPUT@'],
+      command: quickjs_original
+        ? [bqjs_bcgen, '<' + name + '>', '@INPUT@', '@OUTPUT@']
+        : [qjsc_exe, '-b', '-C', '-H', '-n', '<' + name + '>',
+           '-o', '@OUTPUT@', '@INPUT@'],
     )
     engine_bundles += {name: custom_target(
       name + '.h',

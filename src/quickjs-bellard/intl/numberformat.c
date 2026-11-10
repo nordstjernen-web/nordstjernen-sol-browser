@@ -1282,7 +1282,7 @@ JSValue js_numberformat_constructor(JSContext *ctx,
         return JS_EXCEPTION;
 
     /* defaults */
-    s->locale = js_strdup(ctx, "en-US");
+    s->locale = js_strdup(ctx, JS_GetDefaultLocale(JS_GetRuntime(ctx)));
     s->numberingSystem = NS_LATN;
     s->style = NF_STYLE_DECIMAL;
     s->currencyDisplay = NF_CURRENCYDISPLAY_SYMBOL;

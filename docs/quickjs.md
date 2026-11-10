@@ -19,7 +19,7 @@ An existing build directory switches with
 | About page | `QuickJS 2026-06-04` | `QuickJS 0.18.0` |
 | Heap hardening | cage, caged values, compressed fields, pointer tables | the same |
 | `Intl`, `Temporal` | upstream's own (`intl/`, `temporal/`) | the fork's ICU-free implementation |
-| Engine scripts | embedded as source, compiled in each process | embedded as bytecode |
+| Engine scripts | embedded as bytecode (`quickjs-bellard-bcgen`) | embedded as bytecode (`qjsc`) |
 | CI | every workflow | none; build it locally (see below) |
 
 Both builds carry the same Web API surface. The whole binding, `src/js.c`
@@ -100,13 +100,37 @@ Declared in `src/quickjs-bellard/quickjs.h`:
 
 | Hook | Purpose |
 |---|---|
+| `JS_EVAL_FLAG_HIDE_SOURCE` | compiles a script as the embedder's own code: its functions keep no source, so `Function.prototype.toString` reports them as native, and they are left out of a page's stack traces |
+| `JS_IsHostAccess`, `JS_IsHostCaller`, `JS_IsEngineFunction` | tell the embedder's property accesses and callers from a page's: C functions made after the built-ins and hidden-source code are the embedder's |
+| `JS_AddEnginePrivateName`, `JS_GetEnginePrivateAtom` | a name that stands for a private symbol when the embedder uses it, so the state kept on platform objects is neither visible nor writable from page script |
+| `get_own_property_receiver` in `JSClassExoticMethods`, `JS_SetPropertyReceiver` | `[[Get]]` and `[[Set]]` with the receiver, for named access on a frame's window |
+| `JS_NewCFunctionBrand`, `JS_SetCFunctionBrand` | a native function checks that `this` belongs to its interface before it runs |
 | `JS_SetCanCompileStrings` | `eval()` and the `Function` constructors ask the browser first; a Content Security Policy without `'unsafe-eval'` refuses them with an `EvalError` |
 | `JS_GetCallerRealm`, `JS_GetFunctionRealm`, `JS_GetPendingJobRealm` | the realm of the caller of the running native function, of a function, and of the next promise job |
 | `JS_CloneCFunction` | a copy of a native function in another realm, for a frame's own copy of an interface |
 | `JS_RepointArrayBuffer` | moves an imported `WebAssembly.Memory` buffer to the instance's memory |
+| `JS_SetDefaultLocale`, `JS_GetDefaultLocale` | the locale `Intl` and the `toLocale*` functions use when a script names none |
+| `JS_GetErrorFrames` | an error's stored stack |
 | `JS_SetImmutablePrototype`, `JS_AtomIsArrayIndex` | exported as they are |
 | `JS_IsDate`, `JS_IsRegExp`, `JS_IsMap`, `JS_IsSet`, `JS_IsProxy`, `JS_IsDataView`, `JS_IsArrayObject`, `JS_IsErrorObject`, `JS_GetBoxedPrimitiveKind` | exact class tests |
 | `JS_SetHeapCage`, `JS_Cage*` | the heap cage and its shared heap |
+
+The engine also hides the embedder's `__nd`/`__ns`/`__js` helpers on the
+global object from a page's key enumeration, keeps the legacy RegExp
+statics (`RegExp.$1` to `$9`, `lastMatch`, `lastParen`, `leftContext`,
+`rightContext`, `input`), `Error.captureStackTrace`, and `caller` and
+`arguments` on non-strict functions, and writes a native function whose
+name is not an identifier as a computed key (`function get ["$&"]() ...`).
+
+`JS_NewContext` adds `Intl` and `Temporal` itself, so that they count as
+built-ins rather than as the embedder's functions. Do not call
+`JS_AddIntrinsicTemporal` or `JS_AddIntrinsicIntl` again on such a context:
+upstream's second initialisation leaks the context. `qjs.c` and
+`run-test262.c` no longer do.
+
+`quickjs-bellard-bcgen` (`bcgen.c`) compiles one engine script to
+hidden-source bytecode; native builds embed `data/js/polyfills.js` and
+`data/js/streaming.js` that way, as the quickjs-ng build does with `qjsc`.
 
 ## The adapter: `src/ns_quickjs.h`
 
@@ -117,17 +141,16 @@ supplies what is left of the quickjs-ng API:
 
 - **Different signatures.** `JS_IsArray`, `JS_IsError` and `JS_IsBigInt`
   take no context in quickjs-ng; `JS_NewArrayBuffer` takes a realloc-style
-  callback and a maximum length; `JS_NewContext` is wrapped so that every
-  context gets `Intl` and `Temporal`, and `JS_NewTypedArray` pads a short
+  callback and a maximum length, and `JS_NewTypedArray` pads a short
   argument list with `undefined`. The promise-rejection tracker's
   `is_handled` argument is `ns_js_bool` and the interrupt handler's first
   argument is `ns_js_interrupt_arg`.
 - **quickjs-ng additions rebuilt from public calls.** `JS_NewStringUTF16`,
   `JS_ThrowDOMException`, `JS_IsStrictEqual`, `JS_GetVersion`,
   `JS_ToNumber`, `JS_GetPropertyInt64`, `JS_FreezeObject`,
-  `JS_NewForwarder`, and `JS_EvalThis2`, which pads the source with the
-  script's line and column offset because `JS_EvalThis` takes no position.
-- **Fork-only hooks that still fall back**, listed next.
+  `JS_IsRunningScript`, `JS_GetClassCount`, `JS_NewForwarder`, and
+  `JS_EvalThis2`, which pads the source with the script's line and column
+  offset because `JS_EvalThis` takes no position.
 
 A binding change that calls a quickjs-ng function Bellard's engine lacks
 fails to compile in the default build. Add the function to the engine
@@ -136,32 +159,18 @@ are enough, rather than an `#ifdef` at the call site.
 
 ## Known differences on Bellard's engine
 
-These quickjs-ng fork features are not ported yet, so the default build
-differs from `-Dquickjs=quickjs-ng` here:
+What still differs from `-Dquickjs=quickjs-ng`:
 
-- **Named access across frames.** `frame.contentWindow.someId` looks the id
-  up in the calling document rather than the frame's: only the fork's
-  receiver-aware property hook (`get_own_property_receiver`) can tell
-  which window is being read. Named access within a page is unaffected.
-- **Platform object state.** `JS_IsHostAccess` is always true and there are
-  no engine-private names, so the state the engine keeps on platform
-  objects such as `XMLHttpRequest` shows up as their own properties, and a
-  page's write to an attribute is stored as given instead of going through
-  the interface's setter.
-- **`this` brands.** `JS_SetCFunctionBrand` is a no-op; interface methods
-  check their receiver themselves.
-- **Language behaviour.** `RegExp.$1`–`$9`, `Function.prototype.caller` and
-  `Error.captureStackTrace` are missing, and `error.stack` has no leading
-  `Name: message` line.
-- **Engine helper source.** `JS_EVAL_FLAG_HIDE_SOURCE` is 0, so
-  `Function.prototype.toString` of an engine-implemented member defined in
-  an engine script shows its source instead of `[native code]`.
-- **Engine script bytecode.** The engine's own scripts are embedded as
-  source and compiled in each process, about 11 ms per renderer; the
-  quickjs-ng build embeds bytecode.
+- **`error.stack`** has no leading `Name: message` line: it lists frames
+  only, as Firefox and Safari do. The quickjs-ng fork follows V8. The
+  engine's own tests and printers rely on upstream's format, so it is kept.
+- **`Error.prepareStackTrace` and `Error.stackTraceLimit`** are absent, and
+  `Error.captureStackTrace` ignores its second argument.
+- **`ShadowRealm`** is absent. No shipping browser has it.
 - **`Intl` and `Temporal`** are upstream's implementations, which upstream
-  still calls experimental, and `JS_SetDefaultLocale` is a no-op.
-- **`ShadowRealm`** is absent.
+  still calls experimental; their locale data is narrower than the fork's.
+- **Legacy RegExp statics** are updated by every match a page makes; the
+  fork also invalidates them after a subclass or cross-realm match.
 
 ## Heap cage and compressed pointers
 

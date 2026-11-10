@@ -273,16 +273,16 @@ char *js_intl_extract_locale(JSContext *ctx, int argc, JSValueConst *argv)
     char *res = NULL;
 
     if (argc == 0 || JS_IsUndefined(argv[0]))
-        return js_strdup(ctx, "en-US");
+        return js_strdup(ctx, JS_GetDefaultLocale(JS_GetRuntime(ctx)));
 
     if (js_canonicalizeLocaleList_first(ctx, argv[0], &canonical) < 0)
         return NULL;
     if (!canonical)
-        return js_strdup(ctx, "en-US");
+        return js_strdup(ctx, JS_GetDefaultLocale(JS_GetRuntime(ctx)));
     res = js_intl_strip_unicode_extensions(ctx, canonical);
     js_free(ctx, canonical);
     if (!res)
-        res = js_strdup(ctx, "en-US");
+        res = js_strdup(ctx, JS_GetDefaultLocale(JS_GetRuntime(ctx)));
     return res;
 }
 

@@ -122,7 +122,7 @@ static JSValue js_segmenter_constructor(JSContext *ctx,
     if (!s)
         return JS_EXCEPTION;
 
-    s->locale = js_strdup(ctx, "en-US");
+    s->locale = js_strdup(ctx, JS_GetDefaultLocale(JS_GetRuntime(ctx)));
 
     {
         static const char *available[] = {

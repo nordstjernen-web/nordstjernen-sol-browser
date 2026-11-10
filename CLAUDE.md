@@ -183,7 +183,7 @@ meson option picks one (`docs/quickjs.md`):
   hardening and the browser hooks, and upstream's `Intl` and `Temporal`.
 - `quickjs-ng`: `src/quickjs/`, a fork of
   [quickjs-ng](https://github.com/quickjs-ng/quickjs) with the same
-  hardening, its own `Intl`/`Temporal` and a few hooks not ported yet.
+  hardening and hooks and its own `Intl`/`Temporal`.
 
 We modify both freely. Neither is a meson subproject: each directory's
 `meson.build` is loaded via `subdir()` from the top-level and exposes
@@ -197,8 +197,7 @@ We modify both freely. Neither is a meson subproject: each directory's
   `src/ns_quickjs.h` / `src/ns_quickjs.c` supply the rest.
 - **A new quickjs-ng-only call goes into Bellard's engine or the adapter**,
   not behind an `#ifdef` at the call site: the default build fails to
-  compile until it exists. Only the fork's own hooks with no equivalent yet
-  (the receiver-aware `get_own_property_receiver`) are guarded in place.
+  compile until it exists.
 - CI builds the default only: build `-Dquickjs=quickjs-ng` locally after
   binding changes (`docs/quickjs.md`, "Checking a change").
 
