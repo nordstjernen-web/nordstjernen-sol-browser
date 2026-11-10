@@ -81,6 +81,20 @@ ns_security_landlock_scope_abstract_sockets(void)
 #endif
 }
 
+static gboolean ns_capture_devices_allowed = TRUE;
+
+void
+ns_security_deny_capture_devices(void)
+{
+    ns_capture_devices_allowed = FALSE;
+}
+
+gboolean
+ns_security_capture_devices_allowed(void)
+{
+    return ns_capture_devices_allowed;
+}
+
 void
 ns_security_config_dir_read_only(void)
 {
@@ -464,7 +478,7 @@ add_user_dirs(int rfd, guint64 fs_read)
     };
     static const char *const data_subdirs[] = {
         "fonts", "vulkan", "gstreamer-1.0", "mime", "hunspell", "myspell",
-        "enchant", NULL,
+        "enchant", "nordstjernen-extensions", NULL,
     };
     static const char *const cache_subdirs[] = {
         "fontconfig", "mesa_shader_cache", "mesa_shader_cache_db",
@@ -598,7 +612,7 @@ ns_security_sandbox_init(const char *self_exe)
             add_path_rw(rfd, fs_read, content_process_run_dirs[i]);
 
     guint64 fs_dev = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE;
-    for (int vi = 0; vi < 64; vi++) {
+    for (int vi = 0; ns_capture_devices_allowed && vi < 64; vi++) {
         char vdev[32];
         g_snprintf(vdev, sizeof vdev, "/dev/video%d", vi);
         if (g_file_test(vdev, G_FILE_TEST_EXISTS))
@@ -606,7 +620,8 @@ ns_security_sandbox_init(const char *self_exe)
     }
     if (ns_gpu_devices_allowed)
         add_gpu_devices(rfd, fs_read);
-    if (g_file_test("/dev/snd", G_FILE_TEST_IS_DIR))
+    if (ns_capture_devices_allowed &&
+        g_file_test("/dev/snd", G_FILE_TEST_IS_DIR))
         add_path_rw(rfd, fs_read | LANDLOCK_ACCESS_FS_WRITE_FILE, "/dev/snd");
 
     const char *xauth = g_getenv("XAUTHORITY");
