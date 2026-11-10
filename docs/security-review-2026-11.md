@@ -37,7 +37,7 @@ a sandboxed renderer.
 | W1 | `iframe-sandbox-opaque-origin-not-applied-to-network` | High | no | **fixed** |
 | W2 | `pna-bypass-via-opaque-top-level-document` | Medium | no | **fixed** |
 | W3 | `address-bar-userinfo-and-decoded-url-spoofing` | Medium | no | **fixed** |
-| W4 | `csp-unsupported-directives-fail-open` | Low | no | confirmed |
+| W4 | `csp-unsupported-directives-fail-open` | Low | no | **fixed** |
 | W5 | `download-gate-gaps` | Low | partly | confirmed / plausible |
 | S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | confirmed |
 | S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | confirmed (impact plausible) |
@@ -171,6 +171,12 @@ directive. A policy that restricts scripts only through
 only, so a `<meta>` policy with a newline right after the directive name
 is ignored. No bypass was found in source matching, nonces, hashes or
 `strict-dynamic`.
+
+**Fixed.** The four refined directives feed the script and style checks,
+with `-elem` taking precedence over the base directive and `-attr` used
+only when neither is present, and tokens split on all ASCII whitespace.
+`manifest-src` and a top-level `sandbox` directive are still not
+enforced.
 
 **Fix.** Map the `-elem` and `-attr` directives to their parents at
 minimum, and split on all ASCII whitespace.

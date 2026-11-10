@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: Content-Security-Policy now honours `script-src-elem`,
+  `script-src-attr`, `style-src-elem` and `style-src-attr`; a policy
+  that restricted scripts only through `script-src-elem` used to enforce
+  nothing. Directives are split on every ASCII whitespace character, so
+  a `<meta>` policy with a line break after the directive name is no
+  longer ignored (`docs/security-review-2026-11.md`, W4).
 * Security: the address bar no longer shows a URL's userinfo, so
   `https://bank.example@evil.test/` displays as `https://evil.test/`,
   and history records it the same way. Percent-escapes are decoded for
