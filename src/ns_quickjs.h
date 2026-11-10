@@ -18,31 +18,6 @@
 typedef JS_BOOL ns_js_bool;
 typedef JSRuntime ns_js_interrupt_arg;
 
-typedef enum JSBrandMode {
-    JS_BRAND_THROW,
-    JS_BRAND_REJECT,
-    JS_BRAND_IGNORE,
-} JSBrandMode;
-
-static inline int
-JS_NewCFunctionBrand(JSContext *ctx, const JSClassID *class_ids, int count)
-{
-    (void)ctx;
-    (void)class_ids;
-    (void)count;
-    return 0;
-}
-
-static inline void
-JS_SetCFunctionBrand(JSContext *ctx, JSValueConst func, int brand,
-                     JSBrandMode mode)
-{
-    (void)ctx;
-    (void)func;
-    (void)brand;
-    (void)mode;
-}
-
 static inline int
 JS_SetDefaultLocale(JSRuntime *rt, const char *tag)
 {
@@ -72,9 +47,7 @@ JSValue ns_quickjs_new_array_buffer(JSContext *ctx, uint8_t *buf, size_t len,
 JSValue ns_quickjs_new_typed_array(JSContext *ctx, int argc, JSValueConst *argv,
                                    JSTypedArrayEnum type);
 
-#define JS_EVAL_FLAG_HIDE_SOURCE 0
 
-JSValue JS_GetErrorFrames(JSContext *ctx, JSValueConst val);
 bool JS_IsRunningScript(JSContext *ctx);
 int JS_FreezeObject(JSContext *ctx, JSValueConst obj);
 JSValue JS_EvalThis2(JSContext *ctx, JSValueConst this_obj, const char *input,
@@ -103,55 +76,11 @@ JS_IsStrictEqual(JSContext *ctx, JSValueConst op1, JSValueConst op2)
     return JS_StrictEq(ctx, op1, op2);
 }
 
-static inline bool
-JS_IsHostAccess(JSContext *ctx)
-{
-    (void)ctx;
-    return true;
-}
-
-static inline int
-JS_AddEnginePrivateName(JSContext *ctx, const char *name)
-{
-    (void)ctx;
-    (void)name;
-    return 0;
-}
-
-static inline JSAtom
-JS_GetEnginePrivateAtom(JSContext *ctx, const char *name)
-{
-    return JS_NewAtom(ctx, name);
-}
-
 static inline JSValue
 JS_GetArrayBufferViewBuffer(JSContext *ctx, JSValueConst obj,
                             size_t *pbyte_offset, size_t *pbyte_length)
 {
     return JS_GetTypedArrayBuffer(ctx, obj, pbyte_offset, pbyte_length, NULL);
-}
-
-static inline bool
-JS_IsEngineFunction(JSValueConst fn)
-{
-    (void)fn;
-    return true;
-}
-
-static inline bool
-JS_IsHostCaller(JSContext *ctx)
-{
-    (void)ctx;
-    return false;
-}
-
-static inline int
-JS_SetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
-                       JSValue val, JSValueConst receiver, int flags)
-{
-    (void)obj;
-    (void)flags;
-    return JS_SetProperty(ctx, receiver, prop, val);
 }
 
 #define JS_NewContext(rt) ns_quickjs_new_context(rt)

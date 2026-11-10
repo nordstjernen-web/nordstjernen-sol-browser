@@ -386,6 +386,10 @@ static inline JSValue __JS_NewShortBigInt(JSContext *ctx, int64_t d)
 /* allow top-level await in normal script. JS_Eval() returns a
    promise. Only allowed with JS_EVAL_TYPE_GLOBAL */
 #define JS_EVAL_FLAG_ASYNC (1 << 7)
+/* functions compiled by this eval keep no source text, so
+   Function.prototype.toString reports them as native code, and they
+   count as the embedder's own code (JS_IsHostAccess) */
+#define JS_EVAL_FLAG_HIDE_SOURCE (1 << 8)
 
 typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 typedef JSValue JSCFunctionMagic(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic);
@@ -586,6 +590,10 @@ typedef struct JSClassExoticMethods {
     int (*is_extensible)(JSContext *ctx, JSValueConst obj);
     /* return < 0 if exception or TRUE/FALSE */
     int (*prevent_extensions)(JSContext *ctx, JSValueConst obj);
+    /* like get_own_property, but used by [[Get]] and given the receiver */
+    int (*get_own_property_receiver)(JSContext *ctx, JSPropertyDescriptor *desc,
+                                     JSValueConst obj, JSAtom prop,
+                                     JSValueConst receiver);
 } JSClassExoticMethods;
 
 typedef void JSClassFinalizer(JSRuntime *rt, JSValue val);
@@ -1289,6 +1297,22 @@ int JS_GetBoxedPrimitiveKind(JSValueConst val);
 JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func);
 int JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
                           size_t byte_length);
+typedef enum JSBrandMode {
+    JS_BRAND_THROW,
+    JS_BRAND_REJECT,
+    JS_BRAND_IGNORE,
+} JSBrandMode;
+int JS_NewCFunctionBrand(JSContext *ctx, const JSClassID *class_ids, int count);
+void JS_SetCFunctionBrand(JSContext *ctx, JSValueConst func, int brand,
+                          JSBrandMode mode);
+JSValue JS_GetErrorFrames(JSContext *ctx, JSValueConst val);
+bool JS_IsHostAccess(JSContext *ctx);
+bool JS_IsHostCaller(JSContext *ctx);
+bool JS_IsEngineFunction(JSValueConst fn);
+int JS_AddEnginePrivateName(JSContext *ctx, const char *name);
+JSAtom JS_GetEnginePrivateAtom(JSContext *ctx, const char *name);
+int JS_SetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                           JSValue val, JSValueConst receiver, int flags);
 
 /* C module definition */
 

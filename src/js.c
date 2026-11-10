@@ -5360,7 +5360,6 @@ ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
     return 1;
 }
 
-#ifndef NS_QUICKJS_ORIGINAL
 static int
 ns_window_named_get_receiver(JSContext *ctx, JSPropertyDescriptor *desc,
                              JSValueConst obj, JSAtom prop,
@@ -5377,13 +5376,10 @@ ns_window_named_get_receiver(JSContext *ctx, JSPropertyDescriptor *desc,
     desc->setter = JS_UNDEFINED;
     return 1;
 }
-#endif
 
 static JSClassExoticMethods ns_window_named_exotic = {
     .get_own_property          = ns_window_named_get,
-#ifndef NS_QUICKJS_ORIGINAL
     .get_own_property_receiver = ns_window_named_get_receiver,
-#endif
 };
 
 static JSClassDef ns_window_named_class = {

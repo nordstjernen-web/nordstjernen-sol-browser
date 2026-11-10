@@ -46,39 +46,11 @@ ns_quickjs_new_context(JSRuntime *rt)
 {
     static gsize learned;
     JSContext *ctx = (JS_NewContext)(rt);
-    if (ctx && (JS_AddIntrinsicTemporal(ctx) < 0 || JS_AddIntrinsicIntl(ctx) < 0)) {
-        JS_FreeContext(ctx);
-        return NULL;
-    }
     if (ctx && g_once_init_enter(&learned)) {
         ns_quickjs_learn_class_ids(ctx);
         g_once_init_leave(&learned, 1);
     }
     return ctx;
-}
-
-JSValue
-JS_GetErrorFrames(JSContext *ctx, JSValueConst val)
-{
-    if (!JS_IsErrorObject(val))
-        return JS_UNDEFINED;
-    JSAtom atom = JS_NewAtom(ctx, "stack");
-    JSPropertyDescriptor desc;
-    int has = JS_GetOwnProperty(ctx, &desc, val, atom);
-    JS_FreeAtom(ctx, atom);
-    if (has < 0) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        return JS_UNDEFINED;
-    }
-    if (!has)
-        return JS_UNDEFINED;
-    JS_FreeValue(ctx, desc.getter);
-    JS_FreeValue(ctx, desc.setter);
-    if ((desc.flags & JS_PROP_GETSET) || !JS_IsString(desc.value)) {
-        JS_FreeValue(ctx, desc.value);
-        return JS_UNDEFINED;
-    }
-    return desc.value;
 }
 
 static void
