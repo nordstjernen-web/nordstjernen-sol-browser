@@ -15,6 +15,8 @@ void ns_security_runtime_dir_read_only(void);
 void ns_security_deny_process_exec(void);
 void ns_security_landlock_scope_abstract_sockets(void);
 void ns_security_config_dir_read_only(void);
+void ns_security_deny_capture_devices(void);
+gboolean ns_security_capture_devices_allowed(void);
 gboolean ns_security_refuse_root(void);
 gboolean ns_security_require_landlock(void);
 int ns_security_landlock_abi(void);

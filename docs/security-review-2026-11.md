@@ -60,7 +60,7 @@ camera or microphone, or on macOS and Windows.
 | S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | **partly fixed** |
 | S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | **fixed** |
 | S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | **partly fixed** |
-| S4 | `capture-devices-pregranted-to-every-renderer` | Low–Medium | yes | open |
+| S4 | `capture-devices-pregranted-to-every-renderer` | Low–Medium | yes | **fixed** |
 | S5 | `renderer-holds-display-connection-without-surfaceless-egl` | Medium, configuration-dependent | yes | **fixed** |
 | S6 | `renderer-inherits-shell-environment` | Low | yes | **fixed** |
 | S7 | `shared-profile-lets-one-renderer-persist-into-other-sites` | Medium | yes | open |
@@ -313,11 +313,15 @@ microphone access, but at the OS level any renderer can open the devices
 whatever `permissions.ini` says, so a compromised renderer can capture
 silently for any site.
 
-**Still open.** Closing this needs the shell to open the device after a
-grant and hand the descriptor to the renderer, or to respawn the tab's
-renderer with the device rule. Both change the permission flow, which
-could not be exercised without a camera and an interactive session, so
-it was not attempted blind.
+**Fixed.** The shell starts a renderer with the `capture` argument only
+for a tab whose origin holds the camera permission and has requested it;
+without the argument the Landlock rules omit `/dev/video*` and
+`/dev/snd`. A renderer without the devices reports a camera request to
+the shell even when the site is already allowed, and the shell then
+replaces it and reloads. Leaving the origin replaces it again. A
+`/carry` endpoint moves the pending form body and initiator to the new
+renderer. Checked with a placeholder `/dev/video0` node, not a real
+camera; headless and WebDriver renderers never get the devices.
 
 **Fix.** Leave capture devices out of the default ruleset. Have the
 shell open the device after a grant and pass the descriptor over the

@@ -3,6 +3,15 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: on Linux a renderer can open the camera and sound devices
+  only when it was started for a tab whose site holds the camera
+  permission and has asked for the camera. Every other renderer's
+  sandbox leaves `/dev/video*` and `/dev/snd` out, so a compromised
+  renderer cannot record silently. The first time a site is allowed to
+  use the camera in a tab, and when a tab that had it navigates to
+  another site, the tab's renderer is replaced and the page reloads;
+  session storage, the pending form submission and the navigation's
+  initiator carry over (`docs/security-review-2026-11.md`, S4).
 * Security hardening: decoded video frames start from a zeroed buffer,
   so a short colour conversion cannot leave uninitialised memory in a
   frame a page can read back through a canvas; an SVG mask whose surface

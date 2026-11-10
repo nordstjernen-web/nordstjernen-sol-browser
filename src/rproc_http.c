@@ -257,13 +257,14 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
         char wbuf[16], hbuf[16];
         snprintf(wbuf, sizeof wbuf, "%d", max_width);
         snprintf(hbuf, sizeof hbuf, "%d", max_height);
-        char *argv[6];
+        char *argv[8];
         int ai = 0;
         argv[ai++] = (char *)renderer_path;
         argv[ai++] = wbuf;
         argv[ai++] = hbuf;
         if (shm) argv[ai++] = (char *)"shm";
-        if (priv) argv[ai++] = (char *)"private";
+        if (priv & NS_RPROC_SPAWN_PRIVATE) argv[ai++] = (char *)"private";
+        if (priv & NS_RPROC_SPAWN_CAPTURE) argv[ai++] = (char *)"capture";
         argv[ai] = NULL;
         execve(renderer_path, argv, child_env);
         static const char exec_failed[] =
@@ -393,7 +394,7 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
         child_err = NULL;
 
     char cmd[1024];
-    const char *priv_arg = priv ? " private" : "";
+    const char *priv_arg = (priv & NS_RPROC_SPAWN_PRIVATE) ? " private" : "";
     int cmd_len;
     if (shm)
         cmd_len = snprintf(cmd, sizeof cmd, "\"%s\" %d %d shm %llu%s",
@@ -602,10 +603,19 @@ ns_rproc_http *
 ns_rproc_http_spawn_shm_ex(const char *renderer_path, int max_width,
                            int max_height, int private_mode)
 {
+    return ns_rproc_http_spawn_shm_flags(
+        renderer_path, max_width, max_height,
+        private_mode ? NS_RPROC_SPAWN_PRIVATE : 0);
+}
+
+ns_rproc_http *
+ns_rproc_http_spawn_shm_flags(const char *renderer_path, int max_width,
+                              int max_height, int flags)
+{
     if (g_inproc_attach)
         return spawn_checked(spawn_inproc(max_width, max_height));
     return spawn_checked(spawn_common(renderer_path, max_width, max_height,
-                                      1, private_mode));
+                                      1, flags));
 }
 
 void
@@ -1775,6 +1785,27 @@ ns_rproc_http_clear_cache(ns_rproc_http *r)
     if (!r)
         return -1;
     return request_ok(r, "/clear-cache", g_strdup("{}"));
+}
+
+char *
+ns_rproc_http_carry_get(ns_rproc_http *r)
+{
+    if (!r)
+        return NULL;
+    return request(r, "/carry", "{\"op\":\"get\"}");
+}
+
+int
+ns_rproc_http_carry_set(ns_rproc_http *r, const char *data)
+{
+    if (!r || !data)
+        return -1;
+    char *de = json_escape(data);
+    char *json = NULL;
+    if (!de || asprintf(&json, "{\"op\":\"set\",\"data\":\"%s\"}", de) < 0)
+        json = NULL;
+    free(de);
+    return request_ok(r, "/carry", json);
 }
 
 char *

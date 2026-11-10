@@ -52,6 +52,7 @@ struct ns_renderer_session {
     size_t         post_len;
     char          *post_ct;
     char          *page_nav;
+    char          *carried_referrer;
     ns_tiles      *tiles;
 };
 
@@ -150,6 +151,52 @@ session_stash_post(ns_renderer_session *s, const char *href)
     s->post_body = pb;
     s->post_len = len;
     s->post_ct = ct;
+}
+
+static char *
+session_carry_serialize(ns_renderer_session *s)
+{
+    g_autofree char *referrer = s->cur ? ns_browser_url(s->cur) : NULL;
+    g_autofree char *body = s->post_body
+        ? g_base64_encode((const guchar *)s->post_body, s->post_len) : NULL;
+    return g_strdup_printf("%s\n%s\n%s\n%s\n%s",
+                           referrer ? referrer : "",
+                           s->page_nav ? s->page_nav : "",
+                           s->post_url ? s->post_url : "",
+                           s->post_ct ? s->post_ct : "",
+                           body ? body : "");
+}
+
+static char *
+session_carry_field(const char *value)
+{
+    return value && *value ? strdup(value) : NULL;
+}
+
+static void session_clear_post(ns_renderer_session *s);
+
+static void
+session_carry_load(ns_renderer_session *s, const char *text)
+{
+    g_auto(GStrv) fields = g_strsplit(text ? text : "", "\n", 5);
+    if (g_strv_length(fields) != 5) return;
+    session_clear_post(s);
+    free(s->carried_referrer);
+    free(s->page_nav);
+    s->carried_referrer = session_carry_field(fields[0]);
+    s->page_nav = session_carry_field(fields[1]);
+    if (!*fields[2] || !*fields[4]) return;
+    gsize len = 0;
+    guchar *body = g_base64_decode(fields[4], &len);
+    if (!body) return;
+    s->post_body = malloc(len ? len : 1);
+    if (s->post_body) {
+        memcpy(s->post_body, body, len);
+        s->post_len = len;
+        s->post_url = strdup(fields[2]);
+        s->post_ct = session_carry_field(fields[3]);
+    }
+    g_free(body);
 }
 
 static void
@@ -309,6 +356,7 @@ ns_renderer_session_free(ns_renderer_session *s)
     if (!s)
         return;
     session_clear_post(s);
+    free(s->carried_referrer);
     session_bfcache_clear(s);
     if (s->cur)
         ns_browser_close(s->cur);
@@ -756,6 +804,22 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/carry") == 0) {
+        char *op = json_get_str(body, "op");
+        if (op && strcmp(op, "set") == 0) {
+            char *data = json_get_str(body, "data");
+            session_carry_load(s, data);
+            free(data);
+            http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
+        } else {
+            g_autofree char *text = session_carry_serialize(s);
+            http_write_response(ctrl_w, 200, "text/plain", NULL, text,
+                                strlen(text));
+        }
+        free(op);
+        return 0;
+    }
+
     if (strcmp(head->path, "/session-storage") == 0) {
         char *op = json_get_str(body, "op");
         if (!s->session_storage) s->session_storage = ns_session_storage_new();
@@ -857,6 +921,9 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             ? session_bfcache_take(s, url) : NULL;
         char *referrer = (!history && !reload && s->cur)
             ? ns_browser_url(s->cur) : NULL;
+        if (!referrer && !history && !reload && !s->cur && s->carried_referrer)
+            referrer = g_strdup(s->carried_referrer);
+        g_clear_pointer(&s->carried_referrer, free);
         if (s->cur && reload)
             ns_browser_close(s->cur);
         else if (s->cur)

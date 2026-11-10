@@ -233,11 +233,19 @@ main(int argc, char **argv)
 #endif
     }
 
-    for (int i = 3; i < argc; i++)
-        if (strcmp(argv[i], "private") == 0) {
+    gboolean capture = FALSE;
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "private") == 0)
             g_setenv("NS_PRIVATE", "1", TRUE);
-            break;
-        }
+        else if (strcmp(argv[i], "capture") == 0)
+            capture = TRUE;
+    }
+#ifdef __linux__
+    if (!capture)
+        ns_security_deny_capture_devices();
+#else
+    (void)capture;
+#endif
 
     if (ns_browser_init() != 0) {
         if (!shm_mode)
