@@ -453,7 +453,10 @@ ns_ws_worker_curl(gpointer data)
     ns_net_apply_curl_tls(curl);
     ns_net_apply_curl_proxy(curl, ws->url);
     ns_net_address_guard address_guard;
-    ns_net_address_guard_init(&address_guard, ws->origin, ws->url);
+    ns_net_address_guard_init(&address_guard,
+        ws->origin && strcmp(ws->origin, "null") != 0 ? ws->origin
+                                                      : ws->top_url,
+        ws->url);
     ns_net_apply_curl_address_guard(curl, &address_guard);
     ns_net_curl_apply_cookies(curl, ws->url, ws->origin, ws->top_url);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);

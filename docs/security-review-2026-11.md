@@ -35,7 +35,7 @@ a sandboxed renderer.
 | ID | Slug | Severity | Needs renderer compromise | Status |
 |----|------|----------|---------------------------|--------|
 | W1 | `iframe-sandbox-opaque-origin-not-applied-to-network` | High | no | **fixed** |
-| W2 | `pna-bypass-via-opaque-top-level-document` | Medium | no | confirmed |
+| W2 | `pna-bypass-via-opaque-top-level-document` | Medium | no | **fixed** |
 | W3 | `address-bar-userinfo-and-decoded-url-spoofing` | Medium | no | confirmed |
 | W4 | `csp-unsupported-directives-fail-open` | Low | no | confirmed |
 | W5 | `download-gate-gaps` | Low | partly | confirmed / plausible |
@@ -123,6 +123,11 @@ A public page can get there with `location = 'data:text/html,…'` or
 resulting document can send image, form, `fetch` and WebSocket requests
 to `127.0.0.1` and RFC 1918 hosts, and read the responses of targets
 that answer `Access-Control-Allow-Origin: *` or accept `Origin: null`.
+
+**Fixed.** A document without a tuple origin is now public for the
+guard, except `file:` (local) and the browser's own `about:` pages.
+WebSocket and EventSource fall back to the top-level URL when their
+origin is `null`.
 
 **Fix.** Have opaque documents inherit the initiator's address space
 (the initiator is already known at `/open`,

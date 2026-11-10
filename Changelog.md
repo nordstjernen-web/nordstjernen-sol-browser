@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: the private-network guard no longer skips documents without
+  a network origin. A top-level `data:` page, or a sandboxed frame's
+  WebSocket or EventSource, counted as an unknown address space and
+  could reach localhost and LAN hosts from a public site; such documents
+  are now treated as public (`file:` pages stay local) (`docs/security-
+  review-2026-11.md`, W2).
 * Security: a sandboxed `<iframe>` without `allow-same-origin` now has an
   opaque origin on the network too, not only for storage and cookies.
   `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource`

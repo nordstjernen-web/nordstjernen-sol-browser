@@ -2342,10 +2342,21 @@ ns_host_name_is_private(const char *host)
 }
 
 static ns_address_space
+ns_address_space_of_opaque_document(const char *document_url)
+{
+    if (g_ascii_strncasecmp(document_url, "file:", 5) == 0)
+        return NS_ADDRESS_SPACE_LOCAL;
+    if (ns_net_url_is_chrome_page(document_url))
+        return NS_ADDRESS_SPACE_UNKNOWN;
+    return NS_ADDRESS_SPACE_PUBLIC;
+}
+
+static ns_address_space
 ns_address_space_of_document(const char *document_url)
 {
     g_autofree char *origin = ns_url_origin_from(document_url);
-    if (!origin || !*origin) return NS_ADDRESS_SPACE_UNKNOWN;
+    if (!origin || !*origin || strcmp(origin, "null") == 0)
+        return ns_address_space_of_opaque_document(document_url);
     g_mutex_lock(&g_address_space_lock);
     gpointer seen = g_address_space_by_origin
         ? g_hash_table_lookup(g_address_space_by_origin, origin) : NULL;

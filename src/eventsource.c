@@ -381,7 +381,10 @@ ns_es_connect_once(ns_es *es, const char *url, gboolean *opened_out,
     ns_net_apply_curl_tls(curl);
     ns_net_apply_curl_proxy(curl, url);
     ns_net_address_guard address_guard;
-    ns_net_address_guard_init(&address_guard, es->origin, url);
+    ns_net_address_guard_init(&address_guard,
+        es->origin && strcmp(es->origin, "null") != 0 ? es->origin
+                                                      : es->top_url,
+        url);
     ns_net_apply_curl_address_guard(curl, &address_guard);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
