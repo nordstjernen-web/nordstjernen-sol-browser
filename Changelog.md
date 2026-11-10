@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Docs: `docs/security-review-2026-11.md` records a source review for
+  security vulnerabilities. It found no attacker-reachable memory
+  corruption in the parsers it read; the most serious open finding is
+  that a sandboxed `<iframe>` without `allow-same-origin` still makes
+  `fetch`, XHR and WebSocket requests with the embedding site's origin
+  and cookies. The report lists every open finding with a suggested fix,
+  and the areas the review did not reach.
 * Security: a corrupted JavaScript heap can no longer make an
   ArrayBuffer's free or resize hook release memory outside the heap cage.
   The buffer's data pointer was masked into the cage whenever scripts
