@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a message that cannot be copied into the receiving frame is
+  delivered as `null`. When the copy of `postMessage` data into the
+  receiver's realm failed, the receiver was handed the sender's original
+  object, and a receiving frame could make the copy fail on purpose or
+  remove the engine's delivery hook, gaining an object of the sender's
+  realm across origins. The delivery hook is no longer visible to pages.
 * Security: `storage` events reach only frames that share the storage
   area. A write to the page's `localStorage` or `sessionStorage` was
   announced to every frame, cross-origin ones included, with the page's

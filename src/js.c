@@ -14844,10 +14844,10 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         JS_FreeValue(ctx, ports_in);
         if (JS_IsException(adopted)) {
             JS_FreeValue(realm, JS_GetException(realm));
-        } else {
-            JS_FreeValue(ctx, data);
-            data = adopted;
+            adopted = JS_NULL;
         }
+        JS_FreeValue(ctx, data);
+        data = adopted;
     }
 
     JSValue port_origin = JS_GetPropertyStr(ctx, port, "_origin");
@@ -15649,10 +15649,11 @@ ns_message_event_adopt_data(JSContext *ctx, JSContext *realm, JSValueConst ev)
     if (realm != ctx && JS_IsObject(data)) {
         JSValue adopted = ns_structured_clone_value(realm, data,
             JS_IsArray(ports) ? (JSValueConst)ports : JS_UNDEFINED);
-        if (JS_IsException(adopted))
+        if (JS_IsException(adopted)) {
             JS_FreeValue(realm, JS_GetException(realm));
-        else
-            JS_SetPropertyStr(ctx, ev, "data", adopted);
+            adopted = JS_NULL;
+        }
+        JS_SetPropertyStr(ctx, ev, "data", adopted);
     }
     JS_FreeValue(ctx, data);
     JSValue realm_ports = JS_NewArray(realm);
@@ -30199,6 +30200,7 @@ ns_js_add_engine_private_names(JSContext *ctx)
                                          "__nsPostMessageTo",
                                          "__nsPostMessageThis",
                                          "__nsPostMessageFrom",
+                                         "__nsDeliverMessage",
                                          "_realm",
                                          "_pair",
                                          "_queue",
