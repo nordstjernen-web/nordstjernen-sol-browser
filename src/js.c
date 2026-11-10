@@ -66672,6 +66672,7 @@ ns_js_reset_runtime_state(ns_js *js)
     ns_js_clear_frame_clocks(js, FALSE);
     if (js->frame_contexts)
         g_hash_table_remove_all(js->frame_contexts);
+    g_clear_pointer(&js->import_map, g_ptr_array_unref);
     if (js->frame_csps)
         g_hash_table_remove_all(js->frame_csps);
     if (js->frame_posts)
@@ -68559,6 +68560,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
 typedef struct ns_import_map_entry {
     char *key;
     char *value;
+    const ns_node *frame;
 } ns_import_map_entry;
 
 static void
@@ -68571,9 +68573,27 @@ ns_import_map_entry_free(gpointer p)
     g_free(e);
 }
 
+static const ns_node *
+ns_js_import_map_frame_of_node(const ns_node *n)
+{
+    for (; n; n = n->parent)
+        if (ns_node_is_embedded_doc(n)) return n->parent;
+    return NULL;
+}
+
 static void
-ns_js_import_map_add(ns_js *js, const char *key, const char *value,
-                     const char *base)
+ns_js_import_map_forget_frame(ns_js *js, const ns_node *frame)
+{
+    if (!js || !js->import_map) return;
+    for (guint i = js->import_map->len; i > 0; i--) {
+        ns_import_map_entry *e = g_ptr_array_index(js->import_map, i - 1);
+        if (e->frame == frame) g_ptr_array_remove_index(js->import_map, i - 1);
+    }
+}
+
+static void
+ns_js_import_map_add(ns_js *js, const ns_node *frame, const char *key,
+                     const char *value, const char *base)
 {
     if (!js || !key || !*key || !value || !*value) return;
     char *resolved = ns_url_resolve(base && *base ? base : NULL, value);
@@ -68582,7 +68602,7 @@ ns_js_import_map_add(ns_js *js, const char *key, const char *value,
         js->import_map = g_ptr_array_new_with_free_func(ns_import_map_entry_free);
     for (guint i = 0; i < js->import_map->len; i++) {
         ns_import_map_entry *e = g_ptr_array_index(js->import_map, i);
-        if (strcmp(e->key, key) == 0) {
+        if (e->frame == frame && strcmp(e->key, key) == 0) {
             g_free(e->value);
             e->value = resolved;
             return;
@@ -68591,12 +68611,13 @@ ns_js_import_map_add(ns_js *js, const char *key, const char *value,
     ns_import_map_entry *e = g_new0(ns_import_map_entry, 1);
     e->key = g_strdup(key);
     e->value = resolved;
+    e->frame = frame;
     g_ptr_array_add(js->import_map, e);
 }
 
 static void
-ns_js_register_import_map_json(ns_js *js, const char *text, gsize len,
-                               const char *base)
+ns_js_register_import_map_json(ns_js *js, const ns_node *frame,
+                               const char *text, gsize len, const char *base)
 {
     if (!js || !text) return;
     JSValue root = JS_ParseJSON(js->ctx, text, len, "importmap");
@@ -68611,7 +68632,8 @@ ns_js_register_import_map_json(ns_js *js, const char *text, gsize len,
                 const char *key = JS_AtomToCString(js->ctx, tab[i].atom);
                 JSValue v = JS_GetProperty(js->ctx, imports, tab[i].atom);
                 const char *val = JS_IsString(v) ? JS_ToCString(js->ctx, v) : NULL;
-                if (key && val) ns_js_import_map_add(js, key, val, base);
+                if (key && val)
+                    ns_js_import_map_add(js, frame, key, val, base);
                 if (key) JS_FreeCString(js->ctx, key);
                 if (val) JS_FreeCString(js->ctx, val);
                 JS_FreeValue(js->ctx, v);
@@ -68634,9 +68656,10 @@ ns_js_register_import_maps_rec(ns_js *js, ns_node *root, int depth)
             !ns_element_get_attr(root, NS_SCRIPT_ALREADY_STARTED)) {
             ns_element_set_attr(root, NS_SCRIPT_ALREADY_STARTED, "1");
             char *base = ns_js_node_document_base_url(js, root);
+            const ns_node *frame = ns_js_import_map_frame_of_node(root);
             for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
                 if (c->kind == NS_NODE_TEXT && c->text)
-                    ns_js_register_import_map_json(js, c->text,
+                    ns_js_register_import_map_json(js, frame, c->text,
                                                    strlen(c->text), base);
             }
             g_free(base);
@@ -68655,13 +68678,14 @@ ns_js_register_import_maps(ns_js *js, ns_node *root)
 }
 
 static char *
-ns_js_import_map_resolve(ns_js *js, const char *name)
+ns_js_import_map_resolve(ns_js *js, const ns_node *frame, const char *name)
 {
     if (!js || !js->import_map || !name) return NULL;
     ns_import_map_entry *best = NULL;
     size_t best_len = 0;
     for (guint i = 0; i < js->import_map->len; i++) {
         ns_import_map_entry *e = g_ptr_array_index(js->import_map, i);
+        if (e->frame != frame) continue;
         size_t klen = strlen(e->key);
         if (strcmp(e->key, name) == 0)
             return g_strdup(e->value);
@@ -68682,7 +68706,8 @@ ns_js_module_normalize(JSContext *ctx, const char *base_name,
 {
     ns_js *js = opaque;
     if (!name) return NULL;
-    char *mapped = ns_js_import_map_resolve(js, name);
+    char *mapped = ns_js_import_map_resolve(js, ns_js_frame_of_realm(js, ctx),
+                                            name);
     if (mapped) {
         char *out = js_strdup(ctx, mapped);
         g_free(mapped);
@@ -72416,6 +72441,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
 
     ns_node *content_root = NULL;
     ns_node *content_doc = NULL;
+    ns_js_import_map_forget_frame(js, iframe);
     gboolean doc_is_xml = FALSE;
     if (xml_empty) {
         content_doc = ns_node_new_document();
