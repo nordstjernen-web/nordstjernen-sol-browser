@@ -158,6 +158,9 @@ typedef struct ns_mut_observer {
 struct ns_js_drag_session {
     ns_js  *js;
     JSValue data_transfer;
+    JSContext *frame_ctx;
+    JSValue frame_transfer;
+    GPtrArray *engine_data;
 };
 
 #define NS_JS_BODY_BYTES_MAX (32u * 1024u * 1024u)
@@ -37456,6 +37459,12 @@ ns_js_dispatch_wheel(ns_js *js, const ns_node *target,
                                       default_prevented);
 }
 
+static JSContext *
+ns_js_main_context(ns_js *js)
+{
+    return js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+}
+
 static JSValue
 ns_js_new_data_transfer(JSContext *ctx)
 {
@@ -37506,9 +37515,11 @@ ns_js_dispatch_clipboard_event(ns_js *js, const ns_node *target,
     if (!js || !target || !type) return FALSE;
     if (js->halted || js->in_pump) return FALSE;
     JSContext *ctx = js->ctx;
-    JSValue data = ns_js_new_data_transfer(ctx);
+    JSContext *target_ctx = ns_js_node_realm_context(js, target);
+    if (!target_ctx) target_ctx = ctx;
+    JSValue data = ns_js_new_data_transfer(target_ctx);
     if (text && JS_IsObject(data))
-        ns_js_data_transfer_set(ctx, data, "text/plain", text);
+        ns_js_data_transfer_set(target_ctx, data, "text/plain", text);
     JSValue event = ns_make_event(ctx, type, target);
     JS_SetPropertyStr(ctx, event, "bubbles", JS_TRUE);
     JS_SetPropertyStr(ctx, event, "cancelable", JS_TRUE);
@@ -37521,11 +37532,13 @@ ns_js_drag_session *
 ns_js_drag_session_new(ns_js *js)
 {
     if (!js || !js->ctx || js->halted) return NULL;
-    JSValue dt = ns_js_new_data_transfer(js->ctx);
+    JSValue dt = ns_js_new_data_transfer(ns_js_main_context(js));
     if (!JS_IsObject(dt)) return NULL;
     ns_js_drag_session *session = g_new0(ns_js_drag_session, 1);
     session->js = js;
     session->data_transfer = dt;
+    session->frame_transfer = JS_UNDEFINED;
+    session->engine_data = g_ptr_array_new_with_free_func(g_free);
     return session;
 }
 
@@ -37533,8 +37546,11 @@ void
 ns_js_drag_session_free(ns_js_drag_session *session)
 {
     if (!session) return;
-    if (session->js && session->js->ctx)
+    if (session->js && session->js->ctx) {
         JS_FreeValue(session->js->ctx, session->data_transfer);
+        JS_FreeValue(session->js->ctx, session->frame_transfer);
+    }
+    g_ptr_array_free(session->engine_data, TRUE);
     g_free(session);
 }
 
@@ -37543,8 +37559,10 @@ ns_js_drag_session_set_data(ns_js_drag_session *session,
                             const char *type, const char *data)
 {
     if (!session || !session->js || !session->js->ctx || !type) return;
-    ns_js_data_transfer_set(session->js->ctx, session->data_transfer, type,
-                            data);
+    g_ptr_array_add(session->engine_data, g_strdup(type));
+    g_ptr_array_add(session->engine_data, g_strdup(data ? data : ""));
+    ns_js_data_transfer_set(ns_js_main_context(session->js),
+                            session->data_transfer, type, data);
 }
 
 static JSValue
@@ -37614,6 +37632,28 @@ ns_js_drag_session_add_file(ns_js_drag_session *session, const char *path)
     JS_FreeValue(ctx, file);
 }
 
+static JSValue
+ns_js_drag_session_transfer_for(ns_js_drag_session *session,
+                                const ns_node *target)
+{
+    ns_js *js = session->js;
+    JSContext *main_ctx = ns_js_main_context(js);
+    JSContext *target_ctx = ns_js_node_realm_context(js, target);
+    if (!target_ctx || target_ctx == main_ctx)
+        return JS_DupValue(main_ctx, session->data_transfer);
+    if (session->frame_ctx != target_ctx) {
+        JS_FreeValue(main_ctx, session->frame_transfer);
+        session->frame_ctx = target_ctx;
+        session->frame_transfer = ns_js_new_data_transfer(target_ctx);
+        for (guint i = 0; i + 1 < session->engine_data->len; i += 2)
+            if (JS_IsObject(session->frame_transfer))
+                ns_js_data_transfer_set(target_ctx, session->frame_transfer,
+                                        session->engine_data->pdata[i],
+                                        session->engine_data->pdata[i + 1]);
+    }
+    return JS_DupValue(target_ctx, session->frame_transfer);
+}
+
 gboolean
 ns_js_dispatch_drag_event(ns_js *js, ns_js_drag_session *session,
                           const ns_node *target, const char *type,
@@ -37659,7 +37699,8 @@ ns_js_dispatch_drag_event(ns_js *js, ns_js_drag_session *session,
     JS_SetPropertyStr(ctx, event, "relatedTarget",
                       related ? ns_make_element(ctx, related) : JS_NULL);
     JS_SetPropertyStr(ctx, event, "dataTransfer",
-                      session ? JS_DupValue(ctx, session->data_transfer) : JS_NULL);
+                      session ? ns_js_drag_session_transfer_for(session, target)
+                              : JS_NULL);
     return ns_js_dispatch_built_event(js, target, type, event, default_prevented);
 }
 
