@@ -3,6 +3,9 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a zstd-compressed response is no longer cut short when the
+  decoder still holds output after consuming the last input bytes
+  (`docs/security-review-2026-11.md`, M5).
 * Security: `new WebAssembly.Memory()` and `memory.grow()` now throw
   `RangeError` when the JavaScript heap cage cannot supply the memory,
   instead of writing through a null pointer and crashing the renderer

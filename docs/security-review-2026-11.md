@@ -52,7 +52,7 @@ a sandboxed renderer.
 | M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | **fixed** |
 | M3 | `raw-svg-bytes-break-utf8-invariant` | Low | no | plausible |
 | M4 | `webgpu-map-wait-stack-userdata` | Low | no | plausible |
-| M5 | `zstd-final-flush-truncation` | Info | no | plausible |
+| M5 | `zstd-final-flush-truncation` | Info | no | **fixed** |
 
 The slugs are meant to be used as `Security-Fix:` trailers when the
 fixes land.
@@ -488,6 +488,9 @@ The zstd case of `stage_feed` in `src/content_decode.c` loops while
 `in.pos < in.size` with a 16 KiB output buffer. `ZSTD_decompressStream`
 can consume all input while still holding output, and the decoder has no
 finish step, so the tail of a body can be dropped. No memory impact.
+
+**Fixed.** The decode loop keeps draining while the output buffer comes
+back full.
 
 **Fix.** Loop while `in.pos < in.size || o.pos == o.size`.
 

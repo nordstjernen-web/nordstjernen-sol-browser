@@ -242,12 +242,14 @@ stage_feed(ns_content_decoder *dec, ns_decode_stage *st, const guint8 *data,
     case NS_CODING_ZSTD: {
 #ifdef NS_HAVE_ZSTD
         ZSTD_inBuffer in = { data, len, 0 };
-        while (in.pos < in.size) {
+        gboolean pending = len > 0;
+        while (pending) {
             guint8 buf[NS_DECODE_CHUNK];
             ZSTD_outBuffer o = { buf, sizeof buf, 0 };
             size_t rc = ZSTD_decompressStream(st->zstd, &o, &in);
             if (ZSTD_isError(rc)) return FALSE;
             if (o.pos && !append_capped(dec, out, buf, o.pos)) return FALSE;
+            pending = in.pos < in.size || o.pos == sizeof buf;
         }
         return TRUE;
 #else
