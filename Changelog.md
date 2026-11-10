@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: an import map applies only to the document that declared it.
+  The tab kept one import map for every frame, so a cross-origin frame
+  could add entries that redirected the embedding page's later module
+  imports to scripts of the frame's choosing. Entries are now kept per
+  frame and dropped when the frame loads another document or the page
+  navigates.
 * Security: the `document.cookie` accessor on `Document.prototype` reads
   and writes cookies for the document of its own realm only. It used the
   URL of whatever document was current and one cached value for the whole
