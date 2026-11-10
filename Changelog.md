@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: the `DataTransfer` of a clipboard or drag event is created in
+  the realm of the frame that receives the event. It was always built
+  with the top page's `DataTransfer`, so text pasted into a cross-origin
+  frame passed through the embedding page's (replaceable) `setData`
+  first, and the frame received an object of the page's realm.
 * Security: `relatedTarget` on mouse, pointer, drag and focus events
   never names a node of another document. Moving the pointer across the
   edge of an `<iframe>` gave the frame an element of the embedding page
