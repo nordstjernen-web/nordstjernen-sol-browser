@@ -119,6 +119,7 @@ typedef struct {
     gboolean history;
     gboolean user_activated;
     gboolean reload;
+    gboolean capture;
     gboolean caret_active;
     ns_rproc_http_tiles_req tiles;
     char   *have;
@@ -225,6 +226,10 @@ struct NsProcView {
     ReqType     busy_type;
     char       *renderer_path;
     gboolean    private_mode;
+    char       *capture_origin;
+    gboolean    capture_wanted;
+    gboolean    spawn_capture;
+    gboolean    proc_capture;
 
     GSubprocess  *audio_proc;
     GOutputStream *audio_in;
@@ -635,6 +640,7 @@ pv_free(NsProcView *v)
         g_ptr_array_unref(v->history);
     g_free(v->renderer_path);
     g_free(v->session_storage);
+    g_free(v->capture_origin);
     g_free(v->opener_token);
     g_free(v->opener_origin);
     g_free(v->current_url);
@@ -1199,6 +1205,32 @@ pv_open(NsProcView *v, const Req *req, int settle, ns_rproc_http_page *pg)
                                  req->history, req->user_activated, pg);
 }
 
+static ns_rproc_http *
+pv_spawn_renderer(NsProcView *v)
+{
+    int flags = (v->private_mode ? NS_RPROC_SPAWN_PRIVATE : 0) |
+                (v->spawn_capture ? NS_RPROC_SPAWN_CAPTURE : 0);
+    v->proc_capture = v->spawn_capture;
+    return ns_rproc_http_spawn_shm_flags(v->renderer_path, NS_PROC_MAX_WIDTH,
+                                         NS_PROC_MAX_HEIGHT, flags);
+}
+
+static char *
+pv_retire_renderer(NsProcView *v)
+{
+    char *storage = ns_rproc_http_session_storage_get(v->proc);
+    char *carry = ns_rproc_http_carry_get(v->proc);
+    if (storage) {
+        g_mutex_lock(&v->proc_lock);
+        g_free(v->session_storage);
+        v->session_storage = g_strdup(storage);
+        g_mutex_unlock(&v->proc_lock);
+        free(storage);
+    }
+    ns_rproc_http_close(pv_swap_proc(v, NULL));
+    return carry;
+}
+
 static gpointer
 worker_main(gpointer data)
 {
@@ -1214,14 +1246,21 @@ worker_main(gpointer data)
             continue;
         }
         pv_note_busy(v, req);
+        char *carry = NULL;
+        if (req->type == REQ_LOAD) {
+            if (v->proc && !v->closed && v->proc_capture != req->capture)
+                carry = pv_retire_renderer(v);
+            v->spawn_capture = req->capture;
+        }
         if (!v->proc && !v->closed) {
-            pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
-                                     NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
-                                     v->private_mode));
+            pv_swap_proc(v, pv_spawn_renderer(v));
             if (!v->proc)
                 g_printerr("nordstjernen: could not start renderer %s\n",
                            v->renderer_path);
+            else if (carry)
+                ns_rproc_http_carry_set(v->proc, carry);
         }
+        free(carry);
         if (v->proc && req->dpr > 0)
             ns_rproc_http_set_device_pixel_ratio(v->proc, req->dpr);
 
@@ -1236,9 +1275,7 @@ worker_main(gpointer data)
             if (rc != 0 && v->proc && !v->closed) {
                 ns_rproc_http_close(pv_swap_proc(v, NULL));
                 if (!pv_load_superseded(v, req)) {
-                    pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(
-                                        v->renderer_path, NS_PROC_MAX_WIDTH,
-                                        NS_PROC_MAX_HEIGHT, v->private_mode));
+                    pv_swap_proc(v, pv_spawn_renderer(v));
                     if (v->proc)
                         ns_rproc_http_set_device_pixel_ratio(v->proc,
                                                              req->dpr);
@@ -2948,6 +2985,20 @@ pv_url_is_history(const char *url)
     return c == '\0' || c == '?' || c == '#';
 }
 
+static gboolean
+pv_url_gets_capture(NsProcView *v, const char *url)
+{
+#ifdef __linux__
+    if (!v->capture_origin) return FALSE;
+    g_autofree char *origin = ns_proc_url_origin(url);
+    return origin && strcmp(origin, v->capture_origin) == 0 &&
+           ns_perm_get(origin, NS_CAP_CAMERA) == NS_PERM_ALLOW;
+#else
+    (void)v; (void)url;
+    return FALSE;
+#endif
+}
+
 static void
 do_load_full(NsProcView *v, const char *url, gboolean record,
              gboolean history, gboolean user_activated, gboolean reload)
@@ -3031,6 +3082,8 @@ do_load_full(NsProcView *v, const char *url, gboolean record,
     req->history = history;
     req->user_activated = user_activated;
     req->reload = reload;
+    req->capture = pv_url_gets_capture(v, url);
+    v->capture_wanted = req->capture;
     push_req(v, req);
 }
 
@@ -3371,6 +3424,23 @@ pv_current_origin_is(NsProcView *v, const char *origin)
     return same;
 }
 
+static gboolean
+pv_capture_upgrade(NsProcView *v, ns_perm_kind kind, ns_perm_state state,
+                   const char *origin)
+{
+#ifdef __linux__
+    if (kind != NS_CAP_CAMERA || state != NS_PERM_ALLOW || v->capture_wanted)
+        return FALSE;
+    g_free(v->capture_origin);
+    v->capture_origin = g_strdup(origin);
+    ns_proc_view_reload(v);
+    return TRUE;
+#else
+    (void)v; (void)kind; (void)state; (void)origin;
+    return FALSE;
+#endif
+}
+
 static void
 pv_push_page_permissions(NsProcView *v)
 {
@@ -3401,7 +3471,10 @@ pv_on_permission_changed(const char *origin, ns_perm_kind kind,
 {
     NsProcView *v = user_data;
     if (v->closed || !pv_current_origin_is(v, origin)) return;
-    pv_send_permission(v, origin, kind, state);
+    gboolean asked_here = v->perm_pending && v->perm_kind == kind &&
+                          g_strcmp0(v->perm_origin, origin) == 0;
+    if (!asked_here || !pv_capture_upgrade(v, kind, state, origin))
+        pv_send_permission(v, origin, kind, state);
     if (v->perm_pending && v->perm_kind == kind &&
         g_strcmp0(v->perm_origin, origin) == 0 && state != NS_PERM_ASK) {
         v->perm_pending = FALSE;
@@ -3430,10 +3503,12 @@ pv_perm_resolve(NsProcView *v, gboolean allow)
     if (v->perm_revealer)
         gtk_revealer_set_reveal_child(GTK_REVEALER(v->perm_revealer), FALSE);
     if (v->area) gtk_widget_grab_focus(v->area);
-    if (allow)
+    if (allow) {
         ns_perm_set(origin, kind, NS_PERM_ALLOW);
-    else
+        pv_capture_upgrade(v, kind, NS_PERM_ALLOW, origin);
+    } else {
         pv_send_permission(v, origin, kind, NS_PERM_DENY);
+    }
     pv_release_held(v, kind, allow);
     g_free(origin);
 }
@@ -3499,7 +3574,7 @@ pv_capability_requested(NsProcView *v, ns_perm_kind kind, const char *origin)
     ns_perm_state st = ns_perm_get(origin, kind);
     if (st == NS_PERM_ASK)
         pv_perm_bar_show(v, kind, origin);
-    else
+    else if (!pv_capture_upgrade(v, kind, st, origin))
         pv_send_permission(v, origin, kind, st);
 }
 

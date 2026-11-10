@@ -224,6 +224,13 @@ struct _GPtrArray *ns_rproc_http_print(ns_rproc_http *r,
                                        ns_print_setup *out_setup,
                                        double *out_scale);
 int   ns_rproc_http_clear_cache(ns_rproc_http *r);
+#define NS_RPROC_SPAWN_PRIVATE 1
+#define NS_RPROC_SPAWN_CAPTURE 2
+ns_rproc_http *ns_rproc_http_spawn_shm_flags(const char *renderer_path,
+                                             int max_width, int max_height,
+                                             int flags);
+char *ns_rproc_http_carry_get(ns_rproc_http *r);
+int   ns_rproc_http_carry_set(ns_rproc_http *r, const char *data);
 char *ns_rproc_http_session_storage_get(ns_rproc_http *r);
 int   ns_rproc_http_session_storage_set(ns_rproc_http *r, const char *data);
 int   ns_rproc_http_set_color_scheme(ns_rproc_http *r, int dark);

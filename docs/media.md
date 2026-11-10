@@ -144,7 +144,9 @@ hardware decoder.
 The MPEG-1 stream's **MP2 audio track** plays too (unless the element is
 `muted`), as does a WebM's **Opus/Vorbis** track when libav is built in. The
 seccomp-sandboxed renderer can't open a sound device, so audio is handed to the
-unsandboxed `nordstjernen-audio` helper. The helper decodes to PCM — pl_mpeg for
+`nordstjernen-audio` helper. On Linux the helper is two sandboxed processes: one
+decodes and mixes and holds no sound-server connection, the other owns the
+device and plays the PCM it reads from a pipe. The helper decodes to PCM — pl_mpeg for
 the MPEG-1/MP2 track, [minimp3](https://github.com/lieff/minimp3) (CC0, vendored)
 for standalone `.mp3` files, libav for Opus/Vorbis (WebM/Ogg), and the
 operating system's AAC decoder for MP4 audio — and plays it

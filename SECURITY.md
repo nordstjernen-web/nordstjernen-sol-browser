@@ -154,25 +154,36 @@ compromised renderer cannot truncate the shell's mapping from under it.
 - **Landlock (filesystem).** Read-only access to system libraries
   (`/usr`, `/lib`, `/lib64`), `/etc`, the CA bundle, font caches,
   `/dev/urandom`, the X11 / Wayland sockets, the `$XAUTHORITY` file
-  itself, and the XDG config, data and cache directories (`~/.config`,
-  `~/.local/share`, `~/.cache`). Read+write access to
+  itself, and — for the UI process — the XDG config, data and cache
+  directories (`~/.config`, `~/.local/share`, `~/.cache`). Renderers and
+  the audio helper get only the subdirectories their libraries use
+  there: fontconfig, user fonts, Vulkan, GStreamer, MIME, spell-check
+  dictionaries, the Mesa and NVIDIA shader caches and the unpacked
+  extensions. Read+write access to
   `~/.config/nordstjernen`, `~/.local/share/nordstjernen`,
   `~/.cache/nordstjernen`, and the user's download directory when it is
-  a sub-directory of `$HOME` (never `$HOME` itself). `/proc`, `/sys` and
-  `/run` are readable; the XDG runtime directory (`/run/user/$UID`) is
+  a sub-directory of `$HOME` (never `$HOME` itself). `/proc` and `/sys`
+  are readable; of `/run` the UI process reads everything and a renderer
+  only the resolver, udev and graphics-driver directories; the XDG
+  runtime directory (`/run/user/$UID`) is
   read+write for the UI process and read-only for renderers. The XDG
   state directory (`~/.local/state/nordstjernen`, where the remote-control
   port and token live) is read+write for the UI process only — renderers
   have no rule for it at all, so they can neither read the token nor
   plant a forged control file. The V4L2
-  camera nodes (`/dev/video*`) and `/dev/snd` are read+write. While
+  camera nodes (`/dev/video*`) and `/dev/snd` are read+write only in a
+  renderer the UI process started for a tab whose site holds the camera
+  permission and has asked for the camera; when that happens, and again
+  when the tab leaves the site, the tab's renderer is replaced. Every
+  other renderer has no rule for them. While
   WebGL or WebGPU is enabled, also
   read+write on the GPU device nodes `/dev/dri` and `/dev/nvidia*`, which
   the driver behind those APIs opens to render on the GPU; with both off
   in Settings the renderer gets no access to them. The rest of `$HOME` — `~/.ssh`, `~/.aws`,
   `~/.netrc`, shell history — is **not** reachable, also when
-  `$XAUTHORITY` is `~/.Xauthority`; other applications' state kept under
-  the XDG directories (other browsers' profiles among it) is readable.
+  `$XAUTHORITY` is `~/.Xauthority`; nor is other applications' state
+  kept under the XDG directories (other browsers' profiles among it),
+  except under the XDG runtime directory, which stays readable.
   No directory the renderer can write to is also executable. Unpacked
   extensions load from `~/.local/share/nordstjernen-extensions`, outside
   the writable profile, so a renderer cannot plant one. Landlock binds
@@ -197,10 +208,13 @@ compromised renderer cannot truncate the shell's mapping from under it.
   `CLONE_NEW*` namespace flags and `clone3` returns `ENOSYS` (so libc
   falls back to `clone`), and `socket` only creates `AF_INET`,
   `AF_INET6` and `AF_NETLINK` sockets in the renderer and in the audio
-  helper. The helper opens its sound device before the filter loads, so
-  it keeps the connection to PulseAudio or PipeWire it already has; a
-  helper compromised through a decoder could misuse that connection,
-  which is a residual risk. `kill`, `tgkill`, `rt_sigqueueinfo`,
+  helper. The helper runs as two processes: the one that reads commands
+  and decodes media never opens a sound device and holds no socket, and
+  writes mixed PCM into a pipe; a second process opens the sound device,
+  keeps the PulseAudio or PipeWire connection, and only copies
+  range-checked samples from the pipe to the device. A decoder
+  compromised through a media file therefore has no connection to the
+  sound server. `kill`, `tgkill`, `rt_sigqueueinfo`,
   `rt_tgsigqueueinfo` and `prlimit64` are allowed only with the
   process's own PID as the target (what `abort()`, `pthread_kill` and
   the thread-dump signal need), and `fcntl` is refused the

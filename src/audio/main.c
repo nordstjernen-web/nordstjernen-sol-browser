@@ -17,6 +17,11 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <errno.h>
+#include <signal.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include <curl/curl.h>
 #ifdef __linux__
 #include <glib.h>
@@ -115,6 +120,7 @@ typedef struct {
 
 static SDL_AudioDeviceID g_dev;
 static int               g_dev_ok;
+static int               g_pcm_fd = -1;
 static ns_audio_stream   g_streams[NS_AUDIO_MAX_STREAMS];
 static SDL_mutex        *g_null_lock;
 static SDL_Thread       *g_null_thread;
@@ -277,12 +283,42 @@ audio_cb(void *userdata, Uint8 *stream, int len)
 }
 
 #define NS_AUDIO_NULL_FRAMES 1024
+#define NS_AUDIO_PIPE_FRAMES 256
+#define NS_AUDIO_PIPE_BYTES  (NS_AUDIO_PIPE_FRAMES * 2 * sizeof(float))
+
+static int
+pcm_pipe_write(const Uint8 *buf, size_t len)
+{
+    while (len > 0) {
+        ssize_t n = write(g_pcm_fd, buf, len);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return 0;
+        buf += n;
+        len -= (size_t)n;
+    }
+    return 1;
+}
+
+static int
+pcm_pipe_feed(void)
+{
+    Uint8 buf[NS_AUDIO_PIPE_BYTES];
+    SDL_LockMutex(g_null_lock);
+    audio_cb(NULL, buf, (int)sizeof buf);
+    SDL_UnlockMutex(g_null_lock);
+    if (pcm_pipe_write(buf, sizeof buf)) return 1;
+    close(g_pcm_fd);
+    g_pcm_fd = -1;
+    return 0;
+}
 
 static int
 null_audio_thread(void *arg)
 {
     (void)arg;
     Uint8 buf[NS_AUDIO_NULL_FRAMES * 2 * sizeof(float)];
+    while (g_pcm_fd >= 0 && !SDL_AtomicGet(&g_null_quit))
+        if (!pcm_pipe_feed()) break;
     Uint64 start = SDL_GetTicks64();
     Uint64 total_frames = 0;
     while (!SDL_AtomicGet(&g_null_quit)) {
@@ -1881,11 +1917,13 @@ void ns_security_seccomp_deny_unix_sockets(void);
 void ns_security_seccomp_deny_exec_memory(void);
 
 static void
-sandbox_self(void)
+sandbox_self(int decodes)
 {
-    g_setenv("ORC_CODE", "backup", TRUE);
-    ns_os_media_preinit();
-    ns_security_add_writable_dir(audio_tmp_dir());
+    if (decodes) {
+        g_setenv("ORC_CODE", "backup", TRUE);
+        ns_os_media_preinit();
+        ns_security_add_writable_dir(audio_tmp_dir());
+    }
     ns_security_runtime_dir_read_only();
     ns_security_config_dir_read_only();
     ns_security_landlock_scope_abstract_sockets();
@@ -1897,6 +1935,113 @@ sandbox_self(void)
     ns_security_sandbox_init(n > 0 ? self : NULL);
     ns_security_seccomp_init();
 }
+
+static int
+output_read_chunk(int fd, float *buf)
+{
+    size_t have = 0;
+    while (have < NS_AUDIO_PIPE_BYTES) {
+        ssize_t n = read(fd, (char *)buf + have, NS_AUDIO_PIPE_BYTES - have);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return 0;
+        have += (size_t)n;
+    }
+    for (int i = 0; i < NS_AUDIO_PIPE_FRAMES * 2; i++)
+        if (!(buf[i] >= -1.0f && buf[i] <= 1.0f)) buf[i] = 0.0f;
+    return 1;
+}
+
+static int
+output_process_main(int pcm_fd, int status_fd)
+{
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    int devnull = open("/dev/null", O_RDWR | O_CLOEXEC);
+    if (devnull >= 0) {
+        dup2(devnull, 0);
+        dup2(devnull, 1);
+        close(devnull);
+    }
+    SDL_AudioDeviceID dev = 0;
+    SDL_SetMainReady();
+    if (SDL_Init(SDL_INIT_AUDIO) == 0) {
+        SDL_AudioSpec want, have;
+        SDL_memset(&want, 0, sizeof want);
+        want.freq = NS_AUDIO_DEVICE_RATE;
+        want.format = AUDIO_F32SYS;
+        want.channels = 2;
+        want.samples = 512;
+        dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+        if (dev) SDL_PauseAudioDevice(dev, 0);
+    }
+    char opened = dev ? 1 : 0;
+    ssize_t reported = write(status_fd, &opened, 1);
+    (void)reported;
+    close(status_fd);
+    sandbox_self(0);
+
+    const Uint32 queue_high = 1024 * 2 * sizeof(float);
+    float buf[NS_AUDIO_PIPE_FRAMES * 2];
+    Uint64 start = SDL_GetTicks64();
+    Uint64 total_frames = 0;
+    while (output_read_chunk(pcm_fd, buf)) {
+        if (dev) {
+            SDL_QueueAudio(dev, buf, sizeof buf);
+            while (SDL_GetQueuedAudioSize(dev) > queue_high) SDL_Delay(2);
+            continue;
+        }
+        total_frames += NS_AUDIO_PIPE_FRAMES;
+        Uint64 target = start + total_frames * 1000u / NS_AUDIO_DEVICE_RATE;
+        Uint64 now = SDL_GetTicks64();
+        if (target > now) {
+            SDL_Delay((Uint32)(target - now));
+        } else if (now - target > 1000) {
+            start = now;
+            total_frames = 0;
+        }
+    }
+    if (dev) SDL_CloseAudioDevice(dev);
+    SDL_Quit();
+    return 0;
+}
+
+static int
+output_process_start(void)
+{
+    int pcm[2], status[2];
+    if (pipe2(pcm, O_CLOEXEC) != 0) return 0;
+    if (pipe2(status, O_CLOEXEC) != 0) {
+        close(pcm[0]);
+        close(pcm[1]);
+        return 0;
+    }
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(pcm[1]);
+        close(status[0]);
+        _exit(output_process_main(pcm[0], status[1]));
+    }
+    close(pcm[0]);
+    close(status[1]);
+    if (pid < 0) {
+        close(pcm[1]);
+        close(status[0]);
+        return 0;
+    }
+    char opened = 0;
+    ssize_t got;
+    do got = read(status[0], &opened, 1);
+    while (got < 0 && errno == EINTR);
+    close(status[0]);
+    if (got != 1) {
+        close(pcm[1]);
+        return 0;
+    }
+    signal(SIGPIPE, SIG_IGN);
+    fcntl(pcm[1], F_SETPIPE_SZ, 4096);
+    g_pcm_fd = pcm[1];
+    g_setenv("SDL_AUDIODRIVER", "dummy", TRUE);
+    return 1;
+}
 #endif
 
 int
@@ -1906,10 +2051,14 @@ main(void)
 #ifdef NS_HAVE_LIBAV
     av_log_set_level(AV_LOG_QUIET);
 #endif
+    int split = 0;
+#ifdef __linux__
+    split = output_process_start();
+#endif
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     SDL_SetMainReady();
-    if (SDL_Init(SDL_INIT_AUDIO) == 0) {
+    if (SDL_Init(SDL_INIT_AUDIO) == 0 && !split) {
         SDL_AudioSpec want, have;
         SDL_memset(&want, 0, sizeof want);
         want.freq = NS_AUDIO_DEVICE_RATE;
@@ -1927,7 +2076,7 @@ main(void)
     emit("ready %s", g_dev_ok || g_null_thread ? "1" : "0");
 
 #ifdef __linux__
-    sandbox_self();
+    sandbox_self(1);
 #endif
 
     char line[4096];
@@ -1982,6 +2131,7 @@ main(void)
     }
 
     null_audio_stop();
+    if (g_pcm_fd >= 0) close(g_pcm_fd);
     if (g_dev_ok) {
         SDL_CloseAudioDevice(g_dev);
         g_dev_ok = 0;

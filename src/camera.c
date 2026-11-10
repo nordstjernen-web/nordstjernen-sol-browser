@@ -7,6 +7,7 @@
 #include "image.h"
 #include "js.h"
 #include "net.h"
+#include "security.h"
 
 static GMutex      g_camera_lock;
 static GHashTable *g_camera_decisions;
@@ -57,6 +58,8 @@ ns_camera_set_state(const char *origin, int state)
     if (g_camera_decisions &&
         g_hash_table_lookup_extended(g_camera_decisions, origin, NULL, &prev))
         was_pending = GPOINTER_TO_INT(prev) == 3;
+    if (state == NS_CAMERA_ALLOW && !ns_security_capture_devices_allowed())
+        state = NS_CAMERA_ASK;
     if (state == NS_CAMERA_ALLOW || state == NS_CAMERA_DENY)
         ns_camera_record_decision(origin, state == NS_CAMERA_ALLOW);
     else if (g_camera_decisions && !was_pending)
