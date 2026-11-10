@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* SECURITY.md is rewritten at about a third of its length and checked
+  against the code: it now covers the remote-control server, the
+  renderer's Seatbelt exec denial, the newer CSP directives and the full
+  set of image, PDF and media decoders, and it drops the external-player
+  handoff, the runtime reuse on same-origin navigation and other claims
+  the code no longer matches.
 * Security: a navigation that reuses the JavaScript runtime drops its
   record of fetches that are still in flight. Their entries stayed in the
   table that an `AbortSignal` handler looks requests up in, and each
