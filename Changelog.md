@@ -3,6 +3,9 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: `window.find()` no longer searches the text of embedded
+  frames, which let a page test whether a string occurs in a
+  cross-origin `<iframe>`.
 * Security: a cross-origin `<iframe>` could end up sharing the
   `document.fonts` object with the page that embeds it, and through it
   reach functions of the other document. Only the top-level document

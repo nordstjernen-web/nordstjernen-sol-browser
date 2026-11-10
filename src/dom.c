@@ -2720,9 +2720,10 @@ ns_element_effectively_inert(const ns_node *el)
 }
 
 static void
-collect_text(const ns_node *n, GString *out, int depth)
+collect_text(const ns_node *n, GString *out, int depth, gboolean own_document)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (own_document && depth > 0 && n->kind == NS_NODE_DOCUMENT) return;
     if (n->kind == NS_NODE_TEXT) {
         if (n->text) g_string_append(out, n->text);
         return;
@@ -2734,14 +2735,22 @@ collect_text(const ns_node *n, GString *out, int depth)
          strcmp(n->name, "template") == 0))
         return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        collect_text(c, out, depth + 1);
+        collect_text(c, out, depth + 1, own_document);
 }
 
 char *
 ns_node_collect_text(const ns_node *root)
 {
     GString *out = g_string_new(NULL);
-    collect_text(root, out, 0);
+    collect_text(root, out, 0, FALSE);
+    return g_string_free(out, FALSE);
+}
+
+char *
+ns_node_collect_own_text(const ns_node *root)
+{
+    GString *out = g_string_new(NULL);
+    collect_text(root, out, 0, TRUE);
     return g_string_free(out, FALSE);
 }
 

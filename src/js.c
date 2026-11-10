@@ -12158,7 +12158,7 @@ ns_window_find(JSContext *ctx, JSValueConst this_val,
     ns_node *doc = js ? js->current_doc : NULL;
     gboolean found = FALSE;
     if (doc) {
-        char *hay = ns_node_collect_text(doc);
+        char *hay = ns_node_collect_own_text(doc);
         if (hay) {
             if (case_sensitive) {
                 found = strstr(hay, needle) != NULL;
