@@ -207,7 +207,7 @@ the table keeps the ones still open.
 | H2b | The `magic` of C functions, data records and closures, which many builtins use as an index into their own tables, was in-cage data the function trusted; so were the declared argument count and the `this` brand, whose index into `rt->brand_classes` was unchecked | out-of-bounds reads in builtin tables, brand check disabled | fixed: the code-table entry holds them |
 | H3 | The context table is process-wide and `js_ctx_get` did not check that a context belongs to the caller's runtime | page code running in another runtime's realm (a worker on another thread, the extension host) | fixed: `js_ctx_get(rt, idx)` aborts on a foreign context |
 | H4 | `JSArrayBuffer.data` was masked on access but handed unmasked to the realloc and free hooks, `sab_free` and the SharedArrayBuffer serializer | free of an out-of-cage pointer | fixed: every hand-off is masked |
-| M1 | The engine-private name table and bitmap, the policy that hides embedder names from page scripts, are cage allocations | policy rewrite | open |
+| M1 | The engine-private name table and bitmap, the policy that hides embedder names from page scripts, are cage allocations | policy rewrite | open in the quickjs-ng fork; Bellard's engine keeps them in trusted blocks |
 | M2 | Runtimes share the cage, and `js_cage_free` releases into the owning runtime's heap without a lock, so a forged pointer to another runtime's object races on that heap's metadata | metadata race outside the cage | open |
 
 ### Inventory

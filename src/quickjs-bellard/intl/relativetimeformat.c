@@ -72,7 +72,7 @@ static JSValue js_relativetimeformat_constructor(JSContext *ctx,
     if (!s)
         return JS_EXCEPTION;
 
-    s->locale = js_strdup(ctx, "en-US");
+    s->locale = js_strdup(ctx, JS_GetDefaultLocale(JS_GetRuntime(ctx)));
     s->numberingSystem = NS_LATN;
     s->style = js_strdup(ctx, "long");
     s->numeric = js_strdup(ctx, "always");

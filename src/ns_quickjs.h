@@ -18,14 +18,6 @@
 typedef JS_BOOL ns_js_bool;
 typedef JSRuntime ns_js_interrupt_arg;
 
-static inline int
-JS_SetDefaultLocale(JSRuntime *rt, const char *tag)
-{
-    (void)rt;
-    (void)tag;
-    return 0;
-}
-
 #define JS_EVAL_OPTIONS_VERSION 1
 
 typedef struct JSEvalOptions {

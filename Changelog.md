@@ -13,6 +13,17 @@ Changelog:
   tables outside the cage, class and atom lookups are bounded, and
   ArrayBuffer backing stores must be cage memory. test262 gives the same
   result as the unmodified engine.
+* The rest of the quickjs-ng fork's browser support is ported to
+  Bellard's QuickJS, so the default build no longer differs from the
+  quickjs-ng build there: the state kept on platform objects such as
+  `XMLHttpRequest` is hidden from page script and attribute writes go
+  through the interface's setter, engine-implemented members print as
+  `[native code]` and stay out of a page's stack traces, interface
+  methods refuse a foreign `this`, named access on a frame's window
+  resolves in the frame, the engine's global helpers are not enumerable,
+  `Intl` follows the browser's language, `RegExp.$1`, `fn.caller` and
+  `Error.captureStackTrace` exist, and the engine's own scripts are
+  embedded as bytecode instead of being parsed in every process.
 * Bellard's QuickJS gains the browser hooks the quickjs-ng fork had: a
   Content Security Policy without `'unsafe-eval'` refuses `eval()` and
   `Function()` on it too, cross-frame calls, promise jobs and native

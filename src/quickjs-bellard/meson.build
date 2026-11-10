@@ -68,6 +68,16 @@ libquickjs = declare_dependency(
   include_directories: include_directories('.', is_system: true),
 )
 
+if not meson.is_cross_build()
+  bqjs_bcgen = executable('quickjs-bellard-bcgen',
+    'bcgen.c',
+    c_args: bqjs_c_args,
+    link_with: bqjs_lib,
+    dependencies: bqjs_sys_deps,
+    install: false,
+  )
+endif
+
 if not meson.is_cross_build() and host_machine.system() != 'windows'
   bqjs_libc = static_library('quickjs-bellard-libc',
     'quickjs-libc.c',

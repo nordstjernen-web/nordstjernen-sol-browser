@@ -53,7 +53,7 @@ static JSValue js_displaynames_constructor(JSContext *ctx,
     if (!s)
         return JS_EXCEPTION;
 
-    s->locale = js_strdup(ctx, "en-US");
+    s->locale = js_strdup(ctx, JS_GetDefaultLocale(JS_GetRuntime(ctx)));
     s->style = js_strdup(ctx, "long");
     s->type = NULL;
     s->fallback = js_strdup(ctx, "code");

@@ -60,14 +60,23 @@ shaped differently:
 - There are no weak-reference chains to convert: upstream counts weak
   references on the object instead.
 
-**Browser hooks were ported.** The CSP `eval` hook, the three realm
-queries, native-function cloning, `JS_RepointArrayBuffer` and exact class
-tests are engine functions now instead of approximations in the adapter
-([`quickjs.md`](quickjs.md), "Browser hooks in Bellard's engine"). That
-closes these former differences: `eval` under a Content Security Policy,
-the calling realm, promise jobs in frames, native functions in frames,
-views on an imported `WebAssembly.Memory`, and the string round trip in
-indexed access on host objects.
+**Browser hooks were ported.** What the adapter approximated or stubbed
+is implemented in the engine ([`quickjs.md`](quickjs.md), "Browser hooks
+in Bellard's engine"), in two steps:
+
+- First the CSP `eval` hook, the three realm queries, native-function
+  cloning, `JS_RepointArrayBuffer` and exact class tests.
+- Then hidden-source engine code, host access, engine-private names, the
+  receiver-aware property hook, `this` brands, hiding of the embedder's
+  global helpers, the default locale, the legacy RegExp statics,
+  `Error.captureStackTrace`, `caller`/`arguments` on non-strict functions,
+  and engine scripts embedded as bytecode.
+
+With those, a probe page gives the same answers on both engines: an
+`XMLHttpRequest` has no own properties and coerces `timeout`, engine
+members print as native code, an interface method called on a foreign
+receiver throws, the embedder's helpers are not enumerable on `window`,
+and `Intl` follows the browser's language.
 
 **`Intl` and `Temporal` are built.** Upstream's own implementations
 (`CONFIG_TEMPORAL_INTL`) are compiled and added to every context.
@@ -76,7 +85,7 @@ indexed access on host objects.
 
 | Check | Result |
 |---|---|
-| test262 (`run-test262 -a`, commit pinned by upstream's Makefile) | 19 errors of 53021, the same 19 as unmodified upstream, at each stage: cage and caged values; compressed fields; pointer tables and bounded lookups |
+| test262 (`run-test262 -a`, commit pinned by upstream's Makefile) | 19 errors of 53021, the same 19 as unmodified upstream, at each hardening stage: cage and caged values; compressed fields; pointer tables and bounded lookups. 18 after the second batch of hooks: no new failure, and `staging/sm/Function/function-bind.js` passes because a native function whose name is not an identifier now prints as a computed key |
 | engine tests (`test_closure`, `test_language`, `test_loop`, `test_bigint`, `test_builtin`, `test_std`, `test_worker`, `test_intl`) | pass |
 | `scripts/dev.sh smoke` | all ten fixtures match their baselines |
 | DOM dump of the 65 pages in `data/fixtures/`, `data/render-tests/` and `docs/demos/` | identical to the quickjs-ng build |
@@ -105,9 +114,10 @@ renderer creates a handful of runtimes in its lifetime.
 ## Still different from the quickjs-ng build
 
 Listed in [`quickjs.md`](quickjs.md), "Known differences on Bellard's
-engine": the receiver-aware property hook, host access and engine-private
-names, `this` brands, a few legacy language features, hidden engine
-source, engine script bytecode, the default locale and `ShadowRealm`.
-The hardening review findings M1 and M2 in `heap-hardening.md` apply to
-both engines where the feature exists; M1 (engine-private names) has no
-counterpart in Bellard's engine yet.
+engine": the format of `error.stack`, `Error.prepareStackTrace` and
+`Error.stackTraceLimit`, `ShadowRealm`, and the breadth of `Intl`.
+
+Of the hardening review findings in `heap-hardening.md`, M1 does not
+apply to Bellard's engine: its engine-private name table and bitmap are
+trusted blocks outside the cage, and the brand of a native function lives
+in its code pointer table entry. M2 applies to both.

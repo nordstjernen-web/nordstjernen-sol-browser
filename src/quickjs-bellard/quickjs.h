@@ -1306,6 +1306,8 @@ int JS_NewCFunctionBrand(JSContext *ctx, const JSClassID *class_ids, int count);
 void JS_SetCFunctionBrand(JSContext *ctx, JSValueConst func, int brand,
                           JSBrandMode mode);
 JSValue JS_GetErrorFrames(JSContext *ctx, JSValueConst val);
+int JS_SetDefaultLocale(JSRuntime *rt, const char *tag);
+const char *JS_GetDefaultLocale(JSRuntime *rt);
 bool JS_IsHostAccess(JSContext *ctx);
 bool JS_IsHostCaller(JSContext *ctx);
 bool JS_IsEngineFunction(JSValueConst fn);

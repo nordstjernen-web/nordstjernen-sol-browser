@@ -118,10 +118,9 @@ static JSContext *JS_NewCustomContext(JSRuntime *rt)
     js_init_module_std(ctx, "std");
     js_init_module_os(ctx, "os");
 #ifdef CONFIG_TEMPORAL_INTL
-    if (enable_experimental) {
-        JS_AddIntrinsicTemporal(ctx);
-        JS_AddIntrinsicIntl(ctx);
-    }
+    /* JS_NewContext() adds Temporal and Intl in this fork; adding them
+       twice leaks the context */
+    (void)enable_experimental;
 #endif
     return ctx;
 }

@@ -393,6 +393,7 @@ struct JSRuntime {
     JSSharedArrayBufferFunctions sab_funcs;
     /* realm of the code that called the running C function */
     JSContext *cfunc_caller_realm;
+    char default_locale[64]; /* BCP 47 tag, empty for en-US */
     /* names that stand for a private symbol when the embedder uses them
        (JS_AddEnginePrivateName); trusted blocks */
     /* sets of class ids a native function's 'this' must belong to */
@@ -8710,6 +8711,41 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
     return 0;
 }
 
+static JSValue js_build_arguments(JSContext *ctx, int argc, JSValueConst *argv);
+
+static JSValue js_function_legacy_get(JSContext *ctx, JSObject *target,
+                                      BOOL want_caller)
+{
+    JSStackFrame *sf, *caller;
+    JSObject *cp;
+    JSFunctionBytecode *cb;
+
+    for (sf = ctx->rt->current_stack_frame; sf; sf = sf->prev_frame) {
+        if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT ||
+            JS_VALUE_GET_OBJ(sf->cur_func) != target)
+            continue;
+        if (!want_caller)
+            return js_build_arguments(ctx, sf->arg_count,
+                                      (JSValueConst *)sf->arg_buf);
+        cb = NULL;
+        for (caller = sf->prev_frame; caller; caller = caller->prev_frame) {
+            if (JS_VALUE_GET_TAG(caller->cur_func) != JS_TAG_OBJECT)
+                return JS_NULL;
+            cp = JS_VALUE_GET_OBJ(caller->cur_func);
+            if (!js_class_has_bytecode(cp->class_id))
+                return JS_NULL;
+            cb = js_cload(struct JSFunctionBytecode *, cp->u.func.function_bytecode);
+            if (cb->func_name != JS_ATOM__eval_)
+                break;
+        }
+        if (!caller || !cb || (cb->js_mode & JS_MODE_STRICT) ||
+            cb->func_kind != JS_FUNC_NORMAL || cb->is_engine_code)
+            return JS_NULL;
+        return JS_DupValue(ctx, caller->cur_func);
+    }
+    return JS_NULL;
+}
+
 JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
                                JSAtom prop, JSValueConst this_obj,
                                BOOL throw_ref_error)
@@ -8766,6 +8802,18 @@ JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
             return JS_UNDEFINED;
     } else {
         p = JS_VALUE_GET_OBJ(obj);
+    }
+
+    /* legacy web behaviour: 'caller' and 'arguments' read on a non-strict
+       function resolve against the live call stack, while the prototype
+       accessors stay the %ThrowTypeError% pair */
+    if (unlikely(prop == JS_ATOM_caller || prop == JS_ATOM_arguments) &&
+        tag == JS_TAG_OBJECT && p->class_id == JS_CLASS_BYTECODE_FUNCTION &&
+        !find_own_property1(p, prop)) {
+        JSFunctionBytecode *b = js_cload(struct JSFunctionBytecode *, p->u.func.function_bytecode);
+        if (!(b->js_mode & JS_MODE_STRICT) && b->has_prototype &&
+            b->func_kind == JS_FUNC_NORMAL)
+            return js_function_legacy_get(ctx, p, prop == JS_ATOM_caller);
     }
 
     for(;;) {
@@ -43183,6 +43231,70 @@ static JSValue js_function_bind(JSContext *ctx, JSValueConst this_val,
     return JS_EXCEPTION;
 }
 
+static BOOL js_native_name_is_identifier(const char *str, size_t len)
+{
+    size_t i;
+    if (len == 0)
+        return TRUE;
+    if (str[0] >= '0' && str[0] <= '9')
+        return FALSE;
+    for (i = 0; i < len; i++) {
+        unsigned char c = str[i];
+        if (!(c >= 0x80 || c == '$' || c == '_' ||
+              (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9')))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+/* NativeFunction syntax wants a PropertyName: a name that is not an
+   identifier (the accessor "get $&") is written as a computed string key */
+static JSValue js_native_function_source(JSContext *ctx, const char *pref,
+                                         JSValue name, const char *suff)
+{
+    const char *str, *key;
+    size_t len, accessor_len = 0, i;
+    DynBuf dbuf;
+    JSValue ret;
+
+    if (!JS_IsString(name))
+        return JS_ConcatString3(ctx, pref, name, suff);
+    str = JS_ToCStringLen(ctx, &len, name);
+    if (!str) {
+        JS_FreeValue(ctx, name);
+        return JS_EXCEPTION;
+    }
+    if (len > 4 && (!memcmp(str, "get ", 4) || !memcmp(str, "set ", 4)))
+        accessor_len = 4;
+    key = str + accessor_len;
+    if (js_native_name_is_identifier(key, len - accessor_len) ||
+        (key[0] == '[' && str[len - 1] == ']')) {
+        JS_FreeCString(ctx, str);
+        return JS_ConcatString3(ctx, pref, name, suff);
+    }
+    JS_FreeValue(ctx, name);
+    js_dbuf_init(ctx, &dbuf);
+    dbuf_putstr(&dbuf, pref);
+    dbuf_put(&dbuf, (const uint8_t *)str, accessor_len);
+    dbuf_putstr(&dbuf, "[\"");
+    for (i = accessor_len; i < len; i++) {
+        if (str[i] == '"' || str[i] == '\\')
+            dbuf_putc(&dbuf, '\\');
+        dbuf_putc(&dbuf, str[i]);
+    }
+    dbuf_putstr(&dbuf, "\"]");
+    dbuf_putstr(&dbuf, suff);
+    JS_FreeCString(ctx, str);
+    if (dbuf_error(&dbuf)) {
+        dbuf_free(&dbuf);
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    ret = JS_NewStringLen(ctx, (const char *)dbuf.buf, dbuf.size);
+    dbuf_free(&dbuf);
+    return ret;
+}
+
 static JSValue js_function_toString(JSContext *ctx, JSValueConst this_val,
                                     int argc, JSValueConst *argv)
 {
@@ -43223,7 +43335,7 @@ static JSValue js_function_toString(JSContext *ctx, JSValueConst this_val,
         name = JS_GetProperty(ctx, this_val, JS_ATOM_name);
         if (JS_IsUndefined(name))
             name = JS_AtomToString(ctx, JS_ATOM_empty_string);
-        return JS_ConcatString3(ctx, pref, name, suff);
+        return js_native_function_source(ctx, pref, name, suff);
     }
 }
 
@@ -66967,4 +67079,28 @@ JSValue JS_GetErrorFrames(JSContext *ctx, JSValueConst val)
         JS_VALUE_GET_TAG(p->u.object_data) != JS_TAG_STRING)
         return JS_UNDEFINED;
     return JS_DupValue(ctx, p->u.object_data);
+}
+
+/* The locale Intl and the toLocale functions use when a script names
+   none: the browser's first accept-language. */
+int JS_SetDefaultLocale(JSRuntime *rt, const char *tag)
+{
+    size_t i, len;
+
+    len = tag ? strlen(tag) : 0;
+    if (len == 0 || len >= sizeof(rt->default_locale))
+        return -1;
+    for (i = 0; i < len; i++) {
+        char c = tag[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '-'))
+            return -1;
+    }
+    memcpy(rt->default_locale, tag, len + 1);
+    return 0;
+}
+
+const char *JS_GetDefaultLocale(JSRuntime *rt)
+{
+    return rt->default_locale[0] ? rt->default_locale : "en-US";
 }
