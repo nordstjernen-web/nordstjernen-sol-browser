@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: the table methods (`createTHead`, `createCaption`,
+  `insertRow`, `deleteRow` and the rest) and a NodeIterator's reference
+  node no longer reach into an embedded frame's document or a shadow
+  tree. Called on a table that contained an `<iframe>`, they searched the
+  framed document as well and returned or changed its nodes, across
+  origins.
 * Security: WebGPU objects are registered in every JavaScript runtime.
   The WebGPU classes were set up only in the first runtime a renderer
   created, so after a navigation their finalizers never ran and a canvas
