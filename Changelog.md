@@ -9,7 +9,7 @@ Changelog:
   PulseAudio, PipeWire or ALSA connection and only copies range-checked
   samples from the pipe to the device, so a decoder compromised through
   a media file cannot reach the sound server. Audio output gains roughly
-  30–40 ms of latency (`docs/security-review-2026-11.md`, S9).
+  30–40 ms of latency.
 * Security: on Linux a renderer can open the camera and sound devices
   only when it was started for a tab whose site holds the camera
   permission and has asked for the camera. Every other renderer's
@@ -18,7 +18,7 @@ Changelog:
   use the camera in a tab, and when a tab that had it navigates to
   another site, the tab's renderer is replaced and the page reloads;
   session storage, the pending form submission and the navigation's
-  initiator carry over (`docs/security-review-2026-11.md`, S4).
+  initiator carry over.
 * Security hardening: decoded video frames start from a zeroed buffer,
   so a short colour conversion cannot leave uninitialised memory in a
   frame a page can read back through a canvas; an SVG mask whose surface
@@ -29,26 +29,22 @@ Changelog:
   (`mapAsync`, `requestAdapter`, `requestDevice`, `popErrorScope`,
   `onSubmittedWorkDone` and canvas readback) no longer hand the driver a
   pointer into their own stack frame. If the wait timed out, a callback
-  delivered later would have written into a dead frame (`docs/security-
-  review-2026-11.md`, M4).
+  delivered later would have written into a dead frame.
 * Security: SVG files used as images or as external `<use>` targets are
   now made valid UTF-8 before they are parsed, like every other
   document. Several text walkers assume valid UTF-8 and could read a few
   bytes past the end of a string that ended in a truncated multi-byte
-  sequence (`docs/security-review-2026-11.md`, M3).
+  sequence.
 * Security: a zstd-compressed response is no longer cut short when the
-  decoder still holds output after consuming the last input bytes
-  (`docs/security-review-2026-11.md`, M5).
+  decoder still holds output after consuming the last input bytes.
 * Security: `new WebAssembly.Memory()` and `memory.grow()` now throw
   `RangeError` when the JavaScript heap cage cannot supply the memory,
-  instead of writing through a null pointer and crashing the renderer
-  (`docs/security-review-2026-11.md`, M2).
+  instead of writing through a null pointer and crashing the renderer.
 * Security: two DOM walkers that recursed without a depth limit — the
   one collecting `<foreignObject>` elements under an inline `<svg>` and
   the one collecting an iframe document's images — now stop at the same
   depth as every other walker, so a very deeply nested document cannot
-  exhaust the renderer's stack through them (`docs/security-
-  review-2026-11.md`, M1).
+  exhaust the renderer's stack through them.
 * Docs: SECURITY.md is brought back in line with the code — the SQLite
   cookie store, FTP top-level navigations, the audio helper's socket
   rules and its retained sound-server connection, and the list of
@@ -59,62 +55,58 @@ Changelog:
   directories it uses there and the resolver, udev and driver
   directories under `/run`, so other applications' credentials,
   removable media and other browsers' profiles are out of a compromised
-  renderer's reach (`docs/security-review-2026-11.md`, S3).
+  renderer's reach.
 * Security: renderers and the audio helper are started with an allow-
   listed environment — locale, home and XDG directories, display, proxy
   and certificate settings, graphics, media and `NS_*` variables —
   instead of everything the browser was launched with, so API tokens,
   `SSH_AUTH_SOCK` and the session bus address are no longer in a
-  renderer's memory (`docs/security-review-2026-11.md`, S6).
+  renderer's memory.
 * Security: a sandboxed Linux renderer no longer connects to the
   desktop's X11 or Wayland display to get an OpenGL context for WebGL.
   When the EGL stack lacks the surfaceless platform it now tries the EGL
   device platform (which also covers the NVIDIA driver), and if neither
   exists WebGL is off in that renderer instead of handing it a display
-  connection. `NS_WEBGL_ALLOW_DISPLAY=1` restores the old fallback
-  (`docs/security-review-2026-11.md`, S5).
+  connection. `NS_WEBGL_ALLOW_DISPLAY=1` restores the old fallback.
 * Security: the Linux renderer's seccomp filter no longer allows System
   V shared memory, semaphores or message queues, so a compromised
   renderer cannot attach other applications' shared-memory segments. The
   audio helper keeps them for ALSA's dmix; microphone capture through an
-  ALSA dsnoop device no longer works inside the renderer
-  (`docs/security-review-2026-11.md`, S2).
+  ALSA dsnoop device no longer works inside the renderer.
 * Security: on Linux a renderer or media helper that cannot load its
   seccomp filter now exits instead of continuing with a warning, as it
   already did for Landlock, and a socket rule that fails to install no
   longer opens every socket family. `NS_ALLOW_NO_SECCOMP=1` restores the
-  old tolerance (`docs/security-review-2026-11.md`, S8).
+  old tolerance.
 * Security: on Linux a compromised renderer can no longer signal other
   processes through `rt_sigqueueinfo`, `rt_tgsigqueueinfo` or
   `fcntl(F_SETOWN/F_SETSIG)`, nor change another process's resource
   limits through `prlimit64`; the seccomp filter now restricts those
-  calls to the renderer's own process (`docs/security-
-  review-2026-11.md`, S1).
+  calls to the renderer's own process.
 * Security: more file types prompt before they are saved — disk images,
   Office macro documents, Windows shell and installer formats, and
   further shell and macOS script types. The move of a finished download
   out of the staging directory now checks that the file it moved is the
   regular file it inspected, so a compromised renderer cannot swap in a
-  directory (`docs/security-review-2026-11.md`, W5).
+  directory.
 * Security: Content-Security-Policy now honours `script-src-elem`,
   `script-src-attr`, `style-src-elem` and `style-src-attr`; a policy
   that restricted scripts only through `script-src-elem` used to enforce
   nothing. Directives are split on every ASCII whitespace character, so
   a `<meta>` policy with a line break after the directive name is no
-  longer ignored (`docs/security-review-2026-11.md`, W4).
+  longer ignored.
 * Security: the address bar no longer shows a URL's userinfo, so
   `https://bank.example@evil.test/` displays as `https://evil.test/`,
   and history records it the same way. Percent-escapes are decoded for
   display only in the path, query and fragment, and only into printable
   non-ASCII letters; escaped spaces, slashes, `@` and their Unicode
   look-alikes stay escaped. The bar shows a long URL from its start
-  instead of its end (`docs/security-review-2026-11.md`, W3).
+  instead of its end.
 * Security: the private-network guard no longer skips documents without
   a network origin. A top-level `data:` page, or a sandboxed frame's
   WebSocket or EventSource, counted as an unknown address space and
   could reach localhost and LAN hosts from a public site; such documents
-  are now treated as public (`file:` pages stay local) (`docs/security-
-  review-2026-11.md`, W2).
+  are now treated as public (`file:` pages stay local).
 * Security: a sandboxed `<iframe>` without `allow-same-origin` now has an
   opaque origin on the network too, not only for storage and cookies.
   `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource`
@@ -127,14 +119,7 @@ Changelog:
   can open a new window only with both `allow-popups` and
   `allow-popups-to-escape-sandbox`, because a popup cannot yet inherit
   the sandbox. `window.open(url, '_self')` inside a frame navigates that
-  frame instead of the whole tab (`docs/security-review-2026-11.md`, W1).
-* Docs: `docs/security-review-2026-11.md` records a source review for
-  security vulnerabilities. It found no attacker-reachable memory
-  corruption in the parsers it read; the most serious open finding is
-  that a sandboxed `<iframe>` without `allow-same-origin` still makes
-  `fetch`, XHR and WebSocket requests with the embedding site's origin
-  and cookies. The report lists every open finding with a suggested fix,
-  and the areas the review did not reach.
+  frame instead of the whole tab.
 * Security: a corrupted JavaScript heap can no longer make an
   ArrayBuffer's free or resize hook release memory outside the heap cage.
   The buffer's data pointer was masked into the cage whenever scripts

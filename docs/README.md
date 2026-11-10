@@ -43,7 +43,6 @@ reporting in [SECURITY.md](../SECURITY.md), and licensing in
 - [single-process-mode.md](single-process-mode.md) — the one-tab `--single-process` mode.
 - [threading.md](threading.md) — the threading model.
 - [watchdog.md](watchdog.md) — the watchdog supervisor.
-- [security-review-2026-11.md](security-review-2026-11.md) — the November 2026 source review for security vulnerabilities: open findings, what was found sound, and what was not covered.
 
 ## Web platform & standards
 
