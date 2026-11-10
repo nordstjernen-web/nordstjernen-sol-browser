@@ -213,6 +213,7 @@ gboolean    ns_element_effectively_inert(const ns_node *el);
 void        ns_dom_set_active_modal(const ns_node *modal);
 const ns_node *ns_dom_active_modal(void);
 char       *ns_node_collect_text(const ns_node *root);
+char *ns_node_collect_own_text(const ns_node *root);
 
 char       *ns_node_inner_html(const ns_node *root);
 char       *ns_node_outer_html(const ns_node *node);

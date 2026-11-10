@@ -126,6 +126,7 @@ struct ns_worker_host {
     gboolean      is_module;
     gboolean      is_service_worker;
     gboolean      is_shared;
+    gboolean      opaque_origin;
     gint          sw_active;
     gint          terminated;
     char         *scope;
@@ -252,7 +253,8 @@ static JSValue ns_document_elements_from_point(JSContext *ctx,
 static JSValue ns_make_performance_object(JSContext *ctx, ns_js *js,
                                           gboolean include_memory);
 static void ns_js_emit_audio(ns_js *js, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
-static ns_worker_host *ns_sw_controller_for(ns_js *js, const char *abs_url);
+static ns_worker_host *ns_sw_controller_for(ns_js *js, const char *client_url,
+                                            const char *abs_url);
 static void ns_sw_post_fetch_request(ns_worker_host *host, guint id,
                                      const char *url, const char *method,
                                      const char *const *headers,
@@ -1453,6 +1455,21 @@ ns_js_drop_message_tasks(ns_js *js)
         ns_message_task_free(task);
 }
 
+typedef struct {
+    JSContext *ctx;
+    ns_node   *doc;
+    ns_node   *frame;
+    char      *url;
+    char      *entered_url;
+    char     **prev_slot;
+    gboolean   active;
+    gboolean   is_base;
+} ns_realm_scope;
+
+static void ns_js_realm_scope_enter(ns_js *js, JSContext *realm,
+                                    ns_realm_scope *scope);
+static void ns_js_realm_scope_leave(ns_js *js, ns_realm_scope *scope);
+
 static gboolean
 ns_js_run_message_task(gpointer data)
 {
@@ -1471,10 +1488,13 @@ ns_js_run_message_task(gpointer data)
     for (guint i = 0; i < pending && !js->halted; i++) {
         ns_message_task *task = g_queue_pop_head(js->message_tasks);
         if (!task) break;
+        ns_realm_scope scope;
+        ns_js_realm_scope_enter(js, task->ctx, &scope);
         JSValue r = task->func(task->ctx, task->argc, task->argv);
         if (JS_IsException(r))
             JS_FreeValue(task->ctx, JS_GetException(task->ctx));
         JS_FreeValue(task->ctx, r);
+        ns_js_realm_scope_leave(js, &scope);
         ns_message_task_free(task);
         ns_drain_microtasks(js);
     }
@@ -1506,17 +1526,6 @@ ns_js_queue_message_task(JSContext *ctx, JSJobFunc *func, int argc,
         js->message_task_source =
             ns_js_attach_timeout(js, 0, ns_js_run_message_task, js);
 }
-
-typedef struct {
-    JSContext *ctx;
-    ns_node   *doc;
-    ns_node   *frame;
-    char      *url;
-    char      *entered_url;
-    char     **prev_slot;
-    gboolean   active;
-    gboolean   is_base;
-} ns_realm_scope;
 
 static const char *
 ns_js_top_url(ns_js *js)
@@ -1687,6 +1696,7 @@ ns_js_frame_of_realm(ns_js *js, JSContext *realm)
 static gboolean
 ns_js_realm_origin_is_opaque(ns_js *js, JSContext *realm)
 {
+    if (js && js->worker_host) return js->worker_host->opaque_origin;
     ns_node *frame = ns_js_frame_of_realm(js, realm);
     if (!frame) return FALSE;
     unsigned sandbox = ns_iframe_effective_sandbox(frame);
@@ -1748,6 +1758,15 @@ static const ns_csp *
 ns_js_node_csp(const ns_js *js, const ns_node *node)
 {
     return ns_js_frame_csp(js, node ? ns_js_node_frame(node->parent) : NULL);
+}
+
+static const char *
+ns_js_calling_document_url(ns_js *js, JSContext *realm)
+{
+    if (!js) return NULL;
+    const char *url = realm && realm != js->ctx ? ns_js_realm_url(js, realm)
+                                                : NULL;
+    return url ? url : js->current_url;
 }
 
 static const char *
@@ -9921,12 +9940,25 @@ ns_fetch_omits_credentials(JSContext *ctx, int argc, JSValueConst *argv,
 }
 
 static char **
-ns_strv_with_cors_marker(char **headers)
+ns_strv_with_cors_marker(char **headers, gboolean omit_credentials)
 {
     guint n = headers ? g_strv_length(headers) : 0;
-    char **out = g_new0(char *, n + 2);
+    char **out = g_new0(char *, n + 3);
     for (guint i = 0; i < n; i++) out[i] = g_strdup(headers[i]);
     out[n] = g_strdup("X-ND-CORS: 1");
+    if (omit_credentials) out[n + 1] = g_strdup("X-ND-Credentials: omit");
+    return out;
+}
+
+static char **
+ns_strv_without_markers(char **headers)
+{
+    guint n = headers ? g_strv_length(headers) : 0;
+    char **out = g_new0(char *, n + 1);
+    guint kept = 0;
+    for (guint i = 0; i < n; i++)
+        if (g_ascii_strncasecmp(headers[i], "X-ND-", 5) != 0)
+            out[kept++] = g_strdup(headers[i]);
     return out;
 }
 
@@ -10781,8 +10813,11 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         return promise;
     }
 
-    ns_worker_host *sw = (st->js && !st->js->worker_host)
-        ? ns_sw_controller_for(st->js, send_url) : NULL;
+    gboolean omit_credentials =
+        ns_fetch_omits_credentials(ctx, argc, argv, st->opaque_origin, top,
+                                   send_url);
+    ns_worker_host *sw = (st->js && !st->js->worker_host && !st->opaque_origin)
+        ? ns_sw_controller_for(st->js, top, send_url) : NULL;
     if (sw) {
         if (!st->id) {
             st->id = ++st->js->next_fetch_id;
@@ -10798,9 +10833,12 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
             memcpy(st->fb_body, body, body_len);
             st->fb_body_len = body_len;
         }
-        st->fb_headers = ns_strv_with_cors_marker((char **)extras->pdata);
+        st->fb_headers = ns_strv_with_cors_marker((char **)extras->pdata,
+                                                  omit_credentials);
+        g_auto(GStrv) page_headers =
+            ns_strv_without_markers((char **)extras->pdata);
         ns_sw_post_fetch_request(sw, st->id, send_url, use_method,
-                                 (const char *const *)extras->pdata,
+                                 (const char *const *)page_headers,
                                  (const guint8 *)body, body_len);
         g_ptr_array_free(extras, TRUE);
         g_free(abs_url);
@@ -10812,8 +10850,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     g_ptr_array_add(extras, g_strdup("X-ND-CORS: 1"));
     if (st->opaque_origin)
         g_ptr_array_add(extras, g_strdup("X-ND-Opaque-Origin: 1"));
-    if (ns_fetch_omits_credentials(ctx, argc, argv, st->opaque_origin, top,
-                                   send_url))
+    if (omit_credentials)
         g_ptr_array_add(extras, g_strdup("X-ND-Credentials: omit"));
     g_ptr_array_add(extras, NULL);
     ns_net_request_async(send_url, top, use_method,
@@ -12121,7 +12158,7 @@ ns_window_find(JSContext *ctx, JSValueConst this_val,
     ns_node *doc = js ? js->current_doc : NULL;
     gboolean found = FALSE;
     if (doc) {
-        char *hay = ns_node_collect_text(doc);
+        char *hay = ns_node_collect_own_text(doc);
         if (hay) {
             if (case_sensitive) {
                 found = strstr(hay, needle) != NULL;
@@ -22891,15 +22928,15 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     st->js  = _js;
     st->obj = JS_DupValue(ctx, this_val);
     st->gen = ns_xhr_gen(ctx, this_val);
-    char *resolved = (_js && _js->current_url)
-        ? ns_url_resolve(_js->current_url, url) : NULL;
+    const char *xhr_doc_url = ns_js_calling_document_url(_js, ctx);
+    char *resolved = xhr_doc_url ? ns_url_resolve(xhr_doc_url, url) : NULL;
     st->url = resolved ? resolved : g_strdup(url);
     char *secure_url = ns_js_realm_upgrade_insecure(_js, ctx, st->url);
     if (secure_url) {
         g_free(st->url);
         st->url = secure_url;
     }
-    st->origin_url = g_strdup(_js ? _js->current_url : NULL);
+    st->origin_url = g_strdup(xhr_doc_url);
     st->opaque_origin = ns_js_realm_origin_is_opaque(_js, ctx);
     st->start_ms = ns_perf_now_ms(_js);
     if (method) st->method = g_strdup(method);
@@ -22952,8 +22989,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     if (st->opaque_origin)
         g_ptr_array_add(hdr_terminated, (gpointer)"X-ND-Opaque-Origin: 1");
     if (!ns_xhr_with_credentials(ctx, this_val) &&
-        !ns_origin_matches(st->opaque_origin,
-                           ns_js_realm_url_or_current(st->js, ctx), st->url))
+        !ns_origin_matches(st->opaque_origin, st->origin_url, st->url))
         g_ptr_array_add(hdr_terminated, (gpointer)"X-ND-Credentials: omit");
     g_autofree char *top_level_marker = ns_js_top_level_marker(st->js);
     if (top_level_marker) g_ptr_array_add(hdr_terminated, top_level_marker);
@@ -22962,8 +22998,8 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     const char *effective_ct = NULL;
     if (send_body && body && !user_set_content_type)
         effective_ct = auto_content_type;
-    gboolean blocked_mixed = st->js && st->js->current_url &&
-        g_ascii_strncasecmp(st->js->current_url, "https://", 8) == 0 &&
+    gboolean blocked_mixed = st->origin_url &&
+        g_ascii_strncasecmp(st->origin_url, "https://", 8) == 0 &&
         g_ascii_strncasecmp(st->url, "http://", 7) == 0;
     const ns_csp *xhr_csp = ns_js_realm_csp(st->js, ctx);
     gboolean blocked_csp = xhr_csp &&
@@ -26233,10 +26269,11 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
         .busy      = ns_js_ws_busy,
     };
     char *origin = NULL;
-    if (js && js->current_url && !ns_js_realm_origin_is_opaque(js, ctx) &&
-        (g_ascii_strncasecmp(js->current_url, "http://",  7) == 0 ||
-         g_ascii_strncasecmp(js->current_url, "https://", 8) == 0))
-        origin = ns_url_origin_from(js->current_url);
+    const char *ws_doc_url = ns_js_calling_document_url(js, ctx);
+    if (ws_doc_url && !ns_js_realm_origin_is_opaque(js, ctx) &&
+        (g_ascii_strncasecmp(ws_doc_url, "http://",  7) == 0 ||
+         g_ascii_strncasecmp(ws_doc_url, "https://", 8) == 0))
+        origin = ns_url_origin_from(ws_doc_url);
     if (!origin || !*origin) {
         g_free(origin);
         origin = g_strdup("null");
@@ -26431,10 +26468,11 @@ ns_window_eventsource_ctor(JSContext *ctx, JSValueConst this_val,
     JS_SetOpaque(obj, s);
 
     char *origin = NULL;
-    if (js && js->current_url && !ns_js_realm_origin_is_opaque(js, ctx) &&
-        (g_ascii_strncasecmp(js->current_url, "http://", 7) == 0 ||
-         g_ascii_strncasecmp(js->current_url, "https://", 8) == 0))
-        origin = ns_url_origin_from(js->current_url);
+    const char *es_doc_url = ns_js_calling_document_url(js, ctx);
+    if (es_doc_url && !ns_js_realm_origin_is_opaque(js, ctx) &&
+        (g_ascii_strncasecmp(es_doc_url, "http://", 7) == 0 ||
+         g_ascii_strncasecmp(es_doc_url, "https://", 8) == 0))
+        origin = ns_url_origin_from(es_doc_url);
     s->origin = ns_url_origin_from(target);
 
     JS_SetPropertyStr(ctx, obj, "url",             JS_NewString(ctx, target));
@@ -28845,6 +28883,35 @@ ns_worker_script_text(const guint8 *data, gsize len, gsize *out_len)
     return text;
 }
 
+static gboolean
+ns_mime_is_javascript(const char *content_type)
+{
+    static const char *const types[] = {
+        "text/javascript", "application/javascript",
+        "application/x-javascript", "text/ecmascript",
+        "application/ecmascript", "application/x-ecmascript",
+        "text/x-javascript", "text/x-ecmascript", "text/jscript",
+        "text/livescript", "text/javascript1.0", "text/javascript1.1",
+        "text/javascript1.2", "text/javascript1.3", "text/javascript1.4",
+        "text/javascript1.5",
+    };
+    if (!content_type) return FALSE;
+    while (g_ascii_isspace((guchar)*content_type)) content_type++;
+    gsize len = strcspn(content_type, "; \t");
+    for (gsize i = 0; i < G_N_ELEMENTS(types); i++)
+        if (strlen(types[i]) == len &&
+            g_ascii_strncasecmp(content_type, types[i], len) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_net_url_is_fetched(const char *url)
+{
+    return url && (g_ascii_strncasecmp(url, "http://", 7) == 0 ||
+                   g_ascii_strncasecmp(url, "https://", 8) == 0);
+}
+
 static char *
 ns_worker_fetch_script(ns_worker_host *host, const char *url,
                        gboolean allow_cross_origin,
@@ -28872,6 +28939,12 @@ ns_worker_fetch_script(ns_worker_host *host, const char *url,
                                                 script_headers, NULL, &err);
     char *body = NULL;
     if (resp && resp->status == 200 && resp->body &&
+        ns_net_url_is_fetched(resp->final_url ? resp->final_url : url) &&
+        !ns_mime_is_javascript(resp->content_type)) {
+        if (out_error)
+            *out_error = g_strdup("the script was not served with a "
+                                  "JavaScript MIME type");
+    } else if (resp && resp->status == 200 && resp->body &&
         resp->body->len <= NS_WORKER_SCRIPT_BYTES_MAX) {
         const char *final_url = resp->final_url ? resp->final_url : url;
         g_autofree char *redirect_error = NULL;
@@ -29479,15 +29552,16 @@ ns_sw_returns_resolved_true(JSContext *ctx, JSValueConst this_val,
 }
 
 static ns_worker_host *
-ns_sw_controller_for(ns_js *js, const char *abs_url)
+ns_sw_controller_for(ns_js *js, const char *client_url, const char *abs_url)
 {
-    if (!js || !js->workers || !abs_url) return NULL;
+    if (!js || !js->workers || !abs_url || !client_url) return NULL;
     for (guint i = 0; i < js->workers->len; i++) {
         ns_worker_host *h = g_ptr_array_index(js->workers, i);
         if (!h || !h->is_service_worker) continue;
         if (g_atomic_int_get(&h->closing)) continue;
         if (!g_atomic_int_get(&h->sw_active)) continue;
-        if (h->scope && *h->scope && g_str_has_prefix(abs_url, h->scope))
+        if (h->scope && *h->scope && g_str_has_prefix(abs_url, h->scope) &&
+            ns_url_same_origin(client_url, h->scope))
             return h;
     }
     return NULL;
@@ -30880,8 +30954,11 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     gsize inline_script_len = 0;
     gboolean fails = FALSE;
     gboolean opaque = FALSE;
+    gboolean owner_opaque = ns_js_realm_origin_is_opaque(js, ctx);
+    const char *owner_url = ns_js_calling_document_url(js, ctx);
     if (g_str_has_prefix(raw, "blob:")) {
-        GBytes *blob = ns_js_blob_url_lookup(js, raw, NULL);
+        GBytes *blob = ns_net_blob_url_visible_to(raw, owner_url)
+            ? ns_js_blob_url_lookup(js, raw, NULL) : NULL;
         if (blob) {
             gsize blob_len = 0;
             const guint8 *blob_data = g_bytes_get_data(blob, &blob_len);
@@ -30925,10 +31002,17 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     }
     g_autofree char *name = argc >= 2 ? ns_worker_option_string(ctx, argv[1], "name") : NULL;
 
+    if (!inline_script && !fails && owner_opaque) {
+        if (js->log_cb)
+            js->log_cb("Worker blocked: a document with an opaque origin can "
+                       "only start workers from blob: or data: URLs",
+                       js->log_user_data);
+        fails = TRUE;
+    }
     if (!inline_script && !fails) {
         char *policy_error = NULL;
         ns_worker_host tmp = {0};
-        tmp.base_url = js->current_url;
+        tmp.base_url = (char *)owner_url;
         if (!ns_worker_script_url_allowed(&tmp, abs_url, FALSE, &policy_error)) {
             if (js->log_cb && policy_error) {
                 char *line = g_strdup_printf("Worker %s: %s", abs_url, policy_error);
@@ -30976,13 +31060,15 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     host->owner_obj = JS_DupValue(ctx, obj);
     host->context = g_main_context_new();
     host->url = abs_url;
-    host->base_url = g_strdup(js->current_url ? js->current_url : abs_url);
+    host->base_url = g_strdup(owner_url ? owner_url : abs_url);
     host->csp_headers = ns_js_csp_headers_dup(js);
     host->name = g_strdup(name ? name : "");
     host->inline_script = inline_script;
     host->inline_script_len = inline_script_len;
     host->is_module = is_module;
-    host->origin = opaque ? g_strdup("null") : ns_url_origin_from(host->base_url);
+    host->opaque_origin = owner_opaque;
+    host->origin = opaque || owner_opaque ? g_strdup("null")
+                                          : ns_url_origin_from(host->base_url);
     if (!host->origin) host->origin = g_strdup("");
     host->log_cb = js->log_cb;
     host->log_user_data = js->log_user_data;
@@ -31008,6 +31094,7 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 static gboolean
 ns_shared_worker_same_origin(ns_js *js, JSContext *ctx, const char *abs_url)
 {
+    if (ns_js_realm_origin_is_opaque(js, ctx)) return FALSE;
     if (g_str_has_prefix(abs_url, "data:")) return TRUE;
     g_autofree char *doc_origin =
         ns_url_origin_from(ns_js_realm_url_or_current(js, ctx));
@@ -31252,6 +31339,12 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return ns_sw_reject(ctx, "TypeError", "register requires a script URL");
     const char *raw = JS_ToCString(ctx, argv[0]);
     if (!raw) return JS_EXCEPTION;
+    if (ns_js_realm_origin_is_opaque(js, ctx)) {
+        JS_FreeCString(ctx, raw);
+        return ns_sw_reject(ctx, "SecurityError",
+                            "a document with an opaque origin cannot "
+                            "register a service worker");
+    }
     const char *doc_url = ns_js_realm_url_or_current(js, ctx);
     char *abs_url = ns_url_resolve(doc_url, raw);
     JS_FreeCString(ctx, raw);
@@ -57010,7 +57103,8 @@ static JSValue
 ns_document_get_fonts(JSContext *ctx, JSValueConst this_val)
 {
     ns_js *js = js_from_ctx(ctx);
-    gboolean main_doc = js && js->ctx == ctx && js->current_doc &&
+    gboolean main_doc = js && js->ctx == ctx &&
+                        ctx == ns_js_main_realm(js) && js->current_doc &&
                         ns_document_root_for(ctx, this_val) == js->current_doc;
     if (main_doc) {
         js->fonts_loadingdone_armed = TRUE;
@@ -59885,7 +59979,7 @@ ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
         "X-ND-CORS: 1", "X-ND-Opaque-Origin: 1", "X-ND-Credentials: omit", NULL
     };
     ns_net_request_async(abs_url,
-                         js ? js->current_url : NULL,
+                         ns_js_calling_document_url(js, ctx),
                          "POST", body, body_len,
                          content_type,
                          ns_js_realm_origin_is_opaque(js, ctx)

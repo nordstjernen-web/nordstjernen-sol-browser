@@ -299,6 +299,15 @@ ns_engine_take_resource_timings(const char *top_url)
 }
 
 static GBytes *
+css_bytes_as_utf8(const guint8 *data, gsize len)
+{
+    if (g_utf8_validate((const char *)data, (gssize)len, NULL))
+        return g_bytes_new(data, len);
+    char *valid = g_utf8_make_valid((const char *)data, (gssize)len);
+    return g_bytes_new_take(valid, strlen(valid));
+}
+
+static GBytes *
 fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
                 gboolean strict_mime, const char *initiator,
                 gboolean render_blocking, gboolean in_frame)
@@ -331,7 +340,7 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
                        content_type_is_css(resp->content_type);
     if (resp && !resp->error && resp->status < 400 && mime_ok &&
         resp->body && resp->body->len > 0) {
-        bytes = g_bytes_new(resp->body->data, resp->body->len);
+        bytes = css_bytes_as_utf8(resp->body->data, resp->body->len);
         if (cache)
             g_hash_table_insert(cache, g_strdup(url), g_bytes_ref(bytes));
     } else if (cache) {

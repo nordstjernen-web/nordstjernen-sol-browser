@@ -3,6 +3,37 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: external stylesheets are made valid UTF-8 before they are
+  parsed. A CSS string ending in a truncated multi-byte sequence became
+  generated-content text that several text walkers could read a few
+  bytes past.
+* Security: the camera code no longer trusts the frame geometry a V4L2
+  device reports. Sizes are capped, odd YUYV widths are refused, the
+  driver's line stride is used, a frame is converted only when the
+  buffer holds all of it, and the output starts zeroed, so a virtual or
+  faulty device cannot make the renderer read past the frame buffer.
+* Security: `window.find()` no longer searches the text of embedded
+  frames, which let a page test whether a string occurs in a
+  cross-origin `<iframe>`.
+* Security: a cross-origin `<iframe>` could end up sharing the
+  `document.fonts` object with the page that embeds it, and through it
+  reach functions of the other document. Only the top-level document
+  keeps a persistent `document.fonts` object now. Script run from queued
+  tasks such as the `canvas.toBlob` callback also runs with its own
+  frame's URL again, and `XMLHttpRequest`, `WebSocket`, `EventSource` and
+  `sendBeacon` take their origin from the document that created them
+  rather than from whichever document happened to be running, so such a
+  callback can no longer issue same-origin requests to the embedding
+  page.
+* Security: a frame sandboxed without `allow-same-origin` can no longer
+  get the embedding site's origin through a worker. Workers started from
+  it have the origin `null`, may only load `blob:` and `data:` scripts,
+  and send their requests without cookies; `SharedWorker` and service
+  worker registration are refused there. A service worker now controls
+  only requests from documents of its own origin, a request it declines
+  to answer keeps its credentials mode, and internal request markers are
+  no longer passed to its fetch handler. Worker and `importScripts`
+  scripts must be served with a JavaScript MIME type.
 * Security: on Linux the audio helper now runs as two processes. The one
   that decodes media files never opens a sound device and holds no
   socket; it writes mixed PCM into a pipe. A second process owns the

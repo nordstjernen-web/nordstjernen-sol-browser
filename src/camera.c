@@ -162,6 +162,7 @@ ns_camera_active(void)
 #include <linux/videodev2.h>
 
 #define NS_CAMERA_BUFFERS 4
+#define NS_CAMERA_MAX_SIDE 8192
 
 typedef struct ns_camera_buf {
     void  *start;
@@ -174,6 +175,7 @@ struct ns_camera {
     int            width;
     int            height;
     guint32        pixfmt;
+    guint32        stride;
     ns_camera_buf  bufs[NS_CAMERA_BUFFERS];
     guint          n_bufs;
     gboolean       streaming;
@@ -269,7 +271,13 @@ ns_camera_open(const char *device)
     req.count = NS_CAMERA_BUFFERS;
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     req.memory = V4L2_MEMORY_MMAP;
-    if (xioctl(fd, VIDIOC_REQBUFS, &req) != 0 || req.count < 2) {
+    gboolean geometry_ok =
+        fmt.fmt.pix.width > 0 && fmt.fmt.pix.width <= NS_CAMERA_MAX_SIDE &&
+        fmt.fmt.pix.height > 0 && fmt.fmt.pix.height <= NS_CAMERA_MAX_SIDE &&
+        (fmt.fmt.pix.pixelformat != V4L2_PIX_FMT_YUYV ||
+         fmt.fmt.pix.width % 2 == 0);
+    if (!geometry_ok || xioctl(fd, VIDIOC_REQBUFS, &req) != 0 ||
+        req.count < 2) {
         close(fd);
         return NULL;
     }
@@ -280,6 +288,8 @@ ns_camera_open(const char *device)
     cam->width = (int)fmt.fmt.pix.width;
     cam->height = (int)fmt.fmt.pix.height;
     cam->pixfmt = fmt.fmt.pix.pixelformat;
+    cam->stride = fmt.fmt.pix.bytesperline >= fmt.fmt.pix.width * 2
+        ? fmt.fmt.pix.bytesperline : fmt.fmt.pix.width * 2;
 
     for (guint i = 0; i < req.count && i < NS_CAMERA_BUFFERS; i++) {
         struct v4l2_buffer buf;
@@ -336,7 +346,7 @@ ns_camera_next_frame(ns_camera *cam)
     if (buf.index >= cam->n_bufs) return NULL;
 
     const guint8 *data = cam->bufs[buf.index].start;
-    gsize used = buf.bytesused;
+    gsize used = MIN((gsize)buf.bytesused, cam->bufs[buf.index].length);
     ns_texture *tex = NULL;
 
     if (cam->pixfmt == V4L2_PIX_FMT_MJPEG) {
@@ -346,12 +356,13 @@ ns_camera_next_frame(ns_camera *cam)
             cam->width = w;
             cam->height = h;
         }
-    } else if (cam->pixfmt == V4L2_PIX_FMT_YUYV) {
+    } else if (cam->pixfmt == V4L2_PIX_FMT_YUYV &&
+               (gsize)cam->stride * (gsize)cam->height <= used) {
         gsize stride = (gsize)cam->width * 4;
         gsize buf_len = stride * (gsize)cam->height;
-        guint8 *bgra = g_malloc(buf_len);
+        guint8 *bgra = g_malloc0(buf_len);
         yuyv_to_bgra(data, cam->width, cam->height,
-                     (gsize)cam->width * 2, bgra, stride);
+                     (gsize)cam->stride, bgra, stride);
         GBytes *bytes = g_bytes_new_take(bgra, buf_len);
         tex = ns_texture_new(cam->width, cam->height,
                              NS_TEXTURE_BGRA_PREMULTIPLIED, bytes, stride);
