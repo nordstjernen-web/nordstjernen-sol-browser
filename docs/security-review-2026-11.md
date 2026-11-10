@@ -50,7 +50,7 @@ a sandboxed renderer.
 | S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | open (documented) |
 | M1 | `unbounded-dom-recursion-svg-foreign-and-frame-images` | Low (DoS) | no | **fixed** |
 | M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | **fixed** |
-| M3 | `raw-svg-bytes-break-utf8-invariant` | Low | no | plausible |
+| M3 | `raw-svg-bytes-break-utf8-invariant` | Low | no | **fixed** |
 | M4 | `webgpu-map-wait-stack-userdata` | Low | no | plausible |
 | M5 | `zstd-final-flush-truncation` | Info | no | **fixed** |
 
@@ -465,6 +465,10 @@ node or attribute ending in a truncated lead byte makes them step over
 the terminator and read adjacent heap until a zero byte. The result
 feeds only a boolean or a colour. Not verified: that lexbor passes
 invalid bytes through unchanged.
+
+**Fixed.** The three call sites go through `ns_svg_parse_bytes`, which
+validates the bytes and repairs them with `g_utf8_make_valid` when
+needed. The walkers themselves are unchanged.
 
 **Fix.** Validate, or run `g_utf8_make_valid` over, the bytes at those
 three call sites, and clamp the listed walkers as `src/dom.c:2461` does.

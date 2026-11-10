@@ -93,7 +93,7 @@ svg_external_fetched(GObject *source, GAsyncResult *result, gpointer user_data)
         if (resp && resp->status >= 200 && resp->status < 300 && body &&
             body->len > 0 && body->len <= NS_SVG_EXTERNAL_MAX_BYTES &&
             ns_svg_bytes_look_like_svg(body->data, body->len))
-            d->doc = ns_html_parse((const char *)body->data, (gssize)body->len);
+            d->doc = ns_svg_parse_bytes(body->data, body->len);
     }
     if (g_pending > 0) g_pending--;
     g_generation++;

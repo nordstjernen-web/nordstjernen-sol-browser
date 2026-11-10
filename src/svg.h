@@ -79,6 +79,7 @@ gboolean ns_svg_render_bytes(cairo_t *cr, const guchar *data, gsize len,
                              double width, double height);
 
 gboolean ns_svg_bytes_look_like_svg(const guchar *data, gsize len);
+ns_node *ns_svg_parse_bytes(const guchar *data, gsize len);
 
 G_END_DECLS
 

@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: SVG files used as images or as external `<use>` targets are
+  now made valid UTF-8 before they are parsed, like every other
+  document. Several text walkers assume valid UTF-8 and could read a few
+  bytes past the end of a string that ended in a truncated multi-byte
+  sequence (`docs/security-review-2026-11.md`, M3).
 * Security: a zstd-compressed response is no longer cut short when the
   decoder still holds output after consuming the last input bytes
   (`docs/security-review-2026-11.md`, M5).
