@@ -588,18 +588,12 @@ endif
 subdir('src/lexbor')
 
 if get_option('quickjs') == 'quickjs'
-  quickjs_sp = subproject('quickjs',
-    default_options: ['warning_level=0', 'werror=false'])
-  quickjs_version = quickjs_sp.get_variable('quickjs_version')
-  libquickjs = declare_dependency(
-    compile_args: ['-DNS_QUICKJS_ORIGINAL',
-                   '-DNS_QUICKJS_ORIGINAL_VERSION="' + quickjs_version + '"'],
-    dependencies: quickjs_sp.get_variable('quickjs_dep'))
-  message('JS engine: quickjs (Bellard\'s original QuickJS ' +
-          quickjs_version + ' through src/ns_quickjs.h, full DOM bindings)')
+  subdir('src/quickjs-bellard')
+  message('JS engine: quickjs (in-tree fork of Bellard\'s QuickJS ' +
+          bqjs_version + ', full DOM bindings)')
 else
   subdir('src/quickjs')
-  message('JS engine: quickjs (in-tree quickjs-ng fork, full DOM bindings)')
+  message('JS engine: quickjs-ng (in-tree quickjs-ng fork, full DOM bindings)')
 endif
 quickjs_original = get_option('quickjs') == 'quickjs'
 

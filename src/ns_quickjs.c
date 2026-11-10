@@ -203,6 +203,10 @@ ns_quickjs_new_context(JSRuntime *rt)
 {
     static gsize learned;
     JSContext *ctx = (JS_NewContext)(rt);
+    if (ctx && (JS_AddIntrinsicTemporal(ctx) < 0 || JS_AddIntrinsicIntl(ctx) < 0)) {
+        JS_FreeContext(ctx);
+        return NULL;
+    }
     if (ctx && g_once_init_enter(&learned)) {
         ns_quickjs_learn_class_ids(ctx);
         g_once_init_leave(&learned, 1);
