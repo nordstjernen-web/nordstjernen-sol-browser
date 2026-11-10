@@ -679,27 +679,91 @@ set_loading_ui(ProcWindow *pw, gboolean loading)
 }
 
 static char *
+url_without_userinfo(const char *url)
+{
+    if (!url) return NULL;
+    const char *sep = strstr(url, "://");
+    if (!sep || memchr(url, '/', (gsize)(sep - url)) ||
+        memchr(url, '?', (gsize)(sep - url)))
+        return g_strdup(url);
+    const char *authority = sep + 3;
+    const char *end = authority + strcspn(authority, "/?#\\");
+    const char *at = NULL;
+    for (const char *p = authority; p < end; p++)
+        if (*p == '@') at = p;
+    if (!at) return g_strdup(url);
+    return g_strdup_printf("%.*s%s", (int)(authority - url), url, at + 1);
+}
+
+static gboolean
+address_char_is_displayable(gunichar c)
+{
+    static const gunichar confusable[] = {
+        0x2044, 0x2215, 0x29f8, 0xff0f, 0xfe68, 0xff3c, 0x2216, 0xff20,
+        0xfe6b, 0xff1a, 0xfe55, 0x2236, 0xff1f, 0xfe56, 0xff03, 0xfe5f,
+        0xff0e, 0x3002, 0xff61, 0xfe52, 0x2024, 0xff05, 0xfe6a,
+    };
+    if (c < 0x80 || !g_unichar_isprint(c) || g_unichar_isspace(c) ||
+        g_unichar_iszerowidth(c))
+        return FALSE;
+    GUnicodeType type = g_unichar_type(c);
+    if (type == G_UNICODE_FORMAT || type == G_UNICODE_CONTROL ||
+        type == G_UNICODE_PRIVATE_USE || type == G_UNICODE_SURROGATE ||
+        type == G_UNICODE_UNASSIGNED || type == G_UNICODE_SPACE_SEPARATOR ||
+        type == G_UNICODE_LINE_SEPARATOR ||
+        type == G_UNICODE_PARAGRAPH_SEPARATOR)
+        return FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(confusable); i++)
+        if (c == confusable[i]) return FALSE;
+    return TRUE;
+}
+
+static gsize
+address_escaped_run_length(const char *p)
+{
+    gsize n = 0;
+    while (p[n] == '%' && g_ascii_isxdigit(p[n + 1]) &&
+           g_ascii_isxdigit(p[n + 2]) && g_ascii_xdigit_value(p[n + 1]) >= 8)
+        n += 3;
+    return n;
+}
+
+static gboolean
+address_append_decoded_run(GString *out, const char *run, gsize run_len)
+{
+    g_autofree char *bytes = g_malloc(run_len / 3 + 1);
+    gsize n = 0;
+    for (gsize i = 0; i < run_len; i += 3)
+        bytes[n++] = (char)(g_ascii_xdigit_value(run[i + 1]) * 16 +
+                            g_ascii_xdigit_value(run[i + 2]));
+    bytes[n] = '\0';
+    if (!g_utf8_validate(bytes, (gssize)n, NULL)) return FALSE;
+    for (const char *p = bytes; *p; p = g_utf8_next_char(p))
+        if (!address_char_is_displayable(g_utf8_get_char(p))) return FALSE;
+    g_string_append_len(out, bytes, (gssize)n);
+    return TRUE;
+}
+
+static char *
 address_display_url(const char *url)
 {
     if (!url || !*url) return g_strdup("");
-    if (!strchr(url, '%')) return g_strdup(url);
-    char *dec = g_uri_unescape_string(url, NULL);
-    if (!dec) return g_strdup(url);
-    if (!g_utf8_validate(dec, -1, NULL)) {
-        g_free(dec);
-        return g_strdup(url);
-    }
-    for (const char *p = dec; *p; p = g_utf8_next_char(p)) {
-        gunichar c = g_utf8_get_char(p);
-        if (c < 0x20 || c == 0x7f ||
-            (c >= 0x200e && c <= 0x200f) ||
-            (c >= 0x202a && c <= 0x202e) ||
-            (c >= 0x2066 && c <= 0x2069)) {
-            g_free(dec);
-            return g_strdup(url);
+    g_autofree char *bare = url_without_userinfo(url);
+    const char *sep = strstr(bare, "://");
+    const char *tail = sep ? sep + 3 + strcspn(sep + 3, "/?#") : bare;
+    if (!sep || !strchr(tail, '%')) return g_steal_pointer(&bare);
+    GString *out = g_string_new_len(bare, (gssize)(tail - bare));
+    for (const char *p = tail; *p;) {
+        gsize run = address_escaped_run_length(p);
+        if (!run) {
+            g_string_append_c(out, *p++);
+            continue;
         }
+        if (!address_append_decoded_run(out, p, run))
+            g_string_append_len(out, p, (gssize)run);
+        p += run;
     }
-    return dec;
+    return g_string_free(out, FALSE);
 }
 
 static void
@@ -723,7 +787,7 @@ set_address_text(ProcWindow *pw, const char *url)
     char *shown = address_display_url(
         url && g_str_equal(url, "about:start") ? "" : url);
     gtk_editable_set_text(GTK_EDITABLE(pw->address), shown);
-    gtk_editable_set_position(GTK_EDITABLE(pw->address), -1);
+    gtk_editable_set_position(GTK_EDITABLE(pw->address), 0);
     g_free(shown);
 }
 
@@ -1149,17 +1213,20 @@ download_move_posix(NsDownload *d, const char *tmp_path, const char *final_url)
     int dfd = open(staging, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (dfd < 0)
         return FALSE;
-    struct stat st;
-    gboolean ok = fstatat(dfd, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0 &&
-                  S_ISREG(st.st_mode) &&
+    struct stat st, moved;
+    int fd = openat(dfd, leaf, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    gboolean ok = fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
                   renameat(dfd, leaf, AT_FDCWD, d->path) == 0;
-    if (!ok)
+    if (!ok) {
         unlinkat(dfd, leaf, 0);
-    close(dfd);
-    if (ok && g_lstat(d->path, &st) == 0 && S_ISLNK(st.st_mode)) {
-        g_unlink(d->path);
+    } else if (g_lstat(d->path, &moved) != 0 || moved.st_dev != st.st_dev ||
+               moved.st_ino != st.st_ino) {
+        if (renameat(AT_FDCWD, d->path, dfd, leaf) != 0)
+            g_unlink(d->path);
         ok = FALSE;
     }
+    if (fd >= 0) close(fd);
+    close(dfd);
     if (ok)
         ns_security_mark_download_origin(
             d->path, final_url && *final_url ? final_url : d->url);
@@ -1359,6 +1426,14 @@ download_name_is_executable(const char *name)
         ".desktop", ".sh", ".bash", ".zsh", ".run", ".bin", ".appimage",
         ".deb", ".rpm", ".flatpakref", ".dmg", ".pkg", ".app", ".command",
         ".jar", ".py", ".pl", ".rb", ".php", ".apk", ".xpi", ".crx",
+        ".scf", ".jnlp", ".application", ".appref-ms", ".gadget", ".msp",
+        ".mst", ".psm1", ".psd1", ".vb", ".chm", ".hlp", ".iso", ".img",
+        ".vhd", ".vhdx", ".docm", ".dotm", ".xlsm", ".xltm", ".xlam",
+        ".pptm", ".potm", ".ppam", ".library-ms", ".search-ms",
+        ".settingcontent-ms", ".website", ".diagcab", ".appx", ".appxbundle",
+        ".msixbundle", ".service", ".csh", ".ksh", ".fish", ".terminal",
+        ".workflow", ".action", ".scpt", ".mobileconfig", ".snap",
+        ".flatpak",
     };
     const char *dot = strrchr(name, '.');
     if (!dot) return FALSE;
@@ -1816,8 +1891,11 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
 
     switch (evt) {
     case NS_PROC_EVT_TITLE: {
-        if (!ns_proc_view_is_private(v))
-            ns_history_record(ns_proc_view_url(v), text);
+        if (!ns_proc_view_is_private(v)) {
+            g_autofree char *recorded =
+                url_without_userinfo(ns_proc_view_url(v));
+            ns_history_record(recorded, text);
+        }
         if (idx >= 0) {
             GtkWidget *p =
                 gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);

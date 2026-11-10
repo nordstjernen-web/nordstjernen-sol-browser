@@ -3,6 +3,44 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: more file types prompt before they are saved — disk images,
+  Office macro documents, Windows shell and installer formats, and
+  further shell and macOS script types. The move of a finished download
+  out of the staging directory now checks that the file it moved is the
+  regular file it inspected, so a compromised renderer cannot swap in a
+  directory (`docs/security-review-2026-11.md`, W5).
+* Security: Content-Security-Policy now honours `script-src-elem`,
+  `script-src-attr`, `style-src-elem` and `style-src-attr`; a policy
+  that restricted scripts only through `script-src-elem` used to enforce
+  nothing. Directives are split on every ASCII whitespace character, so
+  a `<meta>` policy with a line break after the directive name is no
+  longer ignored (`docs/security-review-2026-11.md`, W4).
+* Security: the address bar no longer shows a URL's userinfo, so
+  `https://bank.example@evil.test/` displays as `https://evil.test/`,
+  and history records it the same way. Percent-escapes are decoded for
+  display only in the path, query and fragment, and only into printable
+  non-ASCII letters; escaped spaces, slashes, `@` and their Unicode
+  look-alikes stay escaped. The bar shows a long URL from its start
+  instead of its end (`docs/security-review-2026-11.md`, W3).
+* Security: the private-network guard no longer skips documents without
+  a network origin. A top-level `data:` page, or a sandboxed frame's
+  WebSocket or EventSource, counted as an unknown address space and
+  could reach localhost and LAN hosts from a public site; such documents
+  are now treated as public (`file:` pages stay local) (`docs/security-
+  review-2026-11.md`, W2).
+* Security: a sandboxed `<iframe>` without `allow-same-origin` now has an
+  opaque origin on the network too, not only for storage and cookies.
+  `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource`
+  from such a frame send `Origin: null`, are always cross-origin, are
+  preflighted, and carry no cookies unless the request asks to include
+  credentials; before, they ran with the embedding site's origin and
+  cookies and could read its pages. A sandboxed frame can no longer
+  navigate the top-level page without `allow-top-navigation` (or
+  `allow-top-navigation-by-user-activation` plus a user gesture), and
+  can open a new window only with both `allow-popups` and
+  `allow-popups-to-escape-sandbox`, because a popup cannot yet inherit
+  the sandbox. `window.open(url, '_self')` inside a frame navigates that
+  frame instead of the whole tab (`docs/security-review-2026-11.md`, W1).
 * Docs: `docs/security-review-2026-11.md` records a source review for
   security vulnerabilities. It found no attacker-reachable memory
   corruption in the parsers it read; the most serious open finding is

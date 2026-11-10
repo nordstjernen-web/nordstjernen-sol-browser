@@ -2342,10 +2342,21 @@ ns_host_name_is_private(const char *host)
 }
 
 static ns_address_space
+ns_address_space_of_opaque_document(const char *document_url)
+{
+    if (g_ascii_strncasecmp(document_url, "file:", 5) == 0)
+        return NS_ADDRESS_SPACE_LOCAL;
+    if (ns_net_url_is_chrome_page(document_url))
+        return NS_ADDRESS_SPACE_UNKNOWN;
+    return NS_ADDRESS_SPACE_PUBLIC;
+}
+
+static ns_address_space
 ns_address_space_of_document(const char *document_url)
 {
     g_autofree char *origin = ns_url_origin_from(document_url);
-    if (!origin || !*origin) return NS_ADDRESS_SPACE_UNKNOWN;
+    if (!origin || !*origin || strcmp(origin, "null") == 0)
+        return ns_address_space_of_opaque_document(document_url);
     g_mutex_lock(&g_address_space_lock);
     gpointer seen = g_address_space_by_origin
         ? g_hash_table_lookup(g_address_space_by_origin, origin) : NULL;
@@ -6387,6 +6398,12 @@ ns_fetch_marker_value(GPtrArray *extra_headers, const char *marker)
     return NULL;
 }
 
+static gboolean
+ns_fetch_origin_is_opaque(GPtrArray *extra_headers)
+{
+    return ns_fetch_marker_value(extra_headers, "X-ND-Opaque-Origin:") != NULL;
+}
+
 static const char *
 ns_fetch_initiator(GPtrArray *extra_headers)
 {
@@ -7008,8 +7025,10 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                       ns_fetch_is_revalidation(extra_headers);
     const char *initiator = is_navigation
         ? ns_fetch_initiator(extra_headers) : NULL;
-    gboolean chain_cross_site = is_navigation &&
-                                ns_fetch_chain_cross_site(extra_headers);
+    gboolean opaque_origin = !is_navigation &&
+                             ns_fetch_origin_is_opaque(extra_headers);
+    gboolean chain_cross_site = opaque_origin ||
+        (is_navigation && ns_fetch_chain_cross_site(extra_headers));
     const char *request_site_url = initiator ? initiator : top_url;
     const char *privileged_site_url =
         request_site_url && *request_site_url ? request_site_url
@@ -7126,7 +7145,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         g_strdup_printf("User-Agent: %s", effective_ua);
     gboolean frame_navigation = !is_navigation &&
         ns_net_dest_is_nested_navigation(ns_net_fetch_destination(extra_headers));
-    const char *request_origin = initiator
+    const char *request_origin = opaque_origin ? "null"
+        : initiator
         ? (is_simple_get(method) ? ""
                                  : ns_net_request_origin(url, initiator,
                                                          initiator, method))
@@ -7813,15 +7833,17 @@ ns_fetch_cors_preflight(const char *url, const char *top_url,
                         const char *method, const char *content_type,
                         GPtrArray *extra_headers, GCancellable *cancellable)
 {
+    gboolean opaque_origin = ns_fetch_origin_is_opaque(extra_headers);
     if (!top_url || !*top_url || !ns_url_is_http_or_https(url) ||
-        ns_url_same_origin(top_url, url))
+        (!opaque_origin && ns_url_same_origin(top_url, url)))
         return NULL;
     g_autofree char *unsafe_headers =
         ns_cors_unsafe_header_names(extra_headers, content_type);
     gboolean simple_method = ns_cors_method_is_simple(method);
     if (simple_method && !unsafe_headers) return NULL;
 
-    g_autofree char *origin = ns_url_origin_from(top_url);
+    g_autofree char *origin = opaque_origin ? g_strdup("null")
+                                            : ns_url_origin_from(top_url);
     g_autofree char *key = g_strdup_printf("%s %s %s %s", origin ? origin : "",
                                            url, method,
                                            unsafe_headers ? unsafe_headers : "");
@@ -7835,6 +7857,7 @@ ns_fetch_cors_preflight(const char *url, const char *top_url,
     GPtrArray *pre = g_ptr_array_new();
     g_ptr_array_add(pre, method_h);
     if (headers_h) g_ptr_array_add(pre, headers_h);
+    if (opaque_origin) g_ptr_array_add(pre, (gpointer)"X-ND-Opaque-Origin: 1");
     ns_response *r = ns_fetch_sync_hop(url, top_url, "OPTIONS", NULL, 0, NULL,
                                        pre, cancellable, NULL, FALSE, NULL);
     g_ptr_array_free(pre, TRUE);

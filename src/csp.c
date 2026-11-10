@@ -12,6 +12,7 @@
 typedef struct {
     GPtrArray *sources[NS_CSP_KIND_COUNT];
     gboolean   set[NS_CSP_KIND_COUNT];
+    int        rank[NS_CSP_KIND_COUNT];
     gboolean   upgrade_insecure_requests;
 } ns_csp_policy;
 
@@ -24,9 +25,29 @@ policy_frame_ancestors_allows(const ns_csp_policy *p,
                               const char *parent_url,
                               const char *document_url);
 
+#define NS_CSP_RANK_ATTR 1
+#define NS_CSP_RANK_BASE 2
+#define NS_CSP_RANK_ELEM 3
+
 static ns_csp_kind
-directive_kind(const char *name)
+directive_kind(const char *name, int *rank)
 {
+    static const struct {
+        const char *name;
+        ns_csp_kind kind;
+        int         rank;
+    } refined[] = {
+        { "script-src-elem", NS_CSP_SCRIPT, NS_CSP_RANK_ELEM },
+        { "script-src-attr", NS_CSP_SCRIPT, NS_CSP_RANK_ATTR },
+        { "style-src-elem",  NS_CSP_STYLE,  NS_CSP_RANK_ELEM },
+        { "style-src-attr",  NS_CSP_STYLE,  NS_CSP_RANK_ATTR },
+    };
+    *rank = NS_CSP_RANK_BASE;
+    for (gsize i = 0; i < G_N_ELEMENTS(refined); i++) {
+        if (g_ascii_strcasecmp(name, refined[i].name) != 0) continue;
+        *rank = refined[i].rank;
+        return refined[i].kind;
+    }
     static const struct { const char *name; ns_csp_kind kind; } map[] = {
         { "default-src",     NS_CSP_DEFAULT },
         { "script-src",      NS_CSP_SCRIPT },
@@ -71,18 +92,23 @@ policy_parse(const char *policy_text)
     for (int i = 0; clauses[i]; i++) {
         char *clause = g_strstrip(clauses[i]);
         if (!*clause) continue;
-        char **toks = g_strsplit_set(clause, " \t", -1);
+        char **toks = g_strsplit_set(clause, " \t\n\r\f", -1);
         if (!toks || !toks[0]) { g_strfreev(toks); continue; }
         if (g_ascii_strcasecmp(toks[0], "upgrade-insecure-requests") == 0) {
             p->upgrade_insecure_requests = TRUE;
             g_strfreev(toks);
             continue;
         }
-        ns_csp_kind k = directive_kind(toks[0]);
-        if (k == NS_CSP_KIND_COUNT || p->set[k]) { g_strfreev(toks); continue; }
+        int rank = 0;
+        ns_csp_kind k = directive_kind(toks[0], &rank);
+        if (k == NS_CSP_KIND_COUNT || (p->set[k] && rank <= p->rank[k])) {
+            g_strfreev(toks);
+            continue;
+        }
         p->set[k] = TRUE;
-        if (!p->sources[k])
-            p->sources[k] = g_ptr_array_new_with_free_func(g_free);
+        p->rank[k] = rank;
+        if (p->sources[k]) g_ptr_array_free(p->sources[k], TRUE);
+        p->sources[k] = g_ptr_array_new_with_free_func(g_free);
         for (int j = 1; toks[j]; j++) {
             char *t = g_strstrip(toks[j]);
             if (!*t) continue;

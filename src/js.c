@@ -682,10 +682,40 @@ ns_js_sandbox_allows_form_navigation(ns_js *js, const ns_node *form,
     else if ((to_top || to_blank) && !top_nav)
         why = "Blocked form submission: sandboxed iframe without "
               "allow-top-navigation";
-    else if (to_blank && !(sb & NS_SANDBOX_ALLOW_POPUPS))
-        why = "Blocked form submission: sandboxed iframe without allow-popups";
+    else if (to_blank && (!(sb & NS_SANDBOX_ALLOW_POPUPS) ||
+                          !(sb & NS_SANDBOX_ALLOW_POPUPS_ESCAPE)))
+        why = "Blocked form submission: sandboxed iframe without allow-popups "
+              "and allow-popups-to-escape-sandbox";
     if (!why) return TRUE;
     if (js && js->log_cb) js->log_cb(why, js->log_user_data);
+    return FALSE;
+}
+
+gboolean
+ns_js_sandbox_allows_top_navigation(ns_js *js, const ns_node *node,
+                                    gboolean user_activated)
+{
+    unsigned sb = ns_iframe_effective_sandbox(node);
+    if (!(sb & NS_SANDBOX_ACTIVE) || (sb & NS_SANDBOX_ALLOW_TOP_NAV))
+        return TRUE;
+    gboolean activated = user_activated || ns_js_has_transient_activation(js);
+    if (activated && (sb & NS_SANDBOX_ALLOW_TOP_NAV_UA)) return TRUE;
+    if (js && js->log_cb)
+        js->log_cb("Blocked top navigation: sandboxed iframe without "
+                   "allow-top-navigation", js->log_user_data);
+    return FALSE;
+}
+
+static gboolean
+ns_sandbox_allows_popup(ns_js *js, const ns_node *node)
+{
+    unsigned sb = ns_iframe_effective_sandbox(node);
+    if (!(sb & NS_SANDBOX_ACTIVE)) return TRUE;
+    if ((sb & NS_SANDBOX_ALLOW_POPUPS) && (sb & NS_SANDBOX_ALLOW_POPUPS_ESCAPE))
+        return TRUE;
+    if (js && js->log_cb)
+        js->log_cb("Blocked a popup: sandboxed iframe without allow-popups "
+                   "and allow-popups-to-escape-sandbox", js->log_user_data);
     return FALSE;
 }
 
@@ -1652,6 +1682,29 @@ ns_js_frame_of_realm(ns_js *js, JSContext *realm)
     while (g_hash_table_iter_next(&it, &key, &value))
         if (value == realm) return key;
     return NULL;
+}
+
+static gboolean
+ns_js_realm_origin_is_opaque(ns_js *js, JSContext *realm)
+{
+    ns_node *frame = ns_js_frame_of_realm(js, realm);
+    if (!frame) return FALSE;
+    unsigned sandbox = ns_iframe_effective_sandbox(frame);
+    return (sandbox & NS_SANDBOX_ACTIVE) &&
+           !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN);
+}
+
+static gboolean
+ns_origin_matches(gboolean opaque, const char *doc_url, const char *url)
+{
+    return !opaque && ns_url_same_origin(doc_url, url);
+}
+
+static gboolean
+ns_js_realm_may_navigate_top(ns_js *js, JSContext *realm)
+{
+    ns_node *frame = ns_js_frame_of_realm(js, realm);
+    return !frame || ns_js_sandbox_allows_top_navigation(js, frame, FALSE);
 }
 
 static const char *
@@ -9657,6 +9710,7 @@ typedef struct ns_js_fetch_state {
     JSValue        reject;
     char          *requested_url;
     char          *origin_url;
+    gboolean       opaque_origin;
     guint          id;
     GCancellable  *cancellable;
     JSValue        signal;
@@ -9857,12 +9911,13 @@ ns_fetch_includes_credentials(JSContext *ctx, int argc, JSValueConst *argv)
 
 static gboolean
 ns_fetch_omits_credentials(JSContext *ctx, int argc, JSValueConst *argv,
-                           const char *top, const char *send_url)
+                           gboolean opaque, const char *top,
+                           const char *send_url)
 {
     g_autofree char *mode = ns_fetch_credentials_mode(ctx, argc, argv);
     if (mode && !strcmp(mode, "include")) return FALSE;
     if (mode && !strcmp(mode, "omit")) return TRUE;
-    return !ns_url_same_origin(top, send_url);
+    return !ns_origin_matches(opaque, top, send_url);
 }
 
 static char **
@@ -9876,19 +9931,22 @@ ns_strv_with_cors_marker(char **headers)
 }
 
 static gboolean
-cors_allows(const char *doc_url, const char *resp_url, const char *cors_header)
+cors_allows(gboolean opaque, const char *doc_url, const char *resp_url,
+            const char *cors_header)
 {
     if (resp_url && g_str_has_prefix(resp_url, "blob:"))
         return ns_net_blob_url_visible_to(resp_url, doc_url);
     if (resp_url && (g_str_has_prefix(resp_url, "data:") ||
                      g_str_has_prefix(resp_url, "about:"))) return TRUE;
-    if (ns_url_same_origin(doc_url, resp_url)) return TRUE;
+    if (ns_origin_matches(opaque, doc_url, resp_url)) return TRUE;
     if (!cors_header || !*cors_header) return FALSE;
     char *trimmed = g_strdup(cors_header);
     g_strstrip(trimmed);
     gboolean ok = FALSE;
     if (strcmp(trimmed, "*") == 0) {
         ok = TRUE;
+    } else if (opaque) {
+        ok = strcmp(trimmed, "null") == 0;
     } else if (*trimmed) {
         char *doc_origin = ns_url_origin_from(doc_url);
         if (doc_origin && *doc_origin &&
@@ -9901,12 +9959,13 @@ cors_allows(const char *doc_url, const char *resp_url, const char *cors_header)
 }
 
 static gboolean
-cors_allows_credentialed(const char *doc_url, const char *resp_url,
-                         const char *cors_header, const char *raw_headers,
-                         gboolean credentialed)
+cors_allows_credentialed(gboolean opaque, const char *doc_url,
+                         const char *resp_url, const char *cors_header,
+                         const char *raw_headers, gboolean credentialed)
 {
-    if (!cors_allows(doc_url, resp_url, cors_header)) return FALSE;
-    if (!credentialed || !cors_header || ns_url_same_origin(doc_url, resp_url))
+    if (!cors_allows(opaque, doc_url, resp_url, cors_header)) return FALSE;
+    if (!credentialed || !cors_header ||
+        ns_origin_matches(opaque, doc_url, resp_url))
         return TRUE;
     if (resp_url && (g_str_has_prefix(resp_url, "data:") ||
                      g_str_has_prefix(resp_url, "about:"))) return TRUE;
@@ -10056,7 +10115,8 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
     } else {
         const char *origin_url = st->origin_url ? st->origin_url :
                                  (st->js ? st->js->current_url : NULL);
-        gboolean allow = cors_allows_credentialed(origin_url, resp->final_url,
+        gboolean allow = cors_allows_credentialed(st->opaque_origin, origin_url,
+                                                  resp->final_url,
                                                   resp->cors_allow_origin,
                                                   resp->raw_headers,
                                                   st->credentials_included);
@@ -10088,7 +10148,8 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
                                   ? resp->final_url : ""));
         JS_SetPropertyStr(st->ctx, r, "type",
             JS_NewString(st->ctx, !allow ? "opaque"
-                : ns_url_same_origin(origin_url, resp->final_url)
+                : ns_origin_matches(st->opaque_origin, origin_url,
+                                    resp->final_url)
                     ? "basic" : "cors"));
         JS_SetPropertyStr(st->ctx, r, "redirected",
             JS_NewBool(st->ctx, resp->redirect_count > 0));
@@ -10615,6 +10676,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     const char *top = base_url && *base_url ? base_url :
                       (st->js ? st->js->current_url : NULL);
     st->origin_url = g_strdup(top);
+    st->opaque_origin = ns_js_realm_origin_is_opaque(st->js, ctx);
     st->signal = JS_UNDEFINED;
     st->abort_handler = JS_UNDEFINED;
     if (st->js && st->js->pending_fetches)
@@ -10748,7 +10810,10 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 
     g_ptr_array_remove_index(extras, extras->len - 1);
     g_ptr_array_add(extras, g_strdup("X-ND-CORS: 1"));
-    if (ns_fetch_omits_credentials(ctx, argc, argv, top, send_url))
+    if (st->opaque_origin)
+        g_ptr_array_add(extras, g_strdup("X-ND-Opaque-Origin: 1"));
+    if (ns_fetch_omits_credentials(ctx, argc, argv, st->opaque_origin, top,
+                                   send_url))
         g_ptr_array_add(extras, g_strdup("X-ND-Credentials: omit"));
     g_ptr_array_add(extras, NULL);
     ns_net_request_async(send_url, top, use_method,
@@ -17942,7 +18007,7 @@ ns_nav_navigate(JSContext *ctx, JSValueConst this_val,
         ret = ns_nav_result(ctx, committed, finished);
     } else {
         JS_FreeValue(ctx, ev);
-        if (js->nav_cb)
+        if (js->nav_cb && ns_js_realm_may_navigate_top(js, ctx))
             js->nav_cb(url, FALSE, js->nav_user_data);
         JSValue cur1 = ns_nav_current_entry_value(ctx, js);
         JSValue cur2 = ns_nav_current_entry_value(ctx, js);
@@ -20372,6 +20437,20 @@ ns_window_open_named_frame(JSContext *ctx, ns_js *js, int argc,
     return named;
 }
 
+static gboolean
+ns_window_open_targets_existing_context(JSContext *ctx, int argc,
+                                        JSValueConst *argv)
+{
+    if (argc < 2 || !JS_IsString(argv[1])) return FALSE;
+    const char *t = JS_ToCString(ctx, argv[1]);
+    if (!t) return FALSE;
+    gboolean existing = g_ascii_strcasecmp(t, "_self") == 0 ||
+                        g_ascii_strcasecmp(t, "_top") == 0 ||
+                        g_ascii_strcasecmp(t, "_parent") == 0;
+    JS_FreeCString(ctx, t);
+    return existing;
+}
+
 static JSValue
 ns_window_open_method(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
@@ -20409,6 +20488,13 @@ ns_window_open_method(JSContext *ctx, JSValueConst this_val,
             JS_FreeCString(ctx, url);
             return JS_NULL;
         }
+        ns_node *opener_frame = ns_js_frame_of_realm(js, ctx);
+        if (opener_frame &&
+            !ns_window_open_targets_existing_context(ctx, argc, argv) &&
+            !ns_sandbox_allows_popup(js, opener_frame)) {
+            JS_FreeCString(ctx, url);
+            return JS_NULL;
+        }
         ns_js_consume_user_activation(js);
         if (ns_popup_blocked_for(js, ctx)) {
             if (js->log_cb) {
@@ -20426,7 +20512,8 @@ ns_window_open_method(JSContext *ctx, JSValueConst this_val,
             JS_FreeCString(ctx, url);
             return popup;
         }
-        js->nav_cb(url, FALSE, js->nav_user_data);
+        if (ns_js_realm_may_navigate_top(js, ctx))
+            js->nav_cb(url, FALSE, js->nav_user_data);
         JS_FreeCString(ctx, url);
     }
     return JS_DupValue(ctx, this_val);
@@ -21230,6 +21317,7 @@ typedef struct ns_xhr_state {
     char      *method;
     char      *url;
     char      *origin_url;
+    gboolean   opaque_origin;
     double     start_ms;
     GPtrArray *request_headers;
     gint64     gen;
@@ -21999,7 +22087,9 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
     JSContext *ctx = st->ctx;
     gboolean response_allowed = FALSE;
     if (resp && !err) {
-        gboolean allow = cors_allows_credentialed(st->origin_url, resp->final_url,
+        gboolean allow = cors_allows_credentialed(st->opaque_origin,
+                                                  st->origin_url,
+                                                  resp->final_url,
                                                   resp->cors_allow_origin,
                                                   resp->raw_headers,
                                                   ns_xhr_with_credentials(ctx, st->obj))
@@ -22013,8 +22103,9 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
         JS_SetPropertyStr(ctx, st->obj, "responseURL",
                           JS_NewString(ctx,
                               allow && resp->final_url ? resp->final_url : ""));
-        gboolean same_origin = ns_url_same_origin(st->origin_url,
-                                                  resp->final_url);
+        gboolean same_origin = ns_origin_matches(st->opaque_origin,
+                                                 st->origin_url,
+                                                 resp->final_url);
         char *hdrs;
         if (!allow) {
             hdrs = g_strdup("");
@@ -22235,7 +22326,8 @@ ns_xhr_on_chunk(gpointer user_data, const char *hop_url, long status,
         return;
     char *allow_origin = ns_xhr_raw_header_value(raw_headers,
                                                  "access-control-allow-origin");
-    gboolean allowed = cors_allows_credentialed(st->origin_url, hop_url,
+    gboolean allowed = cors_allows_credentialed(st->opaque_origin,
+                                                st->origin_url, hop_url,
                                                 allow_origin, raw_headers,
                                                 ns_xhr_with_credentials(ctx, st->obj));
     g_free(allow_origin);
@@ -22252,7 +22344,7 @@ ns_xhr_on_chunk(gpointer user_data, const char *hop_url, long status,
                           JS_NewString(ctx, ns_http_status_text(code)));
         JS_SetPropertyStr(ctx, st->obj, "responseURL",
                           JS_NewString(ctx, hop_url));
-        if (ns_url_same_origin(st->origin_url, hop_url))
+        if (ns_origin_matches(st->opaque_origin, st->origin_url, hop_url))
             JS_SetPropertyStr(ctx, st->obj, "_responseHeaders",
                               JS_NewString(ctx, raw_headers));
         JS_SetPropertyStr(ctx, st->obj, "_readyState", JS_NewInt32(ctx, 2));
@@ -22808,6 +22900,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         st->url = secure_url;
     }
     st->origin_url = g_strdup(_js ? _js->current_url : NULL);
+    st->opaque_origin = ns_js_realm_origin_is_opaque(_js, ctx);
     st->start_ms = ns_perf_now_ms(_js);
     if (method) st->method = g_strdup(method);
 
@@ -22856,8 +22949,11 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         g_ptr_array_add(hdr_terminated, hdrs->pdata[i]);
     }
     g_ptr_array_add(hdr_terminated, (gpointer)"X-ND-CORS: 1");
+    if (st->opaque_origin)
+        g_ptr_array_add(hdr_terminated, (gpointer)"X-ND-Opaque-Origin: 1");
     if (!ns_xhr_with_credentials(ctx, this_val) &&
-        !ns_url_same_origin(ns_js_realm_url_or_current(st->js, ctx), st->url))
+        !ns_origin_matches(st->opaque_origin,
+                           ns_js_realm_url_or_current(st->js, ctx), st->url))
         g_ptr_array_add(hdr_terminated, (gpointer)"X-ND-Credentials: omit");
     g_autofree char *top_level_marker = ns_js_top_level_marker(st->js);
     if (top_level_marker) g_ptr_array_add(hdr_terminated, top_level_marker);
@@ -26136,7 +26232,7 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
         .busy      = ns_js_ws_busy,
     };
     char *origin = NULL;
-    if (js && js->current_url &&
+    if (js && js->current_url && !ns_js_realm_origin_is_opaque(js, ctx) &&
         (g_ascii_strncasecmp(js->current_url, "http://",  7) == 0 ||
          g_ascii_strncasecmp(js->current_url, "https://", 8) == 0))
         origin = ns_url_origin_from(js->current_url);
@@ -26334,7 +26430,7 @@ ns_window_eventsource_ctor(JSContext *ctx, JSValueConst this_val,
     JS_SetOpaque(obj, s);
 
     char *origin = NULL;
-    if (js && js->current_url &&
+    if (js && js->current_url && !ns_js_realm_origin_is_opaque(js, ctx) &&
         (g_ascii_strncasecmp(js->current_url, "http://", 7) == 0 ||
          g_ascii_strncasecmp(js->current_url, "https://", 8) == 0))
         origin = ns_url_origin_from(js->current_url);
@@ -27878,7 +27974,15 @@ ns_popup_open(JSContext *ctx, ns_js *js, const char *url, int argc,
     }
     if (target && (strcmp(target, "_self") == 0 || strcmp(target, "_top") == 0 ||
                    strcmp(target, "_parent") == 0)) {
-        js->nav_cb(url, FALSE, js->nav_user_data);
+        ns_node *self_frame = ns_js_frame_of_realm(js, ctx);
+        if (self_frame && strcmp(target, "_self") == 0) {
+            g_autofree char *frame_url = *url
+                ? ns_url_resolve(ns_js_realm_url_or_current(js, ctx), url)
+                : NULL;
+            if (frame_url) ns_js_navigate_frame(js, self_frame, frame_url);
+        } else if (ns_js_realm_may_navigate_top(js, ctx)) {
+            js->nav_cb(url, FALSE, js->nav_user_data);
+        }
         return JS_GetGlobalObject(ctx);
     }
     const char *page = ns_js_realm_url_or_current(js, ctx);
@@ -50245,7 +50349,8 @@ ns_element_activation_behavior(JSContext *ctx, const ns_node *act,
             g_autofree char *abs_url = ns_element_anchor_resolved_href(act, js);
             if (abs_url && ns_js_anchor_fragment_navigate(js, abs_url))
                 return JS_UNDEFINED;
-            if (js->nav_cb)
+            if (js->nav_cb &&
+                ns_js_sandbox_allows_top_navigation(js, act, FALSE))
                 js->nav_cb(href, FALSE, js->nav_user_data);
         }
         return JS_UNDEFINED;
@@ -51093,8 +51198,10 @@ ns_js_resource_origin_clean(ns_js *js, JSContext *ctx, const char *url,
     const char *doc_url = ns_js_caller_document_url(js, ctx);
     if (g_str_has_prefix(url, "blob:"))
         return ns_net_blob_url_visible_to(url, doc_url);
-    if (ns_js_urls_same_origin(url, doc_url)) return TRUE;
-    return cors_allow_origin && cors_allows(doc_url, url, cors_allow_origin);
+    gboolean opaque = ns_js_realm_origin_is_opaque(js, ctx);
+    if (!opaque && ns_js_urls_same_origin(url, doc_url)) return TRUE;
+    return cors_allow_origin &&
+           cors_allows(opaque, doc_url, url, cors_allow_origin);
 }
 
 double
@@ -53470,10 +53577,10 @@ ns_iframe_ensure_content_root(ns_node *iframe)
     "    p === Symbol.hasInstance || p === Symbol.isConcatSpreadable; }" \
     "  var crossFallbackKeys = ['then', Symbol.toStringTag, Symbol.hasInstance," \
     "    Symbol.isConcatSpreadable];" \
-    "  function crossLocation(target, denied){" \
+    "  function crossLocation(target, denied, guard){" \
     "    var fallback = crossFallback;" \
-    "    var replace = function replace(v){ target.location.replace(v); };" \
-    "    var setHref = function(v){ target.location.href = v; };" \
+    "    var replace = function replace(v){ if (guard) guard(); target.location.replace(v); };" \
+    "    var setHref = function(v){ if (guard) guard(); target.location.href = v; };" \
     "    return new Proxy({}, {" \
     "      get: function(t, p){" \
     "        if (p === 'replace') return replace;" \
@@ -53677,7 +53784,14 @@ static const char ns_iframe_global_bootstrap[] =
     "      var own = sameOriginWindow(child);"
     "      if (own === G) return win;"
     "      return own || crossWindow(child, proxy); }"
-    "    loc = crossLocation(target, denied);"
+    "    function ancestorGuard(){"
+    "      if (!(sandbox & 1) || (sandbox & 64)) return;"
+    "      var active = false;"
+    "      try { active = !!((sandbox & 128) && G.navigator.userActivation.isActive); } catch (e) {}"
+    "      if (!active) throw new DOMException("
+    "        'Blocked top navigation: sandboxed iframe without allow-top-navigation', 'SecurityError'); }"
+    "    var navGuard = up ? undefined : ancestorGuard;"
+    "    loc = crossLocation(target, denied, navGuard);"
     "    proxy = new Proxy({}, {"
     "      get:function(t,p){"
     "        if(p==='window'||p==='self'||p==='frames') return proxy;"
@@ -53694,7 +53808,7 @@ static const char ns_iframe_global_bootstrap[] =
     "        var child = childFrame(p); if(child) return child;"
     "        if(crossFallback(p)) return undefined;"
     "        return denied(); },"
-    "      set:function(t,p,v){ if(p==='location'){ target.location.href=v; return true; } return denied(); },"
+    "      set:function(t,p,v){ if(p==='location'){ if (navGuard) navGuard(); target.location.href=v; return true; } return denied(); },"
     "      has:function(t,p){ return p==='window'||p==='self'||p==='frames'||p==='parent'||p==='top'||"
     "        p==='postMessage'||p==='location'||p==='closed'||p==='length'||p==='close'||p==='focus'||p==='blur'||"
     "        !!childFrame(p) || denied(); }"
@@ -59766,11 +59880,16 @@ ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
     }
 
     static const char *const beacon_headers[] = { "X-ND-CORS: 1", NULL };
+    static const char *const opaque_beacon_headers[] = {
+        "X-ND-CORS: 1", "X-ND-Opaque-Origin: 1", "X-ND-Credentials: omit", NULL
+    };
     ns_net_request_async(abs_url,
                          js ? js->current_url : NULL,
                          "POST", body, body_len,
                          content_type,
-                         beacon_headers, NULL,
+                         ns_js_realm_origin_is_opaque(js, ctx)
+                             ? opaque_beacon_headers : beacon_headers,
+                         NULL,
                          ns_beacon_done, NULL);
     g_free(abs_url);
     g_free(body);
@@ -66089,6 +66208,7 @@ ns_location_navigate_to(ns_js *js, const char *s)
         return;
     }
     if (ns_location_nav_in_iframe(js)) return;
+    if (!ns_js_realm_may_navigate_top(js, js->ctx)) return;
     g_autofree char *abs_url = ns_url_resolve(ns_js_top_url(js), s);
     if (!abs_url || !ns_js_anchor_fragment_navigate(js, abs_url))
         js->nav_cb(s, FALSE, js->nav_user_data);
@@ -66179,6 +66299,7 @@ ns_location_set_component(JSContext *ctx, JSValueConst val, const char *comp)
     JS_FreeCString(ctx, v);
     if (!next) return JS_UNDEFINED;
     if (js->nav_cb && !ns_location_nav_in_iframe(js) &&
+        ns_js_realm_may_navigate_top(js, ctx) &&
         strcmp(next, ns_js_top_url(js)) != 0)
         js->nav_cb(next, FALSE, js->nav_user_data);
     g_free(next);

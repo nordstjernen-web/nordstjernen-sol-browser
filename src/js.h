@@ -158,6 +158,8 @@ gboolean ns_js_csp_form_action_allowed(const ns_js *js, const ns_node *form,
 const char *ns_js_node_frame_url(const ns_js *js, const ns_node *form);
 gboolean ns_js_form_dialog_submit(ns_js *js, const ns_node *form,
                                   const ns_node *submitter);
+gboolean ns_js_sandbox_allows_top_navigation(ns_js *js, const ns_node *node,
+                                             gboolean user_activated);
 gboolean ns_js_sandbox_allows_form_navigation(ns_js *js, const ns_node *form,
                                               const char *target,
                                               gboolean user_activated);

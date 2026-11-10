@@ -4,8 +4,10 @@ A source review of the first-party C code for security vulnerabilities,
 done on 2026-11-10 against `main` at `ca746e7`. It was a **static**
 review: nothing was built, run or fuzzed for it, so "confirmed" below
 means the code path was traced by reading from attacker input to the
-fault, not reproduced. Every finding is open at the time of writing;
-none is fixed by the commit that adds this file.
+fault, not reproduced. Every finding was open when the review was
+written; the Status column of the table below marks the ones fixed
+since, and the fixing commits carry the slug as a `Security-Fix:`
+trailer.
 
 The threat model is the one in [SECURITY.md](../SECURITY.md): the
 attacker controls everything fetched from the network, and a second
@@ -32,11 +34,11 @@ a sandboxed renderer.
 
 | ID | Slug | Severity | Needs renderer compromise | Status |
 |----|------|----------|---------------------------|--------|
-| W1 | `iframe-sandbox-opaque-origin-not-applied-to-network` | High | no | confirmed |
-| W2 | `pna-bypass-via-opaque-top-level-document` | Medium | no | confirmed |
-| W3 | `address-bar-userinfo-and-decoded-url-spoofing` | Medium | no | confirmed |
-| W4 | `csp-unsupported-directives-fail-open` | Low | no | confirmed |
-| W5 | `download-gate-gaps` | Low | partly | confirmed / plausible |
+| W1 | `iframe-sandbox-opaque-origin-not-applied-to-network` | High | no | **fixed** |
+| W2 | `pna-bypass-via-opaque-top-level-document` | Medium | no | **fixed** |
+| W3 | `address-bar-userinfo-and-decoded-url-spoofing` | Medium | no | **fixed** |
+| W4 | `csp-unsupported-directives-fail-open` | Low | no | **fixed** |
+| W5 | `download-gate-gaps` | Low | partly | **fixed** |
 | S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | confirmed |
 | S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | confirmed (impact plausible) |
 | S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | confirmed |
@@ -87,6 +89,16 @@ Two related gaps share the cause:
   (`:27880`). Top navigation through `top.location` and anchors is
   likely unchecked as well; that setter path was not traced end to end.
 
+**Fixed.** Requests from an opaque realm carry an internal
+`X-ND-Opaque-Origin` marker: the script side treats them as never
+same-origin, the network layer sends `Origin: null`, preflights them and
+marks them cross-site. Top navigation and popups from sandboxed frames
+are gated on their flags; a popup without
+`allow-popups-to-escape-sandbox` is blocked rather than opened
+unsandboxed. Still open: subresource loads (`<img>`, stylesheets) from an
+opaque frame are treated as same-site for cookies, though their
+responses are not readable. The original recommendation follows.
+
 **Fix.** Give each realm an explicit origin — tuple or opaque — fixed at
 frame creation, with `sandbox` minus `allow-same-origin` yielding
 opaque. Use it in `cors_allows*`, `ns_fetch_omits_credentials`, XHR, the
@@ -112,6 +124,11 @@ resulting document can send image, form, `fetch` and WebSocket requests
 to `127.0.0.1` and RFC 1918 hosts, and read the responses of targets
 that answer `Access-Control-Allow-Origin: *` or accept `Origin: null`.
 
+**Fixed.** A document without a tuple origin is now public for the
+guard, except `file:` (local) and the browser's own `about:` pages.
+WebSocket and EventSource fall back to the top-level URL when their
+origin is `null`.
+
 **Fix.** Have opaque documents inherit the initiator's address space
 (the initiator is already known at `/open`,
 `src/renderer_serve.c:861`), and treat `UNKNOWN` as public for
@@ -135,6 +152,11 @@ processing a URL gets before it is shown.
   long URL probably shows its tail rather than its origin. This depends
   on GtkText scrolling and was not verified.
 
+**Fixed.** Userinfo is stripped for display and history; decoding is
+limited to printable non-ASCII characters after the authority, with
+look-alikes of URL delimiters kept escaped; the caret is placed at the
+start.
+
 **Fix.** Strip userinfo before display and before recording history.
 Decode only path, query and fragment, never into delimiters or
 whitespace, and keep non-printing and confusable characters encoded.
@@ -149,6 +171,12 @@ directive. A policy that restricts scripts only through
 only, so a `<meta>` policy with a newline right after the directive name
 is ignored. No bypass was found in source matching, nonces, hashes or
 `strict-dynamic`.
+
+**Fixed.** The four refined directives feed the script and style checks,
+with `-elem` taking precedence over the base directive and `-attr` used
+only when neither is present, and tokens split on all ASCII whitespace.
+`manifest-src` and a top-level `sandbox` directive are still not
+enforced.
 
 **Fix.** Map the `-elem` and `-attr` directives to their parents at
 minimum, and split on all ASCII whitespace.
@@ -167,6 +195,10 @@ minimum, and split on all ASCII whitespace.
   under a race).
 
 Name sanitisation, traversal handling and origin stamping are sound.
+
+**Fixed.** The extension list is extended, and the staged file is opened
+without following links, checked, and compared by device and inode after
+the rename; a mismatch moves it back and fails the download.
 
 **Fix.** Extend the list, or prompt for anything outside a safe-type
 allow-list. Open the staged file with `O_NOFOLLOW`, `fstat` the
