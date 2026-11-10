@@ -51,83 +51,6 @@ JS_SetDefaultLocale(JSRuntime *rt, const char *tag)
     return 0;
 }
 
-typedef JSMallocFunctions ns_quickjs_orig_malloc_functions;
-
-typedef struct NsJSMallocFunctions {
-    void *(*js_calloc)(void *opaque, size_t count, size_t size);
-    void *(*js_malloc)(void *opaque, size_t size);
-    void (*js_free)(void *opaque, void *ptr);
-    void *(*js_realloc)(void *opaque, void *ptr, size_t size);
-    size_t (*js_malloc_usable_size)(const void *ptr);
-} NsJSMallocFunctions;
-#define JSMallocFunctions NsJSMallocFunctions
-
-JSRuntime *ns_quickjs_new_runtime2(const NsJSMallocFunctions *mf, void *opaque);
-#define JS_NewRuntime2(mf, opaque) ns_quickjs_new_runtime2((mf), (opaque))
-
-static inline void
-JS_SetHeapCage(uintptr_t base, size_t size)
-{
-    (void)base;
-    (void)size;
-}
-
-static inline bool
-JS_CageContains(const void *ptr)
-{
-    (void)ptr;
-    return false;
-}
-
-static inline uintptr_t
-JS_CageBase(void)
-{
-    return 0;
-}
-
-static inline size_t
-JS_CageSize(void)
-{
-    return 0;
-}
-
-static inline size_t
-JS_CageCommittedBytes(void)
-{
-    return 0;
-}
-
-static inline void *
-JS_CageMalloc(size_t size)
-{
-    size_t *raw = malloc(sizeof(size_t) + (size ? size : 1));
-    if (!raw) return NULL;
-    raw[0] = size;
-    return raw + 1;
-}
-
-static inline void *
-JS_CageRealloc(void *ptr, size_t size)
-{
-    if (!ptr) return JS_CageMalloc(size);
-    size_t *raw = realloc((size_t *)ptr - 1, sizeof(size_t) + (size ? size : 1));
-    if (!raw) return NULL;
-    raw[0] = size;
-    return raw + 1;
-}
-
-static inline void
-JS_CageFree(void *ptr)
-{
-    if (ptr) free((size_t *)ptr - 1);
-}
-
-static inline size_t
-JS_CageUsableSize(const void *ptr)
-{
-    return ptr ? ((const size_t *)ptr)[-1] : 0;
-}
-
 #define JS_EVAL_OPTIONS_VERSION 1
 
 typedef struct JSEvalOptions {
@@ -142,8 +65,6 @@ typedef void *JSReallocArrayBufferDataFunc(JSRuntime *rt, void *opaque,
                                            void *ptr, size_t size);
 
 JSContext *ns_quickjs_new_context(JSRuntime *rt);
-bool ns_quickjs_is_array(JSValueConst val);
-bool ns_quickjs_is_error(JSValueConst val);
 JSValue ns_quickjs_new_array_buffer(JSContext *ctx, uint8_t *buf, size_t len,
                                     size_t max_len,
                                     JSReallocArrayBufferDataFunc *realloc_func,
@@ -153,23 +74,9 @@ JSValue ns_quickjs_new_typed_array(JSContext *ctx, int argc, JSValueConst *argv,
 
 #define JS_EVAL_FLAG_HIDE_SOURCE 0
 
-enum {
-    JS_BOXED_NONE, JS_BOXED_NUMBER, JS_BOXED_STRING, JS_BOXED_BOOLEAN,
-    JS_BOXED_BIGINT, JS_BOXED_SYMBOL,
-};
-
-bool JS_IsDate(JSValueConst val);
-bool JS_IsRegExp(JSValueConst val);
-bool JS_IsMap(JSValueConst val);
-bool JS_IsSet(JSValueConst val);
-bool JS_IsProxy(JSValueConst val);
 JSValue JS_GetErrorFrames(JSContext *ctx, JSValueConst val);
-int JS_GetBoxedPrimitiveKind(JSValueConst val);
 bool JS_IsRunningScript(JSContext *ctx);
 int JS_FreezeObject(JSContext *ctx, JSValueConst obj);
-JSContext *JS_GetPendingJobRealm(JSRuntime *rt);
-bool JS_IsDataView(JSValueConst val);
-bool JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom);
 JSValue JS_EvalThis2(JSContext *ctx, JSValueConst this_obj, const char *input,
                      size_t input_len, JSEvalOptions *options);
 JSValue JS_NewStringUTF16(JSContext *ctx, const uint16_t *buf, size_t len);
@@ -182,7 +89,6 @@ JSValue JS_GetPropertyInt64(JSContext *ctx, JSValueConst obj, int64_t idx);
 int JS_GetClassCount(JSRuntime *rt);
 JSValue JS_NewForwarder(JSContext *ctx, JSValueConst target, const char *name,
                         int length, bool constructor);
-JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func);
 
 static inline bool
 ns_quickjs_is_big_int(JSValueConst val)
@@ -197,51 +103,11 @@ JS_IsStrictEqual(JSContext *ctx, JSValueConst op1, JSValueConst op2)
     return JS_StrictEq(ctx, op1, op2);
 }
 
-static inline JSContext *
-JS_GetCallerRealm(JSContext *ctx)
-{
-    return ctx;
-}
-
-static inline JSContext *
-JS_GetFunctionRealm(JSContext *ctx, JSValueConst func_obj)
-{
-    (void)func_obj;
-    return ctx;
-}
-
-static inline int
-JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
-                      size_t byte_length)
-{
-    (void)ctx;
-    (void)obj;
-    (void)data;
-    (void)byte_length;
-    return -1;
-}
-
 static inline bool
 JS_IsHostAccess(JSContext *ctx)
 {
     (void)ctx;
     return true;
-}
-
-typedef bool JSCanCompileStrings(JSContext *ctx);
-
-static inline void
-JS_SetCanCompileStrings(JSRuntime *rt, JSCanCompileStrings *fn)
-{
-    (void)rt;
-    (void)fn;
-}
-
-static inline void
-JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj)
-{
-    (void)ctx;
-    (void)obj;
 }
 
 static inline int
@@ -289,8 +155,8 @@ JS_SetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
 }
 
 #define JS_NewContext(rt) ns_quickjs_new_context(rt)
-#define JS_IsArray(val)   ns_quickjs_is_array(val)
-#define JS_IsError(val)   ns_quickjs_is_error(val)
+#define JS_IsArray(val)   JS_IsArrayObject(val)
+#define JS_IsError(val)   JS_IsErrorObject(val)
 #define JS_IsBigInt(val)  ns_quickjs_is_big_int(val)
 #define JS_NewArrayBuffer(ctx, buf, len, max_len, realloc_func, opaque, shared) \
     ns_quickjs_new_array_buffer(ctx, buf, len, max_len, realloc_func, opaque, shared)

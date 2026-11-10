@@ -3,6 +3,22 @@ Changelog:
 
 1.0.47-dev:
 ======
+* The default JavaScript engine is now Fabrice Bellard's QuickJS, forked
+  in-tree at `src/quickjs-bellard/` from upstream master `e585640`. The
+  quickjs-ng fork stays in the tree: `-Dquickjs=quickjs-ng` builds it.
+  See `docs/quickjs-bellard-default.md`.
+* Security: the heap hardening is ported to Bellard's QuickJS. Its heap
+  lives in the 4 GB cage, values and heap pointer fields are 32-bit cage
+  offsets, host pointers, native function pointers and realms sit in
+  tables outside the cage, class and atom lookups are bounded, and
+  ArrayBuffer backing stores must be cage memory. test262 gives the same
+  result as the unmodified engine.
+* Bellard's QuickJS gains the browser hooks the quickjs-ng fork had: a
+  Content Security Policy without `'unsafe-eval'` refuses `eval()` and
+  `Function()` on it too, cross-frame calls, promise jobs and native
+  functions run in the right realm, and views on an imported
+  `WebAssembly.Memory` survive instantiation. `Intl` and `Temporal` are
+  built from upstream's own implementations.
 * Security: external stylesheets are made valid UTF-8 before they are
   parsed. A CSS string ending in a truncated multi-byte sequence became
   generated-content text that several text walkers could read a few

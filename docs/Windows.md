@@ -55,9 +55,8 @@ GPL-configured, which is fine for a local developer build; the
 redistributable packages instead link the minimal LGPL FFmpeg that
 `scripts/build-ffmpeg-lgpl.sh` builds, as CI does.
 
-`git` is only needed for `-Dquickjs=quickjs`, whose wrap clones the
-original QuickJS; the text-shaping Pango fork, web-text-lib, is vendored
-in-tree at `src/web-text-lib/`. MSYS2's stock `gtk4` must be
+Both JavaScript engines and the text-shaping Pango fork, web-text-lib,
+are vendored in-tree, so the build clones nothing for them. MSYS2's stock `gtk4` must be
 4.22.1 or newer — meson enforces that floor on Windows.
 `mingw-w64-ucrt-x86_64-libavif` and `mingw-w64-ucrt-x86_64-libjxl` are optional and
 add AVIF and JPEG XL decoding (CI installs both).

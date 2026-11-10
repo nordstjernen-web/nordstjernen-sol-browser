@@ -382,12 +382,12 @@ These are linked only when present on the build host (meson
   wgpu-native's own MIT-or-Apache-2.0 terms. The library itself is never
   vendored — it is located at build time and, in the release bundles,
   ships beside the executable.
-- **QuickJS** (the original engine) — MIT, © 2017-2021 Fabrice Bellard
-  and Charlie Gordon. <https://github.com/bellard/quickjs>. Linked
-  statically, in place of the quickjs-ng fork, only into builds
-  configured with `-Dquickjs=quickjs`; it is fetched at configure time
-  through `subprojects/quickjs.wrap` and never vendored, unmodified. Its
-  license text is the MIT text in the quickjs-ng section above.
+- **QuickJS** — MIT, © 2017-2026 Fabrice Bellard and Charlie Gordon.
+  <https://github.com/bellard/quickjs>. Vendored and modified in
+  `src/quickjs-bellard/` (license in `src/quickjs-bellard/LICENSE`) and
+  linked statically into the default build; `-Dquickjs=quickjs-ng` links
+  the quickjs-ng fork instead. Its license text is the MIT text in the
+  quickjs-ng section above.
 
 ---
 

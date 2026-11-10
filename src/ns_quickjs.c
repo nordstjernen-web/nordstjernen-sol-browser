@@ -10,70 +10,6 @@
 #include <stdarg.h>
 #include <string.h>
 
-typedef struct ns_quickjs_malloc_bridge {
-    NsJSMallocFunctions mf;
-    void *opaque;
-    JSRuntime *rt;
-} ns_quickjs_malloc_bridge;
-
-static void *
-ns_quickjs_bridge_malloc(JSMallocState *s, size_t size)
-{
-    ns_quickjs_malloc_bridge *b = s->opaque;
-    return b->mf.js_malloc(b->opaque, size);
-}
-
-static void
-ns_quickjs_bridge_free(JSMallocState *s, void *ptr)
-{
-    ns_quickjs_malloc_bridge *b = s->opaque;
-    b->mf.js_free(b->opaque, ptr);
-    if (ptr && ptr == b->rt) g_free(b);
-}
-
-static void *
-ns_quickjs_bridge_realloc(JSMallocState *s, void *ptr, size_t size)
-{
-    ns_quickjs_malloc_bridge *b = s->opaque;
-    return b->mf.js_realloc(b->opaque, ptr, size);
-}
-
-JSRuntime *
-ns_quickjs_new_runtime2(const NsJSMallocFunctions *mf, void *opaque)
-{
-    ns_quickjs_malloc_bridge *b = g_new0(ns_quickjs_malloc_bridge, 1);
-    b->mf = *mf;
-    b->opaque = opaque;
-    ns_quickjs_orig_malloc_functions orig = {
-        ns_quickjs_bridge_malloc,
-        ns_quickjs_bridge_free,
-        ns_quickjs_bridge_realloc,
-        mf->js_malloc_usable_size,
-    };
-    JSRuntime *rt = (JS_NewRuntime2)(&orig, b);
-    if (!rt) {
-        g_free(b);
-        return NULL;
-    }
-    b->rt = rt;
-    return rt;
-}
-
-typedef struct ns_quickjs_class_ids {
-    JSClassID array;
-    JSClassID error;
-    JSClassID data_view;
-    JSClassID date;
-    JSClassID regexp;
-    JSClassID map;
-    JSClassID set;
-    JSClassID proxy;
-    JSClassID boxed[JS_BOXED_SYMBOL + 1];
-    JSClassID bytecode_function;
-    JSClassID c_function;
-    JSClassID c_function_data;
-} ns_quickjs_class_ids;
-
 typedef struct ns_quickjs_array_buffer_owner {
     JSReallocArrayBufferDataFunc *realloc_func;
     void *opaque;
@@ -83,7 +19,7 @@ typedef struct ns_quickjs_forwarder {
     JSValue target;
 } ns_quickjs_forwarder;
 
-static ns_quickjs_class_ids ns_quickjs_classes;
+static JSClassID ns_quickjs_function_class_id;
 static JSClassID ns_quickjs_forwarder_class_id;
 
 static JSClassID
@@ -96,106 +32,13 @@ ns_quickjs_class_of(JSContext *ctx, JSValue val)
     return id;
 }
 
-static JSValue
-ns_quickjs_construct(JSContext *ctx, const char *name, int argc,
-                     JSValueConst *argv)
-{
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, global, name);
-    JSValue obj = JS_CallConstructor(ctx, ctor, argc, argv);
-    JS_FreeValue(ctx, ctor);
-    JS_FreeValue(ctx, global);
-    return obj;
-}
-
-static JSClassID
-ns_quickjs_boxed_class_of(JSContext *ctx, JSValue primitive)
-{
-    JSClassID id = ns_quickjs_class_of(ctx, JS_ToObject(ctx, primitive));
-    JS_FreeValue(ctx, primitive);
-    return id;
-}
-
-static JSValue
-ns_quickjs_noop(JSContext *ctx, JSValueConst this_val, int argc,
-                JSValueConst *argv)
-{
-    (void)ctx;
-    (void)this_val;
-    (void)argc;
-    (void)argv;
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_quickjs_noop_data(JSContext *ctx, JSValueConst this_val, int argc,
-                     JSValueConst *argv, int magic, JSValue *func_data)
-{
-    (void)magic;
-    (void)func_data;
-    return ns_quickjs_noop(ctx, this_val, argc, argv);
-}
-
-static void
-ns_quickjs_learn_function_class_ids(JSContext *ctx)
-{
-    static const char probe[] = "(function () {})";
-    ns_quickjs_class_ids *ids = &ns_quickjs_classes;
-    ids->bytecode_function = ns_quickjs_class_of(ctx,
-        JS_Eval(ctx, probe, sizeof(probe) - 1, "<ns_quickjs>",
-                JS_EVAL_TYPE_GLOBAL));
-    ids->c_function = ns_quickjs_class_of(ctx,
-        JS_NewCFunction(ctx, ns_quickjs_noop, "", 0));
-    ids->c_function_data = ns_quickjs_class_of(ctx,
-        JS_NewCFunctionData(ctx, ns_quickjs_noop_data, 0, 0, 0, NULL));
-}
-
-static void
-ns_quickjs_learn_value_class_ids(JSContext *ctx)
-{
-    ns_quickjs_class_ids *ids = &ns_quickjs_classes;
-    ids->date = ns_quickjs_class_of(ctx, ns_quickjs_construct(ctx, "Date", 0, NULL));
-    JSValue pattern = JS_NewString(ctx, "a");
-    ids->regexp = ns_quickjs_class_of(ctx,
-        ns_quickjs_construct(ctx, "RegExp", 1, &pattern));
-    JS_FreeValue(ctx, pattern);
-    ids->map = ns_quickjs_class_of(ctx, ns_quickjs_construct(ctx, "Map", 0, NULL));
-    ids->set = ns_quickjs_class_of(ctx, ns_quickjs_construct(ctx, "Set", 0, NULL));
-    JSValue proxy_args[2] = { JS_NewObject(ctx), JS_NewObject(ctx) };
-    ids->proxy = ns_quickjs_class_of(ctx,
-        ns_quickjs_construct(ctx, "Proxy", 2, proxy_args));
-    JS_FreeValue(ctx, proxy_args[0]);
-    JS_FreeValue(ctx, proxy_args[1]);
-    ids->boxed[JS_BOXED_NUMBER] = ns_quickjs_boxed_class_of(ctx, JS_NewInt32(ctx, 0));
-    ids->boxed[JS_BOXED_STRING] = ns_quickjs_boxed_class_of(ctx, JS_NewString(ctx, ""));
-    ids->boxed[JS_BOXED_BOOLEAN] = ns_quickjs_boxed_class_of(ctx, JS_FALSE);
-    ids->boxed[JS_BOXED_BIGINT] = ns_quickjs_boxed_class_of(ctx, JS_NewBigInt64(ctx, 0));
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue symbol_fn = JS_GetPropertyStr(ctx, global, "Symbol");
-    ids->boxed[JS_BOXED_SYMBOL] = ns_quickjs_boxed_class_of(ctx,
-        JS_Call(ctx, symbol_fn, JS_UNDEFINED, 0, NULL));
-    JS_FreeValue(ctx, symbol_fn);
-    JS_FreeValue(ctx, global);
-}
-
 static void
 ns_quickjs_learn_class_ids(JSContext *ctx)
 {
-    static const uint8_t one_byte;
-    ns_quickjs_class_ids *ids = &ns_quickjs_classes;
-    ids->array = ns_quickjs_class_of(ctx, JS_NewArray(ctx));
-    ids->error = ns_quickjs_class_of(ctx, JS_NewError(ctx));
-
-    JSValue buffer = JS_NewArrayBufferCopy(ctx, &one_byte, 1);
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue data_view = JS_GetPropertyStr(ctx, global, "DataView");
-    ids->data_view = ns_quickjs_class_of(ctx,
-        JS_CallConstructor(ctx, data_view, 1, &buffer));
-    JS_FreeValue(ctx, data_view);
-    JS_FreeValue(ctx, global);
-    JS_FreeValue(ctx, buffer);
-    ns_quickjs_learn_value_class_ids(ctx);
-    ns_quickjs_learn_function_class_ids(ctx);
+    static const char probe[] = "(function () {})";
+    ns_quickjs_function_class_id = ns_quickjs_class_of(ctx,
+        JS_Eval(ctx, probe, sizeof(probe) - 1, "<ns_quickjs>",
+                JS_EVAL_TYPE_GLOBAL));
 }
 
 JSContext *
@@ -203,6 +46,10 @@ ns_quickjs_new_context(JSRuntime *rt)
 {
     static gsize learned;
     JSContext *ctx = (JS_NewContext)(rt);
+    if (ctx && (JS_AddIntrinsicTemporal(ctx) < 0 || JS_AddIntrinsicIntl(ctx) < 0)) {
+        JS_FreeContext(ctx);
+        return NULL;
+    }
     if (ctx && g_once_init_enter(&learned)) {
         ns_quickjs_learn_class_ids(ctx);
         g_once_init_leave(&learned, 1);
@@ -210,64 +57,10 @@ ns_quickjs_new_context(JSRuntime *rt)
     return ctx;
 }
 
-static bool
-ns_quickjs_has_class(JSValueConst val, JSClassID class_id)
-{
-    return class_id != JS_INVALID_CLASS_ID && JS_GetClassID(val) == class_id;
-}
-
-bool
-ns_quickjs_is_array(JSValueConst val)
-{
-    return ns_quickjs_has_class(val, ns_quickjs_classes.array);
-}
-
-bool
-ns_quickjs_is_error(JSValueConst val)
-{
-    return ns_quickjs_has_class(val, ns_quickjs_classes.error);
-}
-
-bool
-JS_IsDataView(JSValueConst val)
-{
-    return ns_quickjs_has_class(val, ns_quickjs_classes.data_view);
-}
-
-bool
-JS_IsDate(JSValueConst val)
-{
-    return ns_quickjs_has_class(val, ns_quickjs_classes.date);
-}
-
-bool
-JS_IsRegExp(JSValueConst val)
-{
-    return ns_quickjs_has_class(val, ns_quickjs_classes.regexp);
-}
-
-bool
-JS_IsMap(JSValueConst val)
-{
-    return ns_quickjs_has_class(val, ns_quickjs_classes.map);
-}
-
-bool
-JS_IsSet(JSValueConst val)
-{
-    return ns_quickjs_has_class(val, ns_quickjs_classes.set);
-}
-
-bool
-JS_IsProxy(JSValueConst val)
-{
-    return ns_quickjs_has_class(val, ns_quickjs_classes.proxy);
-}
-
 JSValue
 JS_GetErrorFrames(JSContext *ctx, JSValueConst val)
 {
-    if (!ns_quickjs_is_error(val))
+    if (!JS_IsErrorObject(val))
         return JS_UNDEFINED;
     JSAtom atom = JS_NewAtom(ctx, "stack");
     JSPropertyDescriptor desc;
@@ -286,15 +79,6 @@ JS_GetErrorFrames(JSContext *ctx, JSValueConst val)
         return JS_UNDEFINED;
     }
     return desc.value;
-}
-
-int
-JS_GetBoxedPrimitiveKind(JSValueConst val)
-{
-    for (int kind = JS_BOXED_NUMBER; kind <= JS_BOXED_SYMBOL; kind++)
-        if (ns_quickjs_has_class(val, ns_quickjs_classes.boxed[kind]))
-            return kind;
-    return JS_BOXED_NONE;
 }
 
 static void
@@ -336,41 +120,6 @@ ns_quickjs_new_typed_array(JSContext *ctx, int argc, JSValueConst *argv,
     for (int i = 0; i < argc; i++)
         padded[i] = argv[i];
     return (JS_NewTypedArray)(ctx, 3, padded, type);
-}
-
-static bool
-ns_quickjs_parse_array_index(const char *s, size_t len, uint32_t *pval)
-{
-    if (len == 0 || len > 10 || (len > 1 && s[0] == '0'))
-        return false;
-    uint64_t value = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (s[i] < '0' || s[i] > '9')
-            return false;
-        value = value * 10 + (uint64_t)(s[i] - '0');
-    }
-    if (value > 0xFFFFFFFEu)
-        return false;
-    *pval = (uint32_t)value;
-    return true;
-}
-
-bool
-JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom)
-{
-    *pval = 0;
-    JSValue key = JS_AtomToValue(ctx, atom);
-    bool is_index = false;
-    if (JS_IsString(key)) {
-        size_t len = 0;
-        const char *s = JS_ToCStringLen(ctx, &len, key);
-        if (s) {
-            is_index = ns_quickjs_parse_array_index(s, len, pval);
-            JS_FreeCString(ctx, s);
-        }
-    }
-    JS_FreeValue(ctx, key);
-    return is_index;
 }
 
 JSValue
@@ -523,13 +272,6 @@ JS_FreezeObject(JSContext *ctx, JSValueConst obj)
     return ret;
 }
 
-JSContext *
-JS_GetPendingJobRealm(JSRuntime *rt)
-{
-    (void)rt;
-    return NULL;
-}
-
 const char *
 JS_GetVersion(void)
 {
@@ -631,7 +373,7 @@ JS_NewForwarder(JSContext *ctx, JSValueConst target, const char *name,
     JSClassID class_id = ns_quickjs_forwarder_class_for(JS_GetRuntime(ctx));
     if (class_id == JS_INVALID_CLASS_ID)
         return JS_ThrowInternalError(ctx, "cannot register the forwarder class");
-    JSValue proto = JS_GetClassProto(ctx, ns_quickjs_classes.bytecode_function);
+    JSValue proto = JS_GetClassProto(ctx, ns_quickjs_function_class_id);
     JSValue func = JS_NewObjectProtoClass(ctx, proto, class_id);
     JS_FreeValue(ctx, proto);
     if (JS_IsException(func))
@@ -647,21 +389,3 @@ JS_NewForwarder(JSContext *ctx, JSValueConst target, const char *name,
     return func;
 }
 
-JSValue
-JS_CloneCFunction(JSContext *ctx, JSValueConst func)
-{
-    JSClassID class_id = JS_GetClassID(func);
-    if (class_id == JS_INVALID_CLASS_ID)
-        return JS_UNDEFINED;
-    bool constructor = JS_IsConstructor(ctx, func);
-    if (class_id == ns_quickjs_forwarder_class_id) {
-        ns_quickjs_forwarder *fw = JS_GetOpaque(func, class_id);
-        if (!fw)
-            return JS_UNDEFINED;
-        return JS_NewForwarder(ctx, fw->target, "", 0, constructor);
-    }
-    if (class_id != ns_quickjs_classes.c_function &&
-        class_id != ns_quickjs_classes.c_function_data)
-        return JS_UNDEFINED;
-    return JS_NewForwarder(ctx, func, "", 0, constructor);
-}

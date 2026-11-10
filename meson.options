@@ -1,7 +1,7 @@
 option('build_date', type: 'string', value: '',
        description: 'Build date stamp shown in the About dialog (defaults to the configure-time date).')
-option('quickjs', type: 'combo', choices: ['quickjs-ng', 'quickjs'], value: 'quickjs-ng',
-       description: 'Which QuickJS the JavaScript binding runs on. "quickjs-ng" (default) builds the in-tree quickjs-ng fork in src/quickjs/, which carries the browser hooks. "quickjs" builds Fabrice Bellard\'s original QuickJS (https://github.com/bellard/quickjs), fetched at configure time through subprojects/quickjs.wrap and never vendored; src/ns_quickjs.h adapts the binding to its API and the few fork-only hooks fall back to portable approximations (see docs/quickjs.md).')
+option('quickjs', type: 'combo', choices: ['quickjs', 'quickjs-ng'], value: 'quickjs',
+       description: 'Which QuickJS the JavaScript binding runs on. "quickjs" (default) builds the in-tree fork of Fabrice Bellard\'s QuickJS in src/quickjs-bellard/, which carries the heap hardening and the browser hooks. "quickjs-ng" builds the in-tree quickjs-ng fork in src/quickjs/. See docs/quickjs.md.')
 option('gtk', type: 'feature', value: 'auto',
        description: 'Build the GTK 4 desktop shell (on by default when GTK 4 is present). Disable for a renderer-only build that needs no GTK 4 toolkit at all.')
 option('wasm', type: 'feature', value: 'auto',

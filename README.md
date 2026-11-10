@@ -118,9 +118,9 @@ system.
   in `src/web-text-lib/` that caches shaped glyph strings and font metrics
   across layouts, so a run reaches HarfBuzz once instead of three times.
   Android uses the system Pango.
-- **JavaScript** — the QuickJS interpreter: the in-tree quickjs-ng fork, with
-  `Temporal`, the full `Intl` suite without ICU and `ShadowRealm`, or Fabrice
-  Bellard's original QuickJS with `-Dquickjs=quickjs`
+- **JavaScript** — the QuickJS interpreter: an in-tree, heap-hardened fork of
+  Fabrice Bellard's QuickJS with `Temporal` and `Intl` without ICU, or the
+  in-tree quickjs-ng fork with `-Dquickjs=quickjs-ng`
   ([docs/quickjs.md](docs/quickjs.md)). It runs the DOM, Shadow DOM, custom
   elements (including customized built-ins and `ElementInternals`), observer
   APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`, `OffscreenCanvas`),
@@ -289,9 +289,7 @@ FFmpeg), brotli (`br` content encoding and WOFF2 fonts), zstd (`zstd` content
 encoding), poppler-glib (inline PDF), libavif (`-Davif`), libjxl (`-Djxl`),
 Enchant (spell checking), FreeType (WOFF/WOFF2 unpacking), wgpu-native where
 it publishes no release (the BSDs, musl, Windows on Arm; WebGPU is not built
-for Android) and Fabrice Bellard's original
-[QuickJS](https://github.com/bellard/quickjs) (`-Dquickjs=quickjs`, fetched
-through a meson wrap).
+for Android).
 
 ## License
 
