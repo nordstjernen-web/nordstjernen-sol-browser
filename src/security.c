@@ -222,6 +222,7 @@ ns_security_sri_check(const char *integrity_attr,
 
 #ifdef NS_SECCOMP_FILTER_ARGS
 static gboolean ns_seccomp_unix_sockets = TRUE;
+static gboolean ns_seccomp_sysv_ipc_denied;
 static gboolean ns_seccomp_exec_memory_denied;
 #endif
 
@@ -230,6 +231,14 @@ ns_security_seccomp_deny_exec_memory(void)
 {
 #ifdef NS_SECCOMP_FILTER_ARGS
     ns_seccomp_exec_memory_denied = TRUE;
+#endif
+}
+
+void
+ns_security_seccomp_deny_sysv_ipc(void)
+{
+#ifdef NS_SECCOMP_FILTER_ARGS
+    ns_seccomp_sysv_ipc_denied = TRUE;
 #endif
 }
 
@@ -978,6 +987,19 @@ static const char *const ns_seccomp_allowed_names[] = {
 };
 
 static gboolean
+ns_seccomp_is_sysv_ipc_call(const char *name)
+{
+    static const char *const calls[] = {
+        "semctl", "semget", "semop", "semtimedop",
+        "shmat", "shmctl", "shmdt", "shmget",
+        "msgctl", "msgget", "msgrcv", "msgsnd", "ipc",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(calls); i++)
+        if (strcmp(name, calls[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
 ns_seccomp_is_exec_memory_call(const char *name)
 {
     static const char *const calls[] = {
@@ -1122,11 +1144,15 @@ ns_security_seccomp_init(void)
     (void)seccomp_attr_set(ctx, SCMP_FLTATR_CTL_TSYNC, 1);
 
     gboolean deny_exec = FALSE;
+    gboolean deny_sysv = FALSE;
 #ifdef NS_SECCOMP_FILTER_ARGS
     deny_exec = ns_seccomp_exec_memory_denied;
+    deny_sysv = ns_seccomp_sysv_ipc_denied;
 #endif
     for (size_t i = 0; i < G_N_ELEMENTS(ns_seccomp_allowed_names); i++) {
         if (deny_exec && ns_seccomp_is_exec_memory_call(ns_seccomp_allowed_names[i]))
+            continue;
+        if (deny_sysv && ns_seccomp_is_sysv_ipc_call(ns_seccomp_allowed_names[i]))
             continue;
         int nr = seccomp_syscall_resolve_name(ns_seccomp_allowed_names[i]);
         if (nr == __NR_SCMP_ERROR) continue;

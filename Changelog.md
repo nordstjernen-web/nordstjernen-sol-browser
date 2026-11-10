@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: the Linux renderer's seccomp filter no longer allows System
+  V shared memory, semaphores or message queues, so a compromised
+  renderer cannot attach other applications' shared-memory segments. The
+  audio helper keeps them for ALSA's dmix; microphone capture through an
+  ALSA dsnoop device no longer works inside the renderer
+  (`docs/security-review-2026-11.md`, S2).
 * Security: on Linux a renderer or media helper that cannot load its
   seccomp filter now exits instead of continuing with a warning, as it
   already did for Landlock, and a socket rule that fails to install no

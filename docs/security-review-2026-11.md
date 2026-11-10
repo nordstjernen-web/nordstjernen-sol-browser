@@ -40,7 +40,7 @@ a sandboxed renderer.
 | W4 | `csp-unsupported-directives-fail-open` | Low | no | **fixed** |
 | W5 | `download-gate-gaps` | Low | partly | **fixed** |
 | S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | **partly fixed** |
-| S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | confirmed (impact plausible) |
+| S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | **fixed** |
 | S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | confirmed |
 | S4 | `capture-devices-pregranted-to-every-renderer` | Low–Medium | yes | confirmed |
 | S5 | `renderer-holds-display-connection-without-surfaceless-egl` | Medium, configuration-dependent | yes | confirmed (prevalence unknown) |
@@ -248,6 +248,9 @@ argument filters, and `/proc` is readable (`:513`), so
 governs SysV IPC, so a compromised renderer can attach any same-uid
 segment read-write. The concrete impact (MIT-SHM buffers of X11 clients,
 other applications' shared state) was not demonstrated.
+
+**Fixed.** The renderer drops every SysV IPC call from its allow-list.
+The audio helper keeps them, because ALSA's dmix plugin needs them.
 
 **Fix.** Remove the SysV calls from the renderer and audio-helper lists
 — the framebuffer is a memfd — or allow `shmget` only with

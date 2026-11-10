@@ -1203,6 +1203,7 @@ ns_browser_sandbox(const char *self_exe)
     if (ns_config_get()->webgl_enabled)
         ns_gl_prepare_for_sandbox();
     ns_security_seccomp_deny_unix_sockets();
+    ns_security_seccomp_deny_sysv_ipc();
     if (!gpu_apis) {
         ns_mic_preload();
         ns_security_seccomp_deny_exec_memory();
