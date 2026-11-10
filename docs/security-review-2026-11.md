@@ -39,7 +39,7 @@ a sandboxed renderer.
 | W3 | `address-bar-userinfo-and-decoded-url-spoofing` | Medium | no | **fixed** |
 | W4 | `csp-unsupported-directives-fail-open` | Low | no | **fixed** |
 | W5 | `download-gate-gaps` | Low | partly | **fixed** |
-| S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | confirmed |
+| S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | **partly fixed** |
 | S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | confirmed (impact plausible) |
 | S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | confirmed |
 | S4 | `capture-devices-pregranted-to-every-renderer` | Low–Medium | yes | confirmed |
@@ -226,6 +226,13 @@ renderers or any other process of the user. The allow-list in
 `LANDLOCK_SCOPE_SIGNAL` closes the signal paths on Landlock ABI 6
 (kernel 6.12) and later only (`:490`); nothing covers `prlimit64` or
 the scheduler calls.
+
+**Partly fixed.** `rt_sigqueueinfo`, `rt_tgsigqueueinfo` and `prlimit64`
+are allowed only for the process's own pid, and `fcntl` with `F_SETOWN`,
+`F_SETOWN_EX` or `F_SETSIG` is denied. Still open: `sched_set*` and
+`setpriority` on other pids, because threads call them with their own
+thread id, which a filter built at startup cannot tell from a foreign
+pid.
 
 **Fix.** Drop `rt_sigqueueinfo` or filter its first argument to the own
 pid as for `kill`; filter `rt_tgsigqueueinfo` on tgid; restrict

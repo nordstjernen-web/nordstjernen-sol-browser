@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: on Linux a compromised renderer can no longer signal other
+  processes through `rt_sigqueueinfo`, `rt_tgsigqueueinfo` or
+  `fcntl(F_SETOWN/F_SETSIG)`, nor change another process's resource
+  limits through `prlimit64`; the seccomp filter now restricts those
+  calls to the renderer's own process (`docs/security-
+  review-2026-11.md`, S1).
 * Security: more file types prompt before they are saved — disk images,
   Office macro documents, Windows shell and installer formats, and
   further shell and macOS script types. The move of a finished download

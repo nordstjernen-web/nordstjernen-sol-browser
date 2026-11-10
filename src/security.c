@@ -846,7 +846,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "pread64",
     "preadv",
     "preadv2",
-    "prlimit64",
     "pselect6",
     "pselect6_time64",
     "pwrite64",
@@ -872,12 +871,10 @@ static const char *const ns_seccomp_allowed_names[] = {
     "rt_sigaction",
     "rt_sigpending",
     "rt_sigprocmask",
-    "rt_sigqueueinfo",
     "rt_sigreturn",
     "rt_sigsuspend",
     "rt_sigtimedwait",
     "rt_sigtimedwait_time64",
-    "rt_tgsigqueueinfo",
     "sched_getaffinity",
     "sched_getattr",
     "sched_getparam",
@@ -1025,6 +1022,34 @@ ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
                            SCMP_A0(SCMP_CMP_EQ, self_pid, 0));
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 1,
                            SCMP_A0(SCMP_CMP_EQ, self_pid, 0));
+    static const char *const own_process_only[] = {
+        "rt_sigqueueinfo", "rt_tgsigqueueinfo", "prlimit64",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(own_process_only); i++) {
+        int nr = seccomp_syscall_resolve_name(own_process_only[i]);
+        if (nr == __NR_SCMP_ERROR) continue;
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 1,
+                               SCMP_A0(SCMP_CMP_EQ, self_pid, 0));
+    }
+    (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(prlimit64), 1,
+                           SCMP_A0(SCMP_CMP_EQ, 0, 0));
+}
+
+static int
+ns_seccomp_deny_signal_owner_fcntl(scmp_filter_ctx ctx)
+{
+    static const int commands[] = { F_SETOWN, F_SETOWN_EX, F_SETSIG };
+    static const char *const calls[] = { "fcntl", "fcntl64" };
+    int rc = 0;
+    for (gsize c = 0; rc == 0 && c < G_N_ELEMENTS(calls); c++) {
+        int nr = seccomp_syscall_resolve_name(calls[c]);
+        if (nr == __NR_SCMP_ERROR || nr < 0) continue;
+        for (gsize i = 0; rc == 0 && i < G_N_ELEMENTS(commands); i++)
+            rc = seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), nr, 1,
+                                  SCMP_A1(SCMP_CMP_MASKED_EQ, 0xFFFFFFFFu,
+                                          (scmp_datum_t)commands[i]));
+    }
+    return rc;
 }
 
 static int
@@ -1039,6 +1064,8 @@ ns_seccomp_deny_tty_injection(void)
         rc = seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS(ioctl), 1,
                               SCMP_A1(SCMP_CMP_MASKED_EQ, 0xFFFFFFFFu,
                                       (scmp_datum_t)denied[i]));
+    if (rc == 0)
+        rc = ns_seccomp_deny_signal_owner_fcntl(ctx);
     if (rc == 0)
         rc = seccomp_load(ctx);
     seccomp_release(ctx);
