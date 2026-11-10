@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: `relatedTarget` on mouse, pointer, drag and focus events
+  never names a node of another document. Moving the pointer across the
+  edge of an `<iframe>` gave the frame an element of the embedding page
+  and gave the page an element of the framed document, across origins.
+  The embedding page now sees the `<iframe>` element and the frame sees
+  `null`.
 * Security: a message that cannot be copied into the receiving frame is
   delivered as `null`. When the copy of `postMessage` data into the
   receiver's realm failed, the receiver was handed the sender's original
