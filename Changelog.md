@@ -3,6 +3,15 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: external stylesheets are made valid UTF-8 before they are
+  parsed. A CSS string ending in a truncated multi-byte sequence became
+  generated-content text that several text walkers could read a few
+  bytes past.
+* Security: the camera code no longer trusts the frame geometry a V4L2
+  device reports. Sizes are capped, odd YUYV widths are refused, the
+  driver's line stride is used, a frame is converted only when the
+  buffer holds all of it, and the output starts zeroed, so a virtual or
+  faulty device cannot make the renderer read past the frame buffer.
 * Security: `window.find()` no longer searches the text of embedded
   frames, which let a page test whether a string occurs in a
   cross-origin `<iframe>`.

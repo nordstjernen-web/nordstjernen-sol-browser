@@ -1784,7 +1784,7 @@ ns_rproc_http_clear_cache(ns_rproc_http *r)
 {
     if (!r)
         return -1;
-    return request_ok(r, "/clear-cache", g_strdup("{}"));
+    return request_ok(r, "/clear-cache", strdup("{}"));
 }
 
 char *

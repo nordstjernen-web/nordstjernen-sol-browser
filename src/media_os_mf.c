@@ -273,7 +273,8 @@ vdec_pick_output(ns_os_vdec *d)
             UINT32 sz = 0;
             if (SUCCEEDED(IMFMediaType_GetBlob(t, &MF_MT_MINIMUM_DISPLAY_APERTURE,
                                                (UINT8 *)&area, sizeof area, &sz)) &&
-                sz == sizeof area && area.Area.cx > 0 && area.Area.cy > 0) {
+                sz == sizeof area && area.Area.cx > 0 && area.Area.cy > 0 &&
+                area.Area.cx <= (LONG)w && area.Area.cy <= (LONG)h) {
                 d->vis_width = (int)area.Area.cx;
                 d->vis_height = (int)area.Area.cy;
             } else if (d->width > 0 && d->height > 0 &&
