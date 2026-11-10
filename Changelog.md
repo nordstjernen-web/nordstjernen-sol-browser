@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: settling a WebAuthn request no longer uses its pending
+  record after page script may have freed it. A getter the page put on
+  `Object.prototype`, or a replaced `DOMException`, ran while the reply
+  was being turned into the promise's result and could abort the request,
+  which freed the record and its resolver functions that the engine then
+  read and called.
 * Security: `insertAdjacentHTML` with `beforebegin` or `afterend` moves
   every parsed node into the document before any page script can run.
   Bookkeeping for the first inserted node could call a page-defined

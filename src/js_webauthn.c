@@ -229,17 +229,21 @@ ns_webauthn_settle(ns_js *js, JSContext *ctx, JSValueConst item)
         : NULL;
     if (!p) return;
     JSContext *pctx = p->ctx;
+    JSValue resolve = p->resolve;
+    JSValue reject = p->reject;
+    g_hash_table_steal(js->webauthn_pending, GUINT_TO_POINTER(id));
+    g_free(p);
+    if (pctx != ctx) {
+        JS_FreeValue(pctx, resolve);
+        JS_FreeValue(pctx, reject);
+        return;
+    }
     JSValue credential = JS_GetPropertyStr(ctx, item, "credential");
     JSValue arg;
     JSValue settle;
-    if (pctx != ctx) {
-        JS_FreeValue(ctx, credential);
-        g_hash_table_remove(js->webauthn_pending, GUINT_TO_POINTER(id));
-        return;
-    }
     if (JS_IsObject(credential)) {
         arg = JS_DupValue(ctx, credential);
-        settle = JS_DupValue(pctx, p->resolve);
+        settle = JS_DupValue(pctx, resolve);
     } else {
         JSValue name = JS_GetPropertyStr(ctx, item, "error");
         JSValue message = JS_GetPropertyStr(ctx, item, "message");
@@ -251,11 +255,12 @@ ns_webauthn_settle(ns_js *js, JSContext *ctx, JSValueConst item)
         if (m) JS_FreeCString(ctx, m);
         JS_FreeValue(ctx, name);
         JS_FreeValue(ctx, message);
-        settle = JS_DupValue(pctx, p->reject);
+        settle = JS_DupValue(pctx, reject);
     }
     JS_FreeValue(ctx, credential);
+    JS_FreeValue(pctx, resolve);
+    JS_FreeValue(pctx, reject);
     if (JS_IsException(arg)) arg = JS_GetException(pctx);
-    g_hash_table_remove(js->webauthn_pending, GUINT_TO_POINTER(id));
     JSValue r = JS_Call(pctx, settle, JS_UNDEFINED, 1, &arg);
     if (JS_IsException(r)) JS_FreeValue(pctx, JS_GetException(pctx));
     JS_FreeValue(pctx, r);
