@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: `storage` events reach only frames that share the storage
+  area. A write to the page's `localStorage` or `sessionStorage` was
+  announced to every frame, cross-origin ones included, with the page's
+  own Storage object attached, so an embedded third-party frame could
+  watch each key and value and read and write the rest of the storage.
 * Security: imported modules follow CORS and the document's CSP. A
   static or dynamic `import` of a cross-origin URL was fetched and used
   without an `Access-Control-Allow-Origin` check, so a page could read

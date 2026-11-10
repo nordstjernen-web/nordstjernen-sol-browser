@@ -4374,19 +4374,32 @@ static gboolean ns_fire_property_on_handler(ns_js *js, const ns_node *target,
                                             const char *type, JSValue event);
 static JSValue ns_iframe_lookup_realm_window(ns_js *js, ns_node *iframe);
 
-static void
+static gboolean
 ns_storage_event_retarget_area(ns_js *js, JSValueConst ev, JSValueConst win)
 {
     JSValue area = JS_GetPropertyStr(js->ctx, ev, "storageArea");
     GHashTable *store = JS_GetOpaque(area, ns_storage_class_id);
     JS_FreeValue(js->ctx, area);
-    if (!store) return;
+    if (!store) return FALSE;
     JSValue own = JS_GetPropertyStr(js->ctx, win,
         store == js->local_storage ? "localStorage" : "sessionStorage");
-    if (JS_GetOpaque(own, ns_storage_class_id) == store)
+    gboolean shared = JS_GetOpaque(own, ns_storage_class_id) == store;
+    if (shared)
         JS_SetPropertyStr(js->ctx, (JSValue)ev, "storageArea", own);
     else
         JS_FreeValue(js->ctx, own);
+    return shared;
+}
+
+static gboolean
+ns_storage_frame_shares_top_origin(ns_js *js, const ns_node *frame)
+{
+    const char *url = frame ? ns_element_get_attr(frame, "data-nd-frame-url")
+                            : NULL;
+    unsigned sandbox = ns_iframe_effective_sandbox(frame);
+    if ((sandbox & NS_SANDBOX_ACTIVE) && !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
+        return FALSE;
+    return url && *url && ns_url_same_origin(url, ns_js_top_url(js));
 }
 
 static void
@@ -4405,14 +4418,17 @@ ns_storage_deliver_frames(ns_js *js, ns_node *n, JSValueConst ev,
             if (realm) {
                 ns_realm_scope scope;
                 ns_js_realm_scope_enter(js, realm, &scope);
-                JS_SetPropertyStr(js->ctx, (JSValue)ev, "target",
-                                  JS_DupValue(js->ctx, fwin));
-                ns_storage_event_retarget_area(js, ev, fwin);
-                ns_js_dispatch_window_only_event(js, n, "storage",
-                                                 JS_DupValue(js->ctx, ev),
-                                                 NULL);
+                if (ns_storage_frame_shares_top_origin(js, n->parent) &&
+                    ns_storage_event_retarget_area(js, ev, fwin)) {
+                    JS_SetPropertyStr(js->ctx, (JSValue)ev, "target",
+                                      JS_DupValue(js->ctx, fwin));
+                    ns_js_dispatch_window_only_event(js, n, "storage",
+                                                     JS_DupValue(js->ctx, ev),
+                                                     NULL);
+                }
                 ns_js_realm_scope_leave(js, &scope);
-            } else if (body) {
+            } else if (body &&
+                       ns_storage_frame_shares_top_origin(js, n->parent)) {
                 ns_fire_inline_on_handler(js, body, "storage", (JSValue)ev);
                 ns_fire_property_on_handler(js, body, "storage", (JSValue)ev);
             }
