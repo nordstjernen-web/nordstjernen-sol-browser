@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: the address bar no longer shows a URL's userinfo, so
+  `https://bank.example@evil.test/` displays as `https://evil.test/`,
+  and history records it the same way. Percent-escapes are decoded for
+  display only in the path, query and fragment, and only into printable
+  non-ASCII letters; escaped spaces, slashes, `@` and their Unicode
+  look-alikes stay escaped. The bar shows a long URL from its start
+  instead of its end (`docs/security-review-2026-11.md`, W3).
 * Security: the private-network guard no longer skips documents without
   a network origin. A top-level `data:` page, or a sandboxed frame's
   WebSocket or EventSource, counted as an unknown address space and

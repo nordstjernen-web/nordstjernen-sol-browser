@@ -36,7 +36,7 @@ a sandboxed renderer.
 |----|------|----------|---------------------------|--------|
 | W1 | `iframe-sandbox-opaque-origin-not-applied-to-network` | High | no | **fixed** |
 | W2 | `pna-bypass-via-opaque-top-level-document` | Medium | no | **fixed** |
-| W3 | `address-bar-userinfo-and-decoded-url-spoofing` | Medium | no | confirmed |
+| W3 | `address-bar-userinfo-and-decoded-url-spoofing` | Medium | no | **fixed** |
 | W4 | `csp-unsupported-directives-fail-open` | Low | no | confirmed |
 | W5 | `download-gate-gaps` | Low | partly | confirmed / plausible |
 | S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | confirmed |
@@ -151,6 +151,11 @@ processing a URL gets before it is shown.
 - **The caret is placed at the end** (`set_address_text`, `:720`), so a
   long URL probably shows its tail rather than its origin. This depends
   on GtkText scrolling and was not verified.
+
+**Fixed.** Userinfo is stripped for display and history; decoding is
+limited to printable non-ASCII characters after the authority, with
+look-alikes of URL delimiters kept escaped; the caret is placed at the
+start.
 
 **Fix.** Strip userinfo before display and before recording history.
 Decode only path, query and fragment, never into delimiters or
