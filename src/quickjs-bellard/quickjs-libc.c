@@ -3578,7 +3578,7 @@ static int atomic_add_int(int *ptr, int v)
 static void *js_sab_alloc(void *opaque, size_t size)
 {
     JSSABHeader *sab;
-    sab = malloc(sizeof(JSSABHeader) + size);
+    sab = JS_CageMalloc(sizeof(JSSABHeader) + size);
     if (!sab)
         return NULL;
     sab->ref_count = 1;
@@ -3593,7 +3593,7 @@ static void js_sab_free(void *opaque, void *ptr)
     ref_count = atomic_add_int(&sab->ref_count, -1);
     assert(ref_count >= 0);
     if (ref_count == 0) {
-        free(sab);
+        JS_CageFree(sab);
     }
 }
 
