@@ -4630,7 +4630,8 @@ browser_release_aux(ns_browser *browser, int x, int y, int button, int clicks,
     if (!prevented && node && button == 1 && !browser->pending_nav) {
         const char *download = NULL;
         const char *href = browser_link_href(browser, node, x, y, &download);
-        if (href && *href && !download) {
+        if (href && *href && !download &&
+            ns_js_sandbox_allows_top_navigation(browser->js, node, TRUE)) {
             browser->pending_nav = browser_resolve_navigation(browser, href);
             if (out_newtab && browser->pending_nav) *out_newtab = 1;
         }
@@ -4733,7 +4734,8 @@ ns_browser_release_full(ns_browser *browser, int x, int y, int button,
         const char *href = browser_link_href(browser, node, x, y, &download);
         if (href && *href && download)
             browser_js_download(href, download, browser);
-        else if (href && *href) {
+        else if (href && *href &&
+                 ns_js_sandbox_allows_top_navigation(browser->js, node, TRUE)) {
             browser->pending_nav = browser_resolve_navigation(browser, href);
             newtab = (mods & (2 | 8)) != 0;
         }

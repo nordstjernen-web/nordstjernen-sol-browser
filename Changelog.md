@@ -3,6 +3,19 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a sandboxed `<iframe>` without `allow-same-origin` now has an
+  opaque origin on the network too, not only for storage and cookies.
+  `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` and `EventSource`
+  from such a frame send `Origin: null`, are always cross-origin, are
+  preflighted, and carry no cookies unless the request asks to include
+  credentials; before, they ran with the embedding site's origin and
+  cookies and could read its pages. A sandboxed frame can no longer
+  navigate the top-level page without `allow-top-navigation` (or
+  `allow-top-navigation-by-user-activation` plus a user gesture), and
+  can open a new window only with both `allow-popups` and
+  `allow-popups-to-escape-sandbox`, because a popup cannot yet inherit
+  the sandbox. `window.open(url, '_self')` inside a frame navigates that
+  frame instead of the whole tab (`docs/security-review-2026-11.md`, W1).
 * Docs: `docs/security-review-2026-11.md` records a source review for
   security vulnerabilities. It found no attacker-reachable memory
   corruption in the parsers it read; the most serious open finding is

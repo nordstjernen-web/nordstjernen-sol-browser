@@ -4,8 +4,10 @@ A source review of the first-party C code for security vulnerabilities,
 done on 2026-11-10 against `main` at `ca746e7`. It was a **static**
 review: nothing was built, run or fuzzed for it, so "confirmed" below
 means the code path was traced by reading from attacker input to the
-fault, not reproduced. Every finding is open at the time of writing;
-none is fixed by the commit that adds this file.
+fault, not reproduced. Every finding was open when the review was
+written; the Status column of the table below marks the ones fixed
+since, and the fixing commits carry the slug as a `Security-Fix:`
+trailer.
 
 The threat model is the one in [SECURITY.md](../SECURITY.md): the
 attacker controls everything fetched from the network, and a second
@@ -32,7 +34,7 @@ a sandboxed renderer.
 
 | ID | Slug | Severity | Needs renderer compromise | Status |
 |----|------|----------|---------------------------|--------|
-| W1 | `iframe-sandbox-opaque-origin-not-applied-to-network` | High | no | confirmed |
+| W1 | `iframe-sandbox-opaque-origin-not-applied-to-network` | High | no | **fixed** |
 | W2 | `pna-bypass-via-opaque-top-level-document` | Medium | no | confirmed |
 | W3 | `address-bar-userinfo-and-decoded-url-spoofing` | Medium | no | confirmed |
 | W4 | `csp-unsupported-directives-fail-open` | Low | no | confirmed |
@@ -86,6 +88,16 @@ Two related gaps share the cause:
   (`:677`). `window.open(url, '_top')` reaches `nav_cb` unchecked
   (`:27880`). Top navigation through `top.location` and anchors is
   likely unchecked as well; that setter path was not traced end to end.
+
+**Fixed.** Requests from an opaque realm carry an internal
+`X-ND-Opaque-Origin` marker: the script side treats them as never
+same-origin, the network layer sends `Origin: null`, preflights them and
+marks them cross-site. Top navigation and popups from sandboxed frames
+are gated on their flags; a popup without
+`allow-popups-to-escape-sandbox` is blocked rather than opened
+unsandboxed. Still open: subresource loads (`<img>`, stylesheets) from an
+opaque frame are treated as same-site for cookies, though their
+responses are not readable. The original recommendation follows.
 
 **Fix.** Give each realm an explicit origin — tuple or opaque — fixed at
 frame creation, with `sandbox` minus `allow-same-origin` yielding
