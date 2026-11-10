@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: on Linux a renderer or media helper that cannot load its
+  seccomp filter now exits instead of continuing with a warning, as it
+  already did for Landlock, and a socket rule that fails to install no
+  longer opens every socket family. `NS_ALLOW_NO_SECCOMP=1` restores the
+  old tolerance (`docs/security-review-2026-11.md`, S8).
 * Security: on Linux a compromised renderer can no longer signal other
   processes through `rt_sigqueueinfo`, `rt_tgsigqueueinfo` or
   `fcntl(F_SETOWN/F_SETSIG)`, nor change another process's resource

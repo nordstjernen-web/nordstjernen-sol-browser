@@ -248,9 +248,12 @@ on a kernel without it — older than Linux 5.13, built without
 parameter — and a renderer or media helper whose Landlock ruleset cannot be
 created or enforced exits the same way instead of running unconfined. Only
 `NS_NO_SANDBOX=1` overrides this. Android keeps the best-effort behaviour.
-The seccomp filter stays best-effort: a process that cannot load it logs a
-warning and continues. Set `NS_REQUIRE_SANDBOX=1` to make that fail-closed
-too. `about:nordstjernen` shows, in its Security section, the kernel's
+The seccomp filter is mandatory in the same way: a process that cannot
+load it exits (code 70) instead of running untrusted content without a
+syscall filter, and a `socket` rule that cannot be installed leaves that
+socket family denied rather than opening every family. `NS_NO_SECCOMP=1`
+skips the filter and `NS_ALLOW_NO_SECCOMP=1` tolerates a failed load;
+Android keeps the best-effort behaviour. `about:nordstjernen` shows, in its Security section, the kernel's
 Landlock ABI and whether Landlock, seccomp and `no_new_privs` are actually
 in force in the renderer that drew the page (read from
 `/proc/self/status`), along with the macOS Seatbelt or Windows mitigation

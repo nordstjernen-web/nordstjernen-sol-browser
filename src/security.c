@@ -431,6 +431,24 @@ ns_security_require_landlock(void)
 }
 
 static void
+ns_seccomp_filter_missing(const char *what)
+{
+#ifdef __ANDROID__
+    (void)what;
+#else
+    if (ns_security_env_flag("NS_ALLOW_NO_SECCOMP")) {
+        g_warning("seccomp: %s; continuing without a syscall filter because "
+                  "NS_ALLOW_NO_SECCOMP is set", what);
+        return;
+    }
+    g_printerr("nordstjernen: %s, so this process would run untrusted "
+               "content without a syscall filter. Refusing to continue; set "
+               "NS_ALLOW_NO_SECCOMP=1 to run without it.\n", what);
+    _exit(70);
+#endif
+}
+
+static void
 ns_sandbox_require_or_die(const char *what)
 {
     if (!ns_security_env_flag("NS_REQUIRE_SANDBOX"))
@@ -1007,16 +1025,12 @@ ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
     if (clone3_nr != __NR_SCMP_ERROR)
         (void)seccomp_rule_add(ctx, SCMP_ACT_ERRNO(ENOSYS), clone3_nr, 0);
     static const int domains[] = { AF_UNIX, AF_INET, AF_INET6, AF_NETLINK };
-    int sock_rc = 0;
     for (gsize i = 0; i < G_N_ELEMENTS(domains); i++) {
         if (domains[i] == AF_UNIX && !ns_seccomp_unix_sockets) continue;
-        int rc = seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
-                                  SCMP_A0(SCMP_CMP_EQ,
-                                          (scmp_datum_t)domains[i], 0));
-        if (rc != 0) sock_rc = rc;
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
+                               SCMP_A0(SCMP_CMP_EQ,
+                                       (scmp_datum_t)domains[i], 0));
     }
-    if (sock_rc != 0)
-        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 0);
     const scmp_datum_t self_pid = (scmp_datum_t)getpid();
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(kill), 1,
                            SCMP_A0(SCMP_CMP_EQ, self_pid, 0));
@@ -1086,6 +1100,7 @@ ns_security_seccomp_init(void)
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
         g_info("seccomp: PR_SET_NO_NEW_PRIVS failed: %s", g_strerror(errno));
         ns_sandbox_require_or_die("seccomp prerequisite (no_new_privs) failed");
+        ns_seccomp_filter_missing("the seccomp prerequisite (no_new_privs) failed");
         return;
     }
 
@@ -1094,12 +1109,14 @@ ns_security_seccomp_init(void)
         g_warning("seccomp: terminal-injection filter failed to load: %s",
                   g_strerror(-tty_rc));
         ns_sandbox_require_or_die("seccomp terminal-injection filter failed to load");
+        ns_seccomp_filter_missing("the seccomp terminal-injection filter failed to load");
     }
 
     scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_ERRNO(EPERM));
     if (!ctx) {
         g_info("seccomp: seccomp_init failed");
         ns_sandbox_require_or_die("seccomp syscall filter could not be created");
+        ns_seccomp_filter_missing("the seccomp syscall filter could not be created");
         return;
     }
     (void)seccomp_attr_set(ctx, SCMP_FLTATR_CTL_TSYNC, 1);
@@ -1124,6 +1141,7 @@ ns_security_seccomp_init(void)
         g_warning("seccomp: load failed, process is NOT syscall-sandboxed: %s",
                   g_strerror(-rc));
         ns_sandbox_require_or_die("seccomp syscall filter failed to load");
+        ns_seccomp_filter_missing("the seccomp syscall filter failed to load");
     }
     seccomp_release(ctx);
 #endif

@@ -46,7 +46,7 @@ a sandboxed renderer.
 | S5 | `renderer-holds-display-connection-without-surfaceless-egl` | Medium, configuration-dependent | yes | confirmed (prevalence unknown) |
 | S6 | `renderer-inherits-shell-environment` | Low | yes | confirmed |
 | S7 | `shared-profile-lets-one-renderer-persist-into-other-sites` | Medium | yes | confirmed |
-| S8 | `seccomp-best-effort-and-socket-fallback` | Low | yes | confirmed |
+| S8 | `seccomp-best-effort-and-socket-fallback` | Low | yes | **fixed** |
 | S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | plausible |
 | M1 | `unbounded-dom-recursion-svg-foreign-and-frame-images` | Low (DoS) | no | confirmed |
 | M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | confirmed |
@@ -353,6 +353,10 @@ fails to add, `socket` is allowed for every domain (`:1012-1022`); and
 every `seccomp_rule_add` result is discarded. Without the filter the
 renderer keeps `execve` and `AF_UNIX`, so the session D-Bus is
 reachable. Landlock failure is already fatal.
+
+**Fixed.** A failed filter load exits with code 70 unless
+`NS_ALLOW_NO_SECCOMP` is set (Android stays best-effort), and the allow-
+all `socket` fallback is gone.
 
 **Fix.** Make seccomp failure fatal in the renderer and audio helper by
 default, with an opt-out, and deny rather than allow all when a socket
