@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: `insertAdjacentHTML` with `beforebegin` or `afterend` moves
+  every parsed node into the document before any page script can run.
+  Bookkeeping for the first inserted node could call a page-defined
+  getter that detached the reference element; the remaining nodes then
+  stayed in the temporary fragment, were still entered in the document's
+  id, class and tag indexes, and were freed with the fragment, leaving
+  the indexes pointing at freed nodes.
 * Security: the `DataTransfer` of a clipboard or drag event is created in
   the realm of the frame that receives the event. It was always built
   with the top page's `DataTransfer`, so text pasted into a cross-origin

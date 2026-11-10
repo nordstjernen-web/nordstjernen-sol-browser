@@ -38317,10 +38317,11 @@ ns_element_insertAdjacentHTML(JSContext *ctx, JSValueConst this_val,
         }
         if (g_ascii_strcasecmp(pos, "beforebegin") == 0 && self->parent) {
             ns_node *parent = self->parent;
-            for (guint i = 0; i < kids->len; i++) {
+            for (guint i = 0; i < kids->len; i++)
+                ns_insert_sibling_before(self, kids->pdata[i]);
+            for (guint i = 0; _j && i < kids->len; i++) {
                 ns_node *c = kids->pdata[i];
-                ns_insert_sibling_before(self, c);
-                if (_j)
+                if (c->parent == parent)
                     ns_js_record_child_change(_j, parent, c, NULL,
                                               c->prev_sibling, c->next_sibling);
             }
@@ -38352,12 +38353,14 @@ ns_element_insertAdjacentHTML(JSContext *ctx, JSValueConst this_val,
             ns_node *parent = self->parent;
             ns_node *ref = self;
             for (guint i = 0; i < kids->len; i++) {
+                ns_insert_sibling_after(ref, kids->pdata[i]);
+                ref = kids->pdata[i];
+            }
+            for (guint i = 0; _j && i < kids->len; i++) {
                 ns_node *c = kids->pdata[i];
-                ns_insert_sibling_after(ref, c);
-                if (_j)
+                if (c->parent == parent)
                     ns_js_record_child_change(_j, parent, c, NULL,
                                               c->prev_sibling, c->next_sibling);
-                ref = c;
             }
         }
         ns_node *upgrade_root = adjacent_to_self ? self->parent : self;
