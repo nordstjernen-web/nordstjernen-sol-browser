@@ -48,7 +48,7 @@ a sandboxed renderer.
 | S7 | `shared-profile-lets-one-renderer-persist-into-other-sites` | Medium | yes | open |
 | S8 | `seccomp-best-effort-and-socket-fallback` | Low | yes | **fixed** |
 | S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | open (documented) |
-| M1 | `unbounded-dom-recursion-svg-foreign-and-frame-images` | Low (DoS) | no | confirmed |
+| M1 | `unbounded-dom-recursion-svg-foreign-and-frame-images` | Low (DoS) | no | **fixed** |
 | M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | confirmed |
 | M3 | `raw-svg-bytes-break-utf8-invariant` | Low | no | plausible |
 | M4 | `webgpu-map-wait-stack-userdata` | Low | no | plausible |
@@ -424,6 +424,11 @@ guards with `NS_DOM_MAX_DEPTH`. Two do not:
 A document or script that nests on the order of 10^5 elements under an
 inline `<svg>`, or inside an iframe, exhausts the stack and crashes the
 renderer. The guard page makes it a clean fault.
+
+**Fixed.** Both walkers take a depth argument and stop at
+`NS_DOM_MAX_DEPTH`. The crash itself was not reproduced: a 100,000-deep
+parsed document and a script-built one both ran without a fault before
+and after the change.
 
 **Fix.** Add a depth parameter with the `NS_DOM_MAX_DEPTH` guard the
 neighbouring walkers use, or make both iterative.

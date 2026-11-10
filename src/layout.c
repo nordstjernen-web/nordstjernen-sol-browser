@@ -5934,8 +5934,10 @@ layout_svg_foreign_object(const ns_node *fo, GHashTable *styles, double width)
 
 static void
 collect_svg_foreign_objects(ns_box *svg_box, const ns_node *n,
-                            GHashTable *styles, double fallback_width)
+                            GHashTable *styles, double fallback_width,
+                            int depth)
 {
+    if (depth >= NS_DOM_MAX_DEPTH) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
         const ns_style *cs = g_hash_table_lookup(styles, c);
@@ -5949,7 +5951,8 @@ collect_svg_foreign_objects(ns_box *svg_box, const ns_node *n,
                     svg_foreign_width(c, fallback_width)));
             continue;
         }
-        collect_svg_foreign_objects(svg_box, c, styles, fallback_width);
+        collect_svg_foreign_objects(svg_box, c, styles, fallback_width,
+                                    depth + 1);
     }
 }
 
@@ -5958,7 +5961,8 @@ build_svg_foreign_objects(ns_box *svg_box, const ns_node *svg,
                           GHashTable *styles, double width)
 {
     if (!styles) return;
-    collect_svg_foreign_objects(svg_box, svg, styles, width > 0 ? width : 300);
+    collect_svg_foreign_objects(svg_box, svg, styles, width > 0 ? width : 300,
+                                0);
 }
 
 static const char *

@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: two DOM walkers that recursed without a depth limit — the
+  one collecting `<foreignObject>` elements under an inline `<svg>` and
+  the one collecting an iframe document's images — now stop at the same
+  depth as every other walker, so a very deeply nested document cannot
+  exhaust the renderer's stack through them (`docs/security-
+  review-2026-11.md`, M1).
 * Docs: SECURITY.md is brought back in line with the code — the SQLite
   cookie store, FTP top-level navigations, the audio helper's socket
   rules and its retained sound-server connection, and the list of
