@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security hardening: decoded video frames start from a zeroed buffer,
+  so a short colour conversion cannot leave uninitialised memory in a
+  frame a page can read back through a canvas; an SVG mask whose surface
+  failed to render is skipped instead of dereferenced; and
+  `TextDecoder` no longer leaves a stray exception pending when its
+  stream state is not a buffer.
 * Security: WebGPU operations that wait for a driver callback
   (`mapAsync`, `requestAdapter`, `requestDevice`, `popErrorScope`,
   `onSubmittedWorkDone` and canvas readback) no longer hand the driver a

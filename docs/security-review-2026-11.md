@@ -14,6 +14,24 @@ attacker controls everything fetched from the network, and a second
 tier of findings assumes the attacker already has code execution inside
 a sandboxed renderer.
 
+## Status after the fixes
+
+Fourteen of the nineteen findings are fixed and two are partly fixed;
+the table's Status column and a note under each finding say what
+changed.
+
+- **Fixed:** W1–W5, S2, S5, S6, S8, M1–M5.
+- **Partly fixed:** S1 (scheduling calls on other processes remain) and
+  S3 (the XDG runtime directory and outbound network remain).
+- **Open:** S4 (capture devices), S7 (shared profile and popup relay)
+  and S9 (audio helper's sound-server connection, now documented). S4
+  and S7 need the shell to broker devices, network and storage for the
+  renderer.
+
+The fixes were checked in headless and windowed runs in a container
+with software rendering. They were not run on real GPU drivers, with a
+camera or microphone, or on macOS and Windows.
+
 ## Summary
 
 - **No attacker-reachable heap or stack corruption was found** in the
@@ -504,6 +522,11 @@ back full.
 **Fix.** Loop while `in.pos < in.size || o.pos == o.size`.
 
 ### Hardening notes
+
+The first, second and fourth notes are addressed: the frame buffer is
+zero-initialised, the mask surface is checked before its pixels are
+read, and the TextDecoder path clears the exception. The grid line-name
+interning is unchanged.
 
 - `src/video_decode.c:473-488`, `:550-568`: the BGRA buffer comes from
   `av_malloc` and the `sws_scale` return value is ignored. A short

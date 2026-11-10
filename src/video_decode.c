@@ -470,7 +470,7 @@ ns_lav_frame_to_texture(ns_lav *L, AVFrame *frame)
     if (w <= 0 || h <= 0 || w > 16384 || h > 16384) return NULL;
     gsize stride = ((gsize)w * 4 + 63) & ~(gsize)63;
     gsize buf_len = stride * (gsize)h;
-    guint8 *bgra = av_malloc(buf_len + 64);
+    guint8 *bgra = av_mallocz(buf_len + 64);
     if (!bgra) return NULL;
 
     L->sws = sws_getCachedContext(L->sws, frame->width, frame->height,
@@ -547,7 +547,7 @@ ns_lav_os_frame_to_texture(ns_lav *L, ns_os_frame *f)
                                : AV_PIX_FMT_BGRA;
     gsize stride = ((gsize)w * 4 + 63) & ~(gsize)63;
     gsize buf_len = stride * (gsize)h;
-    guint8 *bgra = av_malloc(buf_len + 64);
+    guint8 *bgra = av_mallocz(buf_len + 64);
     if (!bgra) return NULL;
     L->sws = sws_getCachedContext(L->sws, w, h, src_fmt, w, h, AV_PIX_FMT_BGRA,
                                   SWS_BILINEAR, NULL, NULL, NULL);

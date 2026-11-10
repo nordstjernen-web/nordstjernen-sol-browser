@@ -24278,6 +24278,7 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
         size_t tlen = 0;
         uint8_t *tp = JS_GetArrayBuffer(ctx, &tlen, tail);
         if (tp && tlen) g_byte_array_append(buf, tp, tlen);
+        else if (!tp) JS_FreeValue(ctx, JS_GetException(ctx));
     }
     JS_FreeValue(ctx, tail);
 

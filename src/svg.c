@@ -2014,6 +2014,11 @@ svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     }
     const unsigned char *src = cairo_image_surface_get_data(rgb);
     unsigned char *dst = cairo_image_surface_get_data(a8);
+    if (!src || !dst || cairo_surface_status(rgb) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(rgb);
+        cairo_surface_destroy(a8);
+        return NULL;
+    }
     int sstride = cairo_image_surface_get_stride(rgb);
     int dstride = cairo_image_surface_get_stride(a8);
     gboolean alpha_mask = svg_mask_type_is_alpha(mask);
