@@ -51868,6 +51868,7 @@ ns_first_descendant_named_rec(ns_node *root, const char *name, int depth)
 {
     if (!root || depth >= 512) return NULL;
     for (ns_node *c = root->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_embedded_doc(c) || ns_node_is_shadow_root(c)) continue;
         if (c->kind == NS_NODE_ELEMENT && c->name &&
             g_ascii_strcasecmp(c->name, name) == 0)
             return c;
@@ -51889,6 +51890,7 @@ ns_collect_descendants_named_rec(ns_node *root, const char *name,
 {
     if (!root || depth >= 512) return;
     for (ns_node *c = root->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_embedded_doc(c) || ns_node_is_shadow_root(c)) continue;
         if (c->kind == NS_NODE_ELEMENT && c->name &&
             g_ascii_strcasecmp(c->name, name) == 0)
             g_ptr_array_add(out, c);
@@ -58179,9 +58181,27 @@ ns_document_create_node_iterator(JSContext *ctx, JSValueConst this_val,
 }
 
 static ns_node *
+ns_ni_skip_hidden_back(ns_node *n)
+{
+    while (n && (ns_node_is_embedded_doc(n) || ns_node_is_shadow_root(n)))
+        n = n->prev_sibling;
+    return n;
+}
+
+static ns_node *
+ns_ni_skip_hidden_fwd(ns_node *n)
+{
+    while (n && (ns_node_is_embedded_doc(n) || ns_node_is_shadow_root(n)))
+        n = n->next_sibling;
+    return n;
+}
+
+static ns_node *
 ns_ni_last_inclusive(ns_node *n)
 {
-    while (n->last_child) n = n->last_child;
+    for (ns_node *c = ns_ni_skip_hidden_back(n->last_child); c;
+         c = ns_ni_skip_hidden_back(n->last_child))
+        n = c;
     return n;
 }
 
@@ -58196,8 +58216,10 @@ ns_ni_is_inclusive_ancestor(const ns_node *anc, const ns_node *node)
 static ns_node *
 ns_ni_following_outside(ns_node *node, ns_node *root)
 {
-    for (ns_node *n = node; n && n != root; n = ns_dom_frame_parent(n))
-        if (n->next_sibling) return n->next_sibling;
+    for (ns_node *n = node; n && n != root; n = ns_dom_frame_parent(n)) {
+        ns_node *next = ns_ni_skip_hidden_fwd(n->next_sibling);
+        if (next) return next;
+    }
     return NULL;
 }
 
@@ -58221,9 +58243,8 @@ ns_node_iters_pre_remove(ns_js *js, ns_node *removed)
             }
             it->before = FALSE;
         }
-        ns_node *newref = removed->prev_sibling
-            ? ns_ni_last_inclusive(removed->prev_sibling)
-            : removed->parent;
+        ns_node *prev = ns_ni_skip_hidden_back(removed->prev_sibling);
+        ns_node *newref = prev ? ns_ni_last_inclusive(prev) : removed->parent;
         JS_FreeValue(ctx, it->ref);
         it->ref = newref ? ns_make_element(ctx, newref) : JS_NULL;
     }
