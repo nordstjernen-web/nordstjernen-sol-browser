@@ -69302,15 +69302,34 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
     if (js) js->module_load_count++;
     GError *err = NULL;
     const char *top_url = !js ? NULL
-        : (js->worker_host ? js->worker_host->base_url : js->current_url);
+        : (js->worker_host ? js->worker_host->base_url
+                           : ns_js_realm_url_or_current(js, ctx));
+    gboolean opaque_origin = js && ns_js_realm_origin_is_opaque(js, ctx);
+    gboolean cross_origin = !ns_origin_matches(opaque_origin, top_url, module_name);
+    const ns_csp *csp = js && !js->worker_host ? ns_js_realm_csp(js, ctx) : NULL;
+    if ((csp && !ns_csp_allows(csp, NS_CSP_SCRIPT, module_name, top_url)) ||
+        (top_url && g_str_has_prefix(top_url, "https://") &&
+         g_str_has_prefix(module_name, "http://"))) {
+        JS_ThrowTypeError(ctx, "module blocked by the document's policy: %s",
+                          module_name);
+        return NULL;
+    }
     ns_perf_resource_info info = {
         .timeline = ctx,
         .document_url = ns_js_realm_document_url(js, ctx),
         .cors_mode = TRUE,
     };
+    const char *const *accept = json_module
+        ? NULL : ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT);
+    GPtrArray *headers = g_ptr_array_new();
+    for (int i = 0; accept && accept[i]; i++)
+        g_ptr_array_add(headers, (gpointer)accept[i]);
+    if (cross_origin)
+        g_ptr_array_add(headers, (gpointer)"X-ND-Credentials: omit");
+    g_ptr_array_add(headers, NULL);
     ns_response *resp = ns_js_fetch_subresource(js, module_name, top_url,
-        json_module ? NULL : ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT),
-        &err, "script", &info);
+        (const char *const *)headers->pdata, &err, "script", &info);
+    g_ptr_array_free(headers, TRUE);
     if (!resp || resp->error || !resp->body || resp->body->len == 0 ||
         resp->body->len > NS_MAX_SCRIPT_BYTES) {
         const char *why = err ? err->message :
@@ -69323,6 +69342,16 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
         if (resp) ns_response_free(resp);
         g_clear_error(&err);
         JS_ThrowTypeError(ctx, "module fetch failed: %s", module_name);
+        return NULL;
+    }
+    if (!cors_allows(opaque_origin, top_url,
+                     resp->final_url && *resp->final_url ? resp->final_url
+                                                         : module_name,
+                     resp->cors_allow_origin)) {
+        JS_ThrowTypeError(ctx, "cross-origin module %s is not shared with "
+                          "this document (no Access-Control-Allow-Origin)",
+                          module_name);
+        ns_response_free(resp);
         return NULL;
     }
     if (!module_mime_acceptable(resp->content_type, json_module)) {

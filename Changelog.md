@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: imported modules follow CORS and the document's CSP. A
+  static or dynamic `import` of a cross-origin URL was fetched and used
+  without an `Access-Control-Allow-Origin` check, so a page could read
+  any cross-origin JSON through a JSON module, and `script-src` was not
+  applied to imports. A cross-origin import now needs the header, is
+  sent without cookies, and is refused when `script-src` or the
+  mixed-content rule forbids it.
 * Security: an import map applies only to the document that declared it.
   The tab kept one import map for every frame, so a cross-origin frame
   could add entries that redirected the embedding page's later module
