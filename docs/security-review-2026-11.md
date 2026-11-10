@@ -42,12 +42,12 @@ a sandboxed renderer.
 | S1 | `seccomp-cross-process-signals-and-limits` | Low–Medium | yes | **partly fixed** |
 | S2 | `seccomp-sysv-ipc-reachable` | Low–Medium | yes | **fixed** |
 | S3 | `renderer-landlock-read-scope-plus-open-network` | Medium | yes | **partly fixed** |
-| S4 | `capture-devices-pregranted-to-every-renderer` | Low–Medium | yes | confirmed |
+| S4 | `capture-devices-pregranted-to-every-renderer` | Low–Medium | yes | open |
 | S5 | `renderer-holds-display-connection-without-surfaceless-egl` | Medium, configuration-dependent | yes | **fixed** |
 | S6 | `renderer-inherits-shell-environment` | Low | yes | **fixed** |
-| S7 | `shared-profile-lets-one-renderer-persist-into-other-sites` | Medium | yes | confirmed |
+| S7 | `shared-profile-lets-one-renderer-persist-into-other-sites` | Medium | yes | open |
 | S8 | `seccomp-best-effort-and-socket-fallback` | Low | yes | **fixed** |
-| S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | plausible |
+| S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | open (documented) |
 | M1 | `unbounded-dom-recursion-svg-foreign-and-frame-images` | Low (DoS) | no | confirmed |
 | M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | confirmed |
 | M3 | `raw-svg-bytes-break-utf8-invariant` | Low | no | plausible |
@@ -295,6 +295,12 @@ microphone access, but at the OS level any renderer can open the devices
 whatever `permissions.ini` says, so a compromised renderer can capture
 silently for any site.
 
+**Still open.** Closing this needs the shell to open the device after a
+grant and hand the descriptor to the renderer, or to respawn the tab's
+renderer with the device rule. Both change the permission flow, which
+could not be exercised without a camera and an interactive session, so
+it was not attempted blind.
+
 **Fix.** Leave capture devices out of the default ruleset. Have the
 shell open the device after a grant and pass the descriptor over the
 control socket, or respawn that tab's renderer with the device rule.
@@ -359,6 +365,13 @@ are worth recording.
   popup renderer whose opener is another site can thus run script in
   that site's renderer.
 
+**Still open.** Both paths need the planned network and storage broker.
+Stamping the popup relay's `origin` in the shell was tried and dropped:
+the shell only knows a tab's URL from what its renderer reports, and
+learns a redirected URL after the page's scripts have already run, so
+the check would either trust the compromised renderer or break popups
+that call their opener during load.
+
 **Fix.** For the cache, authenticate each entry with a key the shell
 holds or serve it through a shell broker; short term, give each renderer
 a per-site cache directory. For the relay, have the shell stamp `origin`
@@ -389,6 +402,9 @@ The audio helper opens its SDL device before `sandbox_self`
 connection after new `AF_UNIX` sockets are denied. A helper compromised
 through a decoder might use it for microphone capture or to load server
 modules; the server side was not examined.
+
+**Still open, documented.** SECURITY.md now records the retained sound-
+server connection as a residual risk of the audio helper.
 
 **Fix.** Document it as residual risk at minimum. Ideally the shell owns
 audio output and the helper only decodes to PCM.
@@ -481,6 +497,8 @@ finish step, so the tail of a body can be dropped. No memory impact.
   leaves a pending exception when the value is not an ArrayBuffer.
 
 ## Documentation drift in SECURITY.md
+
+The four items below are corrected in SECURITY.md.
 
 - It names `http` and `https` as the only protocols; `src/net.c:2025`
   also enables `ftp` when libcurl has it (top-level navigations only;

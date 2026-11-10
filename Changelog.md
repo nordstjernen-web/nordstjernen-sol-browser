@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Docs: SECURITY.md is brought back in line with the code — the SQLite
+  cookie store, FTP top-level navigations, the audio helper's socket
+  rules and its retained sound-server connection, and the list of
+  settings that apply without a prompt.
 * Security: on Linux a renderer or media helper can no longer read all
   of `~/.config`, `~/.local/share`, `~/.cache` and `/run`. It now gets
   only the font, graphics-cache, media-plugin, MIME and spell-check
