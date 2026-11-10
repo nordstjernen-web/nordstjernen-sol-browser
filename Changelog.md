@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: `new WebAssembly.Memory()` and `memory.grow()` now throw
+  `RangeError` when the JavaScript heap cage cannot supply the memory,
+  instead of writing through a null pointer and crashing the renderer
+  (`docs/security-review-2026-11.md`, M2).
 * Security: two DOM walkers that recursed without a depth limit — the
   one collecting `<foreignObject>` elements under an inline `<svg>` and
   the one collecting an iframe document's images — now stop at the same

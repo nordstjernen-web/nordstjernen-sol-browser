@@ -49,7 +49,7 @@ a sandboxed renderer.
 | S8 | `seccomp-best-effort-and-socket-fallback` | Low | yes | **fixed** |
 | S9 | `audio-helper-preopened-sound-server-connection` | Low | helper compromise | open (documented) |
 | M1 | `unbounded-dom-recursion-svg-foreign-and-frame-images` | Low (DoS) | no | **fixed** |
-| M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | confirmed |
+| M2 | `wasm-memory-cage-alloc-unchecked` | Low (DoS) | no | **fixed** |
 | M3 | `raw-svg-bytes-break-utf8-invariant` | Low | no | plausible |
 | M4 | `webgpu-map-wait-stack-userdata` | Low | no | plausible |
 | M5 | `zstd-final-flush-truncation` | Info | no | plausible |
@@ -443,6 +443,10 @@ result and then zero-fills from `m->staging + m->staging_size`, which
 with NULL is a write starting at an address between 64 KiB and 512 MiB.
 Script reaches both by filling the cage with buffers first. The old
 block is leaked rather than freed, so there is no use-after-free.
+
+**Fixed.** The constructor allocates before it creates the object and
+throws on failure; `grow` reallocates into a temporary and leaves the
+memory untouched on failure.
 
 **Fix.** Check both results. Throw `RangeError` from the constructor; in
 `grow`, realloc into a temporary and leave `m->staging` untouched on

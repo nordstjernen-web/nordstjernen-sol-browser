@@ -800,7 +800,10 @@ ns_wasm_memory_grow(JSContext *ctx, JSValueConst this_val, int argc,
             guint64 new_size = new_pages * NS_WASM_PAGE_SIZE;
             if (new_size > NS_WASM_MEMORY_MAX_BYTES)
                 return JS_ThrowRangeError(ctx, "wasm memory.grow failed");
-            m->staging = ns_js_cage_shared_realloc(m->staging, new_size);
+            guint8 *grown = ns_js_cage_shared_realloc(m->staging, new_size);
+            if (!grown)
+                return JS_ThrowRangeError(ctx, "wasm memory.grow failed");
+            m->staging = grown;
             memset(m->staging + m->staging_size, 0,
                    new_size - m->staging_size);
             m->staging_size = (size_t)new_size;
@@ -2248,14 +2251,19 @@ ns_wasm_memory_ctor(JSContext *ctx, JSValueConst new_target, int argc,
     guint64 bytes = (guint64)initial * NS_WASM_PAGE_SIZE;
     if (bytes > NS_WASM_MEMORY_MAX_BYTES)
         return JS_ThrowRangeError(ctx, "wasm memory initial is too large");
+    guint8 *staging = ns_js_cage_shared_malloc(bytes ? (size_t)bytes : 1);
+    if (!staging)
+        return JS_ThrowRangeError(ctx, "wasm memory could not be allocated");
     JSValue obj = JS_NewObjectClass(ctx, ns_wasm_memory_class_id);
-    if (JS_IsException(obj))
+    if (JS_IsException(obj)) {
+        ns_js_cage_shared_free(staging);
         return obj;
+    }
     ns_wasm_memory *m = g_new0(ns_wasm_memory, 1);
     m->ctx = ctx;
     m->instance = JS_UNDEFINED;
     m->buffer = JS_UNDEFINED;
-    m->staging = ns_js_cage_shared_malloc(bytes ? (size_t)bytes : 1);
+    m->staging = staging;
     memset(m->staging, 0, bytes ? (size_t)bytes : 1);
     m->staging_size = (size_t)bytes;
     m->max_pages = maximum;
