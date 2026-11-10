@@ -37156,6 +37156,26 @@ ns_event_put(JSContext *ctx, JSValueConst event, const char *name, JSValue value
     JS_DefinePropertyValueStr(ctx, event, name, value, JS_PROP_C_W_E);
 }
 
+static const ns_node *
+ns_node_nearest_document(const ns_node *n)
+{
+    for (; n; n = n->parent)
+        if (n->kind == NS_NODE_DOCUMENT) return n;
+    return NULL;
+}
+
+static const ns_node *
+ns_js_related_target_for(const ns_node *target, const ns_node *related)
+{
+    const ns_node *target_doc = ns_node_nearest_document(target);
+    while (related) {
+        const ns_node *doc = ns_node_nearest_document(related);
+        if (doc == target_doc) return related;
+        related = doc ? doc->parent : NULL;
+    }
+    return NULL;
+}
+
 static JSValue
 ns_js_build_mouse_event(ns_js *js, const ns_node *target, const char *type,
                         double client_x, double client_y,
@@ -37168,6 +37188,7 @@ ns_js_build_mouse_event(ns_js *js, const ns_node *target, const char *type,
     JSContext *ctx = ns_js_node_realm_context(js, target);
     if (!ctx) ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
     *out_ctx = ctx;
+    related = ns_js_related_target_for(target, related);
     double frame_x = 0, frame_y = 0;
     const ns_node *owner_iframe = ns_node_owner_iframe(target);
     const ns_box *owner_box = js->layout_root && owner_iframe
@@ -37634,6 +37655,7 @@ ns_js_dispatch_drag_event(ns_js *js, ns_js_drag_session *session,
     JS_SetPropertyStr(ctx, event, "ctrlKey",  ctrl  ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, event, "altKey",   alt   ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, event, "metaKey",  meta  ? JS_TRUE : JS_FALSE);
+    related = ns_js_related_target_for(target, related);
     JS_SetPropertyStr(ctx, event, "relatedTarget",
                       related ? ns_make_element(ctx, related) : JS_NULL);
     JS_SetPropertyStr(ctx, event, "dataTransfer",
@@ -47560,6 +47582,7 @@ ns_js_dispatch_focus_event(ns_js *js, const ns_node *target, const char *type,
     ns_event_type_init_flags(type, FALSE, &bubbles, &cancelable);
     JS_SetPropertyStr(ctx, event, "bubbles", JS_NewBool(ctx, bubbles));
     JS_SetPropertyStr(ctx, event, "cancelable", JS_NewBool(ctx, cancelable));
+    related = ns_js_related_target_for(target, related);
     JS_SetPropertyStr(ctx, event, "relatedTarget",
                       related ? ns_make_element(ctx, related) : JS_NULL);
     ns_js_dispatch_built_event(js, target, type, event, NULL);
