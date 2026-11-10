@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: WebGPU objects are registered in every JavaScript runtime.
+  The WebGPU classes were set up only in the first runtime a renderer
+  created, so after a navigation their finalizers never ran and a canvas
+  context could outlive its runtime and be handed to a later page. A
+  canvas context is now only reused inside the runtime that made it.
+* Security: `OffscreenCanvas.getContext('webgpu')` returns null in a
+  worker, as the WebGL contexts already did. It used to create a context
+  from the worker thread in the table the main thread paints from.
 * The default JavaScript engine is now Fabrice Bellard's QuickJS, forked
   in-tree at `src/quickjs-bellard/` from upstream master `e585640`. The
   quickjs-ng fork stays in the tree: `-Dquickjs=quickjs-ng` builds it.

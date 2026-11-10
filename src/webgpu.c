@@ -2531,7 +2531,8 @@ wg_context_finalizer(JSRuntime *rt, JSValue val)
     (void)rt;
     ns_wg_context *c = JS_GetOpaque(val, g_context_class);
     if (!c) return;
-    if (g_webgpu_ctx_by_node)
+    if (g_webgpu_ctx_by_node &&
+        g_hash_table_lookup(g_webgpu_ctx_by_node, c->canvas) == c)
         g_hash_table_remove(g_webgpu_ctx_by_node, c->canvas);
     wg_ctx_release_gpu(c);
     if (c->device) wgpuDeviceRelease(c->device);
@@ -4823,57 +4824,56 @@ wg_register_class(JSContext *ctx, JSClassID *id, const char *name,
     def.class_name = name;
     def.finalizer = finalizer;
     ns_new_class_id(id);
-    JS_NewClass(JS_GetRuntime(ctx), *id, &def);
+    if (!JS_IsRegisteredClass(JS_GetRuntime(ctx), *id))
+        JS_NewClass(JS_GetRuntime(ctx), *id, &def);
 }
 
 void
 ns_webgpu_install(JSContext *ctx, ns_js *js, JSValueConst navigator)
 {
     (void)js;
-    if (!g_adapter_class) {
-        wg_register_class(ctx, &g_adapter_class, "GPUAdapter",
-                          wg_adapter_finalizer);
-        wg_register_class(ctx, &g_device_class, "GPUDevice",
-                          wg_device_finalizer);
-        wg_register_class(ctx, &g_queue_class, "GPUQueue",
-                          wg_queue_finalizer);
-        wg_register_class(ctx, &g_buffer_class, "GPUBuffer",
-                          wg_buffer_finalizer);
-        wg_register_class(ctx, &g_context_class, "GPUCanvasContext",
-                          wg_context_finalizer);
-        wg_register_class(ctx, &g_texture_class, "GPUTexture",
-                          wg_texture_finalizer);
-        wg_register_class(ctx, &g_view_class, "GPUTextureView",
-                          wg_view_finalizer);
-        wg_register_class(ctx, &g_encoder_class, "GPUCommandEncoder",
-                          wg_encoder_finalizer);
-        wg_register_class(ctx, &g_pass_class, "GPURenderPassEncoder",
-                          wg_pass_finalizer);
-        wg_register_class(ctx, &g_cmdbuf_class, "GPUCommandBuffer",
-                          wg_cmdbuf_finalizer);
-        wg_register_class(ctx, &g_shader_class, "GPUShaderModule",
-                          wg_shader_finalizer);
-        wg_register_class(ctx, &g_pipeline_class, "GPURenderPipeline",
-                          wg_pipeline_finalizer);
-        wg_register_class(ctx, &g_bgl_class, "GPUBindGroupLayout",
-                          wg_bgl_finalizer);
-        wg_register_class(ctx, &g_pllayout_class, "GPUPipelineLayout",
-                          wg_pllayout_finalizer);
-        wg_register_class(ctx, &g_bindgroup_class, "GPUBindGroup",
-                          wg_bindgroup_finalizer);
-        wg_register_class(ctx, &g_sampler_class, "GPUSampler",
-                          wg_sampler_finalizer);
-        wg_register_class(ctx, &g_queryset_class, "GPUQuerySet",
-                          wg_queryset_finalizer);
-        wg_register_class(ctx, &g_compute_pipe_class, "GPUComputePipeline",
-                          wg_compute_pipe_finalizer);
-        wg_register_class(ctx, &g_compute_pass_class, "GPUComputePassEncoder",
-                          wg_compute_pass_finalizer);
-        wg_register_class(ctx, &g_bundle_encoder_class, "GPURenderBundleEncoder",
-                          wg_bundle_encoder_finalizer);
-        wg_register_class(ctx, &g_bundle_class, "GPURenderBundle",
-                          wg_bundle_finalizer);
-    }
+    wg_register_class(ctx, &g_adapter_class, "GPUAdapter",
+                      wg_adapter_finalizer);
+    wg_register_class(ctx, &g_device_class, "GPUDevice",
+                      wg_device_finalizer);
+    wg_register_class(ctx, &g_queue_class, "GPUQueue",
+                      wg_queue_finalizer);
+    wg_register_class(ctx, &g_buffer_class, "GPUBuffer",
+                      wg_buffer_finalizer);
+    wg_register_class(ctx, &g_context_class, "GPUCanvasContext",
+                      wg_context_finalizer);
+    wg_register_class(ctx, &g_texture_class, "GPUTexture",
+                      wg_texture_finalizer);
+    wg_register_class(ctx, &g_view_class, "GPUTextureView",
+                      wg_view_finalizer);
+    wg_register_class(ctx, &g_encoder_class, "GPUCommandEncoder",
+                      wg_encoder_finalizer);
+    wg_register_class(ctx, &g_pass_class, "GPURenderPassEncoder",
+                      wg_pass_finalizer);
+    wg_register_class(ctx, &g_cmdbuf_class, "GPUCommandBuffer",
+                      wg_cmdbuf_finalizer);
+    wg_register_class(ctx, &g_shader_class, "GPUShaderModule",
+                      wg_shader_finalizer);
+    wg_register_class(ctx, &g_pipeline_class, "GPURenderPipeline",
+                      wg_pipeline_finalizer);
+    wg_register_class(ctx, &g_bgl_class, "GPUBindGroupLayout",
+                      wg_bgl_finalizer);
+    wg_register_class(ctx, &g_pllayout_class, "GPUPipelineLayout",
+                      wg_pllayout_finalizer);
+    wg_register_class(ctx, &g_bindgroup_class, "GPUBindGroup",
+                      wg_bindgroup_finalizer);
+    wg_register_class(ctx, &g_sampler_class, "GPUSampler",
+                      wg_sampler_finalizer);
+    wg_register_class(ctx, &g_queryset_class, "GPUQuerySet",
+                      wg_queryset_finalizer);
+    wg_register_class(ctx, &g_compute_pipe_class, "GPUComputePipeline",
+                      wg_compute_pipe_finalizer);
+    wg_register_class(ctx, &g_compute_pass_class, "GPUComputePassEncoder",
+                      wg_compute_pass_finalizer);
+    wg_register_class(ctx, &g_bundle_encoder_class, "GPURenderBundleEncoder",
+                      wg_bundle_encoder_finalizer);
+    wg_register_class(ctx, &g_bundle_class, "GPURenderBundle",
+                      wg_bundle_finalizer);
 
     JSValue gpu = JS_NewObject(ctx);
     wg_bind(ctx, gpu, "requestAdapter", wg_gpu_requestAdapter, 1);
@@ -4938,11 +4938,13 @@ ns_webgpu_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
 {
     (void)js; (void)canvas_obj;
     if (!ns_webgpu_allowed()) return JS_NULL;
-    if (!g_context_class) return JS_NULL;
+    if (!g_context_class ||
+        !JS_IsRegisteredClass(JS_GetRuntime(ctx), g_context_class))
+        return JS_NULL;
     if (!g_webgpu_ctx_by_node)
         g_webgpu_ctx_by_node = g_hash_table_new(g_direct_hash, g_direct_equal);
     ns_wg_context *existing = g_hash_table_lookup(g_webgpu_ctx_by_node, canvas);
-    if (existing)
+    if (existing && existing->rt == JS_GetRuntime(ctx))
         return JS_DupValue(ctx, existing->self);
 
     JSValue obj = JS_NewObjectClass(ctx, g_context_class);

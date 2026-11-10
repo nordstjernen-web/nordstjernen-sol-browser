@@ -3388,7 +3388,7 @@ ns_canvas_get_webgpu(JSContext *ctx, ns_js *js, ns_canvas_state *st, const ns_no
                      JSValueConst canvas_obj)
 {
 #ifdef ND_HAVE_WEBGPU
-    if (!st->context_kind || st->context_kind == 3) {
+    if (!js->worker_host && (!st->context_kind || st->context_kind == 3)) {
         JSValue gpu = ns_webgpu_get_context(ctx, js, canvas_obj, el);
         if (JS_IsObject(gpu)) {
             st->context_kind = 3;
