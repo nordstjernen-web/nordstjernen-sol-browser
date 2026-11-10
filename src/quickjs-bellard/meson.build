@@ -20,6 +20,7 @@ bqjs_sys_deps = [
 
 bqjs_srcs = files(
   'quickjs.c',
+  'quickjs-cage.c',
   'dtoa.c',
   'libregexp.c',
   'libunicode.c',
@@ -84,6 +85,14 @@ if not meson.is_cross_build() and host_machine.system() != 'windows'
     input: 'repl.js',
     output: 'repl.c',
     command: [bqjsc, '-s', '-c', '-o', '@OUTPUT@', '-m', '@INPUT@'],
+  )
+  executable('run-test262-bellard',
+    'run-test262.c',
+    c_args: bqjs_c_args,
+    link_with: [bqjs_libc, bqjs_lib],
+    dependencies: bqjs_sys_deps,
+    install: false,
+    build_by_default: false,
   )
   executable('qjs-bellard',
     'qjs.c', bqjs_repl,

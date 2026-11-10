@@ -26,6 +26,8 @@
 
 #ifndef NULL
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #endif
 
 struct list_head {
@@ -44,10 +46,20 @@ static inline void init_list_head(struct list_head *head)
     head->next = head;
 }
 
-/* insert 'el' between 'prev' and 'next' */
+static inline void list_corrupted(const struct list_head *el)
+{
+    fprintf(stderr, "quickjs: corrupted list link at %p\n", (const void *)el);
+    abort();
+}
+
+/* insert 'el' between 'prev' and 'next'; both must already point at each
+   other, so a corrupted neighbour cannot turn the insertion into a write
+   elsewhere */
 static inline void __list_add(struct list_head *el,
                               struct list_head *prev, struct list_head *next)
 {
+    if (__builtin_expect(prev->next != next || next->prev != prev, 0))
+        list_corrupted(el);
     prev->next = el;
     el->prev = prev;
     el->next = next;
@@ -71,6 +83,8 @@ static inline void list_del(struct list_head *el)
     struct list_head *prev, *next;
     prev = el->prev;
     next = el->next;
+    if (__builtin_expect(prev->next != el || next->prev != el, 0))
+        list_corrupted(el);
     prev->next = next;
     next->prev = prev;
     el->prev = NULL; /* fail safe */

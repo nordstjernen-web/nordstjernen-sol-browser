@@ -60,7 +60,29 @@ typedef uint32_t JSAtom;
 #define JS_PTR64_DEF(a)
 #endif
 
-#if !defined(JS_PTR64)
+/* Cage boxing: 64-bit builds box values like the NaN-boxing layout, with the
+   low 32 bits holding the pointer's offset from the heap cage base, so a
+   value can only ever name memory inside the cage. */
+#ifndef JS_CAGE_BOXING
+#if defined(JS_PTR64) && !defined(CONFIG_CHECK_JSVALUE) && !defined(__SANITIZE_ADDRESS__) && !defined(_WIN32_DISABLED_CAGE)
+#if defined(__has_feature)
+#if !__has_feature(address_sanitizer)
+#define JS_CAGE_BOXING 1
+#endif
+#else
+#define JS_CAGE_BOXING 1
+#endif
+#endif
+#endif
+#ifndef JS_CAGE_BOXING
+#define JS_CAGE_BOXING 0
+#endif
+
+#if JS_CAGE_BOXING
+#define JS_NAN_BOXING
+#define JS_NAN_BOX_TAG_SHIFT 32
+extern uintptr_t js_cage_pointer_base;
+#elif !defined(JS_PTR64)
 #define JS_NAN_BOXING
 #define JS_NAN_BOX_TAG_SHIFT 32
 #elif defined(__x86_64__) || (defined(__aarch64__) && defined(__APPLE__)) || defined(__riscv)
@@ -162,10 +184,18 @@ typedef uint64_t JSValue;
 #define JS_VALUE_GET_INT(v) (int)(v)
 #define JS_VALUE_GET_BOOL(v) (int)(v)
 #define JS_VALUE_GET_SHORT_BIG_INT(v) (int)(v)
+#if JS_CAGE_BOXING
+#define JS_VALUE_GET_PTR(v) ((void *)(js_cage_pointer_base + (uint32_t)(v)))
+#else
 #define JS_VALUE_GET_PTR(v) (void *)(intptr_t)((v) & (((uint64_t)1 << JS_NAN_BOX_TAG_SHIFT) - 1))
+#endif
 
 #define JS_MKVAL(tag, val) (((uint64_t)(tag) << JS_NAN_BOX_TAG_SHIFT) | (uint32_t)(val))
+#if JS_CAGE_BOXING
+#define JS_MKPTR(tag, ptr) (((uint64_t)(tag) << JS_NAN_BOX_TAG_SHIFT) | (uint32_t)((uintptr_t)(ptr) - js_cage_pointer_base))
+#else
 #define JS_MKPTR(tag, ptr) (((uint64_t)(tag) << JS_NAN_BOX_TAG_SHIFT) | (uintptr_t)(ptr))
+#endif
 
 #define JS_FLOAT64_ADDEND (0x7ff8000000000000 + ((uint64_t)(-JS_TAG_FIRST) << JS_NAN_BOX_TAG_SHIFT))
 
@@ -387,6 +417,15 @@ void JS_SetMaxStackSize(JSRuntime *rt, size_t stack_size);
    used to check stack overflow. */
 void JS_UpdateStackTop(JSRuntime *rt);
 JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque);
+void JS_SetHeapCage(uintptr_t base, size_t size);
+JS_BOOL JS_CageContains(const void *ptr);
+uintptr_t JS_CageBase(void);
+size_t JS_CageSize(void);
+size_t JS_CageCommittedBytes(void);
+void *JS_CageMalloc(size_t size);
+void *JS_CageRealloc(void *ptr, size_t size);
+void JS_CageFree(void *ptr);
+size_t JS_CageUsableSize(const void *ptr);
 void JS_FreeRuntime(JSRuntime *rt);
 void *JS_GetRuntimeOpaque(JSRuntime *rt);
 void JS_SetRuntimeOpaque(JSRuntime *rt, void *opaque);

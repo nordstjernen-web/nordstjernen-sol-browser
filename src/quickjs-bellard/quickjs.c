@@ -46,6 +46,8 @@
 #include "libregexp.h"
 #include "libunicode.h"
 #include "dtoa.h"
+#include "quickjs-cage.h"
+#include "quickjs-cptr.h"
 
 #define OPTIMIZE         1
 #define SHORT_OPCODES    1
@@ -251,6 +253,7 @@ typedef enum OPCodeEnum OPCodeEnum;
 #define JS_MALLOC_MIN_SMALL_SIZE 16
 #define JS_MALLOC_MAX_SMALL_SIZE 512
 #define JS_MALLOC_MAX_SIZE (SIZE_MAX / 4)
+#define JS_MALLOC_TRUSTED_IDX 0xfe
 #if defined(__SANITIZE_ADDRESS__)
 /* use the host malloc() for all allocations */
 #define JS_MALLOC_LARGE_BLOCKS_ONLY 1
@@ -324,6 +327,7 @@ typedef struct {
 
 struct JSRuntime {
     JSMallocContext malloc_ctx;
+    JSCageHeap *cage_heap;
     const char *rt_info;
 
     int atom_hash_size; /* power of two */
@@ -520,6 +524,7 @@ typedef enum {
 struct JSContext {
     JSGCObjectHeader header; /* must come first */
     JSRuntime *rt;
+    uint32_t table_index;
     struct list_head link;
 
     uint16_t binary_object_count;
@@ -1117,6 +1122,8 @@ typedef struct JSMapState {
     JSWeakRefHeader weakref_header; /* only used if is_weak = TRUE */
 } JSMapState;
 
+#include "quickjs-hardening.h"
+
 enum {
     __JS_ATOM_NULL = JS_ATOM_NULL,
 #define DEF(name, str) JS_ATOM_ ## name,
@@ -1579,9 +1586,98 @@ static no_inline void *js_malloc_large(JSMallocContext *s, size_t size)
     return b->header.user_data;
 }
 
+static inline BOOL js_block_is_trusted(const JSMallocBlockHeader *b)
+{
+    return b->u.block_idx == FREE_NIL &&
+           b->block_size_idx == JS_MALLOC_TRUSTED_IDX;
+}
+
+static inline size_t *js_trusted_block_raw(const JSMallocBlockHeader *b)
+{
+    return (size_t *)b - 1;
+}
+
+static void js_trusted_block_free(const JSMallocBlockHeader *b)
+{
+    free(js_trusted_block_raw(b));
+}
+
+/* A trusted block lives outside the heap cage: the runtime, its contexts
+   and the tables the engine indexes with data read from the cage. It keeps
+   the block header so that reference counts and js_free_rt() work on it. */
+static void *js_trusted_mallocz(size_t size)
+{
+    size_t *raw;
+    JSMallocBlockHeader *b;
+    if (size > JS_MALLOC_MAX_SIZE)
+        return NULL;
+    raw = calloc(1, sizeof(size_t) + sizeof(JSMallocBlockHeader) + size);
+    if (!raw)
+        return NULL;
+    raw[0] = size;
+    b = (JSMallocBlockHeader *)(raw + 1);
+    b->u.block_idx = FREE_NIL;
+    b->block_size_idx = JS_MALLOC_TRUSTED_IDX;
+    return b->user_data;
+}
+
+static void *js_trusted_realloc(void *ptr, size_t size)
+{
+    JSMallocBlockHeader *b;
+    size_t *raw, old_size;
+    if (!ptr)
+        return js_trusted_mallocz(size);
+    if (size > JS_MALLOC_MAX_SIZE)
+        return NULL;
+    b = container_of(ptr, JSMallocBlockHeader, user_data);
+    old_size = *js_trusted_block_raw(b);
+    raw = realloc(js_trusted_block_raw(b),
+                  sizeof(size_t) + sizeof(JSMallocBlockHeader) + size);
+    if (!raw)
+        return NULL;
+    raw[0] = size;
+    b = (JSMallocBlockHeader *)(raw + 1);
+    if (size > old_size)
+        memset(b->user_data + old_size, 0, size - old_size);
+    return b->user_data;
+}
+
+typedef enum {
+    JS_BLOCK_ZERO,
+    JS_BLOCK_TRUSTED,
+    JS_BLOCK_LARGE,
+    JS_BLOCK_ARENA,
+} JSBlockKind;
+
+static no_inline __attribute__((noreturn)) void js_block_corrupt(const void *b)
+{
+    fprintf(stderr, "quickjs heap cage: refusing to release the block %p, which is neither in the cage nor trusted\n", b);
+    abort();
+}
+
+/* With the cage active, the address of a block decides how it is released
+   or resized, never its header, which lies inside the cage. */
+static inline JSBlockKind js_block_kind(JSMallocContext *s, const JSMallocBlockHeader *b)
+{
+    if (unlikely(b == (const JSMallocBlockHeader *)s->zero_size_block))
+        return JS_BLOCK_ZERO;
+    if (js_heap_cage_active) {
+        if (likely(js_in_heap_cage(b)))
+            return JS_BLOCK_LARGE;
+        if (js_block_is_trusted(b))
+            return JS_BLOCK_TRUSTED;
+        js_block_corrupt(b);
+    }
+    if (b->u.block_idx != FREE_NIL)
+        return JS_BLOCK_ARENA;
+    return js_block_is_trusted(b) ? JS_BLOCK_TRUSTED : JS_BLOCK_LARGE;
+}
+
 static void *__js_malloc(JSMallocContext *s, size_t size)
 {
     size_t total_size;
+    if (unlikely(size == 0) && js_heap_cage_active)
+        size = 1;
     if (unlikely(size == 0)) {
         JSMallocBlockHeader *b = get_zero_size_block(s);
         return b->user_data;
@@ -1590,7 +1686,7 @@ static void *__js_malloc(JSMallocContext *s, size_t size)
     } else {
         total_size = ((size + JS_MALLOC_ALIGN - 1) & ~(JS_MALLOC_ALIGN - 1)) +
             sizeof(JSMallocBlockHeader);
-        if (!JS_MALLOC_LARGE_BLOCKS_ONLY &&
+        if (!JS_MALLOC_LARGE_BLOCKS_ONLY && !js_heap_cage_active &&
             total_size <= JS_MALLOC_MAX_SMALL_SIZE) {
             int block_size_idx;
             unsigned int block_idx, block_size;
@@ -1630,14 +1726,18 @@ static void *__js_malloc(JSMallocContext *s, size_t size)
 static void __js_free(JSMallocContext *s, void *ptr)
 {
     JSMallocBlockHeader *b;
+    JSBlockKind kind;
 
     if (!ptr)
         return;
     b = container_of(ptr, JSMallocBlockHeader, user_data);
-    if (unlikely(b->u.block_idx == FREE_NIL)) {
-        /* large or zero size block */
-        if (b == get_zero_size_block(s)) {
+    kind = js_block_kind(s, b);
+    if (unlikely(kind != JS_BLOCK_ARENA)) {
+        /* large, trusted or zero size block */
+        if (kind == JS_BLOCK_ZERO) {
             /* nothing to do */
+        } else if (kind == JS_BLOCK_TRUSTED) {
+            js_trusted_block_free(b);
         } else {
             JSMallocLargeBlockHeader *lb = container_of(ptr, JSMallocLargeBlockHeader, header.user_data);
 #ifdef JS_MALLOC_USE_ITER
@@ -1671,6 +1771,7 @@ static void __js_free(JSMallocContext *s, void *ptr)
 static void *__js_realloc(JSMallocContext *s, void *ptr, size_t size)
 {
     JSMallocBlockHeader *b;
+    JSBlockKind kind;
     if (ptr == NULL) {
         return __js_malloc(s, size);
     } else if (size == 0) {
@@ -1680,9 +1781,12 @@ static void *__js_realloc(JSMallocContext *s, void *ptr, size_t size)
         return NULL;
     }
     b = container_of(ptr, JSMallocBlockHeader, user_data);
-    if (b->u.block_idx == FREE_NIL) {
-        if (b == get_zero_size_block(s)) {
+    kind = js_block_kind(s, b);
+    if (kind != JS_BLOCK_ARENA) {
+        if (kind == JS_BLOCK_ZERO) {
             return __js_malloc(s, size);
+        } else if (kind == JS_BLOCK_TRUSTED) {
+            return js_trusted_realloc(ptr, size);
         } else {
             JSMallocLargeBlockHeader *lb, *new_lb;
             lb = container_of(ptr, JSMallocLargeBlockHeader, header.user_data);
@@ -1736,12 +1840,16 @@ static void *__js_realloc(JSMallocContext *s, void *ptr, size_t size)
 static size_t __js_malloc_usable_size(JSMallocContext *s, const char *ptr)
 {
     JSMallocBlockHeader *b;
+    JSBlockKind kind;
     if (!ptr)
         return 0;
     b = container_of(ptr, JSMallocBlockHeader, user_data);
-    if (b->u.block_idx == FREE_NIL) {
-        if (b == get_zero_size_block(s)) {
+    kind = js_block_kind(s, b);
+    if (kind != JS_BLOCK_ARENA) {
+        if (kind == JS_BLOCK_ZERO) {
             return 0;
+        } else if (kind == JS_BLOCK_TRUSTED) {
+            return *js_trusted_block_raw(b);
         } else {
             JSMallocLargeBlockHeader *lb;
             size_t size;
@@ -2113,10 +2221,9 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     ms.opaque = opaque;
     ms.malloc_limit = -1;
 
-    rt = mf->js_malloc(&ms, sizeof(JSRuntime));
+    rt = js_trusted_mallocz(sizeof(JSRuntime));
     if (!rt)
         return NULL;
-    memset(rt, 0, sizeof(*rt));
     js_malloc_init(&rt->malloc_ctx);
     rt->malloc_ctx.mf = *mf;
     rt->malloc_ctx.malloc_state = ms;
@@ -2253,9 +2360,79 @@ static const JSMallocFunctions def_malloc_funcs = {
     js_def_malloc_usable_size,
 };
 
+static void *js_cage_mf_malloc(JSMallocState *s, size_t size)
+{
+    void *ptr;
+    if (unlikely(s->malloc_size + size > s->malloc_limit))
+        return NULL;
+    ptr = js_cage_heap_alloc(s->opaque, size);
+    if (!ptr)
+        return NULL;
+    s->malloc_count++;
+    s->malloc_size += js_cage_usable_size(ptr) + MALLOC_OVERHEAD;
+    return ptr;
+}
+
+static void js_cage_mf_free(JSMallocState *s, void *ptr)
+{
+    if (!ptr)
+        return;
+    s->malloc_count--;
+    s->malloc_size -= js_cage_usable_size(ptr) + MALLOC_OVERHEAD;
+    js_cage_free(ptr);
+}
+
+static void *js_cage_mf_realloc(JSMallocState *s, void *ptr, size_t size)
+{
+    size_t old_size;
+    if (!ptr) {
+        if (size == 0)
+            return NULL;
+        return js_cage_mf_malloc(s, size);
+    }
+    old_size = js_cage_usable_size(ptr);
+    if (size == 0) {
+        js_cage_mf_free(s, ptr);
+        return NULL;
+    }
+    if (s->malloc_size + size - old_size > s->malloc_limit)
+        return NULL;
+    ptr = js_cage_heap_realloc(s->opaque, ptr, size);
+    if (!ptr)
+        return NULL;
+    s->malloc_size += js_cage_usable_size(ptr) - old_size;
+    return ptr;
+}
+
+static const JSMallocFunctions cage_malloc_funcs = {
+    js_cage_mf_malloc,
+    js_cage_mf_free,
+    js_cage_mf_realloc,
+    js_cage_usable_size,
+};
+
+/* Every runtime gets its own heap inside the process-wide cage; there is
+   no process-heap fallback when values are boxed as cage offsets. */
 JSRuntime *JS_NewRuntime(void)
 {
+#if JS_CAGE_BOXING
+    JSCageHeap *heap;
+    JSRuntime *rt;
+    heap = js_cage_heap_new();
+    if (!heap)
+        return NULL;
+    JS_SetHeapCage(js_cage_base(), js_cage_size());
+    rt = JS_NewRuntime2(&cage_malloc_funcs, heap);
+    if (!rt) {
+        js_cage_heap_destroy(heap);
+        return NULL;
+    }
+    rt->cage_heap = heap;
+    return rt;
+#else
+    (void)cage_malloc_funcs;
     return JS_NewRuntime2(&def_malloc_funcs, NULL);
+#endif
 }
 
 void JS_SetMemoryLimit(JSRuntime *rt, size_t limit)
@@ -2648,8 +2825,10 @@ void JS_FreeRuntime(JSRuntime *rt)
 #endif
 
     {
-        JSMallocState ms = rt->malloc_ctx.malloc_state;
-        rt->malloc_ctx.mf.js_free(&ms, rt);
+        JSCageHeap *cage_heap = rt->cage_heap;
+        js_trusted_block_free(js_rc(rt));
+        if (cage_heap)
+            js_cage_heap_destroy(cage_heap);
     }
 }
 
@@ -2658,9 +2837,15 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     JSContext *ctx;
     int i;
 
-    ctx = js_mallocz_rt(rt, sizeof(JSContext));
+    ctx = js_trusted_mallocz(sizeof(JSContext));
     if (!ctx)
         return NULL;
+    ctx->table_index = js_ctx_table_add(ctx);
+    if (!ctx->table_index) {
+        js_free_rt(rt, ctx);
+        return NULL;
+    }
+    ctx->rt = rt;
     js_rc(ctx)->ref_count = 1;
     add_gc_object(rt, &ctx->header, JS_GC_OBJ_TYPE_JS_CONTEXT);
 
@@ -2901,6 +3086,7 @@ void JS_FreeContext(JSContext *ctx)
 
     list_del(&ctx->link);
     remove_gc_object(&ctx->header);
+    js_ctx_table_remove(ctx->table_index);
     js_free_rt(ctx->rt, ctx);
 }
 
@@ -3123,7 +3309,7 @@ static int JS_ResizeAtomHash(JSRuntime *rt, int new_hash_size)
 
     assert((new_hash_size & (new_hash_size - 1)) == 0); /* power of two */
     new_hash_mask = new_hash_size - 1;
-    new_hash = js_mallocz_rt(rt, sizeof(rt->atom_hash[0]) * new_hash_size);
+    new_hash = js_trusted_mallocz(sizeof(rt->atom_hash[0]) * new_hash_size);
     if (!new_hash)
         return -1;
     for(i = 0; i < rt->atom_hash_size; i++) {
@@ -3307,7 +3493,7 @@ static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
         if (new_size > JS_ATOM_MAX)
             goto fail;
         /* XXX: should use realloc2 to use slack space */
-        new_array = js_realloc_rt(rt, rt->atom_array, sizeof(*new_array) * new_size);
+        new_array = js_trusted_realloc(rt->atom_array, sizeof(*new_array) * new_size);
         if (!new_array)
             goto fail;
         /* Note: the atom 0 is not used */
@@ -3977,8 +4163,8 @@ static int JS_NewClass1(JSRuntime *rt, JSClassID class_id,
             ctx->class_proto = new_tab;
         }
         /* reallocate the class array */
-        new_class_array = js_realloc_rt(rt, rt->class_array,
-                                        sizeof(JSClass) * new_size);
+        new_class_array = js_trusted_realloc(rt->class_array,
+                                             sizeof(JSClass) * new_size);
         if (!new_class_array)
             return -1;
         memset(new_class_array + rt->class_count, 0,
@@ -5257,7 +5443,7 @@ static int init_shape_hash(JSRuntime *rt)
     rt->shape_hash_bits = 4;   /* 16 shapes */
     rt->shape_hash_size = 1 << rt->shape_hash_bits;
     rt->shape_hash_count = 0;
-    rt->shape_hash = js_mallocz_rt(rt, sizeof(rt->shape_hash[0]) *
+    rt->shape_hash = js_trusted_mallocz(sizeof(rt->shape_hash[0]) *
                                    rt->shape_hash_size);
     if (!rt->shape_hash)
         return -1;
@@ -5292,8 +5478,8 @@ static int resize_shape_hash(JSRuntime *rt, int new_shape_hash_bits)
     JSShape **new_shape_hash, *sh, *sh_next;
 
     new_shape_hash_size = 1 << new_shape_hash_bits;
-    new_shape_hash = js_mallocz_rt(rt, sizeof(rt->shape_hash[0]) *
-                                   new_shape_hash_size);
+    new_shape_hash = js_trusted_mallocz(sizeof(rt->shape_hash[0]) *
+                                        new_shape_hash_size);
     if (!new_shape_hash)
         return -1;
     for(i = 0; i < rt->shape_hash_size; i++) {

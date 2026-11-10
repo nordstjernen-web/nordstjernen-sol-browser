@@ -10,55 +10,6 @@
 #include <stdarg.h>
 #include <string.h>
 
-typedef struct ns_quickjs_malloc_bridge {
-    NsJSMallocFunctions mf;
-    void *opaque;
-    JSRuntime *rt;
-} ns_quickjs_malloc_bridge;
-
-static void *
-ns_quickjs_bridge_malloc(JSMallocState *s, size_t size)
-{
-    ns_quickjs_malloc_bridge *b = s->opaque;
-    return b->mf.js_malloc(b->opaque, size);
-}
-
-static void
-ns_quickjs_bridge_free(JSMallocState *s, void *ptr)
-{
-    ns_quickjs_malloc_bridge *b = s->opaque;
-    b->mf.js_free(b->opaque, ptr);
-    if (ptr && ptr == b->rt) g_free(b);
-}
-
-static void *
-ns_quickjs_bridge_realloc(JSMallocState *s, void *ptr, size_t size)
-{
-    ns_quickjs_malloc_bridge *b = s->opaque;
-    return b->mf.js_realloc(b->opaque, ptr, size);
-}
-
-JSRuntime *
-ns_quickjs_new_runtime2(const NsJSMallocFunctions *mf, void *opaque)
-{
-    ns_quickjs_malloc_bridge *b = g_new0(ns_quickjs_malloc_bridge, 1);
-    b->mf = *mf;
-    b->opaque = opaque;
-    ns_quickjs_orig_malloc_functions orig = {
-        ns_quickjs_bridge_malloc,
-        ns_quickjs_bridge_free,
-        ns_quickjs_bridge_realloc,
-        mf->js_malloc_usable_size,
-    };
-    JSRuntime *rt = (JS_NewRuntime2)(&orig, b);
-    if (!rt) {
-        g_free(b);
-        return NULL;
-    }
-    b->rt = rt;
-    return rt;
-}
-
 typedef struct ns_quickjs_class_ids {
     JSClassID array;
     JSClassID error;
