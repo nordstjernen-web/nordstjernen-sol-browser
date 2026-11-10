@@ -4017,6 +4017,7 @@ ns_partition_apply(ns_js *js, const char *new_url)
     }
 
     g_clear_pointer(&js->cookie_value, g_free);
+    g_clear_pointer(&js->cookie_url, g_free);
     js->cookie_generation = 0;
 
     g_free(js->partition_key);
@@ -65250,14 +65251,25 @@ ns_document_is_realm_document(JSContext *ctx, JSValueConst doc)
     return realm;
 }
 
+static const char *
+ns_document_cookie_url(ns_js *js, JSContext *ctx)
+{
+    if (ns_js_realm_origin_is_opaque(js, ctx)) return NULL;
+    const char *url = ns_js_realm_url(js, ctx);
+    return url && *url ? url : NULL;
+}
+
 static void
-ns_document_refresh_cookie(ns_js *js)
+ns_document_refresh_cookie(ns_js *js, const char *url)
 {
     guint generation = ns_cookie_store_generation();
-    if (js->cookie_value && generation == js->cookie_generation) return;
+    if (js->cookie_value && generation == js->cookie_generation &&
+        g_strcmp0(js->cookie_url, url) == 0)
+        return;
     g_free(js->cookie_value);
-    js->cookie_value = js->current_url && *js->current_url
-        ? ns_net_cookies_for_js(js->current_url, ns_js_top_url(js)) : NULL;
+    g_free(js->cookie_url);
+    js->cookie_url = g_strdup(url);
+    js->cookie_value = ns_net_cookies_for_js(url, ns_js_top_url(js));
     if (!js->cookie_value) js->cookie_value = g_strdup("");
     js->cookie_generation = generation;
 }
@@ -65268,7 +65280,9 @@ ns_document_get_cookie(JSContext *ctx, JSValueConst this_val)
     ns_js *js = js_from_ctx(ctx);
     if (!js || ns_document_is_realm_document(ctx, this_val))
         return JS_NewString(ctx, "");
-    ns_document_refresh_cookie(js);
+    const char *url = ns_document_cookie_url(js, ctx);
+    if (!url) return JS_NewString(ctx, "");
+    ns_document_refresh_cookie(js, url);
     return JS_NewString(ctx, js->cookie_value ? js->cookie_value : "");
 }
 
@@ -65277,10 +65291,11 @@ ns_document_set_cookie(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js || ns_document_is_realm_document(ctx, this_val)) return JS_UNDEFINED;
+    g_autofree char *url = g_strdup(ns_document_cookie_url(js, ctx));
+    if (!url) return JS_UNDEFINED;
     const char *s = JS_ToCString(ctx, val);
     if (!s) return JS_UNDEFINED;
-    if (js->current_url && *js->current_url)
-        ns_net_cookie_store_from_js(js->current_url, ns_js_top_url(js), s);
+    ns_net_cookie_store_from_js(url, ns_js_top_url(js), s);
     JS_FreeCString(ctx, s);
     g_clear_pointer(&js->cookie_value, g_free);
     return JS_UNDEFINED;
@@ -67137,6 +67152,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
 
     ns_storage_load_for(js, js->current_url);
     g_clear_pointer(&js->cookie_value, g_free);
+    g_clear_pointer(&js->cookie_url, g_free);
     js->cookie_generation = 0;
 
     JSContext *ctx = js->ctx;
@@ -67317,6 +67333,7 @@ ns_js_free(ns_js *js)
     g_free(js->local_storage_origin);
     g_free(js->local_storage_path);
     g_free(js->cookie_value);
+    g_free(js->cookie_url);
     g_free(js->referrer);
     g_free(js->current_url);
     g_free(js->change_baseline);

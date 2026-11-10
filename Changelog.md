@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: the `document.cookie` accessor on `Document.prototype` reads
+  and writes cookies for the document of its own realm only. It used the
+  URL of whatever document was current and one cached value for the whole
+  tab, so a cross-origin frame that called the accessor directly could
+  read the embedding page's cookies, and a frame sandboxed without
+  `allow-same-origin` could read and set its origin's cookies.
 * Security: `Range.prototype.toString` stays inside one document. The
   native text walk climbed out of a frame's document into the embedding
   page and descended into embedded frames and shadow trees, so a page
