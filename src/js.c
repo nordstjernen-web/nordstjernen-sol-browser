@@ -1912,6 +1912,17 @@ ns_js_realm_scope_leave(ns_js *js, ns_realm_scope *scope)
 }
 
 void
+ns_js_run_in_realm(ns_js *js, JSContext *realm, void (*fn)(gpointer),
+                   gpointer data)
+{
+    if (!js || !realm) return;
+    ns_realm_scope scope;
+    ns_js_realm_scope_enter(js, realm, &scope);
+    if (scope.active || realm == js->ctx) fn(data);
+    ns_js_realm_scope_leave(js, &scope);
+}
+
+void
 ns_js_microtask_checkpoint(ns_js *js)
 {
     if (js && js->ctx && js->callback_depth == 0 && !JS_IsRunningScript(js->ctx))
@@ -24527,8 +24538,8 @@ ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     ns_js *js = js_from_ctx(ctx);
-    char *origin = (js && js->current_url) ? ns_url_origin_from(js->current_url)
-                                           : NULL;
+    const char *page = js ? ns_js_realm_url_or_current(js, ctx) : NULL;
+    char *origin = page ? ns_url_origin_from(page) : NULL;
     char *uuid = g_uuid_string_random();
     char *url = g_strdup_printf("blob:%s/%s",
                                 (origin && *origin) ? origin : "null", uuid);
@@ -66040,7 +66051,7 @@ ns_window_cookie_list(JSContext *ctx, JSValueConst this_val,
     ns_node *frame = ns_js_frame_of_realm(js, ctx);
     if (frame && ns_iframe_sandbox_denies_cookies(frame))
         return JS_NewString(ctx, "[]");
-    const char *doc_url = js->current_url;
+    const char *doc_url = ns_js_realm_url_or_current(js, ctx);
     if (!doc_url || !*doc_url) return JS_NewString(ctx, "[]");
     const char *url_arg = argc > 0 && JS_IsString(argv[0])
                         ? JS_ToCString(ctx, argv[0]) : NULL;
