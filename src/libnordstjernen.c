@@ -674,7 +674,7 @@ browser_target_scroll_y(ns_browser *browser, const ns_node *target, int *out_y)
 
 static void
 browser_queue_scroll_to(ns_browser *browser, const ns_node *target,
-                        gboolean reveal)
+                        gboolean reveal, gboolean animate)
 {
     if (!browser || !target) return;
     if (reveal && browser_reveal_fragment_target(browser, (ns_node *)target))
@@ -682,6 +682,8 @@ browser_queue_scroll_to(ns_browser *browser, const ns_node *target,
     browser_flush(browser);
     int y = 0;
     if (!browser_target_scroll_y(browser, target, &y)) return;
+    if (animate && ns_js_smooth_scroll_viewport(browser->js, browser->cur_scroll_x, y))
+        return;
     browser->pending_scroll_y = y;
     browser->pending_scroll = TRUE;
     if (reveal) {
@@ -736,7 +738,7 @@ browser_js_scroll_to(const ns_node *target, gpointer user_data)
 {
     ns_browser *browser = user_data;
     if (browser) browser->scroll_anchor = NULL;
-    browser_queue_scroll_to(browser, target, FALSE);
+    browser_queue_scroll_to(browser, target, FALSE, FALSE);
 }
 
 static void
@@ -771,7 +773,7 @@ browser_js_fragment_navigate(const char *url, gpointer user_data)
         return;
     }
     ns_node *target = ns_node_find_fragment_target(browser->doc, fragment);
-    if (target) browser_queue_scroll_to(browser, target, TRUE);
+    if (target) browser_queue_scroll_to(browser, target, TRUE, TRUE);
 }
 
 static gboolean
@@ -1548,7 +1550,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         browser_relayout(b);
     ns_node *fragment_target = fragment && *fragment
         ? ns_node_find_fragment_target(b->doc, fragment) : NULL;
-    if (fragment_target) browser_queue_scroll_to(b, fragment_target, TRUE);
+    if (fragment_target) browser_queue_scroll_to(b, fragment_target, TRUE, FALSE);
     else if (has_fragment && (!fragment || !*fragment)) {
         b->pending_scroll_y = 0;
         b->pending_scroll = TRUE;
@@ -3684,6 +3686,22 @@ ns_browser_hover_full(ns_browser *browser, int x, int y, int mods,
     return 0;
 }
 
+static gboolean
+box_contains_overscroll(const ns_box *box, int prop)
+{
+    const ns_css_value *v = box->style ? box->style->values[prop] : NULL;
+    return ns_css_keyword_is(v, "contain") || ns_css_keyword_is(v, "none");
+}
+
+static gboolean
+box_swallows_overscroll(const ns_box *box, int dx, int dy)
+{
+    if (dy != 0 && box_contains_overscroll(box, NS_CSS_OVERSCROLL_BEHAVIOR_Y))
+        return TRUE;
+    return dx != 0 && dy == 0 &&
+           box_contains_overscroll(box, NS_CSS_OVERSCROLL_BEHAVIOR_X);
+}
+
 int
 ns_browser_scroll_at(ns_browser *browser, int x, int y, int dx, int dy)
 {
@@ -3725,7 +3743,7 @@ ns_browser_scroll_at_full(ns_browser *browser, int x, int y, int dx, int dy,
             ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
         browser_scrolled(browser);
     }
-    return consumed;
+    return consumed || box_swallows_overscroll(box, dx, dy);
 }
 
 static gboolean

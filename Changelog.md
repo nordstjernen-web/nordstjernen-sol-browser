@@ -3,6 +3,20 @@ Changelog:
 
 1.0.47-dev:
 ======
+* CSS: `scroll-behavior: smooth` and the `behavior: 'smooth'` option of
+  `scrollTo()`, `scrollBy()`, `scroll()` and `scrollIntoView()` now
+  animate the scroll over 300 ms, for the viewport and for scrollable
+  elements, and so do `scrollTop` / `scrollLeft` assignments and
+  same-document fragment navigation under a smooth scroller.
+  `behavior: 'instant'` and the reduced-motion preference keep the jump.
+  `window.scrollTo({ top })` no longer resets the horizontal position.
+* CSS: `overscroll-behavior: contain` and `none` stop a wheel scroll
+  from passing to the page once the scroller under the pointer has
+  reached its end.
+* CSS: `background-blend-mode` blends each background layer with the
+  layers and background colour beneath it. The property parsed before
+  but painted nothing, so `@supports` sent pages down a branch that did
+  not work; the same held for the two properties above.
 * Removed legacy compatibility surface that no current site needs:
   the `-ms-flexbox`, `-ms-inline-flexbox` and `-ms-grid` values of
   `display`; the `moz*` and `ms*` fullscreen methods, properties and

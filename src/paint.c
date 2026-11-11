@@ -1724,6 +1724,71 @@ paint_bg_gradient_layer(cairo_t *cr, const ns_css_gradient *gr,
     cairo_restore(cr);
 }
 
+static cairo_operator_t
+blend_name_operator(const char *k)
+{
+    if (strcmp(k, "multiply")    == 0) return CAIRO_OPERATOR_MULTIPLY;
+    if (strcmp(k, "screen")      == 0) return CAIRO_OPERATOR_SCREEN;
+    if (strcmp(k, "overlay")     == 0) return CAIRO_OPERATOR_OVERLAY;
+    if (strcmp(k, "darken")      == 0) return CAIRO_OPERATOR_DARKEN;
+    if (strcmp(k, "lighten")     == 0) return CAIRO_OPERATOR_LIGHTEN;
+    if (strcmp(k, "color-dodge") == 0) return CAIRO_OPERATOR_COLOR_DODGE;
+    if (strcmp(k, "color-burn")  == 0) return CAIRO_OPERATOR_COLOR_BURN;
+    if (strcmp(k, "hard-light")  == 0) return CAIRO_OPERATOR_HARD_LIGHT;
+    if (strcmp(k, "soft-light")  == 0) return CAIRO_OPERATOR_SOFT_LIGHT;
+    if (strcmp(k, "difference")  == 0) return CAIRO_OPERATOR_DIFFERENCE;
+    if (strcmp(k, "exclusion")   == 0) return CAIRO_OPERATOR_EXCLUSION;
+    if (strcmp(k, "hue")         == 0) return CAIRO_OPERATOR_HSL_HUE;
+    if (strcmp(k, "saturation")  == 0) return CAIRO_OPERATOR_HSL_SATURATION;
+    if (strcmp(k, "color")       == 0) return CAIRO_OPERATOR_HSL_COLOR;
+    if (strcmp(k, "luminosity")  == 0) return CAIRO_OPERATOR_HSL_LUMINOSITY;
+    return CAIRO_OPERATOR_OVER;
+}
+
+static cairo_operator_t
+blend_keyword_operator(const ns_css_value *v)
+{
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword)
+        return CAIRO_OPERATOR_OVER;
+    return blend_name_operator(v->u.keyword);
+}
+
+static cairo_operator_t
+bg_layer_blend_operator(const ns_style *s, int layer)
+{
+    const ns_css_value *v = s->values[NS_CSS_BACKGROUND_BLEND_MODE];
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword ||
+        !strchr(v->u.keyword, ','))
+        return blend_keyword_operator(v);
+    g_auto(GStrv) modes = g_strsplit(v->u.keyword, ",", -1);
+    return blend_name_operator(g_strstrip(modes[layer % g_strv_length(modes)]));
+}
+
+static gboolean
+bg_layers_blend(const ns_style *s, int n_layers)
+{
+    if (!s) return FALSE;
+    for (int li = 0; li < n_layers; li++)
+        if (bg_layer_blend_operator(s, li) != CAIRO_OPERATOR_OVER) return TRUE;
+    return FALSE;
+}
+
+static void
+bg_layer_blend_begin(cairo_t *cr, cairo_operator_t op)
+{
+    if (op != CAIRO_OPERATOR_OVER) cairo_push_group(cr);
+}
+
+static void
+bg_layer_blend_end(cairo_t *cr, cairo_operator_t op)
+{
+    if (op == CAIRO_OPERATOR_OVER) return;
+    cairo_pop_group_to_source(cr);
+    cairo_set_operator(cr, op);
+    cairo_paint(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+}
+
 static void
 paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
                               const ns_style *s, double x, double y,
@@ -2207,7 +2272,8 @@ paint_block(cairo_t *cr, const ns_box *b)
     }
 
     gboolean clip_to_text = style_background_clips_to_text(s);
-    if (clip_to_text) cairo_push_group(cr);
+    gboolean isolate_blend = !clip_to_text && bg_layers_blend(s, n_bg_layers);
+    if (clip_to_text || isolate_blend) cairo_push_group(cr);
     rgba bg = rgba_anim(b, NS_CSS_ANIM_TARGET_BG_COLOR,
                         s ? s->values[NS_CSS_BACKGROUND_COLOR] : NULL,
                         0, 0, 0, 0);
@@ -2240,7 +2306,9 @@ paint_block(cairo_t *cr, const ns_box *b)
                            &lclip_x, &lclip_y, &lclip_w, &lclip_h);
         bg_layer_origin_area(b, li, border_x, border_y, border_w, border_h,
                              &lpos_x, &lpos_y, &lpos_w, &lpos_h);
+        cairo_operator_t blend = bg_layer_blend_operator(s, li);
         if (lv->kind == NS_CSS_V_GRADIENT) {
+            bg_layer_blend_begin(cr, blend);
             paint_bg_gradient_layer(cr, &lv->u.gradient,
                 ns_css_value_layer(s->values[NS_CSS_BACKGROUND_REPEAT], li),
                 ns_css_value_layer(s->values[NS_CSS_BACKGROUND_SIZE], li),
@@ -2248,6 +2316,7 @@ paint_block(cairo_t *cr, const ns_box *b)
                 ns_css_value_layer(s->values[NS_CSS_BACKGROUND_POSITION_Y], li),
                 lpos_x, lpos_y, lpos_w, lpos_h,
                 lclip_x, lclip_y, lclip_w, lclip_h, radii);
+            bg_layer_blend_end(cr, blend);
             continue;
         }
         if (lv->kind != NS_CSS_V_URL) continue;
@@ -2258,6 +2327,7 @@ paint_block(cairo_t *cr, const ns_box *b)
         else if (b->media)
             img = b->media->bg_image;
         if (!img) continue;
+        bg_layer_blend_begin(cr, blend);
         paint_bg_image_core(cr, img,
             ns_css_value_layer(s->values[NS_CSS_BACKGROUND_REPEAT], li),
             ns_css_value_layer(s->values[NS_CSS_BACKGROUND_SIZE], li),
@@ -2266,8 +2336,14 @@ paint_block(cairo_t *cr, const ns_box *b)
             style_pixelated(s),
             lpos_x, lpos_y, lpos_w, lpos_h,
             lclip_x, lclip_y, lclip_w, lclip_h, radii);
+        bg_layer_blend_end(cr, blend);
     }
-    if (clip_to_text) paint_background_clipped_to_text(cr, b, cairo_pop_group(cr));
+    if (clip_to_text) {
+        paint_background_clipped_to_text(cr, b, cairo_pop_group(cr));
+    } else if (isolate_blend) {
+        cairo_pop_group_to_source(cr);
+        cairo_paint(cr);
+    }
 
     if (s && s->values[NS_CSS_BOX_SHADOW] &&
         s->values[NS_CSS_BOX_SHADOW]->kind == NS_CSS_V_SHADOW) {
@@ -9113,26 +9189,7 @@ compute_sticky_offset(const ns_box *b, cairo_t *cr,
 static cairo_operator_t
 blend_mode_operator(const ns_style *s)
 {
-    if (!s || !s->values[NS_CSS_MIX_BLEND_MODE]) return CAIRO_OPERATOR_OVER;
-    const ns_css_value *v = s->values[NS_CSS_MIX_BLEND_MODE];
-    if (v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return CAIRO_OPERATOR_OVER;
-    const char *k = v->u.keyword;
-    if (strcmp(k, "multiply")    == 0) return CAIRO_OPERATOR_MULTIPLY;
-    if (strcmp(k, "screen")      == 0) return CAIRO_OPERATOR_SCREEN;
-    if (strcmp(k, "overlay")     == 0) return CAIRO_OPERATOR_OVERLAY;
-    if (strcmp(k, "darken")      == 0) return CAIRO_OPERATOR_DARKEN;
-    if (strcmp(k, "lighten")     == 0) return CAIRO_OPERATOR_LIGHTEN;
-    if (strcmp(k, "color-dodge") == 0) return CAIRO_OPERATOR_COLOR_DODGE;
-    if (strcmp(k, "color-burn")  == 0) return CAIRO_OPERATOR_COLOR_BURN;
-    if (strcmp(k, "hard-light")  == 0) return CAIRO_OPERATOR_HARD_LIGHT;
-    if (strcmp(k, "soft-light")  == 0) return CAIRO_OPERATOR_SOFT_LIGHT;
-    if (strcmp(k, "difference")  == 0) return CAIRO_OPERATOR_DIFFERENCE;
-    if (strcmp(k, "exclusion")   == 0) return CAIRO_OPERATOR_EXCLUSION;
-    if (strcmp(k, "hue")         == 0) return CAIRO_OPERATOR_HSL_HUE;
-    if (strcmp(k, "saturation")  == 0) return CAIRO_OPERATOR_HSL_SATURATION;
-    if (strcmp(k, "color")       == 0) return CAIRO_OPERATOR_HSL_COLOR;
-    if (strcmp(k, "luminosity")  == 0) return CAIRO_OPERATOR_HSL_LUMINOSITY;
-    return CAIRO_OPERATOR_OVER;
+    return blend_keyword_operator(s ? s->values[NS_CSS_MIX_BLEND_MODE] : NULL);
 }
 
 static ns_paint_stats g_paint_stats;
