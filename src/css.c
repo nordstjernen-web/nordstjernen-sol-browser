@@ -10596,6 +10596,9 @@ ns_css_display_blockified(ns_display d)
     return d;
 }
 
+static gboolean g_starting_pass;
+static gboolean g_starting_rules_seen;
+
 static char *
 normalize_display_value(const char *text)
 {
@@ -23613,6 +23616,22 @@ parse_rules_until(const char **pp, const char *end,
                 g_free(at_name);
                 continue;
             }
+            if (g_ascii_strcasecmp(at_name, "starting-style") == 0) {
+                char term = 0;
+                p = css_scan_segment(p, end, &term);
+                if (p < end && *p == '{') {
+                    p++;
+                    guint before = sh->rules->len;
+                    parse_rules_until(&p, end, sh, source_order, '}',
+                                      current_layer, scope_stack);
+                    for (guint ri = before; ri < sh->rules->len; ri++)
+                        ((ns_css_rule *)g_ptr_array_index(sh->rules, ri))
+                            ->starting = TRUE;
+                    if (sh->rules->len > before) g_starting_rules_seen = TRUE;
+                } else if (p < end && *p == ';') p++;
+                g_free(at_name);
+                continue;
+            }
             if (g_ascii_strcasecmp(at_name, "scope") == 0) {
                 char term = 0;
                 const char *prelude_start = p;
@@ -24084,6 +24103,7 @@ css_flatten_style_rule(GString *out, const char *sel,
                     g_ascii_strncasecmp(nsel, "@supports", 9) == 0 ||
                     g_ascii_strncasecmp(nsel, "@container", 10) == 0 ||
                     g_ascii_strncasecmp(nsel, "@layer", 6) == 0 ||
+                    g_ascii_strncasecmp(nsel, "@starting-style", 15) == 0 ||
                     g_ascii_strncasecmp(nsel, "@scope", 6) == 0;
                 if (group) {
                     g_string_append(out, nsel);
@@ -30436,6 +30456,7 @@ css_bucket_each_match(const ns_css_stylesheet *sheet, const GArray *bucket,
         const ns_css_rule *r = c->rule_idx < sheet->rules->len
             ? g_ptr_array_index(sheet->rules, c->rule_idx) : NULL;
         if (!r || r->container_condition ||
+            (r->starting && !g_starting_pass) ||
             c->selector_idx >= r->selectors->len) continue;
         const ns_css_selector *sel =
             g_ptr_array_index(r->selectors, c->selector_idx);
@@ -30572,6 +30593,7 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
         if (ri >= n_rules) continue;
         ns_css_rule *r = g_ptr_array_index(sheet->rules, ri);
         if (!r || cand.selector_idx >= r->selectors->len) continue;
+        if (r->starting && !g_starting_pass) continue;
         gboolean container_ok = !r->container_condition ||
                                 container_rule_matches(r);
         ns_css_selector *cand_sel =
@@ -34054,6 +34076,15 @@ cascade_walk(ns_node *node,
              gboolean under_dirty,
              gboolean parent_changed);
 
+static GHashTable    *g_starting_styles;
+
+const ns_style *
+ns_css_style_starting(const void *node)
+{
+    return node && g_starting_styles
+        ? g_hash_table_lookup(g_starting_styles, node) : NULL;
+}
+
 static GHashTable    *g_incr_prev_styles;
 static GHashTable    *g_incr_before_styles;
 static gboolean       g_incr_before_partial;
@@ -37383,6 +37414,40 @@ incr_mark_env_dependents(guint changed)
             g_hash_table_add(g_incr_self_dirty, node);
 }
 
+static gboolean
+element_newly_rendered(const ns_node *node)
+{
+    const ns_style *prev = g_incr_prev_styles
+        ? g_hash_table_lookup(g_incr_prev_styles, node) : NULL;
+    return !prev || ns_display_is_none(ns_css_display_of(prev));
+}
+
+static void
+starting_style_compute(ns_node *node, const ns_css_stylesheet *ua,
+                       const ns_css_stylesheet *const *author, gsize n_author,
+                       const ns_style *parent_style,
+                       const ns_style *layout_parent, double *root_px,
+                       GHashTable *layer_ranks)
+{
+    GHashTable *scratch = g_hash_table_new(g_direct_hash, g_direct_equal);
+    GPtrArray *changed = g_incr_changed;
+    guint recomputed = g_incr_recomputed;
+    g_incr_changed = NULL;
+    g_starting_pass = TRUE;
+    cascade_walk(node, ua, author, n_author, parent_style, layout_parent,
+                 root_px, layer_ranks, scratch, TRUE, TRUE);
+    g_starting_pass = FALSE;
+    g_incr_changed = changed;
+    g_incr_recomputed = recomputed;
+    ns_style *starting = g_hash_table_lookup(scratch, node);
+    g_hash_table_destroy(scratch);
+    if (!starting) return;
+    if (!g_starting_styles)
+        g_starting_styles = g_hash_table_new_full(
+            g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)ns_style_free);
+    g_hash_table_insert(g_starting_styles, node, starting);
+}
+
 static void
 cascade_walk(ns_node *node,
              const ns_css_stylesheet *ua,
@@ -37397,6 +37462,8 @@ cascade_walk(ns_node *node,
 {
     static int depth;
     if (depth >= NS_CSS_MAX_CASCADE_DEPTH) return;
+    const ns_css_stylesheet *const *entry_author = author;
+    gsize entry_n_author = n_author;
     if (node->kind == NS_NODE_ELEMENT && g_incr_pass_active && !under_dirty &&
         !parent_changed && g_incr_walk_needed && *root_px > 0 &&
         (!g_inv_active || g_inv_active->len == 0) &&
@@ -37682,7 +37749,7 @@ cascade_walk(ns_node *node,
         share_key_t probe;
         gboolean have_key = FALSE;
         const ns_style *shared = NULL;
-        if (g_style_share) {
+        if (g_style_share && !g_starting_pass) {
             style_share_key(g_share_scratch, parent_style, *root_px, matches,
                             var_matches, pending_matches, pe_g, n_pe);
             probe.data = g_share_scratch->data;
@@ -37781,9 +37848,29 @@ cascade_walk(ns_node *node,
             s->env_dependent |= STYLE_READS_CONTAINER;
         if (g_font_metric_reads != font_metric_reads_before)
             s->env_dependent |= STYLE_READS_FONT_METRICS;
-        incr_note_env_dependent(node, s->env_dependent);
+        if (!g_starting_pass)
+            incr_note_env_dependent(node, s->env_dependent);
         }
         g_hash_table_insert(out, node, s);
+        if (g_starting_pass) {
+            if (host_sheets) g_ptr_array_free(host_sheets, TRUE);
+            g_part_scope = outer_part_scope;
+            if (frame_viewport) {
+                g_viewport_w = frame_vw;
+                g_viewport_h = frame_vh;
+            }
+            depth--;
+            return;
+        }
+        if (g_starting_rules_seen && ns_css_style_may_animate(s) &&
+            element_newly_rendered(node)) {
+            css_part_scope inner_part_scope = g_part_scope;
+            g_part_scope = outer_part_scope;
+            starting_style_compute(node, ua, entry_author, entry_n_author,
+                                   parent_style, layout_parent, root_px,
+                                   layer_ranks);
+            g_part_scope = inner_part_scope;
+        }
         if (s->explicit_inherit && g_cascade_parent_node) {
             if (!g_explicit_inherit_parents)
                 g_explicit_inherit_parents =
@@ -39069,6 +39156,7 @@ ns_css_compute(ns_node *doc,
     g_ancestor_filter_attrs = g_css_attr_ancestor_hashes;
     GHashTable *outer_doc_sheets = g_doc_sheets;
     g_doc_sheets = doc_sheets_new(author_sheets, sheet_docs, n_sheets);
+    if (g_starting_styles) g_hash_table_remove_all(g_starting_styles);
     cascade_walk(doc, cached_ua, author_sheets, n_sheets, NULL, NULL,
                  &root_px, layer_ranks, out, FALSE, FALSE);
     g_clear_pointer(&g_doc_sheets, g_hash_table_destroy);

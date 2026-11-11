@@ -994,6 +994,7 @@ typedef struct ns_css_rule {
     GPtrArray  *scopes;
     int         source_order;
     guint       pe_mask;
+    gboolean    starting;
 } ns_css_rule;
 
 typedef struct ns_css_import {
@@ -1205,6 +1206,7 @@ const char *ns_css_position_try_rule(const char *name);
 double ns_css_dimension_px(const ns_css_value *v, double font_size,
                            double basis);
 const ns_style *ns_css_style_before_change(const void *node);
+const ns_style *ns_css_style_starting(const void *node);
 
 ns_display ns_css_display_of(const ns_style *s);
 ns_display ns_css_display_from_keyword(const char *canonical);

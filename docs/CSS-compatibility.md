@@ -264,6 +264,7 @@ the 1.0.31-dev source.
 
 | Topic | Status | Notes |
 |-------|:--:|------|
+| `@starting-style` | ✅ | top level and nested; supplies the before-change style for an element's first style and for leaving `display: none`. Its rules appear flattened in `cssRules`; there is no `CSSStartingStyleRule` |
 | `@media` (width/height/orientation/aspect-ratio/resolution, range syntax, `prefers-*`, color-gamut, etc.) | ✅ | broad MQ4/5 feature coverage |
 | `@supports` (incl. `selector()`) | ✅ | evaluated |
 | `@font-face` | ✅ | |

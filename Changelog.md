@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* CSS: `@starting-style` is supported, at the top level and nested in a
+  style rule. An element that is styled for the first time, or that
+  leaves `display: none`, transitions from the values its
+  `@starting-style` rules give it, so popovers, dialogs and inserted
+  elements can animate in with plain CSS.
 * CSS: `text-decoration-skip-ink` works. With the initial value `auto`
   a solid underline breaks where it would cross a glyph's descender;
   `none` draws it straight through as before. Underlines with a custom
