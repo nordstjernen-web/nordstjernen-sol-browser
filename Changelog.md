@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: the window process refuses a layer update that claims more
+  than 4096 viewport layers. The count came from the renderer unchecked
+  and the snapshot loop ran once per layer, so a compromised renderer
+  could stall the user interface.
 * Security: only the Safe Browsing warning page itself can follow its
   "continue anyway" link. Any page on the same host as a listed URL
   could navigate to it, which skipped the warning without a click and
