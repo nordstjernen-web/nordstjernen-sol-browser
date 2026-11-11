@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* CSS: `field-sizing: content` sizes a text input to its value (or its
+  placeholder when empty) and a textarea to its lines, growing and
+  shrinking as the text changes; `min-width`, `max-width` and an
+  explicit `width` still apply.
 * CSS: `scroll-behavior: smooth` and the `behavior: 'smooth'` option of
   `scrollTo()`, `scrollBy()`, `scroll()` and `scrollIntoView()` now
   animate the scroll over 300 ms, for the viewport and for scrollable
