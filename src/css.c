@@ -32121,7 +32121,7 @@ static const char *kUa =
     "big { font-size: larger; }\n"
     "code, pre, kbd, samp, tt { font-family: monospace; }\n"
     "pre { margin-block: 1em; white-space: pre; }\n"
-    "textarea { white-space: pre-wrap; }\n"
+    "textarea { white-space: pre-wrap; resize: both; }\n"
     "mark { background-color: Mark; color: MarkText; }\n"
     "small { font-size: smaller; }\n"
     "sub { vertical-align: sub; font-size: smaller; }\n"

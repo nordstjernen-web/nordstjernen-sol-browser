@@ -234,6 +234,7 @@ void ns_js_details_toggle_open(ns_js *js, ns_node *details, gboolean open);
 gboolean ns_js_run_animation_frame(ns_js *js);
 
 gboolean ns_js_has_pending_animation_frame(const ns_js *js);
+gboolean ns_js_smooth_scroll_viewport(ns_js *js, double x, double y);
 gboolean ns_js_needs_tick(const ns_js *js);
 gboolean ns_js_needs_frame_tick(const ns_js *js);
 gboolean ns_js_has_work_before(const ns_js *js, gint64 deadline_us);

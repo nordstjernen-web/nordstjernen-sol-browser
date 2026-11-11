@@ -77,6 +77,14 @@ the 1.0.31-dev source.
 | `overflow` / `overflow-x` / `overflow-y` (`visible`/`hidden`/`clip`/`auto`/`scroll`) | ✅ | scrollable boxes get working scrollbars + hit-testing |
 | `scrollbar-width` (`auto`/`thin`/`none`) · `scrollbar-color` | ✅ | `none` hides the overlay scrollbar, `thin` narrows it; `scrollbar-color` themes thumb/track (inherited) |
 | `scroll-snap-type` · `scroll-snap-align` · `scroll-padding` · `scroll-margin` | ✅ | a scroll that lands from the wheel or from `scrollTop`/`scrollLeft` moves to the nearest snap position; `scroll-padding` insets the snapport, `scroll-margin` outsets the snap area |
+| `scroll-behavior` | ✅ | `smooth` eases programmatic scrolls (`scrollTo`/`scrollBy`/`scrollIntoView`, `scrollTop`/`scrollLeft`, same-document fragment navigation) over 300 ms, as does `behavior: 'smooth'`; off under reduced motion |
+| `overscroll-behavior` | ✅ | `contain`/`none` keep a wheel scroll in the scroller under the pointer once it reaches its end |
+| `scrollbar-gutter` | ✅ | scrollbars are overlay scrollbars and take no layout space, so every value is correctly a no-op |
+| `touch-action` | 🟡 | parsed; the GTK shell has no touch pan or pinch gesture to suppress, so it has no effect on desktop. Not wired to the Android shell's gestures |
+| `resize` | ✅ | grip in the bottom-right corner of a textarea or a non-`visible`-overflow box; dragging sets inline `width`/`height` on the allowed axes |
+| `field-sizing` | ✅ | `content` sizes text inputs to their value or placeholder and textareas to their lines |
+| `interpolate-size` | ❌ | parsed only; transitions to and from `auto` and the intrinsic keywords do not animate |
+| `forced-color-adjust` | ✅ | `forced-colors` always evaluates to `none`, so there is nothing to adjust |
 | `break-before` · `break-after` · `break-inside` (and the legacy `page-break-*`) | ✅ | honoured while paginating for paper; `always` maps onto `page` (see [printing.md](printing.md)) |
 | `text-overflow: ellipsis` | ✅ | verified on `white-space:nowrap` clipped boxes |
 | `object-fit` / `object-position` | ✅ | replaced-element sizing |
@@ -178,6 +186,7 @@ the 1.0.31-dev source.
 | `color`, `font-family`/`size`/`weight`/`style`/`stretch`/`kerning`/`variant`, `line-height` | ✅ | Pango-backed; inline font/style ranges participate in width and line-height measurement; `font-stretch` keywords and percentages map to Pango's stretch buckets; `font-kerning`, ligature controls, raw `font-feature-settings`, and `font-variation-settings` map to OpenType features |
 | `text-align` (`left`/`right`/`center`/`justify`/`start`/`end`) | ✅ | |
 | `text-decoration` (line/style/color), `text-shadow` | ✅ | the `text-decoration-line` longhand is parsed and feeds the same line state as the shorthand |
+| `text-decoration-skip-ink` | ✅ | `auto` breaks solid underlines around glyph descenders; `none` draws straight through. Overlines are not skipped |
 | `text-transform` (uppercase/lowercase/capitalize) | ✅ | |
 | `text-indent` (incl. negative sprite-hiding) | ✅ | |
 | `letter-spacing` / `word-spacing` / `tab-size` | ✅ | |
@@ -230,6 +239,7 @@ the 1.0.31-dev source.
 | `opacity` | ✅ | |
 | `filter` (grayscale/sepia/invert/brightness/contrast/saturate/blur/drop-shadow) | ✅ | on images; `blur()` is a separable box blur; `drop-shadow()` uses the image alpha mask, CSS lengths, and parsed colors/currentColor |
 | `mix-blend-mode` | ✅ | |
+| `background-blend-mode` | ✅ | per-layer, isolated to the element's own background |
 | `clip-path` (basic shapes) | ✅ | `circle()`, `ellipse()`, `inset()`, `rect()`, `xywh()`, `polygon()`, `path()`, `shape()` with geometry boxes; canonical specified and computed serialization; interpolation and `add` composition |
 | `shape-outside` / `shape-margin` / `shape-image-threshold` | 🟡 | parsed and serialized (`circle()`, `ellipse()`, `inset()`, `rect()`, `xywh()`, `polygon()`, `path()`, `shape()`, shape boxes; interpolation and `add` composition; computed values resolve lengths and positions); floats do not wrap around the shape yet |
 | `mask-image` (`url()` + linear/radial gradient) | ✅ | gradient masks composite the whole element through the gradient's alpha (fade effects); `mask`/`-webkit-mask` aliased; conic masks skipped |

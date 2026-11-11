@@ -247,6 +247,19 @@ static gboolean ns_ce_constructor_registered(ns_js *js, JSValueConst ctor);
 static JSValue ns_ce_class_for_node(ns_js *js, const ns_node *node);
 static const ns_node *ns_node_owner_iframe(const ns_node *n);
 static double ns_window_scroll_prop(JSContext *ctx, const char *prop);
+typedef enum ns_scroll_behavior {
+    NS_SCROLL_BEHAVIOR_AUTO,
+    NS_SCROLL_BEHAVIOR_INSTANT,
+    NS_SCROLL_BEHAVIOR_SMOOTH,
+} ns_scroll_behavior;
+
+static gboolean ns_scroll_start_smooth(JSContext *ctx, JSValueConst target,
+                                       double x, double y,
+                                       ns_scroll_behavior behavior);
+static ns_scroll_behavior ns_read_scroll_behavior(JSContext *ctx, int argc,
+                                                  JSValueConst *argv);
+static void ns_js_step_smooth_scrolls(ns_js *js);
+static void ns_js_smooth_scrolls_clear(ns_js *js);
 static JSValue ns_document_element_from_point(JSContext *ctx,
                                               JSValueConst this_val,
                                               int argc, JSValueConst *argv);
@@ -36231,6 +36244,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
     if (!ns_js_frame_may_run(js)) return FALSE;
     if (js->focused_node && ns_node_is_disabled_form_control(js->focused_node))
         ns_js_set_focus(js, NULL);
+    ns_js_step_smooth_scrolls(js);
     ns_js_flush_scrollend(js);
     ns_js_flush_ready_images(js);
     ns_js_flush_autofocus(js);
@@ -36358,7 +36372,8 @@ ns_js_run_animation_frame_internal(ns_js *js)
 gboolean
 ns_js_has_pending_animation_frame(const ns_js *js)
 {
-    return ns_raf_has_runnable(js);
+    return ns_raf_has_runnable(js) ||
+           (js && js->smooth_scrolls && js->smooth_scrolls->len > 0);
 }
 
 static gboolean
@@ -45134,25 +45149,75 @@ ns_element_scrolled(JSContext *ctx, JSValueConst this_val, ns_box *b)
     }
 }
 
+static void
+ns_element_apply_scroll_top(JSContext *ctx, JSValueConst this_val, double v)
+{
+    if (ns_element_is_scrolling_root(ctx, this_val)) {
+        ns_js_scroll_viewport(ctx,
+                              ns_window_scroll_prop(ctx, "scrollX"), v);
+        return;
+    }
+    const ns_box *cb = ns_box_for_this(ctx, this_val);
+    if (!cb) return;
+    ns_box *b = (ns_box *)cb;
+    double max = b->scroll_max_y > 0 ? b->scroll_max_y : 0;
+    if (v < 0) v = 0;
+    if (v > max) v = max;
+    if (v == b->scroll_y) return;
+    b->scroll_y = v;
+    ns_element_scrolled(ctx, this_val, b);
+}
+
+static void
+ns_element_apply_scroll_left(JSContext *ctx, JSValueConst this_val, double v)
+{
+    if (ns_element_is_scrolling_root(ctx, this_val)) {
+        ns_js_scroll_viewport(ctx, v,
+                              ns_window_scroll_prop(ctx, "scrollY"));
+        return;
+    }
+    const ns_box *cb = ns_box_for_this(ctx, this_val);
+    if (!cb) return;
+    ns_box *b = (ns_box *)cb;
+    double max = b->scroll_max_x > 0 ? b->scroll_max_x : 0;
+    if (v < 0) v = 0;
+    if (v > max) v = max;
+    if (v == b->scroll_x) return;
+    b->scroll_x = v;
+    ns_element_scrolled(ctx, this_val, b);
+}
+
+static double
+ns_element_scroll_position(JSContext *ctx, JSValueConst this_val,
+                           gboolean vertical)
+{
+    if (ns_element_is_scrolling_root(ctx, this_val))
+        return ns_window_scroll_prop(ctx, vertical ? "scrollY" : "scrollX");
+    const ns_box *b = ns_box_for_this(ctx, this_val);
+    if (!b) return 0;
+    return vertical ? b->scroll_y : b->scroll_x;
+}
+
+static void
+ns_element_scroll_request(JSContext *ctx, JSValueConst this_val,
+                          gboolean has_x, double x, gboolean has_y, double y,
+                          ns_scroll_behavior behavior)
+{
+    if (!has_x && !has_y) return;
+    if (!has_x) x = ns_element_scroll_position(ctx, this_val, FALSE);
+    if (!has_y) y = ns_element_scroll_position(ctx, this_val, TRUE);
+    if (ns_scroll_start_smooth(ctx, this_val, x, y, behavior)) return;
+    if (has_x) ns_element_apply_scroll_left(ctx, this_val, x);
+    if (has_y) ns_element_apply_scroll_top(ctx, this_val, y);
+}
+
 static JSValue
 ns_element_set_scrollTop(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
     double v;
     if (JS_ToFloat64(ctx, &v, val) != 0) return JS_UNDEFINED;
-    if (ns_element_is_scrolling_root(ctx, this_val)) {
-        ns_js_scroll_viewport(ctx,
-                              ns_window_scroll_prop(ctx, "scrollX"), v);
-        return JS_UNDEFINED;
-    }
-    const ns_box *cb = ns_box_for_this(ctx, this_val);
-    if (!cb) return JS_UNDEFINED;
-    ns_box *b = (ns_box *)cb;
-    double max = b->scroll_max_y > 0 ? b->scroll_max_y : 0;
-    if (v < 0) v = 0;
-    if (v > max) v = max;
-    if (v == b->scroll_y) return JS_UNDEFINED;
-    b->scroll_y = v;
-    ns_element_scrolled(ctx, this_val, b);
+    ns_element_scroll_request(ctx, this_val, FALSE, 0, TRUE, v,
+                              NS_SCROLL_BEHAVIOR_AUTO);
     return JS_UNDEFINED;
 }
 
@@ -45161,20 +45226,8 @@ ns_element_set_scrollLeft(JSContext *ctx, JSValueConst this_val, JSValueConst va
 {
     double v;
     if (JS_ToFloat64(ctx, &v, val) != 0) return JS_UNDEFINED;
-    if (ns_element_is_scrolling_root(ctx, this_val)) {
-        ns_js_scroll_viewport(ctx, v,
-                              ns_window_scroll_prop(ctx, "scrollY"));
-        return JS_UNDEFINED;
-    }
-    const ns_box *cb = ns_box_for_this(ctx, this_val);
-    if (!cb) return JS_UNDEFINED;
-    ns_box *b = (ns_box *)cb;
-    double max = b->scroll_max_x > 0 ? b->scroll_max_x : 0;
-    if (v < 0) v = 0;
-    if (v > max) v = max;
-    if (v == b->scroll_x) return JS_UNDEFINED;
-    b->scroll_x = v;
-    ns_element_scrolled(ctx, this_val, b);
+    ns_element_scroll_request(ctx, this_val, TRUE, v, FALSE, 0,
+                              NS_SCROLL_BEHAVIOR_AUTO);
     return JS_UNDEFINED;
 }
 
@@ -47928,6 +47981,7 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
     }
     const char *block_mode = block ? block : "start";
     const char *inline_mode = inline_align ? inline_align : "nearest";
+    gboolean smooth = FALSE;
     if (argc >= 1 && JS_IsBool(argv[0]) && !JS_ToBool(ctx, argv[0]))
         block_mode = "end";
 
@@ -48054,18 +48108,25 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
         }
         next_x = MAX(0.0, next_x);
         next_y = MAX(0.0, next_y);
-        if (js->viewport_scroll_cb)
-            js->viewport_scroll_cb(&next_x, &next_y,
-                                   js->viewport_scroll_user_data);
-        if (next_x != sx || next_y != sy) {
-            ns_js_note_viewport_scroll(js, next_x, next_y);
+        smooth = (next_x != sx || next_y != sy) &&
+                 ns_scroll_start_smooth(ctx, JS_UNDEFINED, next_x, next_y,
+                                        ns_read_scroll_behavior(ctx, argc, argv));
+        if (smooth) {
             changed = TRUE;
+        } else {
+            if (js->viewport_scroll_cb)
+                js->viewport_scroll_cb(&next_x, &next_y,
+                                       js->viewport_scroll_user_data);
+            if (next_x != sx || next_y != sy) {
+                ns_js_note_viewport_scroll(js, next_x, next_y);
+                changed = TRUE;
+            }
         }
     }
 
     if (changed && js->repaint_cb)
         js->repaint_cb(js->repaint_user_data);
-    if (js->scroll_to_cb)
+    if (js->scroll_to_cb && !smooth)
         js->scroll_to_cb(el, js->scroll_to_user_data);
     g_free(block);
     g_free(inline_align);
@@ -53493,7 +53554,7 @@ static void
 ns_read_scroll_xy(JSContext *ctx, int argc, JSValueConst *argv,
                   double *out_x, double *out_y)
 {
-    double x = 0, y = 0;
+    double x = NAN, y = NAN;
     if (argc >= 1 && JS_IsObject(argv[0]) && !JS_IsNumber(argv[0])) {
         JSValue lv = JS_GetPropertyStr(ctx, argv[0], "left");
         JSValue tv = JS_GetPropertyStr(ctx, argv[0], "top");
@@ -53505,8 +53566,8 @@ ns_read_scroll_xy(JSContext *ctx, int argc, JSValueConst *argv,
         if (argc >= 1) JS_ToFloat64(ctx, &x, argv[0]);
         if (argc >= 2) JS_ToFloat64(ctx, &y, argv[1]);
     }
-    *out_x = x;
-    *out_y = y;
+    if (isfinite(x)) *out_x = x;
+    if (isfinite(y)) *out_y = y;
 }
 
 static void
@@ -53521,14 +53582,192 @@ ns_js_scroll_viewport(JSContext *ctx, double x, double y)
     ns_js_note_viewport_scroll(js, x, y);
 }
 
+typedef struct ns_smooth_scroll {
+    JSContext *ctx;
+    JSValue    target;
+    double     from_x, from_y;
+    double     to_x, to_y;
+    double     start_ms;
+} ns_smooth_scroll;
+
+#define NS_SMOOTH_SCROLL_MS 300.0
+
+static ns_scroll_behavior
+ns_read_scroll_behavior(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    if (argc < 1 || !JS_IsObject(argv[0])) return NS_SCROLL_BEHAVIOR_AUTO;
+    g_autofree char *v = ns_js_get_string_prop(ctx, argv[0], "behavior");
+    if (v && strcmp(v, "smooth") == 0) return NS_SCROLL_BEHAVIOR_SMOOTH;
+    if (v && strcmp(v, "instant") == 0) return NS_SCROLL_BEHAVIOR_INSTANT;
+    return NS_SCROLL_BEHAVIOR_AUTO;
+}
+
+static const ns_node *
+ns_scroll_target_node(JSContext *ctx, JSValueConst target)
+{
+    if (!JS_IsObject(target) || ns_element_is_scrolling_root(ctx, target))
+        return NULL;
+    return ns_unwrap_element(target);
+}
+
+static const ns_node *
+ns_js_root_element(const ns_js *js)
+{
+    if (!js || !js->current_doc) return NULL;
+    for (const ns_node *c = js->current_doc->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT && c->name && strcmp(c->name, "html") == 0)
+            return c;
+    return NULL;
+}
+
+static gboolean
+ns_scroll_resolves_smooth(JSContext *ctx, JSValueConst target,
+                          ns_scroll_behavior behavior)
+{
+    if (behavior == NS_SCROLL_BEHAVIOR_INSTANT) return FALSE;
+    if (ns_css_get_reduced_motion() == NS_CSS_REDUCED_MOTION_REDUCE) return FALSE;
+    if (behavior == NS_SCROLL_BEHAVIOR_SMOOTH) return TRUE;
+    const ns_node *scroller = ns_scroll_target_node(ctx, target);
+    if (!scroller) scroller = ns_js_root_element(js_from_ctx(ctx));
+    g_autofree char *value = ns_computed_lookup(ctx, scroller, "scroll-behavior");
+    return value && strcmp(value, "smooth") == 0;
+}
+
+static void
+ns_smooth_scroll_cancel(ns_js *js, const ns_node *node)
+{
+    if (!js->smooth_scrolls) return;
+    for (guint i = js->smooth_scrolls->len; i-- > 0;) {
+        ns_smooth_scroll *e =
+            &g_array_index(js->smooth_scrolls, ns_smooth_scroll, i);
+        if (ns_scroll_target_node(e->ctx, e->target) != node) continue;
+        JS_FreeValue(e->ctx, e->target);
+        g_array_remove_index(js->smooth_scrolls, i);
+    }
+}
+
+static gboolean
+ns_smooth_scroll_pending_for(const ns_js *js, const ns_node *node)
+{
+    if (!js->smooth_scrolls) return FALSE;
+    for (guint i = 0; i < js->smooth_scrolls->len; i++) {
+        const ns_smooth_scroll *e =
+            &g_array_index(js->smooth_scrolls, ns_smooth_scroll, i);
+        if (ns_scroll_target_node(e->ctx, e->target) == node) return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+ns_js_smooth_scrolls_clear(ns_js *js)
+{
+    if (!js || !js->smooth_scrolls) return;
+    for (guint i = 0; i < js->smooth_scrolls->len; i++) {
+        ns_smooth_scroll *e =
+            &g_array_index(js->smooth_scrolls, ns_smooth_scroll, i);
+        JS_FreeValue(e->ctx, e->target);
+    }
+    g_array_free(js->smooth_scrolls, TRUE);
+    js->smooth_scrolls = NULL;
+}
+
+static gboolean
+ns_scroll_start_smooth(JSContext *ctx, JSValueConst target, double x, double y,
+                       ns_scroll_behavior behavior)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return FALSE;
+    const ns_node *node = ns_scroll_target_node(ctx, target);
+    ns_smooth_scroll_cancel(js, node);
+    if (!node && ctx != ns_js_main_realm(js)) return FALSE;
+    if (!isfinite(x) || !isfinite(y)) return FALSE;
+    if (!ns_scroll_resolves_smooth(ctx, target, behavior)) return FALSE;
+    ns_smooth_scroll e = { .ctx = ctx, .to_x = MAX(x, 0.0), .to_y = MAX(y, 0.0) };
+    if (node) {
+        const ns_box *b = ns_box_for_this(ctx, target);
+        if (!b) return FALSE;
+        e.from_x = b->scroll_x;
+        e.from_y = b->scroll_y;
+        e.to_x = MIN(e.to_x, MAX(b->scroll_max_x, 0.0));
+        e.to_y = MIN(e.to_y, MAX(b->scroll_max_y, 0.0));
+    } else {
+        e.from_x = ns_window_scroll_prop(ctx, "scrollX");
+        e.from_y = ns_window_scroll_prop(ctx, "scrollY");
+    }
+    if (fabs(e.to_x - e.from_x) < 1.0 && fabs(e.to_y - e.from_y) < 1.0)
+        return FALSE;
+    e.target = node ? JS_DupValue(ctx, target) : JS_UNDEFINED;
+    e.start_ms = ns_perf_now_ms(js);
+    if (!js->smooth_scrolls)
+        js->smooth_scrolls = g_array_new(FALSE, FALSE, sizeof(ns_smooth_scroll));
+    g_array_append_val(js->smooth_scrolls, e);
+    if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+    return TRUE;
+}
+
+static void
+ns_js_step_smooth_scrolls(ns_js *js)
+{
+    if (!js->smooth_scrolls || js->smooth_scrolls->len == 0) return;
+    GArray *running = js->smooth_scrolls;
+    js->smooth_scrolls = NULL;
+    double now = ns_perf_now_ms(js);
+    for (guint i = 0; i < running->len; i++) {
+        ns_smooth_scroll e = g_array_index(running, ns_smooth_scroll, i);
+        const ns_node *node = ns_scroll_target_node(e.ctx, e.target);
+        gboolean gone = JS_IsObject(e.target) && !node;
+        if (gone || ns_smooth_scroll_pending_for(js, node)) {
+            JS_FreeValue(e.ctx, e.target);
+            continue;
+        }
+        double t = CLAMP((now - e.start_ms) / NS_SMOOTH_SCROLL_MS, 0.0, 1.0);
+        double eased = t < 0.5 ? 4.0 * t * t * t
+                               : 1.0 - pow(-2.0 * t + 2.0, 3.0) / 2.0;
+        double x = e.from_x + (e.to_x - e.from_x) * eased;
+        double y = e.from_y + (e.to_y - e.from_y) * eased;
+        if (node) {
+            ns_element_apply_scroll_left(e.ctx, e.target, x);
+            ns_element_apply_scroll_top(e.ctx, e.target, y);
+        } else {
+            ns_js_scroll_viewport(e.ctx, x, y);
+        }
+        if (t >= 1.0 || ns_smooth_scroll_pending_for(js, node)) {
+            JS_FreeValue(e.ctx, e.target);
+            continue;
+        }
+        if (!js->smooth_scrolls)
+            js->smooth_scrolls =
+                g_array_new(FALSE, FALSE, sizeof(ns_smooth_scroll));
+        g_array_append_val(js->smooth_scrolls, e);
+    }
+    g_array_free(running, TRUE);
+}
+
+static void
+ns_window_scroll_request(JSContext *ctx, double x, double y,
+                         ns_scroll_behavior behavior)
+{
+    if (!ns_scroll_start_smooth(ctx, JS_UNDEFINED, x, y, behavior))
+        ns_js_scroll_viewport(ctx, x, y);
+}
+
+gboolean
+ns_js_smooth_scroll_viewport(ns_js *js, double x, double y)
+{
+    if (!js || !js->ctx || js->halted) return FALSE;
+    return ns_scroll_start_smooth(js->ctx, JS_UNDEFINED, x, y,
+                                  NS_SCROLL_BEHAVIOR_AUTO);
+}
+
 static JSValue
 ns_window_scroll_to(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     (void)this_val;
-    double x = 0, y = 0;
+    double x = ns_window_scroll_prop(ctx, "scrollX");
+    double y = ns_window_scroll_prop(ctx, "scrollY");
     ns_read_scroll_xy(ctx, argc, argv, &x, &y);
-    ns_js_scroll_viewport(ctx, x, y);
+    ns_window_scroll_request(ctx, x, y, ns_read_scroll_behavior(ctx, argc, argv));
     return JS_UNDEFINED;
 }
 
@@ -53539,9 +53778,10 @@ ns_window_scroll_by(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     double dx = 0, dy = 0;
     ns_read_scroll_xy(ctx, argc, argv, &dx, &dy);
-    ns_js_scroll_viewport(ctx,
-                          ns_window_scroll_prop(ctx, "scrollX") + dx,
-                          ns_window_scroll_prop(ctx, "scrollY") + dy);
+    ns_window_scroll_request(ctx,
+                             ns_window_scroll_prop(ctx, "scrollX") + dx,
+                             ns_window_scroll_prop(ctx, "scrollY") + dy,
+                             ns_read_scroll_behavior(ctx, argc, argv));
     return JS_UNDEFINED;
 }
 
@@ -53616,16 +53856,8 @@ ns_element_scroll_common(JSContext *ctx, JSValueConst this_val,
         x += cx;
         y += cy;
     }
-    if (has_x) {
-        JSValue v = JS_NewFloat64(ctx, x);
-        ns_element_set_scrollLeft(ctx, this_val, v);
-        JS_FreeValue(ctx, v);
-    }
-    if (has_y) {
-        JSValue v = JS_NewFloat64(ctx, y);
-        ns_element_set_scrollTop(ctx, this_val, v);
-        JS_FreeValue(ctx, v);
-    }
+    ns_element_scroll_request(ctx, this_val, has_x, x, has_y, y,
+                              ns_read_scroll_behavior(ctx, argc, argv));
     return JS_UNDEFINED;
 }
 
@@ -66592,6 +66824,7 @@ ns_js_reset_runtime_state(ns_js *js)
         }
         g_array_set_size(js->raf_pending, 0);
     }
+    ns_js_smooth_scrolls_clear(js);
 
     if (js->listeners) {
         for (guint i = 0; i < js->listeners->len; i++) {
@@ -67300,6 +67533,7 @@ ns_js_free(ns_js *js)
     ns_set_active_js(js);
     ns_js_webauthn_reset(js);
     ns_js_module_prefetch_release(js);
+    ns_js_smooth_scrolls_clear(js);
     for (; js->mic_holds > 0; js->mic_holds--) ns_mic_release();
     for (; js->camera_holds > 0; js->camera_holds--) ns_camera_release();
     if (js->media_grant_origins) {

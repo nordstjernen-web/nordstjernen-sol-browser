@@ -2854,6 +2854,44 @@ control_prefers_css_chrome(ns_inline_attr_kind k, const ns_node *dom,
     return FALSE;
 }
 
+static gboolean
+style_field_sizing_content(const ns_style *s)
+{
+    return s && keyword_is(s->values[NS_CSS_FIELD_SIZING], "content");
+}
+
+static char *
+textarea_sizing_text(const ns_node *dom)
+{
+    char *value = ns_textarea_value_dup(dom);
+    if (value && *value) return value;
+    g_free(value);
+    return g_strdup(ns_element_get_attr(dom, "placeholder"));
+}
+
+static int
+textarea_content_columns(const ns_node *dom)
+{
+    g_autofree char *text = textarea_sizing_text(dom);
+    glong widest = 1;
+    g_auto(GStrv) lines = g_strsplit(text ? text : "", "\n", -1);
+    for (int i = 0; lines[i]; i++)
+        widest = MAX(widest, g_utf8_strlen(lines[i], -1));
+    return (int)MIN(widest + 1, 1000);
+}
+
+static int
+textarea_content_rows(const ns_node *dom, int columns)
+{
+    g_autofree char *text = textarea_sizing_text(dom);
+    if (columns < 1) columns = 1;
+    glong rows = 0;
+    g_auto(GStrv) lines = g_strsplit(text ? text : "", "\n", -1);
+    for (int i = 0; lines[i]; i++)
+        rows += MAX((g_utf8_strlen(lines[i], -1) + columns - 1) / columns, 1);
+    return (int)CLAMP(rows, 1, 1000);
+}
+
 static void
 emit_form_attr_sized(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize end,
                      const ns_node *dom, GHashTable *styles)
@@ -2879,16 +2917,20 @@ emit_form_attr_sized(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize en
         }
     }
     if (dom && dom->name && strcmp(dom->name, "textarea") == 0) {
+        gboolean fit = style_field_sizing_content(s);
         if (bw <= 0) {
             const char *cols = ns_element_get_attr(dom, "cols");
             int c = cols ? atoi(cols) : 20;
             if (c <= 0) c = 20;
+            if (fit) c = textarea_content_columns(dom);
             bw = c * (fs * 0.5) + 8.0;
         }
         if (bh <= 0) {
             const char *rows = ns_element_get_attr(dom, "rows");
             int r = rows ? atoi(rows) : 2;
             if (r <= 0) r = 2;
+            if (fit)
+                r = textarea_content_rows(dom, (int)((bw - 8.0) / (fs * 0.5)));
             double line_h = fs * 1.3;
             bh = r * line_h + 6.0;
         }
@@ -10914,11 +10956,33 @@ menulist_intrinsic_width(const ns_box *box)
 }
 
 static double
+text_input_content_width(const ns_box *box)
+{
+    const char *value = ns_input_used_value(box->dom);
+    if (!value || !*value) value = ns_element_get_attr(box->dom, "placeholder");
+    if (!value || !*value) return 2.0;
+    const char *type = ns_element_get_attr(box->dom, "type");
+    g_autoptr(GString) shown = g_string_new(NULL);
+    if (type && g_ascii_strcasecmp(type, "password") == 0)
+        for (glong i = g_utf8_strlen(value, -1); i > 0; i--)
+            g_string_append(shown, "\xe2\x80\xa2");
+    else
+        g_string_append(shown, value);
+    NsPangoLayout *layout = make_pango_layout(box->style);
+    ns_pango_layout_set_width(layout, -1);
+    double width = text_glyph_advance_px(layout, shown->str);
+    g_object_unref(layout);
+    return ceil(width) + 2.0;
+}
+
+static double
 text_input_intrinsic_width(const ns_box *box)
 {
     if (box && ns_node_is_element_named(box->dom, "select"))
         return menulist_intrinsic_width(box);
     if (!box || !node_is_windowed_text_input(box->dom)) return 0;
+    if (style_field_sizing_content(box->style))
+        return text_input_content_width(box);
     int size = ns_parse_int(ns_element_get_attr(box->dom, "size"), 0, 0,
                             G_MAXINT16);
     if (size <= 0) size = 20;
