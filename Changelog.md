@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* View transitions animate: `document.startViewTransition()` captures
+  the page as it is, runs the update, and cross-fades from the old
+  picture to the new state over 250 ms. `ready` resolves when the fade
+  starts and `finished` when it ends; `skipTransition()`, a new
+  transition and the reduced-motion preference end it at once. This is
+  the default whole-page cross-fade only: elements with
+  `view-transition-name` do not move or resize separately and the
+  `::view-transition-*` pseudo-elements cannot be styled yet.
 * CSS: `interpolate-size: allow-keywords` works for `width` and
   `height`. A transition between a length and `auto`, `min-content`,
   `max-content` or `fit-content` now animates through the element's

@@ -15555,7 +15555,28 @@
                 get: function () { return stateOf(this)[name]; }, enumerable: true, configurable: true
             });
         });
-        ViewTransition.prototype.skipTransition = function skipTransition() { stateOf(this); };
+        var FADE_MS = 250;
+        var capture = global.__ns_vt_capture;
+        var showOld = global.__ns_vt_show;
+        var hideOld = global.__ns_vt_end;
+
+        function reducedMotion() {
+            try { return !!global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+            catch (e) { return false; }
+        }
+        function stopFade(state) {
+            if (!state.fading) return;
+            state.fading = false;
+            if (state.timer) clearTimeout(state.timer);
+            hideOld();
+            if (state.done) state.done();
+        }
+
+        ViewTransition.prototype.skipTransition = function skipTransition() {
+            var state = stateOf(this);
+            state.skipped = true;
+            stopFade(state);
+        };
         Object.defineProperty(ViewTransition.prototype, Symbol.toStringTag, { value: 'ViewTransition', configurable: true });
 
         DocumentProto.startViewTransition = function startViewTransition(callbackOrOptions) {
@@ -15565,21 +15586,36 @@
             if (update != null && typeof update !== 'function')
                 throw new TypeError("Failed to execute 'startViewTransition' on 'Document': the update callback is not a function.");
             var transition = Object.create(ViewTransition.prototype);
+            var state = { skipped: false, fading: false, timer: 0, done: null };
+            var previous = active.get(doc);
+            if (previous) previous.skipTransition();
+            var snapshot = (doc === global.document && typeof capture === 'function' && !reducedMotion())
+                ? capture() : null;
             var updated = Promise.resolve().then(function () { return update ? update() : undefined; })
                                            .then(function () { return undefined; });
-            var settled = updated.then(function () {
+            var ready = updated.then(function () {
+                if (snapshot && !state.skipped && showOld(snapshot, FADE_MS)) state.fading = true;
+            });
+            var finished = ready.then(function () {
+                if (!state.fading) return undefined;
+                return new Promise(function (resolve) {
+                    state.done = resolve;
+                    state.timer = setTimeout(function () { state.timer = 0; stopFade(state); }, FADE_MS);
+                });
+            });
+            var settled = finished.then(function () {
                 if (active.get(doc) === transition) active['delete'](doc);
             }, function (reason) {
                 if (active.get(doc) === transition) active['delete'](doc);
                 throw reason;
             });
+            ready['catch'](function () {});
             settled['catch'](function () {});
-            states.set(transition, {
-                updateCallbackDone: updated,
-                ready: settled,
-                finished: settled,
-                types: new Set(options && options.types ? options.types : [])
-            });
+            state.updateCallbackDone = updated;
+            state.ready = ready;
+            state.finished = settled;
+            state.types = new Set(options && options.types ? options.types : []);
+            states.set(transition, state);
             active.set(doc, transition);
             return transition;
         };

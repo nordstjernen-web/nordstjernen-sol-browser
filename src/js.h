@@ -59,6 +59,7 @@ typedef gboolean (*ns_js_popup_allowed_cb)(const char *url, const char *opener_u
 typedef void (*ns_js_repaint_cb)(gpointer user_data);
 typedef void (*ns_js_layout_flush_cb)(gpointer user_data);
 typedef void (*ns_js_viewport_scroll_cb)(double *x, double *y, gpointer user_data);
+typedef char *(*ns_js_snapshot_cb)(gpointer user_data);
 typedef gboolean (*ns_js_clipboard_write_cb)(const char *text, gpointer user_data);
 typedef gboolean (*ns_js_selection_cmd_cb)(const char *command, gpointer user_data);
 typedef void (*ns_js_window_action_cb)(const char *action, gpointer user_data);
@@ -148,6 +149,7 @@ void   ns_js_video_event(ns_js *js, const void *node, const char *kind, double v
 void   ns_js_audio_feedback(ns_js *js, const char *line);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
 void   ns_js_set_style_flush_cb(ns_js *js, ns_js_layout_flush_cb cb);
+void   ns_js_set_snapshot_cb(ns_js *js, ns_js_snapshot_cb cb, gpointer user_data);
 void   ns_js_set_viewport_scroll_cb(ns_js *js, ns_js_viewport_scroll_cb cb,
                                     gpointer user_data);
 void   ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer user_data);
