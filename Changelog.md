@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* JS: `fetchLater(url, { method, body, activateAfter, signal })` queues
+  a request that is sent when `activateAfter` elapses or the document
+  goes away, whichever is first, and returns a result whose
+  `activated` turns true once it is sent. Secure contexts only; pending
+  requests are limited to 64 KiB and 64 entries per document.
 * HTML: `<script type="speculationrules">` prefetch rules are honoured.
   URLs in a list rule, and links matched by a document rule
   (`href_matches`, `selector_matches`, `and`/`or`/`not`) whose

@@ -259,6 +259,7 @@ static gboolean ns_scroll_start_smooth(JSContext *ctx, JSValueConst target,
 static ns_scroll_behavior ns_read_scroll_behavior(JSContext *ctx, int argc,
                                                   JSValueConst *argv);
 static void ns_js_step_smooth_scrolls(ns_js *js);
+static void ns_js_fetch_later_flush(ns_js *js);
 static JSValue ns_script_supports(JSContext *ctx, JSValueConst this_val,
                                   int argc, JSValueConst *argv);
 static void ns_js_smooth_scrolls_clear(ns_js *js);
@@ -60262,6 +60263,38 @@ ns_beacon_done(GObject *src, GAsyncResult *result, gpointer user_data)
     g_clear_error(&err);
 }
 
+static void
+ns_request_body_bytes(JSContext *ctx, JSValueConst b, char **body,
+                      gsize *body_len, char **content_type)
+{
+    if (ns_js_value_is_form_data(ctx, b)) {
+        *body = ns_js_form_data_serialize(ctx, b, body_len, content_type);
+    } else if (ns_js_value_is_url_search_params(ctx, b)) {
+        *body = ns_js_usp_serialize(ctx, b, body_len, content_type);
+    } else if (JS_IsString(b)) {
+        size_t l = 0;
+        const char *s = JS_ToCStringLen(ctx, &l, b);
+        if (s) {
+            *body = g_strndup(s, l);
+            *body_len = l;
+            JS_FreeCString(ctx, s);
+            *content_type = g_strdup("text/plain;charset=UTF-8");
+        }
+    } else {
+        *body = ns_js_body_bytes(ctx, b, body_len);
+        if (*body && JS_IsObject(b)) {
+            JSValue tv = JS_GetPropertyStr(ctx, b, "type");
+            if (JS_IsString(tv)) {
+                const char *t = JS_ToCString(ctx, tv);
+                if (t && *t && ns_header_value_is_safe(t))
+                    *content_type = g_strdup(t);
+                if (t) JS_FreeCString(ctx, t);
+            }
+            JS_FreeValue(ctx, tv);
+        }
+    }
+}
+
 static JSValue
 ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
@@ -60286,35 +60319,8 @@ ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
     gsize body_len = 0;
     char *content_type = NULL;
 
-    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
-        JSValueConst b = argv[1];
-        if (ns_js_value_is_form_data(ctx, b)) {
-            body = ns_js_form_data_serialize(ctx, b, &body_len, &content_type);
-        } else if (ns_js_value_is_url_search_params(ctx, b)) {
-            body = ns_js_usp_serialize(ctx, b, &body_len, &content_type);
-        } else if (JS_IsString(b)) {
-            size_t l = 0;
-            const char *s = JS_ToCStringLen(ctx, &l, b);
-            if (s) {
-                body = g_strndup(s, l);
-                body_len = l;
-                JS_FreeCString(ctx, s);
-                content_type = g_strdup("text/plain;charset=UTF-8");
-            }
-        } else {
-            body = ns_js_body_bytes(ctx, b, &body_len);
-            if (body && JS_IsObject(b)) {
-                JSValue tv = JS_GetPropertyStr(ctx, b, "type");
-                if (JS_IsString(tv)) {
-                    const char *t = JS_ToCString(ctx, tv);
-                    if (t && *t && ns_header_value_is_safe(t))
-                        content_type = g_strdup(t);
-                    if (t) JS_FreeCString(ctx, t);
-                }
-                JS_FreeValue(ctx, tv);
-            }
-        }
-    }
+    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1]))
+        ns_request_body_bytes(ctx, argv[1], &body, &body_len, &content_type);
 
     static const char *const beacon_headers[] = { "X-ND-CORS: 1", NULL };
     static const char *const opaque_beacon_headers[] = {
@@ -60332,6 +60338,202 @@ ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
     g_free(body);
     g_free(content_type);
     return JS_TRUE;
+}
+
+#define NS_FETCH_LATER_QUOTA_BYTES (64u * 1024u)
+#define NS_FETCH_LATER_MAX_PENDING 64
+
+typedef struct ns_fetch_later {
+    ns_js     *js;
+    JSContext *ctx;
+    JSValue    result;
+    JSValue    signal;
+    char      *url;
+    char      *document_url;
+    char      *origin;
+    char      *method;
+    char      *body;
+    gsize      body_len;
+    char      *content_type;
+    gboolean   opaque;
+    guint      timer;
+} ns_fetch_later;
+
+static void
+ns_fetch_later_free(ns_fetch_later *e)
+{
+    if (e->timer) g_source_remove(e->timer);
+    JS_FreeValue(e->ctx, e->result);
+    JS_FreeValue(e->ctx, e->signal);
+    g_free(e->url);
+    g_free(e->document_url);
+    g_free(e->origin);
+    g_free(e->method);
+    g_free(e->body);
+    g_free(e->content_type);
+    g_free(e);
+}
+
+static gboolean
+ns_fetch_later_aborted(const ns_fetch_later *e)
+{
+    if (!JS_IsObject(e->signal)) return FALSE;
+    JSValue aborted = JS_GetPropertyStr(e->ctx, e->signal, "aborted");
+    gboolean yes = JS_ToBool(e->ctx, aborted) > 0;
+    JS_FreeValue(e->ctx, aborted);
+    return yes;
+}
+
+static void
+ns_fetch_later_send(ns_fetch_later *e)
+{
+    static const char *const headers[] = { "X-ND-CORS: 1", NULL };
+    static const char *const opaque_headers[] = {
+        "X-ND-CORS: 1", "X-ND-Opaque-Origin: 1", "X-ND-Credentials: omit", NULL
+    };
+    if (!ns_fetch_later_aborted(e)) {
+        JS_SetPropertyStr(e->ctx, e->result, "activated", JS_TRUE);
+        ns_net_request_async(e->url, e->document_url, e->method, e->body,
+                             e->body_len, e->content_type,
+                             e->opaque ? opaque_headers : headers, NULL,
+                             ns_beacon_done, NULL);
+    }
+    g_ptr_array_remove_fast(e->js->fetch_later, e);
+}
+
+static gboolean
+ns_fetch_later_due(gpointer data)
+{
+    ns_fetch_later *e = data;
+    e->timer = 0;
+    ns_fetch_later_send(e);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+ns_js_fetch_later_flush(ns_js *js)
+{
+    if (!js || !js->fetch_later) return;
+    while (js->fetch_later->len > 0)
+        ns_fetch_later_send(g_ptr_array_index(js->fetch_later, 0));
+    g_clear_pointer(&js->fetch_later, g_ptr_array_unref);
+}
+
+static gsize
+ns_fetch_later_pending_bytes(const ns_js *js, const char *origin)
+{
+    gsize total = 0;
+    for (guint i = 0; js->fetch_later && i < js->fetch_later->len; i++) {
+        const ns_fetch_later *e = g_ptr_array_index(js->fetch_later, i);
+        if (g_strcmp0(e->origin, origin) == 0)
+            total += e->body_len + strlen(e->url);
+    }
+    return total;
+}
+
+static gboolean
+ns_url_is_potentially_trustworthy(const char *url)
+{
+    if (!url) return FALSE;
+    if (g_str_has_prefix(url, "https:")) return TRUE;
+    if (!g_str_has_prefix(url, "http:")) return FALSE;
+    g_autofree char *host = ns_url_host_from(url);
+    return host && (g_ascii_strcasecmp(host, "localhost") == 0 ||
+                    g_str_has_suffix(host, ".localhost") ||
+                    g_str_has_prefix(host, "127.") ||
+                    strcmp(host, "[::1]") == 0 || strcmp(host, "::1") == 0);
+}
+
+static JSValue
+ns_window_fetch_later(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || argc < 1)
+        return JS_ThrowTypeError(ctx, "fetchLater: 1 argument required");
+    const char *document_url = ns_js_calling_document_url(js, ctx);
+    if (!ns_url_is_potentially_trustworthy(document_url))
+        return JS_ThrowTypeError(ctx, "fetchLater: requires a secure context");
+    JSValueConst init = argc > 1 && JS_IsObject(argv[1]) ? argv[1] : JS_UNDEFINED;
+    JSValue url_value = JS_IsObject(argv[0]) && !JS_IsString(argv[0])
+        ? JS_GetPropertyStr(ctx, argv[0], "url") : JS_UNDEFINED;
+    const char *raw_url = JS_ToCString(ctx, JS_IsString(url_value) ? url_value
+                                                                    : argv[0]);
+    JS_FreeValue(ctx, url_value);
+    if (!raw_url) return JS_EXCEPTION;
+    g_autofree char *url = ns_url_resolve(document_url, raw_url);
+    JS_FreeCString(ctx, raw_url);
+    if (!ns_url_is_potentially_trustworthy(url))
+        return JS_ThrowTypeError(ctx, "fetchLater: URL must be https");
+
+    g_autofree char *method = JS_IsObject(init)
+        ? ns_js_get_string_prop(ctx, init, "method") : NULL;
+    if (!method && JS_IsObject(argv[0]))
+        method = ns_js_get_string_prop(ctx, argv[0], "method");
+    g_autofree char *upper = g_ascii_strup(method ? method : "GET", -1);
+    static const char *const allowed[] = { "GET", "POST", "PUT", "DELETE",
+                                           "PATCH", "HEAD", "OPTIONS" };
+    gboolean method_ok = FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(allowed); i++)
+        method_ok = method_ok || strcmp(upper, allowed[i]) == 0;
+    if (!method_ok) return JS_ThrowTypeError(ctx, "fetchLater: invalid method");
+
+    double activate_after = -1;
+    JSValue signal = JS_UNDEFINED, body_value = JS_UNDEFINED;
+    if (JS_IsObject(init)) {
+        JSValue after = JS_GetPropertyStr(ctx, init, "activateAfter");
+        if (!JS_IsUndefined(after) && !JS_IsNull(after) &&
+            (JS_ToFloat64(ctx, &activate_after, after) != 0 ||
+             !(activate_after >= 0))) {
+            JS_FreeValue(ctx, after);
+            return JS_ThrowRangeError(ctx, "fetchLater: activateAfter must not be negative");
+        }
+        JS_FreeValue(ctx, after);
+        signal = JS_GetPropertyStr(ctx, init, "signal");
+        body_value = JS_GetPropertyStr(ctx, init, "body");
+    }
+    ns_fetch_later *e = g_new0(ns_fetch_later, 1);
+    e->js = js;
+    e->ctx = ctx;
+    e->signal = signal;
+    e->result = JS_NewObject(ctx);
+    e->url = g_steal_pointer(&url);
+    e->document_url = g_strdup(document_url);
+    e->origin = ns_url_origin_from(e->url);
+    e->method = g_steal_pointer(&upper);
+    e->opaque = ns_js_realm_origin_is_opaque(js, ctx);
+    if (!JS_IsUndefined(body_value) && !JS_IsNull(body_value))
+        ns_request_body_bytes(ctx, body_value, &e->body, &e->body_len,
+                              &e->content_type);
+    JS_FreeValue(ctx, body_value);
+    JS_SetPropertyStr(ctx, e->result, "activated", JS_FALSE);
+
+    JSValue thrown = JS_UNDEFINED;
+    if (ns_fetch_later_aborted(e))
+        thrown = ns_throw_dom_exception(ctx, "AbortError", 20,
+                                        "fetchLater: the signal is aborted");
+    else if (e->body_len > 0 && (strcmp(e->method, "GET") == 0 ||
+                                 strcmp(e->method, "HEAD") == 0))
+        thrown = JS_ThrowTypeError(ctx, "fetchLater: GET cannot carry a body");
+    else if ((js->fetch_later &&
+              js->fetch_later->len >= NS_FETCH_LATER_MAX_PENDING) ||
+             ns_fetch_later_pending_bytes(js, e->origin) + e->body_len +
+                 strlen(e->url) > NS_FETCH_LATER_QUOTA_BYTES)
+        thrown = ns_throw_dom_exception(ctx, "QuotaExceededError", 22,
+                                        "fetchLater: deferred request quota exceeded");
+    if (JS_IsException(thrown)) {
+        ns_fetch_later_free(e);
+        return thrown;
+    }
+    if (!js->fetch_later)
+        js->fetch_later = g_ptr_array_new_with_free_func(
+            (GDestroyNotify)ns_fetch_later_free);
+    g_ptr_array_add(js->fetch_later, e);
+    if (activate_after >= 0)
+        e->timer = g_timeout_add((guint)MIN(activate_after, (double)G_MAXINT32),
+                                 ns_fetch_later_due, e);
+    return JS_DupValue(ctx, e->result);
 }
 
 static JSValue
@@ -62837,6 +63039,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "stop",  ns_window_stop,  0);
     ns_bind_fn(ctx, global, "focus", ns_window_focus, 0);
     ns_bind_fn(ctx, global, "find",  ns_window_find,  7);
+    ns_bind_fn(ctx, global, "fetchLater", ns_window_fetch_later, 1);
     ns_bind_fn(ctx, global, "scrollTo", ns_window_scroll_to, 2);
     ns_bind_fn(ctx, global, "scrollBy", ns_window_scroll_by, 2);
     ns_bind_fn(ctx, global, "scroll",   ns_window_scroll_to, 2);
@@ -66827,6 +67030,7 @@ ns_js_reset_runtime_state(ns_js *js)
         g_array_set_size(js->raf_pending, 0);
     }
     ns_js_smooth_scrolls_clear(js);
+    ns_js_fetch_later_flush(js);
 
     if (js->listeners) {
         for (guint i = 0; i < js->listeners->len; i++) {
@@ -67542,6 +67746,7 @@ ns_js_free(ns_js *js)
     ns_js_webauthn_reset(js);
     ns_js_module_prefetch_release(js);
     ns_js_smooth_scrolls_clear(js);
+    ns_js_fetch_later_flush(js);
     for (; js->mic_holds > 0; js->mic_holds--) ns_mic_release();
     for (; js->camera_holds > 0; js->camera_holds--) ns_camera_release();
     if (js->media_grant_origins) {
