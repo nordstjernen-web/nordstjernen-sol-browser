@@ -312,7 +312,7 @@ static BOOL CALLBACK
 mf_d3d_startup(PINIT_ONCE once, PVOID param, PVOID *ctx)
 {
     (void)once; (void)param; (void)ctx;
-    if (getenv("NS_MEDIA_NO_HW_DECODE") || !g_mf.create_dxgi_manager)
+    if (getenv("NS_MEDIA_NO_HW_DECODER") || !g_mf.create_dxgi_manager)
         return TRUE;
     HMODULE d3d11 = LoadLibraryW(L"d3d11.dll");
     ns_d3d11_create_fn create = d3d11

@@ -432,10 +432,10 @@ endif
 
 # Inline WebM (VP9/VP8 + Opus/Vorbis) over FFmpeg's libav* (github.com/FFmpeg/
 # FFmpeg, not the defunct Libav fork). Required on Linux and Windows, where WebM
-# is the dominant format served by YouTube and other sites and the
-# external-player fallback is undesirable; auto-detected on macOS; excluded on
-# Android, whose dependency sysroot (android/scripts/build-deps.sh) does not
-# cross-build FFmpeg, so WebM there stays on the external-player path.
+# is the dominant format served by YouTube and other sites and would otherwise
+# not play inline; auto-detected on macOS; excluded on Android, whose
+# dependency sysroot (android/scripts/build-deps.sh) does not cross-build
+# FFmpeg, so WebM there only reports its URL to the embedder.
 #
 # The version floors are the library sonames of FFmpeg 6.0 (2023) — the oldest
 # release carrying the new AVChannelLayout API this code uses — so a stock Linux

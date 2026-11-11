@@ -212,7 +212,7 @@ This is a ${LIBC} build (linked against ${LOADER}). It will not run
 against the other C library — pick the matching download.
 
 ${LIBC_REQ}
-- GTK 4.6+, with gio, gobject, pango, cairo, gdk-pixbuf
+- GTK 4.14+, with gio, gobject, pango, cairo, gdk-pixbuf
 - libepoxy (usually pulled in by GTK 4; WebGL dispatch)
 - libcurl with a TLS backend; OpenSSL 3 (libcrypto)
 - libuchardet
