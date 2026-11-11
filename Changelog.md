@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* HTML: `<script type="speculationrules">` prefetch rules are honoured.
+  URLs in a list rule, and links matched by a document rule
+  (`href_matches`, `selector_matches`, `and`/`or`/`not`) whose
+  `eagerness` is `immediate` or `eager`, are fetched ahead of time with
+  `Sec-Purpose: prefetch`, like `<link rel="prefetch">`. Only same-site
+  URLs are fetched, at most 20 per document. `prerender` rules are
+  ignored. `HTMLScriptElement.supports()` is added and reports
+  `speculationrules`.
 * CSS: `@starting-style` is supported, at the top level and nested in a
   style rule. An element that is styled for the first time, or that
   leaves `display: none`, transitions from the values its

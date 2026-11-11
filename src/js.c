@@ -259,6 +259,8 @@ static gboolean ns_scroll_start_smooth(JSContext *ctx, JSValueConst target,
 static ns_scroll_behavior ns_read_scroll_behavior(JSContext *ctx, int argc,
                                                   JSValueConst *argv);
 static void ns_js_step_smooth_scrolls(ns_js *js);
+static JSValue ns_script_supports(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv);
 static void ns_js_smooth_scrolls_clear(ns_js *js);
 static JSValue ns_document_element_from_point(JSContext *ctx,
                                               JSValueConst this_val,
@@ -287,7 +289,7 @@ static void ns_js_element_perf_info(ns_js *js, const ns_node *el,
                                     ns_perf_resource_info *info);
 static gboolean ns_script_type_is_module(const ns_node *n);
 enum { NS_SCRIPT_KIND_NONE, NS_SCRIPT_KIND_CLASSIC, NS_SCRIPT_KIND_MODULE,
-       NS_SCRIPT_KIND_IMPORTMAP };
+       NS_SCRIPT_KIND_IMPORTMAP, NS_SCRIPT_KIND_SPECULATIONRULES };
 static int ns_script_kind(const ns_node *n);
 static gboolean javascript_mime_essence_match(const char *s, gsize len);
 static void ns_js_nodes_inserted(ns_js *js, ns_node *parent, GPtrArray *nodes);
@@ -67145,6 +67147,12 @@ ns_js_setup_document_interfaces(ns_js *js, JSContext *ctx, JSValueConst global)
     ns_bind_ctor(ctx, global, "DOMImplementation", ns_illegal_constructor, 0);
     ns_perf_install_entry_list(ctx, global);
     {
+        JSValue script_ctor = JS_GetPropertyStr(ctx, global, "HTMLScriptElement");
+        if (JS_IsObject(script_ctor))
+            ns_bind_fn(ctx, script_ctor, "supports", ns_script_supports, 1);
+        JS_FreeValue(ctx, script_ctor);
+    }
+    {
         static const struct {
             const char *name;
             const JSCFunctionListEntry *funcs;
@@ -68915,12 +68923,185 @@ ns_js_register_import_map_json(ns_js *js, const ns_node *frame,
     JS_FreeValue(js->ctx, root);
 }
 
+static gboolean
+ns_url_glob_matches(const char *pattern, const char *url)
+{
+    while (*pattern && *pattern != '*') {
+        if (*pattern != *url) return FALSE;
+        pattern++;
+        url++;
+    }
+    if (!*pattern) return !*url;
+    while (*pattern == '*') pattern++;
+    for (;; url++) {
+        if (ns_url_glob_matches(pattern, url)) return TRUE;
+        if (!*url) return FALSE;
+    }
+}
+
+static gboolean
+ns_speculation_href_matches(JSContext *ctx, JSValueConst patterns,
+                            const char *href, const char *base)
+{
+    if (JS_IsString(patterns)) {
+        const char *raw = JS_ToCString(ctx, patterns);
+        g_autofree char *pattern = raw ? ns_url_resolve(base, raw) : NULL;
+        if (raw) JS_FreeCString(ctx, raw);
+        return pattern && ns_url_glob_matches(pattern, href);
+    }
+    if (!JS_IsArray(patterns)) return FALSE;
+    uint32_t n = ns_js_array_length(ctx, patterns);
+    for (uint32_t i = 0; i < n && i < 64; i++) {
+        JSValue item = JS_GetPropertyUint32(ctx, patterns, i);
+        gboolean hit = JS_IsString(item) &&
+                       ns_speculation_href_matches(ctx, item, href, base);
+        JS_FreeValue(ctx, item);
+        if (hit) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean ns_speculation_where_matches(JSContext *ctx, JSValueConst where,
+                                             JSValueConst link,
+                                             const char *href, const char *base,
+                                             int depth);
+
+static gboolean
+ns_speculation_where_list(JSContext *ctx, JSValueConst list, JSValueConst link,
+                          const char *href, const char *base, int depth,
+                          gboolean all)
+{
+    if (!JS_IsArray(list)) return FALSE;
+    uint32_t n = ns_js_array_length(ctx, list);
+    for (uint32_t i = 0; i < n && i < 64; i++) {
+        JSValue item = JS_GetPropertyUint32(ctx, list, i);
+        gboolean hit = ns_speculation_where_matches(ctx, item, link, href, base,
+                                                    depth + 1);
+        JS_FreeValue(ctx, item);
+        if (hit != all) return hit;
+    }
+    return all;
+}
+
+static gboolean
+ns_speculation_where_matches(JSContext *ctx, JSValueConst where,
+                             JSValueConst link, const char *href,
+                             const char *base, int depth)
+{
+    if (!JS_IsObject(where) || depth > 8) return FALSE;
+    gboolean result = FALSE;
+    JSValue v = JS_GetPropertyStr(ctx, where, "href_matches");
+    if (!JS_IsUndefined(v)) {
+        result = ns_speculation_href_matches(ctx, v, href, base);
+    } else if (JS_FreeValue(ctx, v),
+               !JS_IsUndefined(v = JS_GetPropertyStr(ctx, where, "selector_matches"))) {
+        JSValue matches = JS_GetPropertyStr(ctx, link, "matches");
+        JSValue hit = JS_IsString(v) && JS_IsFunction(ctx, matches)
+            ? JS_Call(ctx, matches, link, 1, &v) : JS_FALSE;
+        if (JS_IsException(hit)) JS_FreeValue(ctx, JS_GetException(ctx));
+        else result = JS_ToBool(ctx, hit) > 0;
+        JS_FreeValue(ctx, hit);
+        JS_FreeValue(ctx, matches);
+    } else if (JS_FreeValue(ctx, v),
+               !JS_IsUndefined(v = JS_GetPropertyStr(ctx, where, "and"))) {
+        result = ns_speculation_where_list(ctx, v, link, href, base, depth, TRUE);
+    } else if (JS_FreeValue(ctx, v),
+               !JS_IsUndefined(v = JS_GetPropertyStr(ctx, where, "or"))) {
+        result = ns_speculation_where_list(ctx, v, link, href, base, depth, FALSE);
+    } else if (JS_FreeValue(ctx, v),
+               !JS_IsUndefined(v = JS_GetPropertyStr(ctx, where, "not"))) {
+        result = !ns_speculation_where_matches(ctx, v, link, href, base,
+                                               depth + 1);
+    }
+    JS_FreeValue(ctx, v);
+    return result;
+}
+
+static void
+ns_speculation_prefetch_links(ns_js *js, const ns_node *n, JSValueConst where,
+                              const char *base, int depth)
+{
+    if (!n || depth >= 512) return;
+    const char *raw = n->kind == NS_NODE_ELEMENT && n->name &&
+                      (strcmp(n->name, "a") == 0 || strcmp(n->name, "area") == 0)
+        ? ns_element_get_attr(n, "href") : NULL;
+    if (raw && *raw) {
+        g_autofree char *href = ns_url_resolve(base, raw);
+        JSValue link = href ? ns_make_element(js->ctx, n) : JS_UNDEFINED;
+        if (href && ns_speculation_where_matches(js->ctx, where, link, href,
+                                                 base, 0))
+            ns_engine_prefetch_document(href, js->current_url);
+        JS_FreeValue(js->ctx, link);
+    }
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_speculation_prefetch_links(js, c, where, base, depth + 1);
+}
+
+static gboolean
+ns_speculation_rule_is_eager(JSContext *ctx, JSValueConst rule,
+                             gboolean eager_by_default)
+{
+    g_autofree char *eagerness = ns_js_get_string_prop(ctx, rule, "eagerness");
+    if (!eagerness) return eager_by_default;
+    return strcmp(eagerness, "immediate") == 0 || strcmp(eagerness, "eager") == 0;
+}
+
+static void
+ns_js_apply_speculation_rules(ns_js *js, const char *text, gsize len,
+                              const char *base)
+{
+    if (!js || !text || !base || !js->current_url || !js->current_doc) return;
+    JSContext *ctx = js->ctx;
+    JSValue root = JS_ParseJSON(ctx, text, len, "speculationrules");
+    if (JS_IsException(root)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return;
+    }
+    JSValue rules = JS_IsObject(root) ? JS_GetPropertyStr(ctx, root, "prefetch")
+                                      : JS_UNDEFINED;
+    uint32_t n = 0;
+    if (JS_IsArray(rules)) n = ns_js_array_length(ctx, rules);
+    for (uint32_t i = 0; i < n && i < 64; i++) {
+        JSValue rule = JS_GetPropertyUint32(ctx, rules, i);
+        JSValue urls = JS_GetPropertyStr(ctx, rule, "urls");
+        JSValue where = JS_GetPropertyStr(ctx, rule, "where");
+        uint32_t n_urls = 0;
+        if (JS_IsArray(urls) && ns_speculation_rule_is_eager(ctx, rule, TRUE))
+            n_urls = ns_js_array_length(ctx, urls);
+        for (uint32_t u = 0; u < n_urls && u < 64; u++) {
+            JSValue item = JS_GetPropertyUint32(ctx, urls, u);
+            const char *raw = JS_IsString(item) ? JS_ToCString(ctx, item) : NULL;
+            g_autofree char *abs = raw ? ns_url_resolve(base, raw) : NULL;
+            if (abs) ns_engine_prefetch_document(abs, js->current_url);
+            if (raw) JS_FreeCString(ctx, raw);
+            JS_FreeValue(ctx, item);
+        }
+        if (JS_IsObject(where) && ns_speculation_rule_is_eager(ctx, rule, FALSE))
+            ns_speculation_prefetch_links(js, js->current_doc, where, base, 0);
+        JS_FreeValue(ctx, where);
+        JS_FreeValue(ctx, urls);
+        JS_FreeValue(ctx, rule);
+    }
+    JS_FreeValue(ctx, rules);
+    JS_FreeValue(ctx, root);
+}
+
 static void
 ns_js_register_import_maps_rec(ns_js *js, ns_node *root, int depth)
 {
     if (!js || !root || depth >= 512 ||
         (depth > 0 && ns_dom_hidden_child(root))) return;
     if (ns_node_is_element_named(root, "script")) {
+        if (ns_script_kind(root) == NS_SCRIPT_KIND_SPECULATIONRULES &&
+            !ns_element_get_attr(root, NS_SCRIPT_ALREADY_STARTED)) {
+            ns_element_set_attr(root, NS_SCRIPT_ALREADY_STARTED, "1");
+            g_autofree char *base = ns_js_node_document_base_url(js, root);
+            g_autoptr(GString) text = g_string_new(NULL);
+            for (const ns_node *c = root->first_child; c; c = c->next_sibling)
+                if (c->kind == NS_NODE_TEXT && c->text)
+                    g_string_append(text, c->text);
+            ns_js_apply_speculation_rules(js, text->str, text->len, base);
+        }
         if (ns_script_kind(root) == NS_SCRIPT_KIND_IMPORTMAP &&
             !ns_element_get_attr(root, NS_SCRIPT_ALREADY_STARTED)) {
             ns_element_set_attr(root, NS_SCRIPT_ALREADY_STARTED, "1");
@@ -69775,7 +69956,24 @@ ns_script_kind(const ns_node *n)
     if (javascript_mime_essence_match(start, len)) return NS_SCRIPT_KIND_CLASSIC;
     if (g_ascii_strcasecmp(type, "module") == 0) return NS_SCRIPT_KIND_MODULE;
     if (g_ascii_strcasecmp(type, "importmap") == 0) return NS_SCRIPT_KIND_IMPORTMAP;
+    if (g_ascii_strcasecmp(type, "speculationrules") == 0)
+        return NS_SCRIPT_KIND_SPECULATIONRULES;
     return NS_SCRIPT_KIND_NONE;
+}
+
+static JSValue
+ns_script_supports(JSContext *ctx, JSValueConst this_val,
+                   int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    static const char *const types[] = { "classic", "module", "importmap",
+                                         "speculationrules" };
+    const char *type = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
+    gboolean known = FALSE;
+    for (gsize i = 0; type && i < G_N_ELEMENTS(types); i++)
+        known = known || strcmp(type, types[i]) == 0;
+    if (type) JS_FreeCString(ctx, type);
+    return JS_NewBool(ctx, known);
 }
 
 static gboolean
