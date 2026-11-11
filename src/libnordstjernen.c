@@ -154,6 +154,12 @@ struct ns_browser {
     const ns_node  *sb_node;
     double          sb_grab;
     gboolean        sb_dragging;
+    ns_node        *resize_node;
+    gboolean        resize_x, resize_y;
+    gboolean        resize_calibrated;
+    double          resize_from_x, resize_from_y;
+    double          resize_from_w, resize_from_h;
+    double          resize_extra_w, resize_extra_h;
     int             security;
     char           *remote_ip;
 };
@@ -3783,10 +3789,129 @@ box_find_scrollable_by_dom(ns_box *root, const ns_node *node)
     return NULL;
 }
 
+#define NS_RESIZE_GRIP_PX 16.0
+#define NS_RESIZE_MIN_PX 16.0
+
+static gboolean
+browser_node_border_rect(ns_browser *browser, const ns_node *node,
+                         double *x, double *y, double *w, double *h)
+{
+    const ns_box *box = browser_box_for_node(browser->layout, node);
+    if (!box)
+        return ns_box_inline_rect_for_dom(browser->layout, node, x, y, w, h);
+    *x = box->x + box->margin.left;
+    *y = box->y + box->margin.top;
+    *w = box->content_width + box->padding.left + box->padding.right +
+         box->border.left + box->border.right;
+    *h = box->content_height + box->padding.top + box->padding.bottom +
+         box->border.top + box->border.bottom;
+    return TRUE;
+}
+
+static gboolean
+browser_node_resize_axes(ns_browser *browser, const ns_node *node,
+                         gboolean *horizontal, gboolean *vertical)
+{
+    const ns_style *s = browser->styles
+        ? g_hash_table_lookup(browser->styles, node) : NULL;
+    const ns_css_value *v = s ? s->values[NS_CSS_RESIZE] : NULL;
+    if (!v || ns_css_keyword_is(v, "none")) return FALSE;
+    if (!ns_node_is_element_named(node, "textarea") &&
+        ns_css_keyword_is(s->values[NS_CSS_OVERFLOW_X], "visible") &&
+        ns_css_keyword_is(s->values[NS_CSS_OVERFLOW_Y], "visible"))
+        return FALSE;
+    gboolean both = ns_css_keyword_is(v, "both");
+    *horizontal = both || ns_css_keyword_is(v, "horizontal") ||
+                  ns_css_keyword_is(v, "inline");
+    *vertical = both || ns_css_keyword_is(v, "vertical") ||
+                ns_css_keyword_is(v, "block");
+    return *horizontal || *vertical;
+}
+
+static gboolean
+browser_resize_press(ns_browser *browser, int x, int y)
+{
+    for (const ns_node *n = browser_hit_node(browser, x, y); n; n = n->parent) {
+        gboolean horizontal = FALSE, vertical = FALSE;
+        double rx, ry, rw, rh;
+        if (n->kind != NS_NODE_ELEMENT ||
+            !browser_node_resize_axes(browser, n, &horizontal, &vertical) ||
+            !browser_node_border_rect(browser, n, &rx, &ry, &rw, &rh))
+            continue;
+        if (x < rx + rw - NS_RESIZE_GRIP_PX || x > rx + rw ||
+            y < ry + rh - NS_RESIZE_GRIP_PX || y > ry + rh)
+            continue;
+        browser->resize_node = (ns_node *)n;
+        browser->resize_x = horizontal;
+        browser->resize_y = vertical;
+        browser->resize_calibrated = FALSE;
+        browser->resize_from_x = x;
+        browser->resize_from_y = y;
+        browser->resize_from_w = rw;
+        browser->resize_from_h = rh;
+        browser->resize_extra_w = browser->resize_extra_h = 0;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+browser_resize_apply(ns_browser *browser, double border_w, double border_h)
+{
+    ns_node *node = browser->resize_node;
+    const char *old = ns_element_get_attr(node, "style");
+    g_auto(GStrv) decls = g_strsplit(old ? old : "", ";", -1);
+    g_autoptr(GString) style = g_string_new(NULL);
+    for (int i = 0; decls[i]; i++) {
+        g_autofree char *decl = g_strstrip(g_strdup(decls[i]));
+        if (!*decl) continue;
+        if (browser->resize_x && g_ascii_strncasecmp(decl, "width", 5) == 0 &&
+            strchr(": \t", decl[5]))
+            continue;
+        if (browser->resize_y && g_ascii_strncasecmp(decl, "height", 6) == 0 &&
+            strchr(": \t", decl[6]))
+            continue;
+        g_string_append_printf(style, "%s; ", decl);
+    }
+    char num[G_ASCII_DTOSTR_BUF_SIZE];
+    if (browser->resize_x)
+        g_string_append_printf(style, "width: %spx; ",
+            g_ascii_formatd(num, sizeof num, "%.0f",
+                            MAX(border_w - browser->resize_extra_w, 1.0)));
+    if (browser->resize_y)
+        g_string_append_printf(style, "height: %spx; ",
+            g_ascii_formatd(num, sizeof num, "%.0f",
+                            MAX(border_h - browser->resize_extra_h, 1.0)));
+    ns_element_set_attr(node, "style", style->str);
+    browser->dirty = TRUE;
+}
+
+static int
+browser_resize_drag(ns_browser *browser, int x, int y)
+{
+    double w = MAX(browser->resize_from_w + x - browser->resize_from_x,
+                   NS_RESIZE_MIN_PX);
+    double h = MAX(browser->resize_from_h + y - browser->resize_from_y,
+                   NS_RESIZE_MIN_PX);
+    browser_resize_apply(browser, w, h);
+    if (browser->resize_calibrated) return 1;
+    browser_flush(browser);
+    double rx, ry, rw, rh;
+    if (browser_node_border_rect(browser, browser->resize_node,
+                                 &rx, &ry, &rw, &rh)) {
+        browser->resize_extra_w = rw - w;
+        browser->resize_extra_h = rh - h;
+        browser_resize_apply(browser, w, h);
+    }
+    browser->resize_calibrated = TRUE;
+    return 1;
+}
+
 int
 ns_browser_scrollbar_press(ns_browser *browser, int x, int y)
 {
     if (!browser || !browser->layout) return 0;
+    if (browser_resize_press(browser, x, y)) return 1;
     double lx = 0, ly = 0;
     ns_box *box = ns_box_hit_scrollbar(browser->layout, (double)x, (double)y,
                                        &lx, &ly);
@@ -3825,7 +3950,8 @@ ns_browser_scrollbar_press(ns_browser *browser, int x, int y)
 int
 ns_browser_scrollbar_drag(ns_browser *browser, int x, int y)
 {
-    (void)x;
+    if (browser && browser->resize_node)
+        return browser_resize_drag(browser, x, y);
     if (!browser || !browser->sb_dragging) return 0;
     ns_box *box = browser->sb_box;
     if (browser->sb_node)
@@ -3859,6 +3985,7 @@ ns_browser_scrollbar_release(ns_browser *browser)
     browser->sb_dragging = FALSE;
     browser->sb_box = NULL;
     browser->sb_node = NULL;
+    browser->resize_node = NULL;
 }
 
 int

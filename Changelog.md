@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* CSS: `resize` works. A textarea, and any box with `overflow` other
+  than `visible` and `resize` other than `none`, shows a grip in its
+  bottom-right corner; dragging it sets the element's inline `width`
+  and `height`, limited to the axes the property allows. Textareas
+  default to `resize: both`.
 * CSS: `field-sizing: content` sizes a text input to its value (or its
   placeholder when empty) and a textarea to its lines, growing and
   shrinking as the text changes; `min-width`, `max-width` and an

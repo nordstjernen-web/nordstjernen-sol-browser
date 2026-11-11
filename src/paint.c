@@ -1789,6 +1789,32 @@ bg_layer_blend_end(cairo_t *cr, cairo_operator_t op)
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 }
 
+static gboolean
+style_shows_resize_grip(const ns_style *s, const ns_node *dom)
+{
+    if (!s || !dom || keyword_is(s->values[NS_CSS_RESIZE], "none") ||
+        !s->values[NS_CSS_RESIZE])
+        return FALSE;
+    return ns_node_is_element_named(dom, "textarea") ||
+           !keyword_is(s->values[NS_CSS_OVERFLOW_X], "visible") ||
+           !keyword_is(s->values[NS_CSS_OVERFLOW_Y], "visible");
+}
+
+static void
+paint_resize_grip(cairo_t *cr, double right, double bottom)
+{
+    cairo_save(cr);
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.45);
+    cairo_set_line_width(cr, 1.0);
+    for (int i = 1; i <= 2; i++) {
+        double reach = 4.0 * i + 1.0;
+        cairo_move_to(cr, right - 2.0, bottom - 2.0 - reach);
+        cairo_line_to(cr, right - 2.0 - reach, bottom - 2.0);
+    }
+    cairo_stroke(cr);
+    cairo_restore(cr);
+}
+
 static void
 paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
                               const ns_style *s, double x, double y,
@@ -5931,6 +5957,9 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 cairo_stroke(cr);
                 cairo_restore(cr);
             }
+            if (is_textarea && !block_chrome &&
+                style_shows_resize_grip(r->style, r->dom))
+                paint_resize_grip(cr, x1, y1);
             if (r->dom && ns_node_is_element_named(r->dom, "select") &&
                 !keyword_is(r->style ? r->style->values[NS_CSS_APPEARANCE]
                                      : NULL, "none")) {
@@ -11457,6 +11486,12 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         }
         g_strfreev(ct);
     }
+    if (style_shows_resize_grip(b->style, b->dom))
+        paint_resize_grip(cr,
+            b->x + b->margin.left + b->border.left + b->content_width +
+                b->padding.left + b->padding.right,
+            b->y + b->margin.top + b->border.top + b->content_height +
+                b->padding.top + b->padding.bottom);
     if (clip_overflow && b->scrolls && !sb_hidden &&
         (b->scroll_max_x > 0 || b->scroll_max_y > 0)) {
         double px = b->x + b->margin.left + b->border.left;
