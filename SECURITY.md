@@ -92,9 +92,14 @@ because it must spawn renderers and drive the GPU for the window.
   `AF_NETLINK`, signals and `prlimit64` may target only the process
   itself, `fcntl` cannot set signal ownership, and the `TIOCSTI` /
   `TIOCLINUX` ioctls are refused. With WebGL and WebGPU both off,
-  `PROT_EXEC` `mprotect` and anonymous executable `mmap` are refused too;
-  with either on they must be allowed, because GPU drivers compile
-  shaders to machine code.
+  `PROT_EXEC` `mprotect`, anonymous executable `mmap` and `memfd_create`
+  are refused too (the audio output process keeps `memfd_create`, which
+  the sound server's client library needs); with either on they must be allowed, because GPU
+  drivers compile shaders to machine code. This raises the cost of
+  running injected code, it does not rule it out: a file-backed
+  executable `mmap` has to stay allowed for loading libraries, and
+  neither seccomp nor Landlock can tell a library from a file the
+  renderer wrote into its own cache directory.
 
 `about:nordstjernen` shows the Landlock ABI and whether Landlock, seccomp
 and `no_new_privs` are in force in the renderer. `NS_NO_SANDBOX=1`

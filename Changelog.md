@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a renderer that runs without executable memory (WebGL and
+  WebGPU both off) and the audio decoder can no longer call
+  `memfd_create`. The seccomp filter refused `mprotect(PROT_EXEC)` and
+  anonymous executable mappings but has to allow file-backed ones for
+  loading libraries, and a memfd is a file: write code into it, map it
+  executable. SECURITY.md now says what this mode does not cover.
 * Security: web pages can no longer read the browser's own `about:`
   pages. `fetch()` and `XMLHttpRequest` accepted `about:start`, and every
   `about:` response passed the CORS check, so any site could read the

@@ -1202,6 +1202,7 @@ ns_browser_sandbox(const char *self_exe)
     if (!gpu_apis) {
         ns_mic_preload();
         ns_security_seccomp_deny_exec_memory();
+        ns_security_seccomp_deny_memfd();
     }
     ns_security_seccomp_init();
 }

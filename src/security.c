@@ -238,6 +238,7 @@ ns_security_sri_check(const char *integrity_attr,
 static gboolean ns_seccomp_unix_sockets = TRUE;
 static gboolean ns_seccomp_sysv_ipc_denied;
 static gboolean ns_seccomp_exec_memory_denied;
+static gboolean ns_seccomp_memfd_denied;
 #endif
 
 void
@@ -245,6 +246,14 @@ ns_security_seccomp_deny_exec_memory(void)
 {
 #ifdef NS_SECCOMP_FILTER_ARGS
     ns_seccomp_exec_memory_denied = TRUE;
+#endif
+}
+
+void
+ns_security_seccomp_deny_memfd(void)
+{
+#ifdef NS_SECCOMP_FILTER_ARGS
+    ns_seccomp_memfd_denied = TRUE;
 #endif
 }
 
@@ -1069,6 +1078,13 @@ ns_seccomp_is_exec_memory_call(const char *name)
     return FALSE;
 }
 
+static gboolean
+ns_seccomp_is_memfd_call(const char *name)
+{
+    return strcmp(name, "memfd_create") == 0 ||
+           strcmp(name, "memfd_secret") == 0;
+}
+
 static void
 ns_seccomp_add_memory_rules(scmp_filter_ctx ctx)
 {
@@ -1204,14 +1220,18 @@ ns_security_seccomp_init(void)
 
     gboolean deny_exec = FALSE;
     gboolean deny_sysv = FALSE;
+    gboolean deny_memfd = FALSE;
 #ifdef NS_SECCOMP_FILTER_ARGS
     deny_exec = ns_seccomp_exec_memory_denied;
+    deny_memfd = ns_seccomp_memfd_denied;
     deny_sysv = ns_seccomp_sysv_ipc_denied;
 #endif
     for (size_t i = 0; i < G_N_ELEMENTS(ns_seccomp_allowed_names); i++) {
         if (deny_exec && ns_seccomp_is_exec_memory_call(ns_seccomp_allowed_names[i]))
             continue;
         if (deny_sysv && ns_seccomp_is_sysv_ipc_call(ns_seccomp_allowed_names[i]))
+            continue;
+        if (deny_memfd && ns_seccomp_is_memfd_call(ns_seccomp_allowed_names[i]))
             continue;
         int nr = seccomp_syscall_resolve_name(ns_seccomp_allowed_names[i]);
         if (nr == __NR_SCMP_ERROR) continue;
