@@ -3,6 +3,16 @@ Changelog:
 
 1.0.47-dev:
 ======
+* CSS: `color-scheme` now decides colours. An element's used scheme
+  comes from its `color-scheme` value, or from
+  `<meta name="color-scheme">` when that is `normal`, together with the
+  light/dark preference. `light-dark()` and the system colours
+  (`Canvas`, `CanvasText`, `Field`, `ButtonFace`, `LinkText`, ...)
+  resolve against it per element, the page canvas and default text
+  colour follow the root's scheme, and built-in form controls are
+  painted with system colours, so a page that opts into dark gets dark
+  controls. A page that uses `light-dark()` without opting in now gets
+  the light values; it used to follow the preference alone.
 * HTML: interest invokers. A link or button with `interestfor="id"`
   shows interest in its target after the pointer rests on it for half
   a second or when it receives keyboard focus: the target gets an

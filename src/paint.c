@@ -6014,13 +6014,19 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 paint_inline_css_chrome(cr, r, x0, y0, x1 - x0, y1 - y0);
             if (draw_native_chrome) {
                 cairo_save(cr);
-                if (r->kind == NS_INLINE_BUTTON)
+                gboolean dark = r->style && r->style->scheme_dark;
+                if (r->kind == NS_INLINE_BUTTON && dark)
+                    cairo_set_source_rgb(cr, 0.42, 0.42, 0.42);
+                else if (r->kind == NS_INLINE_BUTTON)
                     cairo_set_source_rgb(cr, 0.902, 0.902, 0.902);
+                else if (dark)
+                    cairo_set_source_rgb(cr, 0.231, 0.231, 0.231);
                 else
                     cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
                 cairo_rectangle(cr, x0, y0, x1 - x0, y1 - y0);
                 cairo_fill(cr);
-                cairo_set_source_rgb(cr, 0.722, 0.722, 0.722);
+                if (dark) cairo_set_source_rgb(cr, 0.52, 0.52, 0.52);
+                else      cairo_set_source_rgb(cr, 0.722, 0.722, 0.722);
                 cairo_set_line_width(cr, 1.0);
                 cairo_rectangle(cr, x0 + 0.5, y0 + 0.5,
                                 x1 - x0 - 1, y1 - y0 - 1);
@@ -11764,6 +11770,15 @@ box_solid_background(const ns_box *b, rgba *out)
     return FALSE;
 }
 
+static rgba
+canvas_default_color(const ns_box *root)
+{
+    const ns_box *html = root ? find_element_box_named(root, "html") : NULL;
+    if (html && html->style && html->style->scheme_dark)
+        return (rgba){ 18.0 / 255, 18.0 / 255, 18.0 / 255, 1 };
+    return (rgba){ 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
+}
+
 static gboolean
 canvas_background_of(const ns_box *root, rgba *out)
 {
@@ -11826,7 +11841,7 @@ paint_document(cairo_t *cr, const ns_box *root, const char *highlight_query,
                const struct ns_selection *sel)
 {
     ns_paint_list_ordinals_begin();
-    rgba bg = { 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
+    rgba bg = canvas_default_color(root);
     canvas_background_of(root, &bg);
     cairo_save(cr);
     set_source_rgba(cr, bg);
@@ -11862,7 +11877,7 @@ ns_paint_with_selection(cairo_t *cr, const ns_box *root,
 gboolean
 ns_paint_canvas_color(const ns_box *root, double rgba_out[4])
 {
-    rgba bg = { 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
+    rgba bg = canvas_default_color(root);
     gboolean found = canvas_background_of(root, &bg);
     rgba_out[0] = bg.r;
     rgba_out[1] = bg.g;
