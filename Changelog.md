@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: when libpsl carries no built-in public-suffix list, a cookie
+  with a `Domain` attribute is stored for the setting host only. The
+  public-suffix test was skipped in that case, so `Domain=com` was
+  accepted.
 * Security: a renderer that runs without executable memory (WebGL and
   WebGPU both off) and the audio decoder can no longer call
   `memfd_create`. The seccomp filter refused `mprotect(PROT_EXEC)` and
