@@ -14,6 +14,10 @@ Changelog:
   asked for, not the one the bytes came from, so a page could point a
   video at its own redirect, draw the frames and read back another
   site's video with `getImageData`, `toDataURL` or WebGL `readPixels`.
+* Docs: `docs/modernization-report.md` reviews the tree against
+  GoogleChrome/modern-web-guidance: a support matrix for the features
+  the guidance recommends, the legacy compatibility surface that can go,
+  dated patterns in the C code and docs, and an ordered work plan.
 * Hardening: a sandboxed renderer or audio helper may open a netlink
   socket for the routing protocol only, which is what name resolution
   uses; the other netlink families are refused.
