@@ -10601,11 +10601,8 @@ normalize_display_value(const char *text)
 {
     static const struct { const char *alias, *standard; } prefixed[] = {
         { "-webkit-flex",         "flex" },
-        { "-ms-flexbox",          "flex" },
         { "-webkit-inline-flex",  "inline-flex" },
-        { "-ms-inline-flexbox",   "inline-flex" },
         { "-webkit-grid",         "grid" },
-        { "-ms-grid",             "grid" },
     };
     char *kw = ascii_lower(text, strlen(text));
     if (strcmp(kw, "-webkit-box") == 0 ||
@@ -32254,8 +32251,6 @@ static const char *kUa =
     "slot { display: contents; }\n"
     "marquee { display: inline-block; text-align: initial; "
     "overflow: hidden; }\n"
-    "blink { animation: -nd-blink 1s step-end infinite; }\n"
-    "@keyframes -nd-blink { 50% { visibility: hidden; } }\n"
     "nobr { white-space: nowrap; }\n"
     "br[clear=\"left\" i] { clear: left; }\n"
     "br[clear=\"right\" i] { clear: right; }\n"

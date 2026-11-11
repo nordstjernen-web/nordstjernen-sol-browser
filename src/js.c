@@ -36665,7 +36665,6 @@ ns_event_type_init_flags(const char *type, gboolean at_document,
         "DOMContentLoaded", "input", "change", "focusin", "focusout",
         "select", "fullscreenchange", "fullscreenerror",
         "webkitfullscreenchange", "webkitfullscreenerror",
-        "mozfullscreenchange", "MSFullscreenChange",
     };
     *bubbles = TRUE;
     *cancelable = TRUE;
@@ -53250,8 +53249,6 @@ ns_fullscreen_change_job(JSContext *ctx, int argc, JSValueConst *argv)
         ns_js_dispatch_event(js, target, "fullscreenchange", NULL);
         ns_js_dispatch_event(js, target,
                              "webkitfullscreenchange", NULL);
-        ns_js_dispatch_event(js, target, "mozfullscreenchange", NULL);
-        ns_js_dispatch_event(js, target, "MSFullscreenChange", NULL);
     }
     return JS_UNDEFINED;
 }
@@ -53263,8 +53260,6 @@ ns_dispatch_fullscreen_change(ns_js *js, const ns_node *target)
     if (!target) target = js->current_doc;
     ns_js_dispatch_event(js, target, "fullscreenchange", NULL);
     ns_js_dispatch_event(js, target, "webkitfullscreenchange", NULL);
-    ns_js_dispatch_event(js, target, "mozfullscreenchange", NULL);
-    ns_js_dispatch_event(js, target, "MSFullscreenChange", NULL);
 }
 
 static void
@@ -56132,8 +56127,6 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("requestFullscreen",       0, ns_element_request_fullscreen),
     JS_CFUNC_DEF("webkitRequestFullscreen", 0, ns_element_request_fullscreen),
     JS_CFUNC_DEF("webkitRequestFullScreen", 0, ns_element_request_fullscreen),
-    JS_CFUNC_DEF("mozRequestFullScreen",    0, ns_element_request_fullscreen),
-    JS_CFUNC_DEF("msRequestFullscreen",     0, ns_element_request_fullscreen),
     JS_CFUNC_DEF("getAnimations",           0, ns_event_empty_array),
     JS_CFUNC_DEF("animate",                 2, ns_element_animate),
     JS_CFUNC_DEF("getRootNode",             1, ns_element_getRootNode),
@@ -61002,7 +60995,7 @@ static const char ns_node_shapes_src[] =
     "      });"
     "    });"
     "    var del = Object.getOwnPropertyNames(P).filter(function(k){"
-    "      return k !== 'constructor' && !want.has(k) && k.slice(0, 8) !== '__shady_';"
+    "      return k !== 'constructor' && !want.has(k);"
     "    });"
     "    plan.push([P, add, del]);"
     "  });"
@@ -61385,7 +61378,7 @@ static const char ns_element_shapes_src[] =
     "    var C = G[n]; if (typeof C !== 'function' || !C.prototype) return;"
     "    var P = C.prototype, want = new Set(W[n].split(' '));"
     "    Object.getOwnPropertyNames(P).forEach(function(k){"
-    "      if (k === 'constructor' || want.has(k) || k.slice(0, 8) === '__shady_') return;"
+    "      if (k === 'constructor' || want.has(k)) return;"
     "      try { delete P[k]; } catch (e) {}"
     "    });"
     "  });"
@@ -62084,55 +62077,10 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     }
 }
 
-static JSValue
-ns_chrome_load_times(JSContext *ctx, JSValueConst this_val,
-                     int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    ns_js *js = js_from_ctx(ctx);
-    double origin = js ? js->time_origin_real_ms / 1000.0 : 0.0;
-    double now = ns_perf_now_ms(js) / 1000.0;
-    JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "requestTime",            JS_NewFloat64(ctx, origin));
-    JS_SetPropertyStr(ctx, o, "startLoadTime",          JS_NewFloat64(ctx, origin));
-    JS_SetPropertyStr(ctx, o, "commitLoadTime",         JS_NewFloat64(ctx, origin + 0.04));
-    JS_SetPropertyStr(ctx, o, "finishDocumentLoadTime", JS_NewFloat64(ctx, origin + 0.09));
-    JS_SetPropertyStr(ctx, o, "finishLoadTime",         JS_NewFloat64(ctx, origin + now));
-    JS_SetPropertyStr(ctx, o, "firstPaintTime",         JS_NewFloat64(ctx, origin + 0.1));
-    JS_SetPropertyStr(ctx, o, "firstPaintAfterLoadTime", JS_NewFloat64(ctx, 0.0));
-    JS_SetPropertyStr(ctx, o, "navigationType",         JS_NewString(ctx, "Other"));
-    JS_SetPropertyStr(ctx, o, "wasFetchedViaSpdy",      JS_TRUE);
-    JS_SetPropertyStr(ctx, o, "wasNpnNegotiated",       JS_TRUE);
-    JS_SetPropertyStr(ctx, o, "npnNegotiatedProtocol", JS_NewString(ctx, "h2"));
-    JS_SetPropertyStr(ctx, o, "wasAlternateProtocolAvailable", JS_FALSE);
-    JS_SetPropertyStr(ctx, o, "connectionInfo",         JS_NewString(ctx, "h2"));
-    return o;
-}
-
-static JSValue
-ns_chrome_csi(JSContext *ctx, JSValueConst this_val,
-              int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    ns_js *js = js_from_ctx(ctx);
-    double now = ns_perf_now_ms(js);
-    JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "startE",
-                      JS_NewFloat64(ctx, js ? js->time_origin_real_ms : 0.0));
-    JS_SetPropertyStr(ctx, o, "onloadT",
-                      JS_NewFloat64(ctx, (js ? js->time_origin_real_ms : 0.0) + now));
-    JS_SetPropertyStr(ctx, o, "pageT", JS_NewFloat64(ctx, now));
-    JS_SetPropertyStr(ctx, o, "tran", JS_NewInt32(ctx, 15));
-    return o;
-}
-
 static void
 ns_install_window_chrome(JSContext *ctx, JSValueConst global)
 {
     JSValue chrome = JS_NewObject(ctx);
-    ns_bind_fn(ctx, chrome, "loadTimes", ns_chrome_load_times, 0);
-    ns_bind_fn(ctx, chrome, "csi",       ns_chrome_csi,        0);
-
     JS_SetPropertyStr(ctx, global, "chrome", chrome);
 }
 
@@ -63216,8 +63164,6 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
             "      var fn = P[k] || (NP && NP[k]);"
             "      if(typeof fn !== 'function') return;"
             "      if(!P[k]) Object.defineProperty(P,k,{value:fn,writable:true,configurable:true});"
-            "      if(!P['__shady_'+k]) Object.defineProperty(P,'__shady_'+k,{value:fn,writable:true,configurable:true});"
-            "      if(!P['__shady_native_'+k]) Object.defineProperty(P,'__shady_native_'+k,{value:fn,writable:true,configurable:true});"
             "    });"
             "  });"
             "})();";
@@ -66230,8 +66176,6 @@ static const JSCFunctionListEntry ns_document_funcs[] = {
     JS_CFUNC_DEF("exitFullscreen", 0, ns_document_exit_fullscreen),
     JS_CFUNC_DEF("webkitExitFullscreen", 0, ns_document_exit_fullscreen),
     JS_CFUNC_DEF("webkitCancelFullScreen", 0, ns_document_exit_fullscreen),
-    JS_CFUNC_DEF("mozCancelFullScreen", 0, ns_document_exit_fullscreen),
-    JS_CFUNC_DEF("msExitFullscreen", 0, ns_document_exit_fullscreen),
     JS_CFUNC_DEF("exitPointerLock", 0, ns_document_exitPointerLock),
     JS_CFUNC_DEF("queryCommandSupported", 1, ns_document_queryCommandSupported),
     JS_CFUNC_DEF("queryCommandEnabled",   1, ns_document_queryCommandEnabled),
@@ -66241,10 +66185,7 @@ static const JSCFunctionListEntry ns_document_funcs[] = {
     JS_CGETSET_DEF("rootElement",        ns_document_get_documentElement, NULL),
     JS_CGETSET_DEF("fullscreenElement",  ns_document_get_fullscreen_element, NULL),
     JS_CGETSET_DEF("webkitFullscreenElement", ns_document_get_fullscreen_element, NULL),
-    JS_CGETSET_DEF("mozFullScreenElement", ns_document_get_fullscreen_element, NULL),
-    JS_CGETSET_DEF("msFullscreenElement", ns_document_get_fullscreen_element, NULL),
     JS_CGETSET_DEF("webkitIsFullScreen", ns_document_get_is_fullscreen, NULL),
-    JS_CGETSET_DEF("mozFullScreen", ns_document_get_is_fullscreen, NULL),
     JS_CGETSET_DEF("pointerLockElement", ns_document_get_pointerLockElement, NULL),
     JS_CGETSET_DEF("fullscreenEnabled",  ns_document_get_fullscreen_enabled, NULL),
     JS_CGETSET_DEF("webkitFullscreenEnabled", ns_document_get_fullscreen_enabled, NULL),
