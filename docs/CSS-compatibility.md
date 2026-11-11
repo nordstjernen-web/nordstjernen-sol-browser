@@ -83,7 +83,7 @@ the 1.0.31-dev source.
 | `touch-action` | 🟡 | parsed; the GTK shell has no touch pan or pinch gesture to suppress, so it has no effect on desktop. Not wired to the Android shell's gestures |
 | `resize` | ✅ | grip in the bottom-right corner of a textarea or a non-`visible`-overflow box; dragging sets inline `width`/`height` on the allowed axes |
 | `field-sizing` | ✅ | `content` sizes text inputs to their value or placeholder and textareas to their lines |
-| `interpolate-size` | ❌ | parsed only; transitions to and from `auto` and the intrinsic keywords do not animate |
+| `interpolate-size` | 🟡 | `allow-keywords` animates `width` and `height` transitions to and from `auto` and the intrinsic keywords; other sizing properties, CSS animations and `calc-size()` are not covered |
 | `forced-color-adjust` | ✅ | `forced-colors` always evaluates to `none`, so there is nothing to adjust |
 | `break-before` · `break-after` · `break-inside` (and the legacy `page-break-*`) | ✅ | honoured while paginating for paper; `always` maps onto `page` (see [printing.md](printing.md)) |
 | `text-overflow: ellipsis` | ✅ | verified on `white-space:nowrap` clipped boxes |

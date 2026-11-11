@@ -19,6 +19,10 @@ typedef struct ns_anim_chan {
     ns_css_value *current;
     gboolean      has_last;
     const void     *starting_seen;
+    ns_css_value *size_from;
+    double        size_duration_ms;
+    double        size_delay_ms;
+    ns_css_timing size_timing;
     gboolean      last_currentcolor;
     gboolean      active;
     gboolean      cancelled;
@@ -101,6 +105,9 @@ typedef struct ns_anim_state {
     GHashTable    *base_values;
     ns_style      *prev_style;
     guint          run_generation;
+    gboolean       watch_size;
+    gboolean       has_used_size;
+    double         used_size[2];
 } ns_anim_state;
 
 typedef struct {
@@ -133,6 +140,10 @@ struct ns_anim {
     gboolean    scroll_fresh;
     ns_anim_scroll_lookup_cb scroll_lookup;
     gpointer    scroll_lookup_user;
+    ns_anim_size_visit_cb size_visit;
+    gpointer    size_visit_user;
+    gboolean    size_watch_any;
+    guint       size_pending;
 };
 
 static gint64
@@ -172,6 +183,7 @@ static void
 chan_free(gpointer data)
 {
     ns_anim_chan *ch = data;
+    ns_css_value_free(ch->size_from);
     ns_css_value_free(ch->last);
     ns_css_value_free(ch->from);
     ns_css_value_free(ch->to);
@@ -696,6 +708,126 @@ value_or_initial_used(int prop, const ns_css_value *v, const ns_style *st)
     return currentcolor_used(prop, out, st);
 }
 
+static gboolean
+value_is_size_keyword(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           (strcmp(v->u.keyword, "auto") == 0 ||
+            strcmp(v->u.keyword, "min-content") == 0 ||
+            strcmp(v->u.keyword, "max-content") == 0 ||
+            strcmp(v->u.keyword, "fit-content") == 0);
+}
+
+static gboolean
+style_interpolates_size_keywords(const ns_style *style)
+{
+    const ns_css_value *mode = style->values[NS_CSS_INTERPOLATE_SIZE];
+    return mode && mode->kind == NS_CSS_V_KEYWORD && mode->u.keyword &&
+           strcmp(mode->u.keyword, "allow-keywords") == 0;
+}
+
+static ns_css_value *
+used_size_value(const ns_anim_state *s, int prop)
+{
+    if (!s->has_used_size) return NULL;
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_LENGTH;
+    v->u.length.v = s->used_size[prop == NS_CSS_HEIGHT ? 1 : 0];
+    v->u.length.unit = NS_CSS_UNIT_PX;
+    return v;
+}
+
+static void
+anim_note_used_size(const ns_node *node, double width, double height,
+                    gpointer data)
+{
+    ns_anim *a = data;
+    ns_anim_state *s = g_hash_table_lookup(a->states, node);
+    if (!s || !s->watch_size) return;
+    s->used_size[0] = width;
+    s->used_size[1] = height;
+    s->has_used_size = TRUE;
+}
+
+static void
+chan_drop_pending_size(ns_anim *a, ns_anim_chan *ch)
+{
+    if (!ch->size_from) return;
+    ns_css_value_free(ch->size_from);
+    ch->size_from = NULL;
+    if (a->size_pending > 0) a->size_pending--;
+}
+
+static gboolean
+chan_start_keyword_size(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch,
+                        const ns_style *style, const ns_css_value *from,
+                        const ns_css_value *to, const ns_css_anim_entry *e,
+                        gint64 now_us)
+{
+    if ((ch->prop != NS_CSS_WIDTH && ch->prop != NS_CSS_HEIGHT) ||
+        !(value_is_size_keyword(from) || value_is_size_keyword(to)))
+        return FALSE;
+    if (!style_interpolates_size_keywords(style)) return FALSE;
+    ns_css_value *used = value_is_size_keyword(from)
+        ? used_size_value(s, ch->prop) : NULL;
+    if (value_is_size_keyword(from) && !used) return FALSE;
+    const ns_css_value *start = used ? used : from;
+    chan_drop_pending_size(a, ch);
+    if (!value_is_size_keyword(to)) {
+        chan_start(a, s, ch, start, to, e, now_us, FALSE);
+    } else {
+        if (ch->active) chan_cancel(a, s, ch, now_us);
+        ch->size_from = ns_css_value_dup(start);
+        ch->size_duration_ms = e->duration_ms;
+        ch->size_delay_ms = e->delay_ms;
+        ch->size_timing = e->timing;
+        a->size_pending++;
+    }
+    ns_css_value_free(used);
+    return TRUE;
+}
+
+void
+ns_anim_set_size_visitor(ns_anim *a, ns_anim_size_visit_cb cb, gpointer user)
+{
+    if (!a) return;
+    a->size_visit = cb;
+    a->size_visit_user = user;
+}
+
+gboolean
+ns_anim_resolve_pending_sizes(ns_anim *a)
+{
+    if (!a || !a->size_watch_any || !a->size_visit) return FALSE;
+    a->size_visit(a->size_visit_user, anim_note_used_size, a);
+    if (a->size_pending == 0) return FALSE;
+    gboolean any = FALSE;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, a->states);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_anim_state *s = val;
+        for (guint i = 0; s->chans && i < s->chans->len; i++) {
+            ns_anim_chan *ch = s->chans->pdata[i];
+            if (!ch->size_from) continue;
+            ns_css_value *to = used_size_value(s, ch->prop);
+            ns_css_anim_entry e = { .duration_ms = ch->size_duration_ms,
+                                    .delay_ms = ch->size_delay_ms,
+                                    .timing = ch->size_timing };
+            if (to && !ns_css_value_equal(to, ch->size_from)) {
+                chan_start(a, s, ch, ch->size_from, to, &e, anim_now(a),
+                           FALSE);
+                any = TRUE;
+            }
+            ns_css_value_free(to);
+            ns_css_value_free(ch->size_from);
+            ch->size_from = NULL;
+        }
+    }
+    a->size_pending = 0;
+    return any;
+}
+
 static void
 observe_transition_prop(ns_anim *a, ns_anim_state *s, const ns_style *style,
                         int prop, const ns_css_anim_entry *e, gint64 now_us)
@@ -752,7 +884,10 @@ observe_transition_prop(ns_anim *a, ns_anim_state *s, const ns_style *style,
         ns_css_value *probe = ns_css_value_interpolate_prop(prop, from, cur_eff, 0.0);
         gboolean interpolable = probe != NULL;
         ns_css_value_free(probe);
-        if (interpolable && ancestor_transitions_to(a, s->node, prop, cur_eff)) {
+        if (chan_start_keyword_size(a, s, ch, style, from, cur_eff, e,
+                                    now_us)) {
+        } else if (interpolable &&
+                   ancestor_transitions_to(a, s->node, prop, cur_eff)) {
             if (ch->active) chan_cancel(a, s, ch, now_us);
         } else if (interpolable) {
             chan_start(a, s, ch, from, cur_eff, e, now_us, FALSE);
@@ -794,6 +929,11 @@ observe_transition(ns_anim *a, ns_anim_state *s, const ns_style *style,
         if (!prop_transitionable(p)) continue;
         by_prop[p] = e;
         if (!touched[p]) { touched[p] = TRUE; g_array_append_val(order, p); }
+    }
+    if ((by_prop[NS_CSS_WIDTH] || by_prop[NS_CSS_HEIGHT]) &&
+        style_interpolates_size_keywords(style)) {
+        s->watch_size = TRUE;
+        a->size_watch_any = TRUE;
     }
     for (guint i = 0; i < order->len; i++) {
         int p = g_array_index(order, int, i);

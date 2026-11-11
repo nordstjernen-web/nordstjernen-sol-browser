@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* CSS: `interpolate-size: allow-keywords` works for `width` and
+  `height`. A transition between a length and `auto`, `min-content`,
+  `max-content` or `fit-content` now animates through the element's
+  laid-out size instead of jumping, in both directions, so accordions
+  and expanding panels need no script.
 * CSS: `color-scheme` now decides colours. An element's used scheme
   comes from its `color-scheme` value, or from
   `<meta name="color-scheme">` when that is `normal`, together with the
