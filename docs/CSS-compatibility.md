@@ -215,6 +215,7 @@ the 1.0.31-dev source.
 
 | Topic | Status | Notes |
 |-------|:--:|------|
+| `color-scheme`, `<meta name=color-scheme>`, `light-dark()`, system colours | 🟡 | the used scheme is computed per element; `light-dark()` and system colours in colour properties resolve against it, the canvas and default text colour follow the root, and UA form controls use system colours. Not scheme-aware: colours inside gradients and shadows, checkbox/radio glyphs, scrollbars, and colours parsed outside the cascade (canvas `fillStyle`) |
 | Named, `#hex`, `rgb()`/`rgba()`, `hsl()`/`hsla()` | ✅ | modern space/slash syntax |
 | `hwb()`, `lab()`/`lch()`, `oklab()`/`oklch()`, `color()` | ✅ | every predefined space; values keep their color space and `none` components through specified and computed serialization (`src/css_color.c`); painted after conversion to sRGB |
 | Relative colors (`rgb(from …)`, `oklch(from …)`, `color(from …)`), `alpha()` | ✅ | channel keywords and math functions |

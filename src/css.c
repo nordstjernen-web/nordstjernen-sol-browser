@@ -1094,6 +1094,7 @@ ns_css_value_free(ns_css_value *v)
         }
         g_free(v->image_set_text);
         g_free(v->specified);
+        g_free(v->scheme_text);
         ns_css_value *next = v->next_layer;
         g_free(v);
         v = next;
@@ -1740,9 +1741,64 @@ ns_css_font_weight_number(const ns_css_value *v, int fallback)
     return fallback;
 }
 
+static gboolean g_resolving_dark_scheme;
+
+gboolean
+ns_css_resolving_dark_scheme(void)
+{
+    return g_resolving_dark_scheme;
+}
+
+static const struct { const char *n; guint8 r, g, b; } dark_system_colors[] = {
+    { "activetext",    255, 158, 158 },
+    { "buttonborder",  133, 133, 133 },
+    { "buttonface",    107, 107, 107 },
+    { "buttontext",    255, 255, 255 },
+    { "canvas",        18,  18,  18  },
+    { "canvastext",    255, 255, 255 },
+    { "field",         59,  59,  59  },
+    { "fieldtext",     255, 255, 255 },
+    { "graytext",      128, 128, 128 },
+    { "linktext",      158, 158, 255 },
+    { "visitedtext",   208, 173, 240 },
+};
+
+static const char *const scheme_color_words[] = {
+    "light-dark", "accentcolor", "accentcolortext", "activetext",
+    "buttonborder", "buttonface", "buttontext", "canvas", "canvastext",
+    "field", "fieldtext", "graytext", "highlight", "highlighttext",
+    "linktext", "mark", "marktext", "selecteditem", "selecteditemtext",
+    "visitedtext",
+};
+
+static gboolean
+color_text_depends_on_scheme(const char *text)
+{
+    g_autofree char *lower = g_ascii_strdown(text, -1);
+    for (gsize i = 0; i < G_N_ELEMENTS(scheme_color_words); i++) {
+        const char *word = scheme_color_words[i];
+        gsize len = strlen(word);
+        for (const char *hit = strstr(lower, word); hit;
+             hit = strstr(hit + 1, word)) {
+            gboolean starts = hit == lower || !(g_ascii_isalnum(hit[-1]) || hit[-1] == '-');
+            gboolean ends = !(g_ascii_isalnum(hit[len]) || hit[len] == '-');
+            if (starts && ends) return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 gboolean
 ns_css_named_color(const char *name, guint8 *r, guint8 *g, guint8 *b)
 {
+    for (gsize i = 0; g_resolving_dark_scheme &&
+                      i < G_N_ELEMENTS(dark_system_colors); i++) {
+        if (g_ascii_strcasecmp(dark_system_colors[i].n, name) != 0) continue;
+        *r = dark_system_colors[i].r;
+        *g = dark_system_colors[i].g;
+        *b = dark_system_colors[i].b;
+        return TRUE;
+    }
     static const struct { const char *n; guint8 r, g, b; } table[] = {
         { "aliceblue",       240, 248, 255 },
         { "antiquewhite",    250, 235, 215 },
@@ -14131,6 +14187,8 @@ parse_color_value(const char *t, gboolean allow_invert)
             g_free(kw);
         }
     }
+    if (v && v->kind == NS_CSS_V_COLOR && color_text_depends_on_scheme(t))
+        v->scheme_text = g_strdup(t);
     return v;
 }
 
@@ -32198,7 +32256,8 @@ static const char *kUa =
     "input, select, textarea, button { font-style: normal; font-weight: normal; "
     "font-size: 13.333333px; font-family: Arial; }\n"
     "textarea { font-family: monospace; }\n"
-    "button { display: inline-block; padding: 1px 6px; background-color: #e6e6e6; "
+    "html { color: CanvasText; }\n"
+    "button { display: inline-block; padding: 1px 6px; background-color: light-dark(#e6e6e6, ButtonFace); "
     "border-top-width: 2px; border-right-width: 2px; "
     "border-bottom-width: 2px; border-left-width: 2px; "
     "border-top-style: outset; border-right-style: outset; "
@@ -32221,7 +32280,7 @@ static const char *kUa =
     "input, textarea, select { display: inline-block; }\n"
     "input[type=checkbox i] { margin: 3px 3px 3px 4px; }\n"
     "input[type=radio i] { margin: 3px 3px 0px 5px; }\n"
-    "input, textarea, select { padding: 1px 2px; background-color: #ffffff; "
+    "input, textarea, select { padding: 1px 2px; background-color: Field; "
     "border-top-width: 2px; border-right-width: 2px; "
     "border-bottom-width: 2px; border-left-width: 2px; "
     "border-top-style: inset; border-right-style: inset; "
@@ -32406,6 +32465,7 @@ ns_css_value_cow(ns_style *out, int prop)
     copy->ref = 0;
     copy->image_set_text = g_strdup(v->image_set_text);
     copy->specified = g_strdup(v->specified);
+    copy->scheme_text = g_strdup(v->scheme_text);
     if (copy->next_layer) copy->next_layer->ref++;
     v->ref--;
     out->values[prop] = copy;
@@ -32677,6 +32737,7 @@ layer_value_cow(ns_css_value *prev)
     copy->ref = 0;
     copy->image_set_text = g_strdup(v->image_set_text);
     copy->specified = g_strdup(v->specified);
+    copy->scheme_text = g_strdup(v->scheme_text);
     if (copy->next_layer) copy->next_layer->ref++;
     v->ref--;
     prev->next_layer = copy;
@@ -33164,6 +33225,71 @@ resolve_emphasis_style(ns_style *out)
         keyword_value(g_strconcat(fill, shape, NULL));
 }
 
+static gboolean g_document_scheme_dark;
+
+static gboolean
+color_scheme_text_is_dark(const char *text)
+{
+    if (!text) return FALSE;
+    g_auto(GStrv) words = g_strsplit_set(text, " \t,", -1);
+    gboolean dark = FALSE, light = FALSE;
+    for (int i = 0; words[i]; i++) {
+        if (g_ascii_strcasecmp(words[i], "dark") == 0) dark = TRUE;
+        if (g_ascii_strcasecmp(words[i], "light") == 0) light = TRUE;
+    }
+    return dark && (!light || g_color_scheme == NS_CSS_COLOR_SCHEME_DARK);
+}
+
+static gboolean
+style_uses_dark_scheme(const ns_style *s)
+{
+    const ns_css_value *v = s->values[NS_CSS_COLOR_SCHEME];
+    const char *kw = v && v->kind == NS_CSS_V_KEYWORD ? v->u.keyword : NULL;
+    if (!kw || g_ascii_strcasecmp(kw, "normal") == 0)
+        return g_document_scheme_dark;
+    return color_scheme_text_is_dark(kw);
+}
+
+static void
+style_resolve_dark_colors(ns_style *s)
+{
+    static const ns_css_prop props[] = {
+        NS_CSS_COLOR, NS_CSS_BACKGROUND_COLOR,
+        NS_CSS_BORDER_TOP_COLOR, NS_CSS_BORDER_RIGHT_COLOR,
+        NS_CSS_BORDER_BOTTOM_COLOR, NS_CSS_BORDER_LEFT_COLOR,
+        NS_CSS_OUTLINE_COLOR, NS_CSS_TEXT_DECORATION_COLOR,
+        NS_CSS_COLUMN_RULE_COLOR, NS_CSS_ACCENT_COLOR, NS_CSS_CARET_COLOR,
+        NS_CSS_FILL, NS_CSS_STROKE, NS_CSS_STOP_COLOR,
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(props); i++) {
+        ns_css_value *v = s->values[props[i]];
+        if (!v || v->kind != NS_CSS_V_COLOR || !v->scheme_text) continue;
+        g_resolving_dark_scheme = TRUE;
+        ns_css_value *dark = parse_color_value(v->scheme_text, FALSE);
+        g_resolving_dark_scheme = FALSE;
+        if (!dark) continue;
+        ns_css_value_free(v);
+        s->values[props[i]] = dark;
+    }
+}
+
+static const char *
+document_meta_color_scheme(const ns_node *n, int depth)
+{
+    if (!n || depth > 8) return NULL;
+    if (ns_node_is_element_named(n, "meta")) {
+        const char *name = ns_element_get_attr(n, "name");
+        if (name && g_ascii_strcasecmp(name, "color-scheme") == 0)
+            return ns_element_get_attr(n, "content");
+    }
+    if (ns_node_is_element_named(n, "body")) return NULL;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        const char *found = document_meta_color_scheme(c, depth + 1);
+        if (found) return found;
+    }
+    return NULL;
+}
+
 static void
 cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             const ns_style *layout_parent, gboolean is_root, double root_px)
@@ -33213,6 +33339,8 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             }
         }
     }
+    out->scheme_dark = style_uses_dark_scheme(out);
+    if (out->scheme_dark) style_resolve_dark_colors(out);
     if (ns_css_keyword_is(out->values[NS_CSS_COLOR], "currentcolor"))
         color_from_parent(out, parent_style);
     if (ns_css_keyword_is(out->values[NS_CSS_FONT_WEIGHT], "bolder") ||
@@ -36915,6 +37043,7 @@ ns_style_clone_shared(const ns_style *s)
     c->explicit_inherit = s->explicit_inherit;
     c->env_dependent = s->env_dependent;
     c->currentcolor_bits = s->currentcolor_bits;
+    c->scheme_dark = s->scheme_dark;
     c->inherited_bits = s->inherited_bits;
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
         c->values[i] = s->values[i];
@@ -39253,6 +39382,8 @@ ns_css_compute(ns_node *doc,
     g_doc_sheets = doc_sheets_new(author_sheets, sheet_docs, n_sheets);
     if (g_starting_styles) g_hash_table_remove_all(g_starting_styles);
     highlight_rules_collect(author_sheets, n_sheets);
+    g_document_scheme_dark =
+        color_scheme_text_is_dark(document_meta_color_scheme(doc, 0));
     cascade_walk(doc, cached_ua, author_sheets, n_sheets, NULL, NULL,
                  &root_px, layer_ranks, out, FALSE, FALSE);
     g_clear_pointer(&g_doc_sheets, g_hash_table_destroy);

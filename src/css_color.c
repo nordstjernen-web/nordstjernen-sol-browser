@@ -2214,7 +2214,7 @@ parse_top(const char *s, const guint8 *current, cres *out)
     if (ok) {
         tks ts = { &g_array_index(arr, tk, 0), (int)arr->len, 0 };
         pctx cx = { .current = current,
-                    .dark = ns_css_get_color_scheme() == NS_CSS_COLOR_SCHEME_DARK };
+                    .dark = ns_css_resolving_dark_scheme() };
         ok = parse_color_expr(&ts, &cx, out);
         if (ok && next_nonws(&ts)->type != TK_EOF) {
             g_string_free(out->spec, TRUE);

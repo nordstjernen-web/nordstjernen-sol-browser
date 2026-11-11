@@ -727,6 +727,7 @@ typedef enum ns_css_reduced_motion {
 
 ns_css_reduced_motion ns_css_get_reduced_motion(void);
 ns_css_color_scheme ns_css_get_color_scheme(void);
+gboolean ns_css_resolving_dark_scheme(void);
 void ns_css_set_reduced_motion(ns_css_reduced_motion motion);
 void ns_css_set_color_scheme(ns_css_color_scheme scheme);
 
@@ -768,6 +769,7 @@ typedef struct ns_css_value {
     } u;
     char *image_set_text;
     char *specified;
+    char *scheme_text;
     struct ns_css_value *next_layer;
 } ns_css_value;
 
@@ -1178,6 +1180,7 @@ typedef struct ns_style {
     ns_css_value *values[NS_CSS_PROP_COUNT];
     ns_display display;
     guint8 specified_inline;
+    gboolean scheme_dark;
     struct ns_style *before;
     struct ns_style *after;
     struct ns_style *first_letter;
