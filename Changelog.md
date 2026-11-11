@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Docs: `docs/modernization-proposal.md` is the work plan that follows
+  the modernization report: which legacy surface is removed, how each
+  parse-only CSS property becomes real, and the designs for
+  `@starting-style`, View Transitions, the Custom Highlight API,
+  speculation rules, `fetchLater()` and a single iframe realm.
 * Docs: `docs/modernization-report.md` reviews the tree against
   GoogleChrome/modern-web-guidance: a support matrix for the features
   the guidance recommends, the legacy compatibility surface that can go,
