@@ -9784,6 +9784,7 @@ typedef struct ns_js_fetch_state {
     gboolean       no_cors;
     gboolean       credentials_included;
     double         fetch_start_ms;
+    ns_worker_host *fb_sw;
     char          *fb_send_url;
     char          *fb_top;
     char          *fb_method;
@@ -9792,6 +9793,9 @@ typedef struct ns_js_fetch_state {
     gsize          fb_body_len;
     char         **fb_headers;
 } ns_js_fetch_state;
+
+static ns_worker_host *ns_worker_host_ref(ns_worker_host *host);
+static void ns_worker_host_unref(ns_worker_host *host);
 
 static void
 ns_js_fetch_state_free(ns_js_fetch_state *st)
@@ -9825,6 +9829,7 @@ ns_js_fetch_state_free(ns_js_fetch_state *st)
     if (st->cancellable) g_object_unref(st->cancellable);
     g_free(st->requested_url);
     g_free(st->origin_url);
+    ns_worker_host_unref(st->fb_sw);
     g_free(st->fb_send_url);
     g_free(st->fb_top);
     g_free(st->fb_method);
@@ -10870,6 +10875,8 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
             g_hash_table_insert(st->js->fetch_states_by_id,
                                 GUINT_TO_POINTER(st->id), st);
         }
+        ns_worker_host_unref(st->fb_sw);
+        st->fb_sw = ns_worker_host_ref(sw);
         st->fb_send_url = g_strdup(send_url);
         st->fb_top = g_strdup(top ? top : "");
         st->fb_method = g_strdup(use_method);
@@ -29676,7 +29683,8 @@ ns_sw_fetch_result_on_owner(gpointer data)
     }
     ns_js_fetch_state *st = g_hash_table_lookup(js->fetch_states_by_id,
                                                 GUINT_TO_POINTER(res->id));
-    char *send_url = st ? g_steal_pointer(&st->fb_send_url) : NULL;
+    char *send_url = st && st->fb_sw == host
+        ? g_steal_pointer(&st->fb_send_url) : NULL;
     if (send_url) {
         if (res->outcome == 1) {
             ns_response *resp = g_new0(ns_response, 1);
