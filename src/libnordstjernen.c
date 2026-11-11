@@ -775,6 +775,29 @@ browser_js_soft_navigate(const char *url, gboolean replace, gpointer user_data)
     browser->dirty = TRUE;
 }
 
+#define NS_VIEW_SNAPSHOT_MAX_PIXELS (8.0 * 1024 * 1024)
+
+static char *
+browser_js_snapshot(gpointer user_data)
+{
+    ns_browser *b = user_data;
+    double view_h = b->cur_viewport_h > 0.0 ? b->cur_viewport_h : b->vh;
+    if (!b->layout || !(b->vw > 0) || !(view_h > 0) ||
+        b->vw * view_h > NS_VIEW_SNAPSHOT_MAX_PIXELS)
+        return NULL;
+    ns_paint_set_js(b->js);
+    ns_paint_set_anim(b->anim);
+    GByteArray *png = ns_engine_png_bytes(b->layout, b->cur_scroll_x,
+                                          b->cur_scroll_y, b->vw, view_h, 1.0,
+                                          NULL, NULL);
+    ns_paint_set_anim(NULL);
+    ns_paint_set_js(NULL);
+    if (!png) return NULL;
+    g_autofree char *encoded = g_base64_encode(png->data, png->len);
+    g_byte_array_free(png, TRUE);
+    return g_strconcat("data:image/png;base64,", encoded, NULL);
+}
+
 static void
 browser_js_fragment_navigate(const char *url, gpointer user_data)
 {
@@ -1527,6 +1550,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
         ns_js_set_style_flush_cb(b->js, browser_flush_style);
         ns_js_set_viewport_scroll_cb(b->js, browser_js_viewport_scroll, b);
+        ns_js_set_snapshot_cb(b->js, browser_js_snapshot, b);
         ns_js_set_scroll_to_cb(b->js, browser_js_scroll_to, b);
         ns_js_set_fragment_nav_cb(b->js, browser_js_fragment_navigate, b);
         ns_js_set_soft_nav_cb(b->js, browser_js_soft_navigate, b);

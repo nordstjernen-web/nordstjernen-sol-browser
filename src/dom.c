@@ -2870,6 +2870,7 @@ static void
 serialize_node_opts(const ns_node *n, GString *out, gboolean include_self,
                     int depth, const ns_html_ser_opts *opts)
 {
+    if (n && (n->flags & NS_NODE_UA_OVERLAY)) return;
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
     if (n->kind == NS_NODE_TEXT) {
         ns_html_escape_append(out, n->text, FALSE);

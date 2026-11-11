@@ -569,6 +569,7 @@ static JSValue ns_make_realm_document(JSContext *ctx, ns_node *doc_node,
                                       gboolean is_xml, gboolean inert);
 static void ns_realm_document_install_api(JSContext *ctx, JSValueConst doc);
 static gboolean ns_dom_hidden_child(const ns_node *c);
+static gboolean ns_node_hidden_from_script(const ns_node *n);
 
 #define NS_SANDBOX_ACTIVE              (1u << 0)
 #define NS_SANDBOX_ALLOW_SCRIPTS       (1u << 1)
@@ -40033,7 +40034,7 @@ static const ns_node *
 next_element_sibling(const ns_node *n)
 {
     for (const ns_node *s = n ? n->next_sibling : NULL; s; s = s->next_sibling)
-        if (s->kind == NS_NODE_ELEMENT && !ns_node_is_shadow_root(s)) return s;
+        if (s->kind == NS_NODE_ELEMENT && !ns_node_hidden_from_script(s)) return s;
     return NULL;
 }
 
@@ -40041,7 +40042,7 @@ static const ns_node *
 prev_element_sibling(const ns_node *n)
 {
     for (const ns_node *s = n ? n->prev_sibling : NULL; s; s = s->prev_sibling)
-        if (s->kind == NS_NODE_ELEMENT && !ns_node_is_shadow_root(s)) return s;
+        if (s->kind == NS_NODE_ELEMENT && !ns_node_hidden_from_script(s)) return s;
     return NULL;
 }
 
@@ -40049,7 +40050,7 @@ static const ns_node *
 first_element_child(const ns_node *n)
 {
     for (const ns_node *c = n ? n->first_child : NULL; c; c = c->next_sibling)
-        if (c->kind == NS_NODE_ELEMENT && !ns_node_is_shadow_root(c)) return c;
+        if (c->kind == NS_NODE_ELEMENT && !ns_node_hidden_from_script(c)) return c;
     return NULL;
 }
 
@@ -40103,9 +40104,17 @@ ns_element_get_children(JSContext *ctx, JSValueConst this_val)
 }
 
 static gboolean
+ns_node_hidden_from_script(const ns_node *n)
+{
+    return ns_element_has_shadow_marker(n) ||
+           (n && (n->flags & NS_NODE_UA_OVERLAY));
+}
+
+static gboolean
 ns_dom_hidden_child(const ns_node *c)
 {
-    return ns_node_is_embedded_doc(c) || ns_node_is_shadow_root(c);
+    return ns_node_is_embedded_doc(c) || ns_node_is_shadow_root(c) ||
+           (c && (c->flags & NS_NODE_UA_OVERLAY));
 }
 
 static ns_node *
@@ -40168,7 +40177,7 @@ ns_element_get_lastElementChild(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || ns_node_is_element_named(n, "template")) return JS_NULL;
     for (const ns_node *c = n->last_child; c; c = c->prev_sibling)
-        if (c->kind == NS_NODE_ELEMENT && !ns_node_is_shadow_root(c))
+        if (c->kind == NS_NODE_ELEMENT && !ns_node_hidden_from_script(c))
             return ns_make_element(ctx, c);
     return JS_NULL;
 }
@@ -40208,7 +40217,7 @@ ns_element_get_childElementCount(JSContext *ctx, JSValueConst this_val)
     if (!n || ns_node_is_element_named(n, "template")) return JS_NewInt32(ctx, 0);
     int count = 0;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        if (c->kind == NS_NODE_ELEMENT && !ns_node_is_shadow_root(c)) count++;
+        if (c->kind == NS_NODE_ELEMENT && !ns_node_hidden_from_script(c)) count++;
     return JS_NewInt32(ctx, count);
 }
 
@@ -46060,13 +46069,13 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
     case NS_LIVE_CHILDREN:
         if (!ns_node_is_element_named(root, "template"))
             for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-                if (c->kind == NS_NODE_ELEMENT && !ns_node_is_shadow_root(c))
+                if (c->kind == NS_NODE_ELEMENT && !ns_node_hidden_from_script(c))
                     JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
         break;
     case NS_LIVE_CHILDNODES:
         if (!ns_node_is_element_named(root, "template"))
             for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-                if (!ns_node_is_embedded_doc(c) && !ns_node_is_shadow_root(c))
+                if (!ns_node_is_embedded_doc(c) && !ns_node_hidden_from_script(c))
                     JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
         break;
     case NS_LIVE_BY_TAG:
@@ -60566,6 +60575,79 @@ ns_set_interest_state(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static void
+ns_view_transition_overlay_remove(ns_js *js)
+{
+    ns_node *overlay = js->view_transition_overlay;
+    if (!overlay) return;
+    js->view_transition_overlay = NULL;
+    ns_node_remove(overlay);
+    ns_node_free(overlay);
+    ns_dom_tree_changed();
+    js->mutated = TRUE;
+    if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+}
+
+static JSValue
+ns_view_transition_capture(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || ctx != ns_js_main_realm(js) || !js->snapshot_cb ||
+        js->view_transition_overlay)
+        return JS_NULL;
+    ns_js_flush_layout(js);
+    char *data_url = js->snapshot_cb(js->snapshot_user_data);
+    if (!data_url) return JS_NULL;
+    JSValue out = JS_NewString(ctx, data_url);
+    g_free(data_url);
+    return out;
+}
+
+static JSValue
+ns_view_transition_show(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *root = js ? (ns_node *)ns_js_root_element(js) : NULL;
+    double duration_ms = 0;
+    if (!root || argc < 2 || !JS_IsString(argv[0]) ||
+        JS_ToFloat64(ctx, &duration_ms, argv[1]) != 0 || !(duration_ms > 0))
+        return JS_FALSE;
+    ns_view_transition_overlay_remove(js);
+    const char *snapshot = JS_ToCString(ctx, argv[0]);
+    if (!snapshot) return JS_FALSE;
+    char number[G_ASCII_DTOSTR_BUF_SIZE];
+    g_autofree char *style = g_strdup_printf(
+        "position:fixed;inset:0;z-index:2147483647;pointer-events:none;"
+        "background-image:url(\"%s\");background-size:100%% 100%%;"
+        "background-repeat:no-repeat;"
+        "animation:-nd-view-transition-fade %sms ease both",
+        snapshot, g_ascii_formatd(number, sizeof number, "%.0f", duration_ms));
+    JS_FreeCString(ctx, snapshot);
+    ns_node *overlay = ns_node_new_element(g_strdup("nd-view-transition"));
+    overlay->flags |= NS_NODE_UA_OVERLAY;
+    ns_element_set_attr(overlay, "style", style);
+    ns_node_append_child(root, overlay);
+    js->view_transition_overlay = overlay;
+    ns_dom_tree_changed();
+    js->mutated = TRUE;
+    if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+    return JS_TRUE;
+}
+
+static JSValue
+ns_view_transition_end(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) ns_view_transition_overlay_remove(js);
+    return JS_UNDEFINED;
+}
+
 static gboolean
 ns_url_is_potentially_trustworthy(const char *url)
 {
@@ -63176,6 +63258,9 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "find",  ns_window_find,  7);
     ns_bind_fn(ctx, global, "fetchLater", ns_window_fetch_later, 1);
     ns_bind_fn(ctx, global, "__ns_set_highlights", ns_set_highlights, 1);
+    ns_bind_fn(ctx, global, "__ns_vt_capture", ns_view_transition_capture, 0);
+    ns_bind_fn(ctx, global, "__ns_vt_show", ns_view_transition_show, 2);
+    ns_bind_fn(ctx, global, "__ns_vt_end", ns_view_transition_end, 0);
     ns_bind_fn(ctx, global, "__ns_set_interest_state", ns_set_interest_state, 3);
     ns_bind_fn(ctx, global, "scrollTo", ns_window_scroll_to, 2);
     ns_bind_fn(ctx, global, "scrollBy", ns_window_scroll_by, 2);
@@ -67169,6 +67254,7 @@ ns_js_reset_runtime_state(ns_js *js)
     ns_js_smooth_scrolls_clear(js);
     ns_js_fetch_later_flush(js);
     ns_js_highlights_clear(js);
+    js->view_transition_overlay = NULL;
 
     if (js->listeners) {
         for (guint i = 0; i < js->listeners->len; i++) {
@@ -67886,6 +67972,7 @@ ns_js_free(ns_js *js)
     ns_js_smooth_scrolls_clear(js);
     ns_js_fetch_later_flush(js);
     ns_js_highlights_clear(js);
+    js->view_transition_overlay = NULL;
     for (; js->mic_holds > 0; js->mic_holds--) ns_mic_release();
     for (; js->camera_holds > 0; js->camera_holds--) ns_camera_release();
     if (js->media_grant_origins) {
@@ -74481,6 +74568,14 @@ ns_js_navigate_form_frame(ns_js *js, const ns_node *form, const char *url)
 {
     return ns_js_navigate_frame(js, form ? ns_js_node_frame(form->parent)
                                          : NULL, url);
+}
+
+void
+ns_js_set_snapshot_cb(ns_js *js, ns_js_snapshot_cb cb, gpointer user_data)
+{
+    if (!js) return;
+    js->snapshot_cb = cb;
+    js->snapshot_user_data = user_data;
 }
 
 void

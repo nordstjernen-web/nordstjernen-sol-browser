@@ -126,6 +126,9 @@ struct ns_js {
     ns_js_layout_flush_cb style_flush_cb;
     gpointer      layout_flush_user_data;
     ns_js_viewport_scroll_cb viewport_scroll_cb;
+    ns_js_snapshot_cb snapshot_cb;
+    gpointer      snapshot_user_data;
+    ns_node      *view_transition_overlay;
     gpointer      viewport_scroll_user_data;
     gboolean    (*load_delay_cb)(gpointer user_data);
     gpointer      load_delay_user_data;

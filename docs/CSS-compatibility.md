@@ -228,7 +228,7 @@ the 1.0.31-dev source.
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| View Transitions (`view-transition-name`, `::view-transition-*`) | ❌ | `document.startViewTransition()` runs the update and settles its promises, but nothing is captured or animated; the properties and pseudo-elements only parse |
+| View Transitions (`view-transition-name`, `::view-transition-*`) | 🟡 | `document.startViewTransition()` cross-fades the whole page from a snapshot of the old state to the new one over 250 ms. Named elements are not captured or animated separately, the pseudo-elements are not rendered or styleable, and cross-document transitions are not supported |
 | 2D/3D `transform` (translate/scale/rotate/skew/matrix), `transform-origin` | ✅ | `getComputedStyle().transform` returns the CSSOM **resolved value** — the function list is composed into a single `matrix(...)` (2D) or `matrix3d(...)` (3D, column-order) via `ns_css_transform_to_mat4`, with translate percentages resolved against the border box (`ns_computed_transform_matrix` in `src/js.c`); `none` when no transform |
 | `transition` | ✅ | `src/anim.c`; any animatable property whose start and end values interpolate (`ns_css_value_interpolate`), with `visibility` animating discretely; respects `prefers-reduced-motion` |
 | `@keyframes` + `animation` | 🟡 | any property the keyframes set, interpolated the same way (values that cannot interpolate flip at the midpoint), with per-keyframe timing functions; `animation-direction` (normal/reverse/alternate/alternate-reverse) and `animation-fill-mode` (none/forwards/backwards/both) honoured. `animation-composition` and `animation-timeline` (scroll-driven animations) are not applied |

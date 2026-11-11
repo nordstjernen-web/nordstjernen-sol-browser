@@ -32330,6 +32330,7 @@ static const char *kUa =
     "{ list-style-type: disclosure-open; }\n"
     ":focus-visible { outline: 2px solid #1a73e8; outline-offset: 1px; }\n"
     "dialog:modal::backdrop { background-color: rgba(0, 0, 0, 0.1); }\n"
+    "@keyframes -nd-view-transition-fade { from { opacity: 1; } to { opacity: 0; } }\n"
     "dialog:not([open]) { display: none; }\n"
     "dialog { position: absolute; inset-inline-start: 0; inset-inline-end: 0; "
     "width: fit-content; height: fit-content; margin: auto; border: solid; "
