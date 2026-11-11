@@ -66,6 +66,7 @@ typedef struct ns_engine_resource_timing {
 
 GPtrArray *ns_engine_take_resource_timings(const char *top_url);
 
+gboolean ns_engine_prefetch_document(const char *url, const char *document_url);
 void ns_engine_speculative_preload(ns_node *doc, const char *base_url,
                                    gboolean include_images);
 void ns_engine_preload_script(const char *url, const char *top_url);

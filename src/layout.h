@@ -357,6 +357,15 @@ const ns_node *ns_box_hit_element(const ns_box *root, double x, double y,
                                   const ns_box **out_box, double *local_x,
                                   double *local_y);
 
+typedef struct ns_highlight_span {
+    gsize  start;
+    gsize  end;
+    char  *name;
+    int    priority;
+} ns_highlight_span;
+
+void ns_layout_set_highlights(GHashTable *spans_by_text_node);
+
 gboolean ns_box_inline_rect_for_dom(const ns_box *root, const ns_node *target,
                                     double *x, double *y,
                                     double *w, double *h);

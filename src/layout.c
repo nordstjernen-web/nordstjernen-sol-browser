@@ -3836,6 +3836,49 @@ collect_walk_assigned(const ns_node *slot, collector_ctx *ctx, int depth)
     return any;
 }
 
+static GHashTable *g_layout_highlights;
+
+void
+ns_layout_set_highlights(GHashTable *spans_by_text_node)
+{
+    g_layout_highlights = spans_by_text_node;
+}
+
+static void
+emit_highlight_color(collector_ctx *ctx, ns_inline_attr_kind kind,
+                     const ns_css_value *value, gsize start, gsize len)
+{
+    if (!value) return;
+    ns_inline_attr a = {
+        .kind = kind, .start = start, .len = len,
+        .r = value->u.color.r, .g = value->u.color.g,
+        .b = value->u.color.b, .a = value->u.color.a,
+    };
+    g_array_append_val(ctx->attrs, a);
+}
+
+static void
+emit_text_highlights(collector_ctx *ctx, const ns_node *text, gsize start)
+{
+    const GArray *spans = g_layout_highlights
+        ? g_hash_table_lookup(g_layout_highlights, text) : NULL;
+    gsize text_len = ctx->out->len - start;
+    for (guint i = 0; spans && i < spans->len; i++) {
+        const ns_highlight_span *span =
+            &g_array_index(spans, ns_highlight_span, i);
+        gsize from = MIN(span->start, text_len), to = MIN(span->end, text_len);
+        const ns_css_value *background, *color;
+        if (from >= to ||
+            !ns_css_highlight_colors(text->parent, span->name,
+                                     &background, &color))
+            continue;
+        emit_highlight_color(ctx, NS_INLINE_BG_COLOR, background,
+                             start + from, to - from);
+        emit_highlight_color(ctx, NS_INLINE_COLOR, color,
+                             start + from, to - from);
+    }
+}
+
 static void
 collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 {
@@ -3886,6 +3929,8 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                         ? apply_text_transform(n->text, ctx->text_transform)
                         : NULL;
         g_string_append(ctx->out, xformed ? xformed : n->text);
+        if (!xformed || strlen(xformed) == strlen(n->text))
+            emit_text_highlights(ctx, n, start);
         g_free(xformed);
         collector_note_ws(ctx, n->parent, start);
         if (ctx->active_href) {

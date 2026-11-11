@@ -259,6 +259,10 @@ static gboolean ns_scroll_start_smooth(JSContext *ctx, JSValueConst target,
 static ns_scroll_behavior ns_read_scroll_behavior(JSContext *ctx, int argc,
                                                   JSValueConst *argv);
 static void ns_js_step_smooth_scrolls(ns_js *js);
+static void ns_js_fetch_later_flush(ns_js *js);
+static void ns_js_highlights_clear(ns_js *js);
+static JSValue ns_script_supports(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv);
 static void ns_js_smooth_scrolls_clear(ns_js *js);
 static JSValue ns_document_element_from_point(JSContext *ctx,
                                               JSValueConst this_val,
@@ -287,7 +291,7 @@ static void ns_js_element_perf_info(ns_js *js, const ns_node *el,
                                     ns_perf_resource_info *info);
 static gboolean ns_script_type_is_module(const ns_node *n);
 enum { NS_SCRIPT_KIND_NONE, NS_SCRIPT_KIND_CLASSIC, NS_SCRIPT_KIND_MODULE,
-       NS_SCRIPT_KIND_IMPORTMAP };
+       NS_SCRIPT_KIND_IMPORTMAP, NS_SCRIPT_KIND_SPECULATIONRULES };
 static int ns_script_kind(const ns_node *n);
 static gboolean javascript_mime_essence_match(const char *s, gsize len);
 static void ns_js_nodes_inserted(ns_js *js, ns_node *parent, GPtrArray *nodes);
@@ -60260,6 +60264,38 @@ ns_beacon_done(GObject *src, GAsyncResult *result, gpointer user_data)
     g_clear_error(&err);
 }
 
+static void
+ns_request_body_bytes(JSContext *ctx, JSValueConst b, char **body,
+                      gsize *body_len, char **content_type)
+{
+    if (ns_js_value_is_form_data(ctx, b)) {
+        *body = ns_js_form_data_serialize(ctx, b, body_len, content_type);
+    } else if (ns_js_value_is_url_search_params(ctx, b)) {
+        *body = ns_js_usp_serialize(ctx, b, body_len, content_type);
+    } else if (JS_IsString(b)) {
+        size_t l = 0;
+        const char *s = JS_ToCStringLen(ctx, &l, b);
+        if (s) {
+            *body = g_strndup(s, l);
+            *body_len = l;
+            JS_FreeCString(ctx, s);
+            *content_type = g_strdup("text/plain;charset=UTF-8");
+        }
+    } else {
+        *body = ns_js_body_bytes(ctx, b, body_len);
+        if (*body && JS_IsObject(b)) {
+            JSValue tv = JS_GetPropertyStr(ctx, b, "type");
+            if (JS_IsString(tv)) {
+                const char *t = JS_ToCString(ctx, tv);
+                if (t && *t && ns_header_value_is_safe(t))
+                    *content_type = g_strdup(t);
+                if (t) JS_FreeCString(ctx, t);
+            }
+            JS_FreeValue(ctx, tv);
+        }
+    }
+}
+
 static JSValue
 ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
@@ -60284,35 +60320,8 @@ ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
     gsize body_len = 0;
     char *content_type = NULL;
 
-    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
-        JSValueConst b = argv[1];
-        if (ns_js_value_is_form_data(ctx, b)) {
-            body = ns_js_form_data_serialize(ctx, b, &body_len, &content_type);
-        } else if (ns_js_value_is_url_search_params(ctx, b)) {
-            body = ns_js_usp_serialize(ctx, b, &body_len, &content_type);
-        } else if (JS_IsString(b)) {
-            size_t l = 0;
-            const char *s = JS_ToCStringLen(ctx, &l, b);
-            if (s) {
-                body = g_strndup(s, l);
-                body_len = l;
-                JS_FreeCString(ctx, s);
-                content_type = g_strdup("text/plain;charset=UTF-8");
-            }
-        } else {
-            body = ns_js_body_bytes(ctx, b, &body_len);
-            if (body && JS_IsObject(b)) {
-                JSValue tv = JS_GetPropertyStr(ctx, b, "type");
-                if (JS_IsString(tv)) {
-                    const char *t = JS_ToCString(ctx, tv);
-                    if (t && *t && ns_header_value_is_safe(t))
-                        content_type = g_strdup(t);
-                    if (t) JS_FreeCString(ctx, t);
-                }
-                JS_FreeValue(ctx, tv);
-            }
-        }
-    }
+    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1]))
+        ns_request_body_bytes(ctx, argv[1], &body, &body_len, &content_type);
 
     static const char *const beacon_headers[] = { "X-ND-CORS: 1", NULL };
     static const char *const opaque_beacon_headers[] = {
@@ -60330,6 +60339,313 @@ ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
     g_free(body);
     g_free(content_type);
     return JS_TRUE;
+}
+
+#define NS_FETCH_LATER_QUOTA_BYTES (64u * 1024u)
+#define NS_FETCH_LATER_MAX_PENDING 64
+
+typedef struct ns_fetch_later {
+    ns_js     *js;
+    JSContext *ctx;
+    JSValue    result;
+    JSValue    signal;
+    char      *url;
+    char      *document_url;
+    char      *origin;
+    char      *method;
+    char      *body;
+    gsize      body_len;
+    char      *content_type;
+    gboolean   opaque;
+    guint      timer;
+} ns_fetch_later;
+
+static void
+ns_fetch_later_free(ns_fetch_later *e)
+{
+    if (e->timer) g_source_remove(e->timer);
+    JS_FreeValue(e->ctx, e->result);
+    JS_FreeValue(e->ctx, e->signal);
+    g_free(e->url);
+    g_free(e->document_url);
+    g_free(e->origin);
+    g_free(e->method);
+    g_free(e->body);
+    g_free(e->content_type);
+    g_free(e);
+}
+
+static gboolean
+ns_fetch_later_aborted(const ns_fetch_later *e)
+{
+    if (!JS_IsObject(e->signal)) return FALSE;
+    JSValue aborted = JS_GetPropertyStr(e->ctx, e->signal, "aborted");
+    gboolean yes = JS_ToBool(e->ctx, aborted) > 0;
+    JS_FreeValue(e->ctx, aborted);
+    return yes;
+}
+
+static void
+ns_fetch_later_send(ns_fetch_later *e)
+{
+    static const char *const headers[] = { "X-ND-CORS: 1", NULL };
+    static const char *const opaque_headers[] = {
+        "X-ND-CORS: 1", "X-ND-Opaque-Origin: 1", "X-ND-Credentials: omit", NULL
+    };
+    if (!ns_fetch_later_aborted(e)) {
+        JS_SetPropertyStr(e->ctx, e->result, "activated", JS_TRUE);
+        ns_net_request_async(e->url, e->document_url, e->method, e->body,
+                             e->body_len, e->content_type,
+                             e->opaque ? opaque_headers : headers, NULL,
+                             ns_beacon_done, NULL);
+    }
+    g_ptr_array_remove_fast(e->js->fetch_later, e);
+}
+
+static gboolean
+ns_fetch_later_due(gpointer data)
+{
+    ns_fetch_later *e = data;
+    e->timer = 0;
+    ns_fetch_later_send(e);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+ns_js_fetch_later_flush(ns_js *js)
+{
+    if (!js || !js->fetch_later) return;
+    while (js->fetch_later->len > 0)
+        ns_fetch_later_send(g_ptr_array_index(js->fetch_later, 0));
+    g_clear_pointer(&js->fetch_later, g_ptr_array_unref);
+}
+
+static gsize
+ns_fetch_later_pending_bytes(const ns_js *js, const char *origin)
+{
+    gsize total = 0;
+    for (guint i = 0; js->fetch_later && i < js->fetch_later->len; i++) {
+        const ns_fetch_later *e = g_ptr_array_index(js->fetch_later, i);
+        if (g_strcmp0(e->origin, origin) == 0)
+            total += e->body_len + strlen(e->url);
+    }
+    return total;
+}
+
+static void
+ns_highlight_spans_free(gpointer data)
+{
+    GArray *spans = data;
+    for (guint i = 0; i < spans->len; i++)
+        g_free(g_array_index(spans, ns_highlight_span, i).name);
+    g_array_free(spans, TRUE);
+}
+
+static void
+ns_js_highlights_clear(ns_js *js)
+{
+    if (!js || !js->highlights) return;
+    ns_layout_set_highlights(NULL);
+    g_clear_pointer(&js->highlights, g_hash_table_destroy);
+}
+
+static gsize
+ns_text_byte_offset(const ns_node *text, glong utf16_offset)
+{
+    if (!text->text) return 0;
+    return (gsize)(ns_utf16_offset_to_ptr(text->text, MAX(utf16_offset, 0)) -
+                   text->text);
+}
+
+static void
+ns_highlight_add_span(ns_js *js, const ns_node *text, gsize start, gsize end,
+                      const char *name, int priority)
+{
+    if (start >= end) return;
+    GArray *spans = g_hash_table_lookup(js->highlights, text);
+    if (!spans) {
+        spans = g_array_new(FALSE, FALSE, sizeof(ns_highlight_span));
+        g_hash_table_insert(js->highlights, (gpointer)text, spans);
+    }
+    ns_highlight_span span = { start, end, g_strdup(name), priority };
+    guint at = spans->len;
+    while (at > 0 &&
+           g_array_index(spans, ns_highlight_span, at - 1).priority > priority)
+        at--;
+    g_array_insert_val(spans, at, span);
+}
+
+static const ns_node *
+ns_range_boundary_node(const ns_node *container, glong offset,
+                       const ns_node *root)
+{
+    if (container->kind == NS_NODE_TEXT) return container;
+    const ns_node *child = container->first_child;
+    while (child && offset-- > 0) child = child->next_sibling;
+    return child ? child : ns_node_next_in_subtree(container, root, FALSE);
+}
+
+static void
+ns_highlight_add_range(ns_js *js, const ns_node *start, glong start_offset,
+                       const ns_node *end, glong end_offset,
+                       const char *name, int priority)
+{
+    const ns_node *root = js->current_doc;
+    const ns_node *first = ns_range_boundary_node(start, start_offset, root);
+    const ns_node *stop = end->kind == NS_NODE_TEXT
+        ? ns_node_next_in_subtree(end, root, TRUE)
+        : ns_range_boundary_node(end, end_offset, root);
+    guint budget = 20000;
+    for (const ns_node *n = first; n && n != stop && budget > 0;
+         n = ns_node_next_in_subtree(n, root, TRUE), budget--) {
+        if (n->kind != NS_NODE_TEXT || !n->text) continue;
+        gsize from = n == start ? ns_text_byte_offset(n, start_offset) : 0;
+        gsize to = n == end ? ns_text_byte_offset(n, end_offset)
+                            : strlen(n->text);
+        ns_highlight_add_span(js, n, from, to, name, priority);
+    }
+}
+
+static JSValue
+ns_set_highlights(JSContext *ctx, JSValueConst this_val,
+                  int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || argc < 1 || !JS_IsArray(argv[0]) || !js->current_doc)
+        return JS_UNDEFINED;
+    ns_js_highlights_clear(js);
+    js->highlights = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
+                                           ns_highlight_spans_free);
+    uint32_t n = ns_js_array_length(ctx, argv[0]);
+    for (uint32_t i = 0; i < n && i < 10000; i++) {
+        JSValue entry = JS_GetPropertyUint32(ctx, argv[0], i);
+        JSValue fields[6];
+        for (uint32_t f = 0; f < 6; f++)
+            fields[f] = JS_GetPropertyUint32(ctx, entry, f);
+        const char *name = JS_ToCString(ctx, fields[0]);
+        int32_t priority = 0, start_offset = 0, end_offset = 0;
+        JS_ToInt32(ctx, &priority, fields[1]);
+        JS_ToInt32(ctx, &start_offset, fields[3]);
+        JS_ToInt32(ctx, &end_offset, fields[5]);
+        const ns_node *start = ns_unwrap_element(fields[2]);
+        const ns_node *end = ns_unwrap_element(fields[4]);
+        if (name && start && end)
+            ns_highlight_add_range(js, start, start_offset, end, end_offset,
+                                   name, priority);
+        if (name) JS_FreeCString(ctx, name);
+        for (uint32_t f = 0; f < 6; f++) JS_FreeValue(ctx, fields[f]);
+        JS_FreeValue(ctx, entry);
+    }
+    ns_layout_set_highlights(js->highlights);
+    js->mutated = TRUE;
+    if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+    return JS_UNDEFINED;
+}
+
+static gboolean
+ns_url_is_potentially_trustworthy(const char *url)
+{
+    if (!url) return FALSE;
+    if (g_str_has_prefix(url, "https:")) return TRUE;
+    if (!g_str_has_prefix(url, "http:")) return FALSE;
+    g_autofree char *host = ns_url_host_from(url);
+    return host && (g_ascii_strcasecmp(host, "localhost") == 0 ||
+                    g_str_has_suffix(host, ".localhost") ||
+                    g_str_has_prefix(host, "127.") ||
+                    strcmp(host, "[::1]") == 0 || strcmp(host, "::1") == 0);
+}
+
+static JSValue
+ns_window_fetch_later(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || argc < 1)
+        return JS_ThrowTypeError(ctx, "fetchLater: 1 argument required");
+    const char *document_url = ns_js_calling_document_url(js, ctx);
+    if (!ns_url_is_potentially_trustworthy(document_url))
+        return JS_ThrowTypeError(ctx, "fetchLater: requires a secure context");
+    JSValueConst init = argc > 1 && JS_IsObject(argv[1]) ? argv[1] : JS_UNDEFINED;
+    JSValue url_value = JS_IsObject(argv[0]) && !JS_IsString(argv[0])
+        ? JS_GetPropertyStr(ctx, argv[0], "url") : JS_UNDEFINED;
+    const char *raw_url = JS_ToCString(ctx, JS_IsString(url_value) ? url_value
+                                                                    : argv[0]);
+    JS_FreeValue(ctx, url_value);
+    if (!raw_url) return JS_EXCEPTION;
+    g_autofree char *url = ns_url_resolve(document_url, raw_url);
+    JS_FreeCString(ctx, raw_url);
+    if (!ns_url_is_potentially_trustworthy(url))
+        return JS_ThrowTypeError(ctx, "fetchLater: URL must be https");
+
+    g_autofree char *method = JS_IsObject(init)
+        ? ns_js_get_string_prop(ctx, init, "method") : NULL;
+    if (!method && JS_IsObject(argv[0]))
+        method = ns_js_get_string_prop(ctx, argv[0], "method");
+    g_autofree char *upper = g_ascii_strup(method ? method : "GET", -1);
+    static const char *const allowed[] = { "GET", "POST", "PUT", "DELETE",
+                                           "PATCH", "HEAD", "OPTIONS" };
+    gboolean method_ok = FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(allowed); i++)
+        method_ok = method_ok || strcmp(upper, allowed[i]) == 0;
+    if (!method_ok) return JS_ThrowTypeError(ctx, "fetchLater: invalid method");
+
+    double activate_after = -1;
+    JSValue signal = JS_UNDEFINED, body_value = JS_UNDEFINED;
+    if (JS_IsObject(init)) {
+        JSValue after = JS_GetPropertyStr(ctx, init, "activateAfter");
+        if (!JS_IsUndefined(after) && !JS_IsNull(after) &&
+            (JS_ToFloat64(ctx, &activate_after, after) != 0 ||
+             !(activate_after >= 0))) {
+            JS_FreeValue(ctx, after);
+            return JS_ThrowRangeError(ctx, "fetchLater: activateAfter must not be negative");
+        }
+        JS_FreeValue(ctx, after);
+        signal = JS_GetPropertyStr(ctx, init, "signal");
+        body_value = JS_GetPropertyStr(ctx, init, "body");
+    }
+    ns_fetch_later *e = g_new0(ns_fetch_later, 1);
+    e->js = js;
+    e->ctx = ctx;
+    e->signal = signal;
+    e->result = JS_NewObject(ctx);
+    e->url = g_steal_pointer(&url);
+    e->document_url = g_strdup(document_url);
+    e->origin = ns_url_origin_from(e->url);
+    e->method = g_steal_pointer(&upper);
+    e->opaque = ns_js_realm_origin_is_opaque(js, ctx);
+    if (!JS_IsUndefined(body_value) && !JS_IsNull(body_value))
+        ns_request_body_bytes(ctx, body_value, &e->body, &e->body_len,
+                              &e->content_type);
+    JS_FreeValue(ctx, body_value);
+    JS_SetPropertyStr(ctx, e->result, "activated", JS_FALSE);
+
+    JSValue thrown = JS_UNDEFINED;
+    if (ns_fetch_later_aborted(e))
+        thrown = ns_throw_dom_exception(ctx, "AbortError", 20,
+                                        "fetchLater: the signal is aborted");
+    else if (e->body_len > 0 && (strcmp(e->method, "GET") == 0 ||
+                                 strcmp(e->method, "HEAD") == 0))
+        thrown = JS_ThrowTypeError(ctx, "fetchLater: GET cannot carry a body");
+    else if ((js->fetch_later &&
+              js->fetch_later->len >= NS_FETCH_LATER_MAX_PENDING) ||
+             ns_fetch_later_pending_bytes(js, e->origin) + e->body_len +
+                 strlen(e->url) > NS_FETCH_LATER_QUOTA_BYTES)
+        thrown = ns_throw_dom_exception(ctx, "QuotaExceededError", 22,
+                                        "fetchLater: deferred request quota exceeded");
+    if (JS_IsException(thrown)) {
+        ns_fetch_later_free(e);
+        return thrown;
+    }
+    if (!js->fetch_later)
+        js->fetch_later = g_ptr_array_new_with_free_func(
+            (GDestroyNotify)ns_fetch_later_free);
+    g_ptr_array_add(js->fetch_later, e);
+    if (activate_after >= 0)
+        e->timer = g_timeout_add((guint)MIN(activate_after, (double)G_MAXINT32),
+                                 ns_fetch_later_due, e);
+    return JS_DupValue(ctx, e->result);
 }
 
 static JSValue
@@ -62835,6 +63151,8 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "stop",  ns_window_stop,  0);
     ns_bind_fn(ctx, global, "focus", ns_window_focus, 0);
     ns_bind_fn(ctx, global, "find",  ns_window_find,  7);
+    ns_bind_fn(ctx, global, "fetchLater", ns_window_fetch_later, 1);
+    ns_bind_fn(ctx, global, "__ns_set_highlights", ns_set_highlights, 1);
     ns_bind_fn(ctx, global, "scrollTo", ns_window_scroll_to, 2);
     ns_bind_fn(ctx, global, "scrollBy", ns_window_scroll_by, 2);
     ns_bind_fn(ctx, global, "scroll",   ns_window_scroll_to, 2);
@@ -66825,6 +67143,8 @@ ns_js_reset_runtime_state(ns_js *js)
         g_array_set_size(js->raf_pending, 0);
     }
     ns_js_smooth_scrolls_clear(js);
+    ns_js_fetch_later_flush(js);
+    ns_js_highlights_clear(js);
 
     if (js->listeners) {
         for (guint i = 0; i < js->listeners->len; i++) {
@@ -67144,6 +67464,12 @@ ns_js_setup_document_interfaces(ns_js *js, JSContext *ctx, JSValueConst global)
                   navigator_ctors, G_N_ELEMENTS(navigator_ctors));
     ns_bind_ctor(ctx, global, "DOMImplementation", ns_illegal_constructor, 0);
     ns_perf_install_entry_list(ctx, global);
+    {
+        JSValue script_ctor = JS_GetPropertyStr(ctx, global, "HTMLScriptElement");
+        if (JS_IsObject(script_ctor))
+            ns_bind_fn(ctx, script_ctor, "supports", ns_script_supports, 1);
+        JS_FreeValue(ctx, script_ctor);
+    }
     {
         static const struct {
             const char *name;
@@ -67534,6 +67860,8 @@ ns_js_free(ns_js *js)
     ns_js_webauthn_reset(js);
     ns_js_module_prefetch_release(js);
     ns_js_smooth_scrolls_clear(js);
+    ns_js_fetch_later_flush(js);
+    ns_js_highlights_clear(js);
     for (; js->mic_holds > 0; js->mic_holds--) ns_mic_release();
     for (; js->camera_holds > 0; js->camera_holds--) ns_camera_release();
     if (js->media_grant_origins) {
@@ -68915,12 +69243,185 @@ ns_js_register_import_map_json(ns_js *js, const ns_node *frame,
     JS_FreeValue(js->ctx, root);
 }
 
+static gboolean
+ns_url_glob_matches(const char *pattern, const char *url)
+{
+    while (*pattern && *pattern != '*') {
+        if (*pattern != *url) return FALSE;
+        pattern++;
+        url++;
+    }
+    if (!*pattern) return !*url;
+    while (*pattern == '*') pattern++;
+    for (;; url++) {
+        if (ns_url_glob_matches(pattern, url)) return TRUE;
+        if (!*url) return FALSE;
+    }
+}
+
+static gboolean
+ns_speculation_href_matches(JSContext *ctx, JSValueConst patterns,
+                            const char *href, const char *base)
+{
+    if (JS_IsString(patterns)) {
+        const char *raw = JS_ToCString(ctx, patterns);
+        g_autofree char *pattern = raw ? ns_url_resolve(base, raw) : NULL;
+        if (raw) JS_FreeCString(ctx, raw);
+        return pattern && ns_url_glob_matches(pattern, href);
+    }
+    if (!JS_IsArray(patterns)) return FALSE;
+    uint32_t n = ns_js_array_length(ctx, patterns);
+    for (uint32_t i = 0; i < n && i < 64; i++) {
+        JSValue item = JS_GetPropertyUint32(ctx, patterns, i);
+        gboolean hit = JS_IsString(item) &&
+                       ns_speculation_href_matches(ctx, item, href, base);
+        JS_FreeValue(ctx, item);
+        if (hit) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean ns_speculation_where_matches(JSContext *ctx, JSValueConst where,
+                                             JSValueConst link,
+                                             const char *href, const char *base,
+                                             int depth);
+
+static gboolean
+ns_speculation_where_list(JSContext *ctx, JSValueConst list, JSValueConst link,
+                          const char *href, const char *base, int depth,
+                          gboolean all)
+{
+    if (!JS_IsArray(list)) return FALSE;
+    uint32_t n = ns_js_array_length(ctx, list);
+    for (uint32_t i = 0; i < n && i < 64; i++) {
+        JSValue item = JS_GetPropertyUint32(ctx, list, i);
+        gboolean hit = ns_speculation_where_matches(ctx, item, link, href, base,
+                                                    depth + 1);
+        JS_FreeValue(ctx, item);
+        if (hit != all) return hit;
+    }
+    return all;
+}
+
+static gboolean
+ns_speculation_where_matches(JSContext *ctx, JSValueConst where,
+                             JSValueConst link, const char *href,
+                             const char *base, int depth)
+{
+    if (!JS_IsObject(where) || depth > 8) return FALSE;
+    gboolean result = FALSE;
+    JSValue v = JS_GetPropertyStr(ctx, where, "href_matches");
+    if (!JS_IsUndefined(v)) {
+        result = ns_speculation_href_matches(ctx, v, href, base);
+    } else if (JS_FreeValue(ctx, v),
+               !JS_IsUndefined(v = JS_GetPropertyStr(ctx, where, "selector_matches"))) {
+        JSValue matches = JS_GetPropertyStr(ctx, link, "matches");
+        JSValue hit = JS_IsString(v) && JS_IsFunction(ctx, matches)
+            ? JS_Call(ctx, matches, link, 1, &v) : JS_FALSE;
+        if (JS_IsException(hit)) JS_FreeValue(ctx, JS_GetException(ctx));
+        else result = JS_ToBool(ctx, hit) > 0;
+        JS_FreeValue(ctx, hit);
+        JS_FreeValue(ctx, matches);
+    } else if (JS_FreeValue(ctx, v),
+               !JS_IsUndefined(v = JS_GetPropertyStr(ctx, where, "and"))) {
+        result = ns_speculation_where_list(ctx, v, link, href, base, depth, TRUE);
+    } else if (JS_FreeValue(ctx, v),
+               !JS_IsUndefined(v = JS_GetPropertyStr(ctx, where, "or"))) {
+        result = ns_speculation_where_list(ctx, v, link, href, base, depth, FALSE);
+    } else if (JS_FreeValue(ctx, v),
+               !JS_IsUndefined(v = JS_GetPropertyStr(ctx, where, "not"))) {
+        result = !ns_speculation_where_matches(ctx, v, link, href, base,
+                                               depth + 1);
+    }
+    JS_FreeValue(ctx, v);
+    return result;
+}
+
+static void
+ns_speculation_prefetch_links(ns_js *js, const ns_node *n, JSValueConst where,
+                              const char *base, int depth)
+{
+    if (!n || depth >= 512) return;
+    const char *raw = n->kind == NS_NODE_ELEMENT && n->name &&
+                      (strcmp(n->name, "a") == 0 || strcmp(n->name, "area") == 0)
+        ? ns_element_get_attr(n, "href") : NULL;
+    if (raw && *raw) {
+        g_autofree char *href = ns_url_resolve(base, raw);
+        JSValue link = href ? ns_make_element(js->ctx, n) : JS_UNDEFINED;
+        if (href && ns_speculation_where_matches(js->ctx, where, link, href,
+                                                 base, 0))
+            ns_engine_prefetch_document(href, js->current_url);
+        JS_FreeValue(js->ctx, link);
+    }
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_speculation_prefetch_links(js, c, where, base, depth + 1);
+}
+
+static gboolean
+ns_speculation_rule_is_eager(JSContext *ctx, JSValueConst rule,
+                             gboolean eager_by_default)
+{
+    g_autofree char *eagerness = ns_js_get_string_prop(ctx, rule, "eagerness");
+    if (!eagerness) return eager_by_default;
+    return strcmp(eagerness, "immediate") == 0 || strcmp(eagerness, "eager") == 0;
+}
+
+static void
+ns_js_apply_speculation_rules(ns_js *js, const char *text, gsize len,
+                              const char *base)
+{
+    if (!js || !text || !base || !js->current_url || !js->current_doc) return;
+    JSContext *ctx = js->ctx;
+    JSValue root = JS_ParseJSON(ctx, text, len, "speculationrules");
+    if (JS_IsException(root)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return;
+    }
+    JSValue rules = JS_IsObject(root) ? JS_GetPropertyStr(ctx, root, "prefetch")
+                                      : JS_UNDEFINED;
+    uint32_t n = 0;
+    if (JS_IsArray(rules)) n = ns_js_array_length(ctx, rules);
+    for (uint32_t i = 0; i < n && i < 64; i++) {
+        JSValue rule = JS_GetPropertyUint32(ctx, rules, i);
+        JSValue urls = JS_GetPropertyStr(ctx, rule, "urls");
+        JSValue where = JS_GetPropertyStr(ctx, rule, "where");
+        uint32_t n_urls = 0;
+        if (JS_IsArray(urls) && ns_speculation_rule_is_eager(ctx, rule, TRUE))
+            n_urls = ns_js_array_length(ctx, urls);
+        for (uint32_t u = 0; u < n_urls && u < 64; u++) {
+            JSValue item = JS_GetPropertyUint32(ctx, urls, u);
+            const char *raw = JS_IsString(item) ? JS_ToCString(ctx, item) : NULL;
+            g_autofree char *abs = raw ? ns_url_resolve(base, raw) : NULL;
+            if (abs) ns_engine_prefetch_document(abs, js->current_url);
+            if (raw) JS_FreeCString(ctx, raw);
+            JS_FreeValue(ctx, item);
+        }
+        if (JS_IsObject(where) && ns_speculation_rule_is_eager(ctx, rule, FALSE))
+            ns_speculation_prefetch_links(js, js->current_doc, where, base, 0);
+        JS_FreeValue(ctx, where);
+        JS_FreeValue(ctx, urls);
+        JS_FreeValue(ctx, rule);
+    }
+    JS_FreeValue(ctx, rules);
+    JS_FreeValue(ctx, root);
+}
+
 static void
 ns_js_register_import_maps_rec(ns_js *js, ns_node *root, int depth)
 {
     if (!js || !root || depth >= 512 ||
         (depth > 0 && ns_dom_hidden_child(root))) return;
     if (ns_node_is_element_named(root, "script")) {
+        if (ns_script_kind(root) == NS_SCRIPT_KIND_SPECULATIONRULES &&
+            !ns_element_get_attr(root, NS_SCRIPT_ALREADY_STARTED)) {
+            ns_element_set_attr(root, NS_SCRIPT_ALREADY_STARTED, "1");
+            g_autofree char *base = ns_js_node_document_base_url(js, root);
+            g_autoptr(GString) text = g_string_new(NULL);
+            for (const ns_node *c = root->first_child; c; c = c->next_sibling)
+                if (c->kind == NS_NODE_TEXT && c->text)
+                    g_string_append(text, c->text);
+            ns_js_apply_speculation_rules(js, text->str, text->len, base);
+        }
         if (ns_script_kind(root) == NS_SCRIPT_KIND_IMPORTMAP &&
             !ns_element_get_attr(root, NS_SCRIPT_ALREADY_STARTED)) {
             ns_element_set_attr(root, NS_SCRIPT_ALREADY_STARTED, "1");
@@ -69775,7 +70276,24 @@ ns_script_kind(const ns_node *n)
     if (javascript_mime_essence_match(start, len)) return NS_SCRIPT_KIND_CLASSIC;
     if (g_ascii_strcasecmp(type, "module") == 0) return NS_SCRIPT_KIND_MODULE;
     if (g_ascii_strcasecmp(type, "importmap") == 0) return NS_SCRIPT_KIND_IMPORTMAP;
+    if (g_ascii_strcasecmp(type, "speculationrules") == 0)
+        return NS_SCRIPT_KIND_SPECULATIONRULES;
     return NS_SCRIPT_KIND_NONE;
+}
+
+static JSValue
+ns_script_supports(JSContext *ctx, JSValueConst this_val,
+                   int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    static const char *const types[] = { "classic", "module", "importmap",
+                                         "speculationrules" };
+    const char *type = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
+    gboolean known = FALSE;
+    for (gsize i = 0; type && i < G_N_ELEMENTS(types); i++)
+        known = known || strcmp(type, types[i]) == 0;
+    if (type) JS_FreeCString(ctx, type);
+    return JS_NewBool(ctx, known);
 }
 
 static gboolean

@@ -653,6 +653,43 @@ ns_engine_preload_script(const char *url, const char *top_url)
                          on_preload_fetched, NULL);
 }
 
+#define NS_ENGINE_DOCUMENT_PREFETCH_MAX 20
+
+static char       *g_prefetch_document;
+static GHashTable *g_prefetch_seen;
+
+gboolean
+ns_engine_prefetch_document(const char *url, const char *document_url)
+{
+    if (!url || !document_url || !ns_url_is_http_or_https(url) ||
+        !ns_url_is_http_or_https(document_url) ||
+        !ns_url_is_same_site(url, document_url))
+        return FALSE;
+    if (g_strcmp0(g_prefetch_document, document_url) != 0) {
+        g_free(g_prefetch_document);
+        g_prefetch_document = g_strdup(document_url);
+        g_clear_pointer(&g_prefetch_seen, g_hash_table_destroy);
+    }
+    if (!g_prefetch_seen)
+        g_prefetch_seen = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                g_free, NULL);
+    g_autofree char *target = g_strdup(url);
+    char *hash = strchr(target, '#');
+    if (hash) *hash = 0;
+    gsize doc_len = strcspn(document_url, "#");
+    if ((strlen(target) == doc_len &&
+         strncmp(target, document_url, doc_len) == 0) ||
+        g_hash_table_contains(g_prefetch_seen, target) ||
+        g_hash_table_size(g_prefetch_seen) >= NS_ENGINE_DOCUMENT_PREFETCH_MAX ||
+        !ns_net_csp_allows(document_url, NS_CSP_CONNECT, target, NULL, TRUE))
+        return FALSE;
+    g_hash_table_add(g_prefetch_seen, g_strdup(target));
+    static const char *const headers[] = { "Sec-Purpose: prefetch", NULL };
+    ns_net_request_async(target, document_url, "GET", NULL, 0, NULL, headers,
+                         NULL, on_preload_fetched, preload_flight_new(target));
+    return TRUE;
+}
+
 void
 ns_engine_speculative_preload(ns_node *doc, const char *base_url,
                               gboolean include_images)

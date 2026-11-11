@@ -18,6 +18,7 @@ typedef struct ns_anim_chan {
     ns_css_value *to;
     ns_css_value *current;
     gboolean      has_last;
+    const void     *starting_seen;
     gboolean      last_currentcolor;
     gboolean      active;
     gboolean      cancelled;
@@ -702,6 +703,15 @@ observe_transition_prop(ns_anim *a, ns_anim_state *s, const ns_style *style,
     const ns_css_value *cur = style->values[prop];
     ns_anim_chan *ch = chan_ensure(s, prop);
     if (cur && ch->current && cur == ch->current) return;
+    const ns_style *starting = ns_css_style_starting(s->node);
+    if (!starting) ch->starting_seen = NULL;
+    if (starting && starting != style && ch->starting_seen != starting) {
+        ch->starting_seen = starting;
+        ns_css_value_free(ch->last);
+        ch->last = ns_css_value_dup(starting->values[prop]);
+        ch->last_currentcolor = ns_style_prop_from_currentcolor(starting, prop);
+        ch->has_last = TRUE;
+    }
     if (!ch->has_last && s->prev_style && s->prev_style != style) {
         ch->last = ns_css_value_dup(s->prev_style->values[prop]);
         ch->last_currentcolor = ns_style_prop_from_currentcolor(s->prev_style, prop);

@@ -15463,4 +15463,129 @@
             enumerable: true, configurable: true
         });
     })();
+    (function () {
+        var publishNative = global.__ns_set_highlights;
+        if (typeof publishNative !== 'function' || !global.CSS || global.CSS.highlights) return;
+        var rangesOf = new WeakMap();
+        var registered = new Map();
+
+        function publish() {
+            var flat = [];
+            registered.forEach(function (highlight, name) {
+                rangesOf.get(highlight).forEach(function (range) {
+                    if (!range || !range.startContainer || !range.endContainer) return;
+                    flat.push([String(name), highlight.priority | 0,
+                               range.startContainer, range.startOffset | 0,
+                               range.endContainer, range.endOffset | 0]);
+                });
+            });
+            publishNative(flat);
+        }
+
+        function Highlight() {
+            if (!(this instanceof Highlight)) throw new TypeError("Failed to construct 'Highlight': Please use the 'new' operator.");
+            rangesOf.set(this, new Set(arguments));
+            this.priority = 0;
+            this.type = 'highlight';
+        }
+        function ranges(self) {
+            var set = rangesOf.get(self);
+            if (!set) throw new TypeError('Illegal invocation');
+            return set;
+        }
+        Highlight.prototype.add = function add(range) { ranges(this).add(range); publish(); return this; };
+        Highlight.prototype['delete'] = function (range) { var had = ranges(this)['delete'](range); publish(); return had; };
+        Highlight.prototype.clear = function clear() { ranges(this).clear(); publish(); };
+        Highlight.prototype.has = function has(range) { return ranges(this).has(range); };
+        Highlight.prototype.forEach = function forEach(fn, thisArg) {
+            var self = this;
+            ranges(this).forEach(function (range) { fn.call(thisArg, range, range, self); });
+        };
+        Highlight.prototype.values = function values() { return ranges(this).values(); };
+        Highlight.prototype.keys = Highlight.prototype.values;
+        Highlight.prototype.entries = function entries() { return ranges(this).entries(); };
+        Highlight.prototype[Symbol.iterator] = Highlight.prototype.values;
+        Object.defineProperty(Highlight.prototype, 'size', {
+            get: function () { return ranges(this).size; }, enumerable: true, configurable: true
+        });
+        Object.defineProperty(Highlight.prototype, Symbol.toStringTag, { value: 'Highlight', configurable: true });
+
+        function HighlightRegistry() { throw new TypeError('Illegal constructor'); }
+        var registry = Object.create(HighlightRegistry.prototype);
+        HighlightRegistry.prototype.set = function set(name, highlight) {
+            if (!rangesOf.has(highlight)) throw new TypeError("Failed to execute 'set' on 'HighlightRegistry': parameter 2 is not of type 'Highlight'.");
+            registered.set(String(name), highlight);
+            publish();
+            return this;
+        };
+        HighlightRegistry.prototype.get = function get(name) { return registered.get(String(name)); };
+        HighlightRegistry.prototype.has = function has(name) { return registered.has(String(name)); };
+        HighlightRegistry.prototype['delete'] = function (name) { var had = registered['delete'](String(name)); publish(); return had; };
+        HighlightRegistry.prototype.clear = function clear() { registered.clear(); publish(); };
+        HighlightRegistry.prototype.forEach = function forEach(fn, thisArg) {
+            registered.forEach(function (highlight, name) { fn.call(thisArg, highlight, name, registry); });
+        };
+        HighlightRegistry.prototype.keys = function keys() { return registered.keys(); };
+        HighlightRegistry.prototype.values = function values() { return registered.values(); };
+        HighlightRegistry.prototype.entries = function entries() { return registered.entries(); };
+        HighlightRegistry.prototype[Symbol.iterator] = HighlightRegistry.prototype.entries;
+        Object.defineProperty(HighlightRegistry.prototype, 'size', {
+            get: function () { return registered.size; }, enumerable: true, configurable: true
+        });
+        Object.defineProperty(HighlightRegistry.prototype, Symbol.toStringTag, { value: 'HighlightRegistry', configurable: true });
+
+        global.Highlight = Highlight;
+        global.HighlightRegistry = HighlightRegistry;
+        Object.defineProperty(global.CSS, 'highlights', { value: registry, enumerable: true, configurable: true });
+    })();
+    (function () {
+        var DocumentProto = global.Document && global.Document.prototype;
+        if (!DocumentProto || typeof DocumentProto.startViewTransition === 'function') return;
+        var states = new WeakMap();
+        var active = new WeakMap();
+
+        function ViewTransition() { throw new TypeError('Illegal constructor'); }
+        function stateOf(self) {
+            var state = states.get(self);
+            if (!state) throw new TypeError('Illegal invocation');
+            return state;
+        }
+        ['updateCallbackDone', 'ready', 'finished', 'types'].forEach(function (name) {
+            Object.defineProperty(ViewTransition.prototype, name, {
+                get: function () { return stateOf(this)[name]; }, enumerable: true, configurable: true
+            });
+        });
+        ViewTransition.prototype.skipTransition = function skipTransition() { stateOf(this); };
+        Object.defineProperty(ViewTransition.prototype, Symbol.toStringTag, { value: 'ViewTransition', configurable: true });
+
+        DocumentProto.startViewTransition = function startViewTransition(callbackOrOptions) {
+            var doc = this;
+            var options = callbackOrOptions && typeof callbackOrOptions === 'object' ? callbackOrOptions : null;
+            var update = options ? options.update : callbackOrOptions;
+            if (update != null && typeof update !== 'function')
+                throw new TypeError("Failed to execute 'startViewTransition' on 'Document': the update callback is not a function.");
+            var transition = Object.create(ViewTransition.prototype);
+            var updated = Promise.resolve().then(function () { return update ? update() : undefined; })
+                                           .then(function () { return undefined; });
+            var settled = updated.then(function () {
+                if (active.get(doc) === transition) active['delete'](doc);
+            }, function (reason) {
+                if (active.get(doc) === transition) active['delete'](doc);
+                throw reason;
+            });
+            settled['catch'](function () {});
+            states.set(transition, {
+                updateCallbackDone: updated,
+                ready: settled,
+                finished: settled,
+                types: new Set(options && options.types ? options.types : [])
+            });
+            active.set(doc, transition);
+            return transition;
+        };
+        Object.defineProperty(DocumentProto, 'activeViewTransition', {
+            get: function () { return active.get(this) || null; }, enumerable: true, configurable: true
+        });
+        global.ViewTransition = ViewTransition;
+    })();
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -3,6 +3,36 @@ Changelog:
 
 1.0.47-dev:
 ======
+* JS: `document.startViewTransition()` exists and runs the update
+  callback, returning a `ViewTransition` whose `updateCallbackDone`,
+  `ready` and `finished` promises settle in order; `skipTransition()`,
+  `types` and `document.activeViewTransition` are present. The DOM
+  change is applied without an animation: snapshots and the
+  `::view-transition-*` pseudo-elements are not rendered yet, so pages
+  that call the API work but do not cross-fade.
+* CSS/JS: the Custom Highlight API is supported: `new Highlight(...)`,
+  the `CSS.highlights` registry and the `::highlight(name)`
+  pseudo-element, which paints `color` and `background-color` over the
+  registered ranges without changing the DOM. Higher `priority` paints
+  on top.
+* JS: `fetchLater(url, { method, body, activateAfter, signal })` queues
+  a request that is sent when `activateAfter` elapses or the document
+  goes away, whichever is first, and returns a result whose
+  `activated` turns true once it is sent. Secure contexts only; pending
+  requests are limited to 64 KiB and 64 entries per document.
+* HTML: `<script type="speculationrules">` prefetch rules are honoured.
+  URLs in a list rule, and links matched by a document rule
+  (`href_matches`, `selector_matches`, `and`/`or`/`not`) whose
+  `eagerness` is `immediate` or `eager`, are fetched ahead of time with
+  `Sec-Purpose: prefetch`, like `<link rel="prefetch">`. Only same-site
+  URLs are fetched, at most 20 per document. `prerender` rules are
+  ignored. `HTMLScriptElement.supports()` is added and reports
+  `speculationrules`.
+* CSS: `@starting-style` is supported, at the top level and nested in a
+  style rule. An element that is styled for the first time, or that
+  leaves `display: none`, transitions from the values its
+  `@starting-style` rules give it, so popovers, dialogs and inserted
+  elements can animate in with plain CSS.
 * CSS: `text-decoration-skip-ink` works. With the initial value `auto`
   a solid underline breaks where it would cross a glyph's descender;
   `none` draws it straight through as before. Underlines with a custom
