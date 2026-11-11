@@ -27706,6 +27706,8 @@ ns_popup_new_token(void)
     return g_string_free(s, FALSE);
 }
 
+#define NS_POPUP_MESSAGE_BYTES_MAX (64u * 1024u * 1024u)
+
 static char *
 ns_popup_serialize(JSContext *ctx, JSValueConst value)
 {
@@ -27715,6 +27717,12 @@ ns_popup_serialize(JSContext *ctx, JSValueConst value)
     uint8_t *bytes = JS_WriteObject(ctx, &len, wire, JS_WRITE_OBJ_REFERENCE);
     JS_FreeValue(ctx, wire);
     if (!bytes) return NULL;
+    if (len > NS_POPUP_MESSAGE_BYTES_MAX) {
+        js_free(ctx, bytes);
+        ns_throw_dom_exception(ctx, "DataCloneError", 25,
+                               "postMessage: message is too large");
+        return NULL;
+    }
     char *b64 = g_base64_encode(bytes, len);
     js_free(ctx, bytes);
     return b64;
@@ -27724,8 +27732,9 @@ static JSValue
 ns_popup_deserialize(JSContext *ctx, const char *b64)
 {
     gsize len = 0;
-    guchar *bytes = b64 ? g_base64_decode(b64, &len) : NULL;
-    if (!bytes || !len) {
+    guchar *bytes = b64 && strlen(b64) / 4 <= NS_POPUP_MESSAGE_BYTES_MAX / 3 + 1
+        ? g_base64_decode(b64, &len) : NULL;
+    if (!bytes || !len || len > NS_POPUP_MESSAGE_BYTES_MAX) {
         g_free(bytes);
         return JS_UNDEFINED;
     }

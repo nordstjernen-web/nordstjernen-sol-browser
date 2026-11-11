@@ -2206,9 +2206,12 @@ proc_window_add_tab_core(ProcWindow *pw, const char *url,
 
 typedef struct {
     char *token;
+    char *opener_origin;
     int   opener_tab;
     int   popup_tab;
 } PwPopupLink;
+
+enum { PW_POPUP_CALL_DEPTH_MAX = 16 };
 
 static GPtrArray *g_popup_links;
 
@@ -2217,6 +2220,7 @@ pw_popup_link_free(gpointer data)
 {
     PwPopupLink *l = data;
     g_free(l->token);
+    g_free(l->opener_origin);
     g_free(l);
 }
 
@@ -2239,8 +2243,55 @@ pw_view_for_tab(int tab_id)
     return view_for_page(page);
 }
 
+static gboolean
+pw_popup_origin_opaque(const char *origin)
+{
+    return !origin || !*origin || strcmp(origin, "null") == 0;
+}
+
+static gboolean
+pw_popup_origin_of_url(const char *origin, const char *url)
+{
+    if (pw_popup_origin_opaque(origin) || !url) return FALSE;
+    if (g_ascii_strncasecmp(url, "blob:", 5) == 0) url += 5;
+    g_autofree char *claimed = ns_proc_url_origin(origin);
+    g_autofree char *actual = ns_proc_url_origin(url);
+    return claimed && actual && strcmp(claimed, actual) == 0;
+}
+
+static gboolean
+pw_popup_sender_may_claim(const PwPopupLink *l, int sender, const char *origin)
+{
+    if (pw_popup_origin_opaque(origin)) return TRUE;
+    NsProcView *view = pw_view_for_tab(sender);
+    if (view && pw_popup_origin_of_url(origin, ns_proc_view_url(view)))
+        return TRUE;
+    return sender == l->opener_tab && l->opener_origin &&
+           strcmp(origin, l->opener_origin) == 0;
+}
+
+static gboolean
+pw_popup_call_allowed(const PwPopupLink *l, const RjValue *op)
+{
+    NsProcView *popup = pw_view_for_tab(l->popup_tab);
+    if (!popup || !pw_popup_origin_of_url(l->opener_origin,
+                                          ns_proc_view_url(popup)))
+        return FALSE;
+    const char *path = rj_get_str(op, "path");
+    RjValue *keys = path ? rj_parse(path, strlen(path)) : NULL;
+    gboolean ok = keys && keys->type == RJ_ARR && keys->items->len > 0 &&
+                  keys->items->len <= PW_POPUP_CALL_DEPTH_MAX;
+    for (guint i = 0; ok && i < keys->items->len; i++) {
+        const RjValue *key = g_ptr_array_index(keys->items, i);
+        ok = key && key->type == RJ_STR;
+    }
+    rj_free(keys);
+    return ok;
+}
+
 static void
-pw_popup_send(int tab_id, const RjValue *op, const char *kind)
+pw_popup_send(int tab_id, const RjValue *op, const char *kind,
+              const char *origin)
 {
     NsProcView *target = pw_view_for_tab(tab_id);
     if (!target) return;
@@ -2249,7 +2300,8 @@ pw_popup_send(int tab_id, const RjValue *op, const char *kind)
     static const char *const fields[] = { "token", "to", "data", "origin",
                                           "target", "path", "ports", "id" };
     for (gsize i = 0; i < G_N_ELEMENTS(fields); i++) {
-        const char *val = rj_get_str(op, fields[i]);
+        const char *val = origin && strcmp(fields[i], "origin") == 0
+            ? origin : rj_get_str(op, fields[i]);
         if (!val) continue;
         g_string_append_c(out, ',');
         rj_append_str(out, fields[i]);
@@ -2329,6 +2381,7 @@ pw_popup_open(ProcWindow *pw, NsProcView *v, const RjValue *op)
     if (!popup || !linked) return;
     PwPopupLink *l = g_new0(PwPopupLink, 1);
     l->token = g_strdup(token);
+    l->opener_origin = g_strdup(rj_get_str(op, "origin"));
     l->opener_tab = page_tab_id(ns_proc_view_widget(v));
     l->popup_tab = page_tab_id(ns_proc_view_widget(popup));
     if (!g_popup_links)
@@ -2359,16 +2412,18 @@ pw_popup_handle(ProcWindow *pw, NsProcView *v, const char *json)
         if (strcmp(kind, "post") == 0) {
             const char *to = rj_get_str(op, "to");
             gboolean to_popup = to && strcmp(to, "popup") == 0;
+            if (!pw_popup_sender_may_claim(l, sender, rj_get_str(op, "origin")))
+                continue;
             if (to_popup && sender == l->opener_tab)
-                pw_popup_send(l->popup_tab, op, "message");
+                pw_popup_send(l->popup_tab, op, "message", NULL);
             else if (!to_popup && sender == l->popup_tab)
-                pw_popup_send(l->opener_tab, op, "message");
+                pw_popup_send(l->opener_tab, op, "message", NULL);
         } else if (strcmp(kind, "call") == 0) {
-            if (sender == l->popup_tab)
-                pw_popup_send(l->opener_tab, op, "call");
+            if (sender == l->popup_tab && pw_popup_call_allowed(l, op))
+                pw_popup_send(l->opener_tab, op, "call", l->opener_origin);
         } else if (strcmp(kind, "port") == 0) {
             pw_popup_send(sender == l->popup_tab ? l->opener_tab : l->popup_tab,
-                          op, "port");
+                          op, "port", NULL);
         } else if (strcmp(kind, "close") == 0) {
             int popup_tab = l->popup_tab;
             ProcWindow *ppw = NULL;
