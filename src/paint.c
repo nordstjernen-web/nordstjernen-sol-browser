@@ -4283,17 +4283,64 @@ decoration_thickness_px(const ns_inline_attr *r, const ns_style *s, double em)
     return MAX(em / 16.0, 1.0);
 }
 
+static double
+decoration_em(const ns_inline_attr *r, const ns_style *s)
+{
+    if (r->font_size_px > 0) return r->font_size_px;
+    const ns_style *from = r->style ? r->style : s;
+    return length_or(from ? from->values[NS_CSS_FONT_SIZE] : NULL, 16);
+}
+
 static gboolean
 decoration_has_custom_metrics(const ns_inline_attr *r, const ns_style *s)
 {
     double px;
-    double em = r->font_size_px > 0 ? r->font_size_px : 16.0;
+    double em = decoration_em(r, s);
     if (decoration_length_px(decoration_value_of(r, s, NS_CSS_TEXT_DECORATION_THICKNESS),
                              em, &px))
         return TRUE;
     return r->kind == NS_INLINE_UNDERLINE &&
            decoration_length_px(decoration_value_of(r, s, NS_CSS_TEXT_UNDERLINE_OFFSET),
                                 em, &px);
+}
+
+static gboolean
+decoration_skips_ink(const ns_inline_attr *r, const ns_style *s)
+{
+    if (r->kind != NS_INLINE_UNDERLINE) return FALSE;
+    return !keyword_is(decoration_value_of(r, s, NS_CSS_TEXT_DECORATION_SKIP_INK),
+                       "none");
+}
+
+static void
+decoration_erase_ink(cairo_t *cr, NsPangoLayoutLine *line, double origin_x,
+                     double baseline_y, double thick)
+{
+    cairo_set_operator(cr, CAIRO_OPERATOR_DEST_OUT);
+    cairo_set_source_rgba(cr, 0, 0, 0, 1);
+    cairo_set_dash(cr, NULL, 0, 0);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+    cairo_set_line_width(cr, 2.0 * MAX(thick, 1.0));
+    cairo_new_path(cr);
+    double clip_x0, clip_y0, clip_x1, clip_y1;
+    cairo_clip_extents(cr, &clip_x0, &clip_y0, &clip_x1, &clip_y1);
+    double run_x = origin_x;
+    for (GSList *l = line->runs; l; l = l->next) {
+        NsPangoLayoutRun *run = l->data;
+        double run_w = (double)ns_pango_glyph_string_get_width(run->glyphs) /
+                       NS_PANGO_SCALE;
+        if (run_x + run_w >= clip_x0 - thick && run_x <= clip_x1 + thick) {
+            cairo_move_to(cr, run_x, baseline_y);
+            ns_pango_cairo_glyph_string_path(cr, run->item->analysis.font,
+                                             run->glyphs);
+        }
+        run_x += run_w;
+    }
+    cairo_stroke_preserve(cr);
+    cairo_fill(cr);
+    cairo_pop_group_to_source(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+    cairo_paint(cr);
 }
 
 static const char *
@@ -4307,7 +4354,8 @@ underline_dash_style(const ns_inline_attr *r, const ns_style *s)
     const char *kw = dv && dv->kind == NS_CSS_V_KEYWORD ? dv->u.keyword : NULL;
     if (kw && (strcmp(kw, "dotted") == 0 || strcmp(kw, "dashed") == 0))
         return kw;
-    if ((!kw || strcmp(kw, "solid") == 0) && decoration_has_custom_metrics(r, s))
+    if ((!kw || strcmp(kw, "solid") == 0) &&
+        (decoration_has_custom_metrics(r, s) || decoration_skips_ink(r, s)))
         return "solid";
     return NULL;
 }
@@ -4366,13 +4414,19 @@ paint_dashed_decoration_piece(cairo_t *cr, const dashed_decoration *d,
     ns_pango_layout_line_index_to_x(line, seg1, FALSE, &xb);
     double x0 = dx + d->text_x + (double)MIN(xa, xb) / NS_PANGO_SCALE;
     double x1 = dx + d->text_x + (double)MAX(xa, xb) / NS_PANGO_SCALE;
-    double em = r->font_size_px > 0 ? r->font_size_px : 16.0;
+    double em = decoration_em(r, d->box->style);
     double thick = decoration_thickness_px(r, d->box->style, em);
     double uy = dy + dashed_decoration_y(r, d->box->style, d->base_y, em, thick);
     const ns_css_value *dc =
         r->style ? r->style->values[NS_CSS_TEXT_DECORATION_COLOR] : NULL;
     if (!dc && r->style) dc = r->style->values[NS_CSS_COLOR];
+    gboolean skip_ink = solid && decoration_skips_ink(r, d->box->style);
     cairo_save(cr);
+    if (skip_ink) {
+        cairo_rectangle(cr, x0, uy - thick / 2.0 - 1.0, x1 - x0, thick + 2.0);
+        cairo_clip(cr);
+        cairo_push_group(cr);
+    }
     if (dc && dc->kind == NS_CSS_V_COLOR)
         cairo_set_source_rgba(cr, dc->u.color.r / 255.0,
                               dc->u.color.g / 255.0,
@@ -4389,6 +4443,8 @@ paint_dashed_decoration_piece(cairo_t *cr, const dashed_decoration *d,
     cairo_move_to(cr, x0, uy);
     cairo_line_to(cr, x1, uy);
     cairo_stroke(cr);
+    if (skip_ink)
+        decoration_erase_ink(cr, line, dx + d->text_x, dy + d->base_y, thick);
     cairo_restore(cr);
 }
 

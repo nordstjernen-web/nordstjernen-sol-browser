@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* CSS: `text-decoration-skip-ink` works. With the initial value `auto`
+  a solid underline breaks where it would cross a glyph's descender;
+  `none` draws it straight through as before. Underlines with a custom
+  thickness or offset on inherited decorations now use the element's
+  font size instead of assuming 16px.
 * CSS: `resize` works. A textarea, and any box with `overflow` other
   than `visible` and `resize` other than `none`, shows a grip in its
   bottom-right corner; dragging it sets the element's inline `width`
