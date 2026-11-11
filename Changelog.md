@@ -3,6 +3,37 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Hardening: a sandboxed renderer or audio helper may open a netlink
+  socket for the routing protocol only, which is what name resolution
+  uses; the other netlink families are refused.
+* Security: the window process refuses a layer update that claims more
+  than 4096 viewport layers. The count came from the renderer unchecked
+  and the snapshot loop ran once per layer, so a compromised renderer
+  could stall the user interface.
+* Security: only the Safe Browsing warning page itself can follow its
+  "continue anyway" link. Any page on the same host as a listed URL
+  could navigate to it, which skipped the warning without a click and
+  allow-listed the whole host.
+* Security: an opaque (`no-cors`) `fetch()` response reports
+  `redirected` as false. It reported the real value, which told a page
+  whether a cross-origin URL redirects for the signed-in user.
+* Security: when libpsl carries no built-in public-suffix list, a cookie
+  with a `Domain` attribute is stored for the setting host only. The
+  public-suffix test was skipped in that case, so `Domain=com` was
+  accepted.
+* Security: a renderer that runs without executable memory (WebGL and
+  WebGPU both off) and the audio decoder can no longer call
+  `memfd_create`. The seccomp filter refused `mprotect(PROT_EXEC)` and
+  anonymous executable mappings but has to allow file-backed ones for
+  loading libraries, and a memfd is a file: write code into it, map it
+  executable. SECURITY.md now says what this mode does not cover.
+* Security: web pages can no longer read the browser's own `about:`
+  pages. `fetch()` and `XMLHttpRequest` accepted `about:start`, and every
+  `about:` response passed the CORS check, so any site could read the
+  start page and with it the user's most-visited sites. A request that
+  is not a navigation now gets an `about:` page only from another
+  `about:` page, and the navigation gate and the fetch path share one
+  list of privileged pages.
 * SECURITY.md is rewritten at about a third of its length and checked
   against the code: it now covers the remote-control server, the
   renderer's Seatbelt exec denial, the newer CSP directives and the full

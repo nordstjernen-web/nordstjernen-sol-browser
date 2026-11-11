@@ -8,6 +8,8 @@
 
 enum { PL_STICKY = 2 };
 
+#define NS_PAGE_LAYERS_MAX_VIEW_LAYERS 4096
+
 typedef struct {
     int         layer;
     int         x, y;
@@ -168,7 +170,8 @@ pl_parse_gen(NsLayerUpdate *u, const char *line)
         return FALSE;
     u->fresh = fresh != 0;
     u->canvas = (GdkRGBA){ r / 255.0f, g / 255.0f, b / 255.0f, 1.0f };
-    return u->width > 0 && u->tile_h > 0 && u->scale > 0 && u->n_vp >= 0;
+    return u->width > 0 && u->tile_h > 0 && u->scale > 0 && u->n_vp >= 0 &&
+           u->n_vp <= NS_PAGE_LAYERS_MAX_VIEW_LAYERS;
 }
 
 static void

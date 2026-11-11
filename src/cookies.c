@@ -879,7 +879,7 @@ line_resolve_domain(ns_cookie_line *line, const ns_request_url *req,
     *host_only = TRUE;
     if (!line->domain) return TRUE;
     const psl_ctx_t *psl = psl_builtin();
-    if (psl && psl_is_public_suffix(psl, line->domain)) {
+    if (!psl || psl_is_public_suffix(psl, line->domain)) {
         if (g_ascii_strcasecmp(req->host, line->domain) != 0) return FALSE;
         g_clear_pointer(&line->domain, g_free);
         return TRUE;

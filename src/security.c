@@ -31,6 +31,7 @@
 #include <sched.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <linux/netlink.h>
 #endif
 #endif
 
@@ -238,6 +239,7 @@ ns_security_sri_check(const char *integrity_attr,
 static gboolean ns_seccomp_unix_sockets = TRUE;
 static gboolean ns_seccomp_sysv_ipc_denied;
 static gboolean ns_seccomp_exec_memory_denied;
+static gboolean ns_seccomp_memfd_denied;
 #endif
 
 void
@@ -245,6 +247,14 @@ ns_security_seccomp_deny_exec_memory(void)
 {
 #ifdef NS_SECCOMP_FILTER_ARGS
     ns_seccomp_exec_memory_denied = TRUE;
+#endif
+}
+
+void
+ns_security_seccomp_deny_memfd(void)
+{
+#ifdef NS_SECCOMP_FILTER_ARGS
+    ns_seccomp_memfd_denied = TRUE;
 #endif
 }
 
@@ -1069,6 +1079,13 @@ ns_seccomp_is_exec_memory_call(const char *name)
     return FALSE;
 }
 
+static gboolean
+ns_seccomp_is_memfd_call(const char *name)
+{
+    return strcmp(name, "memfd_create") == 0 ||
+           strcmp(name, "memfd_secret") == 0;
+}
+
 static void
 ns_seccomp_add_memory_rules(scmp_filter_ctx ctx)
 {
@@ -1108,6 +1125,12 @@ ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
     static const int domains[] = { AF_UNIX, AF_INET, AF_INET6, AF_NETLINK };
     for (gsize i = 0; i < G_N_ELEMENTS(domains); i++) {
         if (domains[i] == AF_UNIX && !ns_seccomp_unix_sockets) continue;
+        if (domains[i] == AF_NETLINK) {
+            (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 2,
+                                   SCMP_A0(SCMP_CMP_EQ, AF_NETLINK, 0),
+                                   SCMP_A2(SCMP_CMP_EQ, NETLINK_ROUTE, 0));
+            continue;
+        }
         (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
                                SCMP_A0(SCMP_CMP_EQ,
                                        (scmp_datum_t)domains[i], 0));
@@ -1168,6 +1191,31 @@ ns_seccomp_deny_tty_injection(void)
 }
 #endif
 
+#ifdef NS_HAVE_SECCOMP
+static gboolean
+ns_seccomp_call_denied(const char *name)
+{
+    return (ns_seccomp_exec_memory_denied &&
+            ns_seccomp_is_exec_memory_call(name)) ||
+           (ns_seccomp_sysv_ipc_denied && ns_seccomp_is_sysv_ipc_call(name)) ||
+           (ns_seccomp_memfd_denied && ns_seccomp_is_memfd_call(name));
+}
+
+static void
+ns_seccomp_add_allowed_calls(scmp_filter_ctx ctx)
+{
+    for (size_t i = 0; i < G_N_ELEMENTS(ns_seccomp_allowed_names); i++) {
+        const char *name = ns_seccomp_allowed_names[i];
+        if (ns_seccomp_call_denied(name)) continue;
+        int nr = seccomp_syscall_resolve_name(name);
+        if (nr == __NR_SCMP_ERROR) continue;
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 0);
+    }
+    if (ns_seccomp_exec_memory_denied)
+        ns_seccomp_add_memory_rules(ctx);
+}
+#endif
+
 void
 ns_security_seccomp_init(void)
 {
@@ -1202,23 +1250,7 @@ ns_security_seccomp_init(void)
     }
     (void)seccomp_attr_set(ctx, SCMP_FLTATR_CTL_TSYNC, 1);
 
-    gboolean deny_exec = FALSE;
-    gboolean deny_sysv = FALSE;
-#ifdef NS_SECCOMP_FILTER_ARGS
-    deny_exec = ns_seccomp_exec_memory_denied;
-    deny_sysv = ns_seccomp_sysv_ipc_denied;
-#endif
-    for (size_t i = 0; i < G_N_ELEMENTS(ns_seccomp_allowed_names); i++) {
-        if (deny_exec && ns_seccomp_is_exec_memory_call(ns_seccomp_allowed_names[i]))
-            continue;
-        if (deny_sysv && ns_seccomp_is_sysv_ipc_call(ns_seccomp_allowed_names[i]))
-            continue;
-        int nr = seccomp_syscall_resolve_name(ns_seccomp_allowed_names[i]);
-        if (nr == __NR_SCMP_ERROR) continue;
-        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 0);
-    }
-    if (deny_exec)
-        ns_seccomp_add_memory_rules(ctx);
+    ns_seccomp_add_allowed_calls(ctx);
     ns_seccomp_add_process_rules(ctx);
 
     int rc = seccomp_load(ctx);

@@ -1915,6 +1915,7 @@ void ns_security_config_dir_read_only(void);
 void ns_security_landlock_scope_abstract_sockets(void);
 void ns_security_seccomp_deny_unix_sockets(void);
 void ns_security_seccomp_deny_exec_memory(void);
+void ns_security_seccomp_deny_memfd(void);
 
 static void
 sandbox_self(int decodes)
@@ -1929,6 +1930,7 @@ sandbox_self(int decodes)
     ns_security_landlock_scope_abstract_sockets();
     ns_security_seccomp_deny_unix_sockets();
     ns_security_seccomp_deny_exec_memory();
+    if (decodes) ns_security_seccomp_deny_memfd();
     char self[PATH_MAX];
     ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
     self[n > 0 ? n : 0] = '\0';

@@ -897,12 +897,7 @@ browser_url_is_privileged_page(const char *url)
 {
     if (!url) return FALSE;
     if (g_ascii_strncasecmp(url, "view-source:", 12) == 0) return TRUE;
-    if (g_ascii_strncasecmp(url, "about:", 6) != 0) return FALSE;
-    const char *page = url + 6;
-    return g_ascii_strncasecmp(page, "settings", 8) == 0 ||
-           g_ascii_strncasecmp(page, "config", 6) == 0 ||
-           g_ascii_strncasecmp(page, "history", 7) == 0 ||
-           g_ascii_strncasecmp(page, "ai", 2) == 0;
+    return ns_net_url_is_privileged_page(url);
 }
 
 static gboolean
@@ -924,7 +919,8 @@ browser_url_continues_interstitial(const char *url, const char *from)
 }
 
 static gboolean
-browser_allows_navigation_from(const char *from, const char *url)
+browser_allows_navigation_from(const char *from, const char *url,
+                               gboolean from_interstitial)
 {
     if (!url) return TRUE;
     if (g_ascii_strncasecmp(url, "file:", 5) == 0)
@@ -932,14 +928,16 @@ browser_allows_navigation_from(const char *from, const char *url)
     if (browser_url_is_privileged_page(url))
         return ns_net_url_is_chrome_page(from);
     if (g_str_has_prefix(url, NS_UNSAFE_CONTINUE_SCHEME))
-        return browser_url_continues_interstitial(url, from);
+        return from_interstitial &&
+               browser_url_continues_interstitial(url, from);
     return TRUE;
 }
 
 static gboolean
 browser_allows_navigation_url(ns_browser *b, const char *url)
 {
-    return browser_allows_navigation_from(b ? b->base_url : NULL, url);
+    return browser_allows_navigation_from(
+        b ? b->base_url : NULL, url, b && b->security == NS_SEC_DANGEROUS);
 }
 
 static gboolean
@@ -947,7 +945,7 @@ browser_js_popup_allowed(const char *url, const char *opener_url, gpointer ud)
 {
     ns_browser *b = ud;
     const char *from = opener_url ? opener_url : (b ? b->base_url : NULL);
-    return browser_allows_navigation_from(from, url);
+    return browser_allows_navigation_from(from, url, FALSE);
 }
 
 static char *
@@ -1207,6 +1205,7 @@ ns_browser_sandbox(const char *self_exe)
     if (!gpu_apis) {
         ns_mic_preload();
         ns_security_seccomp_deny_exec_memory();
+        ns_security_seccomp_deny_memfd();
     }
     ns_security_seccomp_init();
 }

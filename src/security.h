@@ -50,6 +50,7 @@ void ns_security_seccomp_init(void);
 void ns_security_seccomp_deny_unix_sockets(void);
 void ns_security_seccomp_deny_sysv_ipc(void);
 void ns_security_seccomp_deny_exec_memory(void);
+void ns_security_seccomp_deny_memfd(void);
 
 void ns_security_win32_mitigations_init(gboolean allow_child_processes);
 
