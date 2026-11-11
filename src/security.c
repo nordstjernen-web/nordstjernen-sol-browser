@@ -1191,6 +1191,31 @@ ns_seccomp_deny_tty_injection(void)
 }
 #endif
 
+#ifdef NS_HAVE_SECCOMP
+static gboolean
+ns_seccomp_call_denied(const char *name)
+{
+    return (ns_seccomp_exec_memory_denied &&
+            ns_seccomp_is_exec_memory_call(name)) ||
+           (ns_seccomp_sysv_ipc_denied && ns_seccomp_is_sysv_ipc_call(name)) ||
+           (ns_seccomp_memfd_denied && ns_seccomp_is_memfd_call(name));
+}
+
+static void
+ns_seccomp_add_allowed_calls(scmp_filter_ctx ctx)
+{
+    for (size_t i = 0; i < G_N_ELEMENTS(ns_seccomp_allowed_names); i++) {
+        const char *name = ns_seccomp_allowed_names[i];
+        if (ns_seccomp_call_denied(name)) continue;
+        int nr = seccomp_syscall_resolve_name(name);
+        if (nr == __NR_SCMP_ERROR) continue;
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 0);
+    }
+    if (ns_seccomp_exec_memory_denied)
+        ns_seccomp_add_memory_rules(ctx);
+}
+#endif
+
 void
 ns_security_seccomp_init(void)
 {
@@ -1225,27 +1250,7 @@ ns_security_seccomp_init(void)
     }
     (void)seccomp_attr_set(ctx, SCMP_FLTATR_CTL_TSYNC, 1);
 
-    gboolean deny_exec = FALSE;
-    gboolean deny_sysv = FALSE;
-    gboolean deny_memfd = FALSE;
-#ifdef NS_SECCOMP_FILTER_ARGS
-    deny_exec = ns_seccomp_exec_memory_denied;
-    deny_memfd = ns_seccomp_memfd_denied;
-    deny_sysv = ns_seccomp_sysv_ipc_denied;
-#endif
-    for (size_t i = 0; i < G_N_ELEMENTS(ns_seccomp_allowed_names); i++) {
-        if (deny_exec && ns_seccomp_is_exec_memory_call(ns_seccomp_allowed_names[i]))
-            continue;
-        if (deny_sysv && ns_seccomp_is_sysv_ipc_call(ns_seccomp_allowed_names[i]))
-            continue;
-        if (deny_memfd && ns_seccomp_is_memfd_call(ns_seccomp_allowed_names[i]))
-            continue;
-        int nr = seccomp_syscall_resolve_name(ns_seccomp_allowed_names[i]);
-        if (nr == __NR_SCMP_ERROR) continue;
-        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 0);
-    }
-    if (deny_exec)
-        ns_seccomp_add_memory_rules(ctx);
+    ns_seccomp_add_allowed_calls(ctx);
     ns_seccomp_add_process_rules(ctx);
 
     int rc = seccomp_load(ctx);
