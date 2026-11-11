@@ -89,6 +89,13 @@ typedef gboolean (*ns_anim_scroll_lookup_cb)(const ns_node *node, double pos[2],
                                              double max[2], gpointer user);
 void     ns_anim_set_scroll_lookup(ns_anim *a, ns_anim_scroll_lookup_cb cb,
                                    gpointer user);
+typedef void (*ns_anim_size_each_fn)(const ns_node *node, double width,
+                                    double height, gpointer data);
+typedef void (*ns_anim_size_visit_cb)(gpointer user, ns_anim_size_each_fn each,
+                                      gpointer data);
+void     ns_anim_set_size_visitor(ns_anim *a, ns_anim_size_visit_cb cb,
+                                  gpointer user);
+gboolean ns_anim_resolve_pending_sizes(ns_anim *a);
 void     ns_anim_rebase(ns_anim *a, gint64 base_us);
 G_END_DECLS
 #endif

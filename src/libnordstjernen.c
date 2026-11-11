@@ -91,6 +91,7 @@ struct ns_browser {
     gboolean        cascade_dirty;
     gboolean        anim_paint_dirty;
     gboolean        scroll_pass;
+    gboolean        size_pass;
     gboolean        relaying;
     char           *pending_nav;
     gboolean        soft_nav_pushed;
@@ -247,6 +248,7 @@ browser_damp_reset(ns_browser *b)
 static void browser_ensure_images(ns_browser *browser);
 static void browser_schedule_media_events(ns_browser *b);
 static void browser_relayout_scroll_pass(ns_browser *b);
+static void browser_relayout_size_pass(ns_browser *b);
 
 static void
 browser_relayout(ns_browser *b)
@@ -324,6 +326,7 @@ browser_relayout(ns_browser *b)
     b->layout_sig[1] = b->layout_sig[0];
     b->layout_sig[0] = sig;
     browser_relayout_scroll_pass(b);
+    browser_relayout_size_pass(b);
 }
 
 static gboolean
@@ -354,6 +357,16 @@ browser_relayout_scroll_pass(ns_browser *b)
     b->scroll_pass = TRUE;
     browser_relayout(b);
     b->scroll_pass = FALSE;
+}
+
+static void
+browser_relayout_size_pass(ns_browser *b)
+{
+    if (b->size_pass || !ns_anim_resolve_pending_sizes(b->anim)) return;
+    b->size_pass = TRUE;
+    b->cascade_dirty = TRUE;
+    browser_relayout(b);
+    b->size_pass = FALSE;
 }
 
 static void

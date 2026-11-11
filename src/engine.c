@@ -1991,10 +1991,39 @@ engine_scroll_note_root(ns_anim *anim, const ns_box *layout, double vw,
                         MAX(bottom - vh, 0.0));
 }
 
+static void
+engine_size_walk(const ns_box *b, ns_anim_size_each_fn each, gpointer data,
+                 int depth)
+{
+    if (!b || depth > 2048) return;
+    if (b->dom && b->kind != NS_BOX_INLINE) {
+        gboolean border_box = b->style &&
+            ns_css_keyword_is(b->style->values[NS_CSS_BOX_SIZING], "border-box");
+        double w = b->content_width, h = b->content_height;
+        if (border_box) {
+            w += b->padding.left + b->padding.right +
+                 b->border.left + b->border.right;
+            h += b->padding.top + b->padding.bottom +
+                 b->border.top + b->border.bottom;
+        }
+        each(b->dom, w, h, data);
+    }
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        engine_size_walk(c, each, data, depth + 1);
+}
+
+static void
+engine_size_visit(gpointer user, ns_anim_size_each_fn each, gpointer data)
+{
+    ns_box *const *layout = user;
+    engine_size_walk(*layout, each, data, 0);
+}
+
 void
 ns_engine_anim_track_layout(ns_anim *anim, ns_box **layout)
 {
     ns_anim_set_scroll_lookup(anim, engine_scroll_lookup, layout);
+    ns_anim_set_size_visitor(anim, engine_size_visit, layout);
 }
 
 gboolean
