@@ -1842,6 +1842,40 @@ paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
         x, y, w, h, x, y, w, h, radii);
 }
 
+static gboolean
+style_outline_visible(const ns_style *s)
+{
+    return s && length_or(s->values[NS_CSS_OUTLINE_WIDTH], 0) > 0 &&
+           s->values[NS_CSS_OUTLINE_STYLE] &&
+           !keyword_is(s->values[NS_CSS_OUTLINE_STYLE], "none") &&
+           !keyword_is(s->values[NS_CSS_OUTLINE_STYLE], "hidden");
+}
+
+static void
+paint_outline(cairo_t *cr, const ns_style *s, double x, double y,
+              double w, double h, corner_radii radii)
+{
+    if (!style_outline_visible(s)) return;
+    double ow = length_or(s->values[NS_CSS_OUTLINE_WIDTH], 0);
+    double off = length_or(s->values[NS_CSS_OUTLINE_OFFSET], 0);
+    rgba oc = rgba_of(s->values[NS_CSS_OUTLINE_COLOR], 0, 0, 0, 1);
+    cairo_save(cr);
+    set_source_rgba(cr, oc);
+    cairo_set_line_width(cr, ow);
+    if (keyword_is(s->values[NS_CSS_OUTLINE_STYLE], "dashed")) {
+        double dashes[] = { ow * 3, ow * 2 };
+        cairo_set_dash(cr, dashes, 2, 0);
+    } else if (keyword_is(s->values[NS_CSS_OUTLINE_STYLE], "dotted")) {
+        double dashes[] = { ow, ow };
+        cairo_set_dash(cr, dashes, 2, 0);
+    }
+    double grow = off + ow / 2.0;
+    rounded_rect_path(cr, x - grow, y - grow, w + grow * 2, h + grow * 2,
+                      outline_radii(radii, w, h, grow));
+    cairo_stroke(cr);
+    cairo_restore(cr);
+}
+
 static void
 paint_inline_css_chrome(cairo_t *cr, const ns_inline_attr *r, double x, double y,
                         double w, double h)
@@ -2534,31 +2568,7 @@ paint_block(cairo_t *cr, const ns_box *b)
             cairo_restore(cr);
             legend_gap = FALSE;
         }
-        double ow = length_or(s->values[NS_CSS_OUTLINE_WIDTH], 0);
-        const ns_css_value *ostyle = s->values[NS_CSS_OUTLINE_STYLE];
-        gboolean ostyle_drawable = ostyle && ostyle->kind == NS_CSS_V_KEYWORD &&
-            ostyle->u.keyword && strcmp(ostyle->u.keyword, "none") != 0 &&
-            strcmp(ostyle->u.keyword, "hidden") != 0;
-        if (ow > 0 && ostyle_drawable) {
-            double off = length_or(s->values[NS_CSS_OUTLINE_OFFSET], 0);
-            rgba oc = rgba_of(s->values[NS_CSS_OUTLINE_COLOR], 0, 0, 0, 1);
-            cairo_save(cr);
-            set_source_rgba(cr, oc);
-            cairo_set_line_width(cr, ow);
-            if (strcmp(ostyle->u.keyword, "dashed") == 0) {
-                double dashes[] = { ow * 3, ow * 2 };
-                cairo_set_dash(cr, dashes, 2, 0);
-            } else if (strcmp(ostyle->u.keyword, "dotted") == 0) {
-                double dashes[] = { ow, ow };
-                cairo_set_dash(cr, dashes, 2, 0);
-            }
-            double grow = off + ow / 2.0;
-            rounded_rect_path(cr, border_x - grow, border_y - grow,
-                              border_w + grow * 2, border_h + grow * 2,
-                              outline_radii(radii, border_w, border_h, grow));
-            cairo_stroke(cr);
-            cairo_restore(cr);
-        }
+        paint_outline(cr, s, border_x, border_y, border_w, border_h, radii);
     }
     if (legend_gap) cairo_restore(cr);
 }
@@ -2638,7 +2648,8 @@ static gboolean
 inline_attr_paints_box(const ns_inline_attr *r)
 {
     return r->kind == NS_INLINE_ELEMENT && r->len > 0 &&
-           style_has_inline_box_paint(r->style) &&
+           (style_has_inline_box_paint(r->style) ||
+            style_outline_visible(r->style)) &&
            !inline_box_is_hidden(r->style);
 }
 
@@ -5161,6 +5172,9 @@ paint_inline_element_fragment(cairo_t *cr, const ns_inline_attr *r,
     }
     paint_inline_css_chrome(cr, r, bx0, y0, bx1 - bx0, y1 - y0);
     cairo_restore(cr);
+    if (r->style && x1 > x0 && y1 > y0)
+        paint_outline(cr, r->style, x0, y0, x1 - x0, y1 - y0,
+                      style_border_radii(r->style, x1 - x0, y1 - y0));
 }
 
 typedef struct inline_fragment {
@@ -6218,6 +6232,8 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 }
             }
             cairo_restore(cr);
+            paint_outline(cr, r->style, bx, by, side, side,
+                          radio ? corner_radii_uniform(side / 2.0) : toggle_radii);
         }
     }
 
