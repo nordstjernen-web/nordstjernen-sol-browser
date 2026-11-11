@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* JS: `document.startViewTransition()` exists and runs the update
+  callback, returning a `ViewTransition` whose `updateCallbackDone`,
+  `ready` and `finished` promises settle in order; `skipTransition()`,
+  `types` and `document.activeViewTransition` are present. The DOM
+  change is applied without an animation: snapshots and the
+  `::view-transition-*` pseudo-elements are not rendered yet, so pages
+  that call the API work but do not cross-fade.
 * CSS/JS: the Custom Highlight API is supported: `new Highlight(...)`,
   the `CSS.highlights` registry and the `::highlight(name)`
   pseudo-element, which paints `color` and `background-color` over the

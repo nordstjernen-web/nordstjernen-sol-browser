@@ -15538,4 +15538,54 @@
         global.HighlightRegistry = HighlightRegistry;
         Object.defineProperty(global.CSS, 'highlights', { value: registry, enumerable: true, configurable: true });
     })();
+    (function () {
+        var DocumentProto = global.Document && global.Document.prototype;
+        if (!DocumentProto || typeof DocumentProto.startViewTransition === 'function') return;
+        var states = new WeakMap();
+        var active = new WeakMap();
+
+        function ViewTransition() { throw new TypeError('Illegal constructor'); }
+        function stateOf(self) {
+            var state = states.get(self);
+            if (!state) throw new TypeError('Illegal invocation');
+            return state;
+        }
+        ['updateCallbackDone', 'ready', 'finished', 'types'].forEach(function (name) {
+            Object.defineProperty(ViewTransition.prototype, name, {
+                get: function () { return stateOf(this)[name]; }, enumerable: true, configurable: true
+            });
+        });
+        ViewTransition.prototype.skipTransition = function skipTransition() { stateOf(this); };
+        Object.defineProperty(ViewTransition.prototype, Symbol.toStringTag, { value: 'ViewTransition', configurable: true });
+
+        DocumentProto.startViewTransition = function startViewTransition(callbackOrOptions) {
+            var doc = this;
+            var options = callbackOrOptions && typeof callbackOrOptions === 'object' ? callbackOrOptions : null;
+            var update = options ? options.update : callbackOrOptions;
+            if (update != null && typeof update !== 'function')
+                throw new TypeError("Failed to execute 'startViewTransition' on 'Document': the update callback is not a function.");
+            var transition = Object.create(ViewTransition.prototype);
+            var updated = Promise.resolve().then(function () { return update ? update() : undefined; })
+                                           .then(function () { return undefined; });
+            var settled = updated.then(function () {
+                if (active.get(doc) === transition) active['delete'](doc);
+            }, function (reason) {
+                if (active.get(doc) === transition) active['delete'](doc);
+                throw reason;
+            });
+            settled['catch'](function () {});
+            states.set(transition, {
+                updateCallbackDone: updated,
+                ready: settled,
+                finished: settled,
+                types: new Set(options && options.types ? options.types : [])
+            });
+            active.set(doc, transition);
+            return transition;
+        };
+        Object.defineProperty(DocumentProto, 'activeViewTransition', {
+            get: function () { return active.get(this) || null; }, enumerable: true, configurable: true
+        });
+        global.ViewTransition = ViewTransition;
+    })();
 })(typeof globalThis !== 'undefined' ? globalThis : this);
