@@ -76,6 +76,7 @@ typedef struct ns_video {
     gboolean     track_requested;
     gboolean     sampled;
     char        *cors_allow_origin;
+    char        *cross_origin_landing;
     guint        layer_gen;
     int          layer_slot;
     double       layer_x, layer_y, layer_w, layer_h;

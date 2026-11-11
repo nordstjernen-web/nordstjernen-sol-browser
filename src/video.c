@@ -374,6 +374,7 @@ ns_video_free(gpointer p)
     ns_texture_unref(v->poster_texture);
     g_free(v->poster_url);
     g_free(v->cors_allow_origin);
+    g_free(v->cross_origin_landing);
     ns_texture_unref(v->frame_texture);
     ns_video_player_free(v->player);
     g_free(v);
@@ -660,7 +661,9 @@ ns_video_cache_frame_for_node(ns_video_cache *cache, const void *dom_node,
     }
     v->sampled = TRUE;
     if (v->frame_texture) {
-        if (out_url) *out_url = v->url;
+        if (out_url)
+            *out_url = v->cross_origin_landing ? v->cross_origin_landing
+                                               : v->url;
         if (out_cors) *out_cors = v->cors_allow_origin;
         return v->frame_texture;
     }
@@ -1004,6 +1007,16 @@ extend_timed(ns_video_player *player, const guint8 *data, gsize len)
 }
 
 static void
+ns_video_note_landing(ns_video *v, const ns_response *resp)
+{
+    const char *landed = resp ? resp->final_url : NULL;
+    if (!landed || !*landed || !v->url || ns_url_same_origin(v->url, landed))
+        return;
+    g_free(v->cross_origin_landing);
+    v->cross_origin_landing = g_strdup(landed);
+}
+
+static void
 on_extend_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
 {
     (void)src;
@@ -1019,6 +1032,7 @@ on_extend_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     ns_video *v = pending->video;
     if (resp && !resp->error && resp->body && resp->body->len > 0 &&
         resp->body->len <= NS_VIDEO_MAX_BYTES) {
+        ns_video_note_landing(v, resp);
         if (!v->player) {
             ns_video_build_player(pending, resp);
             v->loaded = TRUE;
@@ -1761,8 +1775,9 @@ on_video_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
         g_free(pending);
         return;
     }
-    ns_video_build_player(pending, resp);
     ns_video *video = pending->video;
+    ns_video_note_landing(video, resp);
+    ns_video_build_player(pending, resp);
     if (resp && !resp->error) {
         g_free(video->cors_allow_origin);
         video->cors_allow_origin = g_strdup(resp->cors_allow_origin);

@@ -873,13 +873,23 @@ line_passes_policy(const ns_cookie_line *line, const ns_request_url *req,
 }
 
 static gboolean
+domain_is_public_suffix(const psl_ctx_t *psl, const char *domain)
+{
+    gsize len = strlen(domain);
+    while (len && domain[len - 1] == '.') len--;
+    if (!len) return TRUE;
+    g_autofree char *rootless = g_strndup(domain, len);
+    return psl_is_public_suffix(psl, rootless) != 0;
+}
+
+static gboolean
 line_resolve_domain(ns_cookie_line *line, const ns_request_url *req,
                     gboolean *host_only)
 {
     *host_only = TRUE;
     if (!line->domain) return TRUE;
     const psl_ctx_t *psl = psl_builtin();
-    if (!psl || psl_is_public_suffix(psl, line->domain)) {
+    if (!psl || domain_is_public_suffix(psl, line->domain)) {
         if (g_ascii_strcasecmp(req->host, line->domain) != 0) return FALSE;
         g_clear_pointer(&line->domain, g_free);
         return TRUE;

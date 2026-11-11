@@ -1317,11 +1317,18 @@ ns_url_site_from(const char *url)
     g_autoptr(ns_url_parts) p = ns_url_parts_new(url);
     if (!p || !p->protocol || !p->hostname) return NULL;
     g_autofree char *lower = g_ascii_strdown(p->hostname, -1);
+    g_autofree char *rooted_site = NULL;
     const char *site_host = p->hostname;
     if (!g_hostname_is_ip_address(lower) && lower[0] != '[') {
+        gsize len = strlen(lower);
+        gboolean rooted = len > 1 && lower[len - 1] == '.';
+        if (rooted) lower[len - 1] = '\0';
         const psl_ctx_t *psl = psl_builtin();
         const char *reg = psl ? psl_registrable_domain(psl, lower) : NULL;
-        if (reg && *reg) site_host = reg;
+        if (reg && *reg) {
+            if (rooted) rooted_site = g_strconcat(reg, ".", NULL);
+            site_host = rooted ? rooted_site : reg;
+        }
     }
     if (p->port && *p->port)
         return g_strdup_printf("%s://%s:%s", p->protocol, site_host, p->port);

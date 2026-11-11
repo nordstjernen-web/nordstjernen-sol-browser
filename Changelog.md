@@ -3,6 +3,17 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a host name written with a trailing dot (`evil.co.uk.`) is
+  matched against the public-suffix list without the dot. libpsl does
+  not recognise `co.uk.` or `github.io.` as public suffixes, so such a
+  host could set a `Domain=co.uk.` cookie sent to every `*.co.uk.` host,
+  and unrelated tenants like `a.github.io.` and `b.github.io.` counted
+  as one site for SameSite cookies and storage partitioning.
+* Security: a `<video>` whose source redirects to another origin taints
+  the canvas it is drawn to. The origin check used the URL the element
+  asked for, not the one the bytes came from, so a page could point a
+  video at its own redirect, draw the frames and read back another
+  site's video with `getImageData`, `toDataURL` or WebGL `readPixels`.
 * Hardening: a sandboxed renderer or audio helper may open a netlink
   socket for the routing protocol only, which is what name resolution
   uses; the other netlink families are refused.
