@@ -15588,4 +15588,111 @@
         });
         global.ViewTransition = ViewTransition;
     })();
+    (function () {
+        var setState = global.__ns_set_interest_state;
+        var doc = global.document;
+        if (typeof setState !== 'function' || !doc || !global.Event || global.InterestEvent) return;
+        var INTEREST_DELAY_MS = 500;
+        var sources = new WeakMap();
+        var current = null;
+        var pending = null;
+
+        function InterestEvent(type, init) {
+            var event = new Event(type, init);
+            Object.setPrototypeOf(event, InterestEvent.prototype);
+            sources.set(event, init && init.source ? init.source : null);
+            return event;
+        }
+        InterestEvent.prototype = Object.create(Event.prototype, {
+            constructor: { value: InterestEvent, writable: true, configurable: true },
+            source: { get: function () { return sources.get(this) || null; }, enumerable: true, configurable: true }
+        });
+        Object.defineProperty(InterestEvent.prototype, Symbol.toStringTag, { value: 'InterestEvent', configurable: true });
+        global.InterestEvent = InterestEvent;
+
+        function targetOf(source) {
+            var id = source.getAttribute('interestfor');
+            var root = source.getRootNode ? source.getRootNode() : doc;
+            return id ? ((root.getElementById && root.getElementById(id)) || doc.getElementById(id)) : null;
+        }
+        ['HTMLAnchorElement', 'HTMLAreaElement', 'HTMLButtonElement', 'SVGAElement'].forEach(function (name) {
+            var ctor = global[name];
+            if (!ctor || !ctor.prototype) return;
+            Object.defineProperty(ctor.prototype, 'interestForElement', {
+                get: function () { return this.hasAttribute('interestfor') ? targetOf(this) : null; },
+                set: function (element) {
+                    if (element == null) { this.removeAttribute('interestfor'); return; }
+                    if (!element.id) throw new TypeError("Failed to set 'interestForElement': the element needs an id.");
+                    this.setAttribute('interestfor', element.id);
+                },
+                enumerable: true, configurable: true
+            });
+        });
+
+        function sourceFor(node) {
+            for (var n = node; n && n.nodeType === 1; n = n.parentNode) {
+                if (!n.hasAttribute('interestfor')) continue;
+                var tag = n.localName;
+                if (tag === 'a' || tag === 'area' || tag === 'button') return n;
+            }
+            return null;
+        }
+        function isPopover(el) { return el.hasAttribute('popover') && typeof el.showPopover === 'function'; }
+        function cancelPending() { if (pending) { clearTimeout(pending); pending = null; } }
+
+        function lose() {
+            cancelPending();
+            if (!current) return;
+            var held = current;
+            current = null;
+            setState(held.source, false, false);
+            setState(held.target, true, false);
+            var event = new InterestEvent('loseinterest', { source: held.source, cancelable: true });
+            if (held.target.dispatchEvent(event) && isPopover(held.target)) {
+                try { if (held.target.matches(':popover-open')) held.target.hidePopover(); } catch (e) {}
+            }
+        }
+        function gain(source) {
+            cancelPending();
+            var target = targetOf(source);
+            if (!target || (current && current.source === source)) return;
+            lose();
+            var event = new InterestEvent('interest', { source: source, cancelable: true });
+            if (!target.dispatchEvent(event)) return;
+            current = { source: source, target: target };
+            setState(source, false, true);
+            setState(target, true, true);
+            if (isPopover(target)) {
+                try { if (!target.matches(':popover-open')) target.showPopover({ source: source }); } catch (e) {}
+            }
+        }
+        function schedule(fn, arg) {
+            cancelPending();
+            pending = setTimeout(function () { pending = null; fn(arg); }, INTEREST_DELAY_MS);
+        }
+        function inside(node, el) { return !!node && !!el && (node === el || el.contains(node)); }
+        function holds(node) {
+            return !!current && (inside(node, current.source) || inside(node, current.target));
+        }
+
+        doc.addEventListener('mouseover', function (e) {
+            var source = sourceFor(e.target);
+            if (source && (!current || current.source !== source)) schedule(gain, source);
+            else if (holds(e.target)) cancelPending();
+            else if (current) schedule(lose);
+            else cancelPending();
+        }, true);
+        doc.addEventListener('mouseout', function (e) {
+            if (!e.relatedTarget && current) schedule(lose);
+            else if (!e.relatedTarget) cancelPending();
+        }, true);
+        doc.addEventListener('focusin', function (e) {
+            var source = sourceFor(e.target);
+            if (source) gain(source);
+            else if (current && !holds(e.target)) lose();
+        }, true);
+        doc.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && current) lose();
+        }, true);
+    })();
 })(typeof globalThis !== 'undefined' ? globalThis : this);

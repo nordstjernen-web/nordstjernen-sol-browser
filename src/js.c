@@ -60545,6 +60545,27 @@ ns_set_highlights(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static JSValue
+ns_set_interest_state(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *el = argc > 0 ? (ns_node *)ns_unwrap_element(argv[0]) : NULL;
+    if (!js || !el || el->kind != NS_NODE_ELEMENT || argc < 3)
+        return JS_UNDEFINED;
+    const char *name = JS_ToBool(ctx, argv[1]) > 0 ? "data-nd-interest-target"
+                                                   : "data-nd-interest-source";
+    gboolean on = JS_ToBool(ctx, argv[2]) > 0;
+    if ((ns_element_get_attr(el, name) != NULL) == on) return JS_UNDEFINED;
+    if (on) ns_element_set_attr(el, name, "");
+    else    ns_element_remove_attr(el, name);
+    ns_css_mark_attr_dirty(el, name, on ? NULL : "");
+    js->mutated = TRUE;
+    if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+    return JS_UNDEFINED;
+}
+
 static gboolean
 ns_url_is_potentially_trustworthy(const char *url)
 {
@@ -63155,6 +63176,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "find",  ns_window_find,  7);
     ns_bind_fn(ctx, global, "fetchLater", ns_window_fetch_later, 1);
     ns_bind_fn(ctx, global, "__ns_set_highlights", ns_set_highlights, 1);
+    ns_bind_fn(ctx, global, "__ns_set_interest_state", ns_set_interest_state, 3);
     ns_bind_fn(ctx, global, "scrollTo", ns_window_scroll_to, 2);
     ns_bind_fn(ctx, global, "scrollBy", ns_window_scroll_by, 2);
     ns_bind_fn(ctx, global, "scroll",   ns_window_scroll_to, 2);
