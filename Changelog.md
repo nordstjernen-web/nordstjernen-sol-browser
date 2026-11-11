@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: the browser shell checks the popup messages it relays
+  between tabs instead of trusting the sending renderer. A message is
+  dropped unless its claimed origin is the sending tab's own, the one
+  recorded when the popup was opened, or opaque; an opener call is
+  relayed only while the popup is at its opener's origin, with the
+  origin stamped by the shell and the call path validated. Popup
+  message payloads are capped at 64 MB on both ends.
 * Security: a service worker can only answer the fetches that were
   routed to it. The result it reports carried a request id that was not
   tied to the worker, so one worker could substitute the response of a
