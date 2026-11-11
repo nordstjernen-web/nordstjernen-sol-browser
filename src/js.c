@@ -27629,19 +27629,45 @@ ns_js_popup_take_outbox(void)
     return out;
 }
 
+typedef struct {
+    const char *key;
+    const char *value;
+} ns_popup_field;
+
 static void
-ns_popup_emit(JSContext *ctx, JSValueConst op)
+ns_popup_append_json_string(GString *out, const char *text)
 {
-    JSValue json = JS_JSONStringify(ctx, op, JS_UNDEFINED, JS_UNDEFINED);
-    const char *text = JS_IsString(json) ? JS_ToCString(ctx, json) : NULL;
-    if (text) {
-        if (!g_popup_outbox) g_popup_outbox = g_string_new(NULL);
-        if (g_popup_outbox->len) g_string_append_c(g_popup_outbox, ',');
-        g_string_append(g_popup_outbox, text);
-        JS_FreeCString(ctx, text);
+    g_string_append_c(out, '"');
+    for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
+        if (*p == '"' || *p == '\\') {
+            g_string_append_c(out, '\\');
+            g_string_append_c(out, (char)*p);
+        } else if (*p < 0x20) {
+            g_string_append_printf(out, "\\u%04x", *p);
+        } else {
+            g_string_append_c(out, (char)*p);
+        }
     }
-    if (JS_IsException(json)) JS_FreeValue(ctx, JS_GetException(ctx));
-    JS_FreeValue(ctx, json);
+    g_string_append_c(out, '"');
+}
+
+static void
+ns_popup_emit(const ns_popup_field *fields, gsize count)
+{
+    if (!g_popup_outbox) g_popup_outbox = g_string_new(NULL);
+    GString *out = g_popup_outbox;
+    if (out->len) g_string_append_c(out, ',');
+    g_string_append_c(out, '{');
+    gboolean first = TRUE;
+    for (gsize i = 0; i < count; i++) {
+        if (!fields[i].value) continue;
+        if (!first) g_string_append_c(out, ',');
+        first = FALSE;
+        ns_popup_append_json_string(out, fields[i].key);
+        g_string_append_c(out, ':');
+        ns_popup_append_json_string(out, fields[i].value);
+    }
+    g_string_append_c(out, '}');
 }
 
 static char *
@@ -27792,13 +27818,11 @@ ns_popup_port_send(JSContext *ctx, JSValueConst port, int argc,
     g_autofree char *payload = (id && token) ? ns_popup_serialize(ctx, argv[0])
                                              : NULL;
     if (payload) {
-        JSValue op = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, op, "op", JS_NewString(ctx, "port"));
-        JS_SetPropertyStr(ctx, op, "token", JS_NewString(ctx, token));
-        JS_SetPropertyStr(ctx, op, "id", JS_NewString(ctx, id));
-        JS_SetPropertyStr(ctx, op, "data", JS_NewString(ctx, payload));
-        ns_popup_emit(ctx, op);
-        JS_FreeValue(ctx, op);
+        const ns_popup_field fields[] = {
+            { "op", "port" }, { "token", token }, { "id", id },
+            { "data", payload },
+        };
+        ns_popup_emit(fields, G_N_ELEMENTS(fields));
         js->mutated = TRUE;
     }
     if (id) JS_FreeCString(ctx, id);
@@ -27878,6 +27902,7 @@ ns_popup_deliver_port(ns_js *js, JSContext *ctx, JSValueConst op)
 }
 
 enum { NS_POPUP_TO_POPUP = 0, NS_POPUP_TO_OPENER = 1 };
+enum { NS_POPUP_CALL_DEPTH_MAX = 16 };
 
 static JSValue
 ns_popup_proxy_post(JSContext *ctx, JSValueConst this_val, int argc,
@@ -27922,20 +27947,17 @@ ns_popup_proxy_post(JSContext *ctx, JSValueConst this_val, int argc,
     g_autofree char *port_ids = tok
         ? ns_popup_transfer_ports(js, JS_GetCallerRealm(ctx), tok, argc, argv)
         : NULL;
-    if (tok) JS_FreeCString(ctx, tok);
-    JSValue op = JS_NewObject(ctx);
-    if (port_ids)
-        JS_SetPropertyStr(ctx, op, "ports", JS_NewString(ctx, port_ids));
-    JS_SetPropertyStr(ctx, op, "op", JS_NewString(ctx, "post"));
-    JS_SetPropertyStr(ctx, op, "token", JS_DupValue(ctx, data[0]));
-    JS_SetPropertyStr(ctx, op, "to", JS_NewString(ctx,
-        dir == NS_POPUP_TO_OPENER ? "opener" : "popup"));
-    JS_SetPropertyStr(ctx, op, "data", JS_NewString(ctx, payload));
-    JS_SetPropertyStr(ctx, op, "origin", JS_NewString(ctx, sender));
-    JS_SetPropertyStr(ctx, op, "target", JS_NewString(ctx, target));
-    ns_popup_emit(ctx, op);
-    JS_FreeValue(ctx, op);
-    js->mutated = TRUE;
+    if (tok) {
+        const ns_popup_field fields[] = {
+            { "op", "post" }, { "token", tok },
+            { "to", dir == NS_POPUP_TO_OPENER ? "opener" : "popup" },
+            { "data", payload }, { "origin", sender }, { "target", target },
+            { "ports", port_ids },
+        };
+        ns_popup_emit(fields, G_N_ELEMENTS(fields));
+        JS_FreeCString(ctx, tok);
+        js->mutated = TRUE;
+    }
     return JS_UNDEFINED;
 }
 
@@ -27951,11 +27973,12 @@ ns_popup_proxy_close(JSContext *ctx, JSValueConst this_val, int argc,
     gboolean is_closed = JS_ToBool(ctx, closed) > 0;
     JS_FreeValue(ctx, closed);
     if (is_closed) return JS_UNDEFINED;
-    JSValue op = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, op, "op", JS_NewString(ctx, "close"));
-    JS_SetPropertyStr(ctx, op, "token", JS_DupValue(ctx, data[0]));
-    ns_popup_emit(ctx, op);
-    JS_FreeValue(ctx, op);
+    const char *tok = JS_ToCString(ctx, data[0]);
+    if (tok) {
+        const ns_popup_field fields[] = { { "op", "close" }, { "token", tok } };
+        ns_popup_emit(fields, G_N_ELEMENTS(fields));
+        JS_FreeCString(ctx, tok);
+    }
     return JS_UNDEFINED;
 }
 
@@ -28070,13 +28093,11 @@ ns_popup_open(JSContext *ctx, ns_js *js, const char *url, int argc,
     gboolean noopener = ns_popup_features_noopener(ctx, argc, argv);
     g_autofree char *token = noopener ? NULL : ns_popup_new_token();
     g_autofree char *origin = ns_popup_realm_origin(js, ctx);
-    JSValue op = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, op, "op", JS_NewString(ctx, "open"));
-    JS_SetPropertyStr(ctx, op, "url", JS_NewString(ctx, abs_url));
-    JS_SetPropertyStr(ctx, op, "token", JS_NewString(ctx, token ? token : ""));
-    JS_SetPropertyStr(ctx, op, "origin", JS_NewString(ctx, origin));
-    ns_popup_emit(ctx, op);
-    JS_FreeValue(ctx, op);
+    const ns_popup_field fields[] = {
+        { "op", "open" }, { "url", abs_url }, { "token", token ? token : "" },
+        { "origin", origin },
+    };
+    ns_popup_emit(fields, G_N_ELEMENTS(fields));
     js->mutated = TRUE;
     if (!token) return JS_NULL;
     if (!js->popups)
@@ -28098,14 +28119,34 @@ ns_popup_close_self(JSContext *ctx, JSValueConst this_val, int argc,
     if (!js || !js->opener_token || !g_popups_supported) return JS_UNDEFINED;
     JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
     if (ctx != main_ctx) return JS_UNDEFINED;
-    JSValue op = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, op, "op", JS_NewString(ctx, "close"));
-    JS_SetPropertyStr(ctx, op, "token", JS_NewString(ctx, js->opener_token));
-    JS_SetPropertyStr(ctx, op, "self", JS_TRUE);
-    ns_popup_emit(ctx, op);
-    JS_FreeValue(ctx, op);
+    const ns_popup_field fields[] = {
+        { "op", "close" }, { "token", js->opener_token },
+    };
+    ns_popup_emit(fields, G_N_ELEMENTS(fields));
     js->mutated = TRUE;
     return JS_UNDEFINED;
+}
+
+static char *
+ns_popup_call_path(JSContext *ctx, JSValueConst keys)
+{
+    uint32_t depth = JS_IsArray(keys) ? ns_js_array_length(ctx, keys) : 0;
+    if (depth == 0 || depth > NS_POPUP_CALL_DEPTH_MAX) return NULL;
+    GString *path = g_string_new("[");
+    for (uint32_t i = 0; i < depth; i++) {
+        JSValue key = JS_GetPropertyUint32(ctx, keys, i);
+        const char *k = JS_IsString(key) ? JS_ToCString(ctx, key) : NULL;
+        JS_FreeValue(ctx, key);
+        if (!k) {
+            g_string_free(path, TRUE);
+            return NULL;
+        }
+        if (i) g_string_append_c(path, ',');
+        ns_popup_append_json_string(path, k);
+        JS_FreeCString(ctx, k);
+    }
+    g_string_append_c(path, ']');
+    return g_string_free(path, FALSE);
 }
 
 static JSValue
@@ -28119,22 +28160,15 @@ ns_popup_opener_call(JSContext *ctx, JSValueConst this_val, int argc,
     if (!js->opener_origin || strcmp(sender, js->opener_origin) != 0)
         return ns_throw_dom_exception(ctx, "SecurityError", 18,
             "Blocked a frame from accessing a cross-origin opener.");
-    JSValue path = JS_JSONStringify(ctx, argv[0], JS_UNDEFINED, JS_UNDEFINED);
-    if (JS_IsException(path)) return path;
+    g_autofree char *path = ns_popup_call_path(ctx, argv[0]);
+    if (!path) return JS_UNDEFINED;
     g_autofree char *payload = ns_popup_serialize(ctx, argv[1]);
-    if (!payload) {
-        JS_FreeValue(ctx, path);
-        return JS_EXCEPTION;
-    }
-    JSValue op = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, op, "op", JS_NewString(ctx, "call"));
-    JS_SetPropertyStr(ctx, op, "token", JS_NewString(ctx, js->opener_token));
-    JS_SetPropertyStr(ctx, op, "to", JS_NewString(ctx, "opener"));
-    JS_SetPropertyStr(ctx, op, "path", path);
-    JS_SetPropertyStr(ctx, op, "data", JS_NewString(ctx, payload));
-    JS_SetPropertyStr(ctx, op, "origin", JS_NewString(ctx, sender));
-    ns_popup_emit(ctx, op);
-    JS_FreeValue(ctx, op);
+    if (!payload) return JS_EXCEPTION;
+    const ns_popup_field fields[] = {
+        { "op", "call" }, { "token", js->opener_token }, { "to", "opener" },
+        { "path", path }, { "data", payload }, { "origin", sender },
+    };
+    ns_popup_emit(fields, G_N_ELEMENTS(fields));
     js->mutated = TRUE;
     return JS_UNDEFINED;
 }
