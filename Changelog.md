@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a page can no longer rewrite the messages a popup and its
+  opener exchange. They were serialised with `JSON.stringify` in the
+  page's realm, so a page-defined `Object.prototype.toJSON` could forge
+  `MessageEvent.origin` or turn a `postMessage` into a call of a
+  function on a cross-origin opener. They are now serialised in C.
 * View transitions animate: `document.startViewTransition()` captures
   the page as it is, runs the update, and cross-fades from the old
   picture to the new state over 250 ms. `ready` resolves when the fade
