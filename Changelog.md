@@ -3,6 +3,19 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Removed legacy compatibility surface that no current site needs:
+  the `-ms-flexbox`, `-ms-inline-flexbox` and `-ms-grid` values of
+  `display`; the `moz*` and `ms*` fullscreen methods, properties and
+  change events (the standard and `webkit*` ones stay);
+  `chrome.loadTimes()` and `chrome.csi()` (`window.chrome` stays as an
+  empty object); the blinking animation of `<blink>`; and the
+  `__shady_*` method copies installed for the ShadyDOM polyfill.
+* Windows: `NS_MEDIA_NO_HW_DECODER=1`, the documented name, now turns
+  off hardware decoding. The Media Foundation path read
+  `NS_MEDIA_NO_HW_DECODE` instead.
+* Docs: `AGENTS.md`, `docs/tab-isolation.md`, `docs/Linux.md` and the
+  packaging scripts no longer describe a gdk-pixbuf image fallback, an
+  external-player fallback or a GTK 4.6 floor.
 * Security: a host name written with a trailing dot (`evil.co.uk.`) is
   matched against the public-suffix list without the dot. libpsl does
   not recognise `co.uk.` or `github.io.` as public suffixes, so such a

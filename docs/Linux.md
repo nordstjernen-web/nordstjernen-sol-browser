@@ -51,7 +51,7 @@ the nightly scripts.
 **Required** on Linux, for inline **WebM** playback (VP9/VP8 video +
 Opus/Vorbis audio): the FFmpeg `libav*` development packages, version 6.0 or
 newer. `meson setup` fails without them — YouTube and most modern sites serve
-VP9/WebM, so the external-player fallback is not acceptable here.
+VP9/WebM, which would otherwise not play inline.
 
     sudo apt install libavformat-dev libavcodec-dev libavutil-dev \
         libswscale-dev libswresample-dev                       # Debian / Ubuntu

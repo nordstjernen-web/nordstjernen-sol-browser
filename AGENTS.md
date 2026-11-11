@@ -159,8 +159,9 @@ vendored at `subprojects/wuffs/wuffs-v0.4.c` and built as a static
 subproject. `src/image.c::ns_image_decode_bytes` runs the decoders
 in order: ICO (`src/image_ico.c`) → Wuffs (PNG/APNG, GIF, BMP, JPEG)
 → WebP via libwebp (`src/image_webp.c`) → AVIF via libavif when built with it
-(`src/image_avif.c`, optional) → GDK-Pixbuf fallback (TIFF and other
-loader-backed formats). SVG renders in-engine (`src/svg.c`).
+(`src/image_avif.c`, optional) → SVG in-engine (`src/svg.c`). Nothing
+follows: gdk-pixbuf no longer decodes page images, so an unsupported
+format fails to decode.
 
 ### URL parsing: lexbor URL module
 
@@ -252,7 +253,7 @@ The FFmpeg libav\* packages are required on Linux and Windows too (MSYS2
 `scripts/build-ffmpeg-lgpl.sh`): they carry inline WebM playback, and
 `meson setup` fails without them or with a pre-6.0 FFmpeg. On macOS they
 are auto-detected, and a build without them carries no libav dependency and
-falls back to the external player for WebM.
+shows the poster and play overlay for WebM instead of playing it inline.
 
 Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
 enables on-screen spell-checking; `libavif-dev` adds AVIF decoding and can be
