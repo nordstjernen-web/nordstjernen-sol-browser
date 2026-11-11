@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a service worker can only answer the fetches that were
+  routed to it. The result it reports carried a request id that was not
+  tied to the worker, so one worker could substitute the response of a
+  fetch another worker in the same tab was handling.
 * Security: a `ScriptProcessorNode` in a cross-origin iframe no longer
   runs its `onaudioprocess` handler as the top document. The realtime
   Web Audio pump now renders each `AudioContext` inside its own realm,
