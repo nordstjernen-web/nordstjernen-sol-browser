@@ -2054,6 +2054,7 @@ ns_css_selector_free(ns_css_selector *sel)
         ns_css_simple_free(g_ptr_array_index(sel->compounds, i));
     g_ptr_array_free(sel->compounds, TRUE);
     g_array_free(sel->combinators, TRUE);
+    g_free(sel->highlight_name);
     g_free(sel);
 }
 
@@ -2853,6 +2854,12 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                         sel->spec_c += 1;
                     } else if (name_n == 9 && g_ascii_strncasecmp(name_s, "selection", 9) == 0) {
                         sel->pseudo_element = NS_CSS_PE_SELECTION;
+                        sel->spec_c += 1;
+                    } else if (name_n == 9 && arg_s && arg_n > 0 &&
+                               g_ascii_strncasecmp(name_s, "highlight", 9) == 0) {
+                        sel->pseudo_element = NS_CSS_PE_HIGHLIGHT;
+                        g_free(sel->highlight_name);
+                        sel->highlight_name = g_strstrip(g_strndup(arg_s, arg_n));
                         sel->spec_c += 1;
                     } else if (name_n == 6 && g_ascii_strncasecmp(name_s, "marker", 6) == 0) {
                         sel->pseudo_element = NS_CSS_PE_MARKER;
@@ -10598,6 +10605,7 @@ ns_css_display_blockified(ns_display d)
 
 static gboolean g_starting_pass;
 static gboolean g_starting_rules_seen;
+static GArray  *g_highlight_rules;
 
 static char *
 normalize_display_value(const char *text)
@@ -24423,6 +24431,7 @@ ns_css_stylesheet_has_active_rules(const ns_css_stylesheet *sh)
 void
 ns_css_stylesheet_free(ns_css_stylesheet *s)
 {
+    if (g_highlight_rules) g_array_set_size(g_highlight_rules, 0);
     if (!s || s->cached) return;
     if (s->rules) g_ptr_array_free(s->rules, TRUE);
     if (s->imports) g_array_free(s->imports, TRUE);
@@ -37414,6 +37423,76 @@ incr_mark_env_dependents(guint changed)
             g_hash_table_add(g_incr_self_dirty, node);
 }
 
+typedef struct highlight_rule {
+    const ns_css_stylesheet *sheet;
+    ns_css_rule             *rule;
+    const ns_css_selector   *selector;
+} highlight_rule;
+
+static void
+highlight_rules_collect(const ns_css_stylesheet *const *sheets, gsize n_sheets)
+{
+    if (!g_highlight_rules)
+        g_highlight_rules = g_array_new(FALSE, FALSE, sizeof(highlight_rule));
+    g_array_set_size(g_highlight_rules, 0);
+    for (gsize i = 0; i < n_sheets; i++) {
+        const ns_css_stylesheet *sheet = sheets[i];
+        if (!sheet || !(sheet->pseudo_mask & (1u << NS_CSS_PE_HIGHLIGHT)))
+            continue;
+        for (guint ri = 0; ri < sheet->rules->len; ri++) {
+            ns_css_rule *r = g_ptr_array_index(sheet->rules, ri);
+            if (!(r->pe_mask & (1u << NS_CSS_PE_HIGHLIGHT)) || r->starting)
+                continue;
+            for (guint si = 0; si < r->selectors->len; si++) {
+                const ns_css_selector *sel = g_ptr_array_index(r->selectors, si);
+                if (!sel || sel->pseudo_element != NS_CSS_PE_HIGHLIGHT) continue;
+                highlight_rule hr = { sheet, r, sel };
+                g_array_append_val(g_highlight_rules, hr);
+            }
+        }
+    }
+}
+
+static void
+highlight_colors_of(const ns_node *el, const char *name,
+                    const ns_css_value **background,
+                    const ns_css_value **color)
+{
+    const ns_css_value *own_background = NULL, *own_color = NULL;
+    for (guint i = 0; i < g_highlight_rules->len; i++) {
+        const highlight_rule *hr =
+            &g_array_index(g_highlight_rules, highlight_rule, i);
+        if (g_strcmp0(hr->selector->highlight_name, name) != 0 ||
+            !rule_selector_matches(hr->rule, hr->selector, el,
+                                   NS_CSS_PE_HIGHLIGHT, NULL))
+            continue;
+        css_rule_parse_lazy_decls(hr->sheet, hr->rule);
+        for (guint d = 0; hr->rule->decls && d < hr->rule->decls->len; d++) {
+            const ns_css_decl *decl =
+                &g_array_index(hr->rule->decls, ns_css_decl, d);
+            if (!decl->value || decl->value->kind != NS_CSS_V_COLOR) continue;
+            if (decl->prop == NS_CSS_BACKGROUND_COLOR) own_background = decl->value;
+            if (decl->prop == NS_CSS_COLOR) own_color = decl->value;
+        }
+    }
+    if (!*background) *background = own_background;
+    if (!*color) *color = own_color;
+}
+
+gboolean
+ns_css_highlight_colors(const ns_node *el, const char *name,
+                        const ns_css_value **background,
+                        const ns_css_value **color)
+{
+    *background = *color = NULL;
+    if (!name || !g_highlight_rules || g_highlight_rules->len == 0)
+        return FALSE;
+    for (; el && el->kind == NS_NODE_ELEMENT && !(*background && *color);
+         el = el->parent)
+        highlight_colors_of(el, name, background, color);
+    return *background || *color;
+}
+
 static gboolean
 element_newly_rendered(const ns_node *node)
 {
@@ -39157,6 +39236,7 @@ ns_css_compute(ns_node *doc,
     GHashTable *outer_doc_sheets = g_doc_sheets;
     g_doc_sheets = doc_sheets_new(author_sheets, sheet_docs, n_sheets);
     if (g_starting_styles) g_hash_table_remove_all(g_starting_styles);
+    highlight_rules_collect(author_sheets, n_sheets);
     cascade_walk(doc, cached_ua, author_sheets, n_sheets, NULL, NULL,
                  &root_px, layer_ranks, out, FALSE, FALSE);
     g_clear_pointer(&g_doc_sheets, g_hash_table_destroy);

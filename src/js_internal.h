@@ -178,6 +178,7 @@ struct ns_js {
     GArray       *raf_pending;
     GArray       *smooth_scrolls;
     GPtrArray    *fetch_later;
+    GHashTable   *highlights;
     int           next_raf_id;
     gint64        raf_last_us;
     ns_node      *raf_frame_ctx;

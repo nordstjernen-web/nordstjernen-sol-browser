@@ -260,6 +260,7 @@ static ns_scroll_behavior ns_read_scroll_behavior(JSContext *ctx, int argc,
                                                   JSValueConst *argv);
 static void ns_js_step_smooth_scrolls(ns_js *js);
 static void ns_js_fetch_later_flush(ns_js *js);
+static void ns_js_highlights_clear(ns_js *js);
 static JSValue ns_script_supports(JSContext *ctx, JSValueConst this_val,
                                   int argc, JSValueConst *argv);
 static void ns_js_smooth_scrolls_clear(ns_js *js);
@@ -60431,6 +60432,117 @@ ns_fetch_later_pending_bytes(const ns_js *js, const char *origin)
     return total;
 }
 
+static void
+ns_highlight_spans_free(gpointer data)
+{
+    GArray *spans = data;
+    for (guint i = 0; i < spans->len; i++)
+        g_free(g_array_index(spans, ns_highlight_span, i).name);
+    g_array_free(spans, TRUE);
+}
+
+static void
+ns_js_highlights_clear(ns_js *js)
+{
+    if (!js || !js->highlights) return;
+    ns_layout_set_highlights(NULL);
+    g_clear_pointer(&js->highlights, g_hash_table_destroy);
+}
+
+static gsize
+ns_text_byte_offset(const ns_node *text, glong utf16_offset)
+{
+    if (!text->text) return 0;
+    return (gsize)(ns_utf16_offset_to_ptr(text->text, MAX(utf16_offset, 0)) -
+                   text->text);
+}
+
+static void
+ns_highlight_add_span(ns_js *js, const ns_node *text, gsize start, gsize end,
+                      const char *name, int priority)
+{
+    if (start >= end) return;
+    GArray *spans = g_hash_table_lookup(js->highlights, text);
+    if (!spans) {
+        spans = g_array_new(FALSE, FALSE, sizeof(ns_highlight_span));
+        g_hash_table_insert(js->highlights, (gpointer)text, spans);
+    }
+    ns_highlight_span span = { start, end, g_strdup(name), priority };
+    guint at = spans->len;
+    while (at > 0 &&
+           g_array_index(spans, ns_highlight_span, at - 1).priority > priority)
+        at--;
+    g_array_insert_val(spans, at, span);
+}
+
+static const ns_node *
+ns_range_boundary_node(const ns_node *container, glong offset,
+                       const ns_node *root)
+{
+    if (container->kind == NS_NODE_TEXT) return container;
+    const ns_node *child = container->first_child;
+    while (child && offset-- > 0) child = child->next_sibling;
+    return child ? child : ns_node_next_in_subtree(container, root, FALSE);
+}
+
+static void
+ns_highlight_add_range(ns_js *js, const ns_node *start, glong start_offset,
+                       const ns_node *end, glong end_offset,
+                       const char *name, int priority)
+{
+    const ns_node *root = js->current_doc;
+    const ns_node *first = ns_range_boundary_node(start, start_offset, root);
+    const ns_node *stop = end->kind == NS_NODE_TEXT
+        ? ns_node_next_in_subtree(end, root, TRUE)
+        : ns_range_boundary_node(end, end_offset, root);
+    guint budget = 20000;
+    for (const ns_node *n = first; n && n != stop && budget > 0;
+         n = ns_node_next_in_subtree(n, root, TRUE), budget--) {
+        if (n->kind != NS_NODE_TEXT || !n->text) continue;
+        gsize from = n == start ? ns_text_byte_offset(n, start_offset) : 0;
+        gsize to = n == end ? ns_text_byte_offset(n, end_offset)
+                            : strlen(n->text);
+        ns_highlight_add_span(js, n, from, to, name, priority);
+    }
+}
+
+static JSValue
+ns_set_highlights(JSContext *ctx, JSValueConst this_val,
+                  int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || argc < 1 || !JS_IsArray(argv[0]) || !js->current_doc)
+        return JS_UNDEFINED;
+    ns_js_highlights_clear(js);
+    js->highlights = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
+                                           ns_highlight_spans_free);
+    uint32_t n = ns_js_array_length(ctx, argv[0]);
+    for (uint32_t i = 0; i < n && i < 10000; i++) {
+        JSValue entry = JS_GetPropertyUint32(ctx, argv[0], i);
+        JSValue fields[6];
+        for (uint32_t f = 0; f < 6; f++)
+            fields[f] = JS_GetPropertyUint32(ctx, entry, f);
+        const char *name = JS_ToCString(ctx, fields[0]);
+        int32_t priority = 0, start_offset = 0, end_offset = 0;
+        JS_ToInt32(ctx, &priority, fields[1]);
+        JS_ToInt32(ctx, &start_offset, fields[3]);
+        JS_ToInt32(ctx, &end_offset, fields[5]);
+        const ns_node *start = ns_unwrap_element(fields[2]);
+        const ns_node *end = ns_unwrap_element(fields[4]);
+        if (name && start && end)
+            ns_highlight_add_range(js, start, start_offset, end, end_offset,
+                                   name, priority);
+        if (name) JS_FreeCString(ctx, name);
+        for (uint32_t f = 0; f < 6; f++) JS_FreeValue(ctx, fields[f]);
+        JS_FreeValue(ctx, entry);
+    }
+    ns_layout_set_highlights(js->highlights);
+    js->mutated = TRUE;
+    if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+    return JS_UNDEFINED;
+}
+
 static gboolean
 ns_url_is_potentially_trustworthy(const char *url)
 {
@@ -63040,6 +63152,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "focus", ns_window_focus, 0);
     ns_bind_fn(ctx, global, "find",  ns_window_find,  7);
     ns_bind_fn(ctx, global, "fetchLater", ns_window_fetch_later, 1);
+    ns_bind_fn(ctx, global, "__ns_set_highlights", ns_set_highlights, 1);
     ns_bind_fn(ctx, global, "scrollTo", ns_window_scroll_to, 2);
     ns_bind_fn(ctx, global, "scrollBy", ns_window_scroll_by, 2);
     ns_bind_fn(ctx, global, "scroll",   ns_window_scroll_to, 2);
@@ -67031,6 +67144,7 @@ ns_js_reset_runtime_state(ns_js *js)
     }
     ns_js_smooth_scrolls_clear(js);
     ns_js_fetch_later_flush(js);
+    ns_js_highlights_clear(js);
 
     if (js->listeners) {
         for (guint i = 0; i < js->listeners->len; i++) {
@@ -67747,6 +67861,7 @@ ns_js_free(ns_js *js)
     ns_js_module_prefetch_release(js);
     ns_js_smooth_scrolls_clear(js);
     ns_js_fetch_later_flush(js);
+    ns_js_highlights_clear(js);
     for (; js->mic_holds > 0; js->mic_holds--) ns_mic_release();
     for (; js->camera_holds > 0; js->camera_holds--) ns_camera_release();
     if (js->media_grant_origins) {

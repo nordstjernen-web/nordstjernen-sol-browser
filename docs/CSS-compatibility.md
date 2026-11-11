@@ -249,6 +249,7 @@ the 1.0.31-dev source.
 
 ## Selectors (Selectors 4)
 
+| `::highlight(name)` with `Highlight` / `CSS.highlights` | 🟡 | paints `color` and `background-color` over registered ranges, inherited from ancestors; matching rules apply in document order (specificity, layers and `!important` are not weighed), text-decoration and shadows are not painted, and a range changed after registration is picked up at the next registry or `Highlight` change |
 | Group | Status |
 |-------|:--:|
 | Type / `*` / `.class` / `#id` / `[attr]` (all matchers, `i` flag) | ✅ |

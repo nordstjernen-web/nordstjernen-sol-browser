@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* CSS/JS: the Custom Highlight API is supported: `new Highlight(...)`,
+  the `CSS.highlights` registry and the `::highlight(name)`
+  pseudo-element, which paints `color` and `background-color` over the
+  registered ranges without changing the DOM. Higher `priority` paints
+  on top.
 * JS: `fetchLater(url, { method, body, activateAfter, signal })` queues
   a request that is sent when `activateAfter` elapses or the document
   goes away, whichever is first, and returns a result whose

@@ -926,6 +926,7 @@ typedef enum ns_css_pseudo_element {
     NS_CSS_PE_BACKDROP,
     NS_CSS_PE_PLACEHOLDER,
     NS_CSS_PE_FILE_SELECTOR_BUTTON,
+    NS_CSS_PE_HIGHLIGHT,
 } ns_css_pseudo_element;
 
 typedef struct ns_css_selector {
@@ -933,6 +934,7 @@ typedef struct ns_css_selector {
     GArray    *combinators;
 
     ns_css_pseudo_element pseudo_element;
+    char *highlight_name;
 
     int spec_a, spec_b, spec_c;
 
@@ -1207,6 +1209,9 @@ double ns_css_dimension_px(const ns_css_value *v, double font_size,
                            double basis);
 const ns_style *ns_css_style_before_change(const void *node);
 const ns_style *ns_css_style_starting(const void *node);
+gboolean ns_css_highlight_colors(const ns_node *el, const char *name,
+                                 const ns_css_value **background,
+                                 const ns_css_value **color);
 
 ns_display ns_css_display_of(const ns_style *s);
 ns_display ns_css_display_from_keyword(const char *canonical);
