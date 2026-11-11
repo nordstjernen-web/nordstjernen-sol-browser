@@ -642,6 +642,19 @@ ns_webaudio_schedule_floor(ns_js *js, JSContext *ctx, JSValueConst audio_ctx)
     return next / rt->rate;
 }
 
+typedef struct {
+    ns_js    *js;
+    ns_wa_rt *rt;
+    gint64    now;
+} ns_wa_rt_pass;
+
+static void
+ns_wa_rt_render_pass(gpointer data)
+{
+    ns_wa_rt_pass *pass = data;
+    ns_wa_rt_render(pass->js, pass->rt, pass->now);
+}
+
 gboolean
 ns_webaudio_rt_pump(ns_js *js)
 {
@@ -653,7 +666,8 @@ ns_webaudio_rt_pump(ns_js *js)
             g_ptr_array_remove_index(js->webaudio_rt, i);
             continue;
         }
-        ns_wa_rt_render(js, rt, now);
+        ns_wa_rt_pass pass = { js, rt, now };
+        ns_js_run_in_realm(js, rt->ctx, ns_wa_rt_render_pass, &pass);
         i++;
     }
     return js->webaudio_rt->len > 0;

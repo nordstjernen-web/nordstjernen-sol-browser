@@ -454,6 +454,8 @@ void     ns_webaudio_rt_add(ns_js *js, JSContext *ctx, JSValueConst obj,
 void     ns_webaudio_rt_set_state(ns_js *js, JSValueConst obj, const char *state);
 gboolean ns_webaudio_rt_busy(ns_js *js);
 gboolean ns_webaudio_rt_pump(ns_js *js);
+void     ns_js_run_in_realm(ns_js *js, JSContext *realm, void (*fn)(gpointer),
+                            gpointer data);
 double ns_webaudio_schedule_floor(ns_js *js, JSContext *ctx,
                                   JSValueConst audio_ctx);
 void     ns_webaudio_rt_free(ns_js *js);

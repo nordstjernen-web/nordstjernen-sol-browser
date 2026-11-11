@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a `ScriptProcessorNode` in a cross-origin iframe no longer
+  runs its `onaudioprocess` handler as the top document. The realtime
+  Web Audio pump now renders each `AudioContext` inside its own realm,
+  and `URL.createObjectURL()` and `cookieStore` take the calling
+  realm's URL instead of the ambient one.
 * Security: a page can no longer rewrite the messages a popup and its
   opener exchange. They were serialised with `JSON.stringify` in the
   page's realm, so a page-defined `Object.prototype.toJSON` could forge
