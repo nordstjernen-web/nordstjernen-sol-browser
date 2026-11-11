@@ -3,6 +3,9 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: an opaque (`no-cors`) `fetch()` response reports
+  `redirected` as false. It reported the real value, which told a page
+  whether a cross-origin URL redirects for the signed-in user.
 * Security: when libpsl carries no built-in public-suffix list, a cookie
   with a `Domain` attribute is stored for the setting host only. The
   public-suffix test was skipped in that case, so `Domain=com` was

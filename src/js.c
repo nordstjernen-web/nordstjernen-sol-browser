@@ -10201,7 +10201,7 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
                                     resp->final_url)
                     ? "basic" : "cors"));
         JS_SetPropertyStr(st->ctx, r, "redirected",
-            JS_NewBool(st->ctx, resp->redirect_count > 0));
+            JS_NewBool(st->ctx, allow && resp->redirect_count > 0));
         JS_SetPropertyStr(st->ctx, r, "redirectCount",
             JS_NewInt32(st->ctx, allow ? resp->redirect_count : 0));
         JS_SetPropertyStr(st->ctx, r, "bodyUsed", JS_FALSE);
