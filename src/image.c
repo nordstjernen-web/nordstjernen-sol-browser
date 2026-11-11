@@ -722,6 +722,7 @@ ns_image_cache_start_request(ns_image_cache *cache,
                              ns_image *img,
                              const char *url,
                              const char *top_url,
+                             const char *priority_hint,
                              ns_image_ready_cb cb,
                              gpointer user_data)
 {
@@ -734,9 +735,12 @@ ns_image_cache_start_request(ns_image_cache *cache,
     img->attempts++;
     img->request_us = g_get_monotonic_time();
     img->response_us = 0;
+    const char *const *headers = ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE);
+    g_auto(GStrv) hinted =
+        ns_net_headers_with_fetch_priority(headers, priority_hint);
     ns_net_request_async(
         url, top_url, "GET", NULL, 0, NULL,
-        ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), NULL,
+        hinted ? (const char *const *)hinted : headers, NULL,
         on_image_fetched, pending);
 }
 
@@ -752,6 +756,7 @@ ns_image_cache_get_for_doc(ns_image_cache *cache,
                            const char *url,
                            const char *top_url,
                            const void *doc,
+                           const char *priority_hint,
                            ns_image_ready_cb cb,
                            gpointer user_data)
 {
@@ -773,13 +778,13 @@ ns_image_cache_get_for_doc(ns_image_cache *cache,
             cached->failed_at_us = 0;
             g_clear_pointer(&cached->error, g_free);
             ns_image_cache_start_request(cache, cached, url, top_url,
-                                         cb, user_data);
+                                         priority_hint, cb, user_data);
             return cached;
         }
         if (cached->purged && !ns_image_has_pending(cache, cached)) {
             cached->purged = FALSE;
             ns_image_cache_start_request(cache, cached, url, top_url,
-                                         cb, user_data);
+                                         priority_hint, cb, user_data);
             return cached;
         }
         if (ns_image_should_retry(cached, g_get_monotonic_time())) {
@@ -788,7 +793,7 @@ ns_image_cache_get_for_doc(ns_image_cache *cache,
             cached->failed_at_us = 0;
             g_clear_pointer(&cached->error, g_free);
             ns_image_cache_start_request(cache, cached, url, top_url,
-                                         cb, user_data);
+                                         priority_hint, cb, user_data);
             return cached;
         }
         if (cached->loaded || cached->failed) {
@@ -826,7 +831,8 @@ ns_image_cache_get_for_doc(ns_image_cache *cache,
         return img;
     }
 
-    ns_image_cache_start_request(cache, img, url, top_url, cb, user_data);
+    ns_image_cache_start_request(cache, img, url, top_url, priority_hint, cb,
+                                 user_data);
     return img;
 }
 

@@ -51352,6 +51352,8 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
         owner_doc = owner_doc->parent;
     r->img = ns_image_cache_get_for_doc(js->image_cache, abs_url,
                                         base ? base : abs_url, owner_doc,
+                                        ns_net_fetch_priority_hint(
+                                            ns_element_get_attr(el, "fetchpriority")),
                                         ns_js_on_image_ready, r);
     if (r->img && (r->img->loaded || r->img->failed) && !r->ready_idle)
         r->ready_idle = g_idle_add(ns_js_image_ready_idle, r);

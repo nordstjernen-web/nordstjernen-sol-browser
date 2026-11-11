@@ -72,6 +72,7 @@ ns_image       *ns_image_cache_get_for_doc(ns_image_cache *cache,
                                            const char     *url,
                                            const char     *top_url,
                                            const void     *doc,
+                                           const char     *priority_hint,
                                            ns_image_ready_cb cb,
                                            gpointer        user_data);
 

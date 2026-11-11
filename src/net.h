@@ -184,6 +184,9 @@ typedef enum {
 } ns_fetch_destination;
 
 const char *const *ns_net_accept_headers_for(ns_fetch_destination dest);
+const char *ns_net_fetch_priority_hint(const char *fetchpriority);
+char **ns_net_headers_with_fetch_priority(const char *const *headers,
+                                        const char *hint);
 
 char *ns_net_request_key(const char        *url,
                          const char        *top_url,

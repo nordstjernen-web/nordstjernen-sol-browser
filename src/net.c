@@ -6800,6 +6800,42 @@ ns_net_accept_headers_for(ns_fetch_destination dest)
     }
 }
 
+const char *
+ns_net_fetch_priority_hint(const char *fetchpriority)
+{
+    if (!fetchpriority) return NULL;
+    if (g_ascii_strcasecmp(fetchpriority, "high") == 0) return "high";
+    if (g_ascii_strcasecmp(fetchpriority, "low") == 0) return "low";
+    return NULL;
+}
+
+char **
+ns_net_headers_with_fetch_priority(const char *const *headers, const char *hint)
+{
+    if (!hint) return NULL;
+    GPtrArray *out = g_ptr_array_new();
+    for (int i = 0; headers && headers[i]; i++)
+        g_ptr_array_add(out, g_strdup(headers[i]));
+    g_ptr_array_add(out, g_strdup_printf("X-ND-Fetch-Priority: %s", hint));
+    g_ptr_array_add(out, NULL);
+    return (char **)g_ptr_array_free(out, FALSE);
+}
+
+static void
+ns_net_priority_apply_hint(GPtrArray *extra_headers, int *urgency)
+{
+    static const char prefix[] = "X-ND-Fetch-Priority:";
+    for (guint i = 0; extra_headers && i < extra_headers->len; i++) {
+        const char *h = g_ptr_array_index(extra_headers, i);
+        if (!h || g_ascii_strncasecmp(h, prefix, sizeof prefix - 1) != 0)
+            continue;
+        h += sizeof prefix - 1;
+        while (*h == ' ' || *h == '\t') h++;
+        if (g_ascii_strcasecmp(h, "high") == 0) *urgency = MAX(*urgency - 2, 1);
+        else if (g_ascii_strcasecmp(h, "low") == 0) *urgency = MIN(*urgency + 2, 6);
+    }
+}
+
 static const char *
 ns_net_fetch_destination(GPtrArray *extra_headers)
 {
@@ -6902,6 +6938,7 @@ ns_net_request_key(const char *url, const char *top_url, const char *method,
     GPtrArray *sorted = g_ptr_array_new();
     for (int i = 0; extra_headers && extra_headers[i]; i++)
         if (g_ascii_strncasecmp(extra_headers[i], "X-ND-CORS:", 10) != 0 &&
+            g_ascii_strncasecmp(extra_headers[i], "X-ND-Fetch-Priority:", 20) != 0 &&
             g_ascii_strncasecmp(extra_headers[i], "X-ND-Top-Level:", 15) != 0)
             g_ptr_array_add(sorted, (gpointer)extra_headers[i]);
     g_ptr_array_sort(sorted, ns_header_line_cmp);
@@ -7205,6 +7242,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     ns_net_priority_for(ns_net_fetch_destination(extra_headers),
                         is_navigation, &priority_urgency,
                         &priority_incremental);
+    if (!is_navigation)
+        ns_net_priority_apply_hint(extra_headers, &priority_urgency);
     if (getenv("NS_NET_LOG"))
         fprintf(stderr, "NS_NET cookies=%s nav=%d samesite_cross=%d u=%d i=%d %s\n",
                 cookie_partition ? cookie_partition : "(none)", is_navigation,

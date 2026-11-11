@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* HTML: `fetchpriority` on `<img>`, `<script>` and `<link>` now changes
+  the request's HTTP priority instead of only being reflected to
+  script. `high` raises the urgency by two steps and `low` lowers it by
+  two, so a hero image marked `high` is asked for ahead of other images.
 * Keyboard focus is visible by default: the built-in style sheet gives
   `:focus-visible` a 2px outline, so links, buttons, form controls and
   `tabindex` elements show a ring when reached with Tab unless the page
