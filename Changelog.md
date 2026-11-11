@@ -3,6 +3,9 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Hardening: a sandboxed renderer or audio helper may open a netlink
+  socket for the routing protocol only, which is what name resolution
+  uses; the other netlink families are refused.
 * Security: the window process refuses a layer update that claims more
   than 4096 viewport layers. The count came from the renderer unchecked
   and the snapshot loop ran once per layer, so a compromised renderer

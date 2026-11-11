@@ -89,8 +89,8 @@ because it must spawn renderers and drive the GPU for the window.
   module and kexec calls, `listen`/`accept`, `tkill`,
   `pidfd_send_signal`. `clone` may not create namespaces, `clone3`
   returns `ENOSYS`, `socket` creates only `AF_INET`, `AF_INET6` and
-  `AF_NETLINK`, signals and `prlimit64` may target only the process
-  itself, `fcntl` cannot set signal ownership, and the `TIOCSTI` /
+  `AF_NETLINK` (the routing protocol only), signals and `prlimit64` may
+  target only the process itself, `fcntl` cannot set signal ownership, and the `TIOCSTI` /
   `TIOCLINUX` ioctls are refused. With WebGL and WebGPU both off,
   `PROT_EXEC` `mprotect`, anonymous executable `mmap` and `memfd_create`
   are refused too (the audio output process keeps `memfd_create`, which

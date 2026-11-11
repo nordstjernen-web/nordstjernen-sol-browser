@@ -31,6 +31,7 @@
 #include <sched.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <linux/netlink.h>
 #endif
 #endif
 
@@ -1124,6 +1125,12 @@ ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
     static const int domains[] = { AF_UNIX, AF_INET, AF_INET6, AF_NETLINK };
     for (gsize i = 0; i < G_N_ELEMENTS(domains); i++) {
         if (domains[i] == AF_UNIX && !ns_seccomp_unix_sockets) continue;
+        if (domains[i] == AF_NETLINK) {
+            (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 2,
+                                   SCMP_A0(SCMP_CMP_EQ, AF_NETLINK, 0),
+                                   SCMP_A2(SCMP_CMP_EQ, NETLINK_ROUTE, 0));
+            continue;
+        }
         (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket), 1,
                                SCMP_A0(SCMP_CMP_EQ,
                                        (scmp_datum_t)domains[i], 0));
