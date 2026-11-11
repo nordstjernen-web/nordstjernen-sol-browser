@@ -2414,6 +2414,8 @@ parse_pseudo_keyword(const char *name, gsize n,
         { "blank",         NS_CSS_PC_BLANK },
         { "open",          NS_CSS_PC_OPEN },
         { "popover-open",  NS_CSS_PC_POPOVER_OPEN },
+        { "interest-source", NS_CSS_PC_INTEREST_SOURCE },
+        { "interest-target", NS_CSS_PC_INTEREST_TARGET },
         { "modal",         NS_CSS_PC_MODAL },
         { "fullscreen",    NS_CSS_PC_FULLSCREEN },
         { "user-valid",    NS_CSS_PC_USER_VALID },
@@ -26301,6 +26303,14 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                     !ns_element_get_attr(el, "data-nd-popover-open"))
                     return FALSE;
                 break;
+            case NS_CSS_PC_INTEREST_SOURCE:
+                if (!ns_element_get_attr(el, "data-nd-interest-source"))
+                    return FALSE;
+                break;
+            case NS_CSS_PC_INTEREST_TARGET:
+                if (!ns_element_get_attr(el, "data-nd-interest-target"))
+                    return FALSE;
+                break;
             case NS_CSS_PC_MODAL:
                 if (!ns_element_get_attr(el, "data-nd-modal")) return FALSE;
                 break;
@@ -34858,6 +34868,10 @@ incr_collect_attr_keys_simple(const ns_css_simple *c, int depth)
                 g_hash_table_add(g_attr_keys, g_strdup("open"));
             } else if (p->kind == NS_CSS_PC_POPOVER_OPEN) {
                 g_hash_table_add(g_attr_keys, g_strdup("data-nd-popover-open"));
+            } else if (p->kind == NS_CSS_PC_INTEREST_SOURCE) {
+                g_hash_table_add(g_attr_keys, g_strdup("data-nd-interest-source"));
+            } else if (p->kind == NS_CSS_PC_INTEREST_TARGET) {
+                g_hash_table_add(g_attr_keys, g_strdup("data-nd-interest-target"));
             } else if (p->kind == NS_CSS_PC_MODAL) {
                 g_hash_table_add(g_attr_keys, g_strdup("data-nd-modal"));
             }

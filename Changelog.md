@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* HTML: interest invokers. A link or button with `interestfor="id"`
+  shows interest in its target after the pointer rests on it for half
+  a second or when it receives keyboard focus: the target gets an
+  `interest` event and, if it is a popover, opens; moving away, focusing
+  elsewhere or pressing Escape fires `loseinterest` and closes it.
+  `:interest-source` and `:interest-target` match while interest lasts,
+  and `interestForElement` and `InterestEvent` are available. The
+  `interest-delay` properties are not supported; the delay is fixed.
 * HTML: `fetchpriority` on `<img>`, `<script>` and `<link>` now changes
   the request's HTTP priority instead of only being reflected to
   script. `high` raises the urgency by two steps and `low` lowers it by
