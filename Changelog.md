@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: web pages can no longer read the browser's own `about:`
+  pages. `fetch()` and `XMLHttpRequest` accepted `about:start`, and every
+  `about:` response passed the CORS check, so any site could read the
+  start page and with it the user's most-visited sites. A request that
+  is not a navigation now gets an `about:` page only from another
+  `about:` page, and the navigation gate and the fetch path share one
+  list of privileged pages.
 * SECURITY.md is rewritten at about a third of its length and checked
   against the code: it now covers the remote-control server, the
   renderer's Seatbelt exec denial, the newer CSP directives and the full

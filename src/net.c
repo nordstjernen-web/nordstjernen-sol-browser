@@ -5897,15 +5897,34 @@ about_page_is_privileged(const char *page)
     return FALSE;
 }
 
+gboolean
+ns_net_url_is_privileged_page(const char *url)
+{
+    if (!url || !g_str_has_prefix(url, "about:")) return FALSE;
+    g_autofree char *what = g_strndup(url + strlen("about:"),
+                                      strcspn(url + strlen("about:"), "?#"));
+    return about_page_is_privileged(what);
+}
+
+static gboolean
+about_request_refused(const char *url, const char *top_url,
+                      gboolean is_navigation)
+{
+    if (ns_net_url_is_chrome_page(top_url)) return FALSE;
+    if (ns_net_url_is_privileged_page(url)) return TRUE;
+    return !is_navigation && ns_net_url_is_chrome_page(url);
+}
+
 static gboolean
 synthesize_about_response(const char *url, const char *top_url,
+                          gboolean is_navigation,
                           const char *method, const void *req_body,
                           gsize req_body_len, ns_response *resp)
 {
     if (!g_str_has_prefix(url, "about:")) return FALSE;
     g_autofree char *what = g_strndup(url + strlen("about:"),
                                       strcspn(url + strlen("about:"), "?#"));
-    if (about_page_is_privileged(what) && !ns_net_url_is_chrome_page(top_url)) {
+    if (about_request_refused(url, top_url, is_navigation)) {
         resp->status = 403;
         resp->final_url = g_strdup(url);
         resp->content_type = g_strdup("text/plain; charset=utf-8");
@@ -7062,8 +7081,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         }
     }
 
-    if (synthesize_about_response(url, privileged_site_url, method, body,
-                                  body_len, resp))
+    if (synthesize_about_response(url, privileged_site_url, is_navigation,
+                                  method, body, body_len, resp))
         return resp;
     if (synthesize_view_source_response(url, privileged_site_url, cancellable,
                                         resp))

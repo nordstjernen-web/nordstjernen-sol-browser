@@ -9984,8 +9984,9 @@ cors_allows(gboolean opaque, const char *doc_url, const char *resp_url,
 {
     if (resp_url && g_str_has_prefix(resp_url, "blob:"))
         return ns_net_blob_url_visible_to(resp_url, doc_url);
-    if (resp_url && (g_str_has_prefix(resp_url, "data:") ||
-                     g_str_has_prefix(resp_url, "about:"))) return TRUE;
+    if (resp_url && g_str_has_prefix(resp_url, "data:")) return TRUE;
+    if (resp_url && g_str_has_prefix(resp_url, "about:"))
+        return ns_net_url_is_chrome_page(doc_url);
     if (ns_origin_matches(opaque, doc_url, resp_url)) return TRUE;
     if (!cors_header || !*cors_header) return FALSE;
     char *trimmed = g_strdup(cors_header);
