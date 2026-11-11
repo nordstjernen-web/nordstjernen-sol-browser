@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Keyboard focus is visible by default: the built-in style sheet gives
+  `:focus-visible` a 2px outline, so links, buttons, form controls and
+  `tabindex` elements show a ring when reached with Tab unless the page
+  styles its own. `outline` is now painted for inline elements and for
+  checkboxes and radio buttons, which drew none before, authored or not.
+* A modal `<dialog>` dims the page behind it through a default
+  `::backdrop` colour, which pages can override.
 * JS: `document.startViewTransition()` exists and runs the update
   callback, returning a `ViewTransition` whose `updateCallbackDone`,
   `ready` and `finished` promises settle in order; `skipTransition()`,
