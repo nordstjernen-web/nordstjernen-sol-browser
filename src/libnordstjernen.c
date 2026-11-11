@@ -919,7 +919,8 @@ browser_url_continues_interstitial(const char *url, const char *from)
 }
 
 static gboolean
-browser_allows_navigation_from(const char *from, const char *url)
+browser_allows_navigation_from(const char *from, const char *url,
+                               gboolean from_interstitial)
 {
     if (!url) return TRUE;
     if (g_ascii_strncasecmp(url, "file:", 5) == 0)
@@ -927,14 +928,16 @@ browser_allows_navigation_from(const char *from, const char *url)
     if (browser_url_is_privileged_page(url))
         return ns_net_url_is_chrome_page(from);
     if (g_str_has_prefix(url, NS_UNSAFE_CONTINUE_SCHEME))
-        return browser_url_continues_interstitial(url, from);
+        return from_interstitial &&
+               browser_url_continues_interstitial(url, from);
     return TRUE;
 }
 
 static gboolean
 browser_allows_navigation_url(ns_browser *b, const char *url)
 {
-    return browser_allows_navigation_from(b ? b->base_url : NULL, url);
+    return browser_allows_navigation_from(
+        b ? b->base_url : NULL, url, b && b->security == NS_SEC_DANGEROUS);
 }
 
 static gboolean
@@ -942,7 +945,7 @@ browser_js_popup_allowed(const char *url, const char *opener_url, gpointer ud)
 {
     ns_browser *b = ud;
     const char *from = opener_url ? opener_url : (b ? b->base_url : NULL);
-    return browser_allows_navigation_from(from, url);
+    return browser_allows_navigation_from(from, url, FALSE);
 }
 
 static char *

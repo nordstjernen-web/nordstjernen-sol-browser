@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: only the Safe Browsing warning page itself can follow its
+  "continue anyway" link. Any page on the same host as a listed URL
+  could navigate to it, which skipped the warning without a click and
+  allow-listed the whole host.
 * Security: an opaque (`no-cors`) `fetch()` response reports
   `redirected` as false. It reported the real value, which told a page
   whether a cross-origin URL redirects for the signed-in user.
