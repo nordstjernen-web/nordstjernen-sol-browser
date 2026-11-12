@@ -70,10 +70,11 @@ Optional, auto-detected:
 (spell-checking), `libavif-dev` (AVIF; `-Davif=disabled` drops it) and
 `libjxl-dev` (JPEG XL; `-Djxl=disabled` drops it).
 
-`meson setup` checks version floors up front: libcurl 8.5+, GTK 4.14+,
+`meson setup` checks version floors up front: libcurl 8.11+ (with WebSocket support), GTK 4.14+,
 and — for the default web-text-lib text stack — GLib 2.80+, cairo 1.18+,
-HarfBuzz 8.3+, FriBiDi 1.0.6+ and fontconfig 2.15+. Ubuntu 24.04, Debian 13 and Fedora
-40 are the oldest releases that ship all of them;
+HarfBuzz 8.3+, FriBiDi 1.0.6+ and fontconfig 2.15+. Ubuntu 25.04, Debian 13 and Fedora
+42 are the oldest releases that ship all of them (Ubuntu 24.04's libcurl 8.5 has no
+WebSocket support);
 `-Dweb-text-lib=disabled` drops the text-stack floors by shaping through the
 system Pango.
 
@@ -144,7 +145,7 @@ host at runtime; fully-static GTK isn't practical. Runtime requirements:
   floor read from the built binary)
 - GTK 4.14+ with gio, gobject, pango, cairo
 - libepoxy (usually pulled in by GTK 4; WebGL dispatch)
-- libcurl 8.5+ with a TLS backend; OpenSSL 3 (libcrypto)
+- libcurl 8.11+ with a TLS backend and the ws/wss protocols; OpenSSL 3 (libcrypto)
 - libuchardet, libwebp, libpsl, libseccomp, libsqlite3, SDL2, glslang
   (where the distribution ships it as a shared library)
 - FFmpeg 6.0+ runtime libraries (libavformat, libavcodec, libavutil,

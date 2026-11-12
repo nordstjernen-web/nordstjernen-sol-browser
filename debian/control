@@ -9,7 +9,7 @@ Build-Depends:
  libglib2.0-dev,
  libgtk-4-dev (>= 4.14),
  libepoxy-dev,
- libcurl4-openssl-dev (>= 8.5),
+ libcurl4-openssl-dev (>= 8.11),
  libssl-dev,
  libuchardet-dev,
  libpsl-dev,

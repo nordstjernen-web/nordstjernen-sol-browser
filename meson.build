@@ -128,7 +128,7 @@ use_web_text_lib = not is_mobile and get_option('web-text-lib').allowed()
 # web-text-lib enforces the text-stack floors from inside its own build, where a
 # too-old library surfaces as a bare version mismatch and only the first of
 # several is reported. Checking every hard floor here first names them all.
-ns_dependency_floors = [['libcurl', '>=8.5']]
+ns_dependency_floors = [['libcurl', '>=8.11']]
 if use_web_text_lib
   ns_dependency_floors += [
     ['glib-2.0', '>=2.80'],
@@ -269,13 +269,14 @@ if not is_mobile and gtk_feature.allowed()
   endif
 endif
 gmodule = dependency('gmodule-2.0')
-libcurl = dependency('libcurl', version: '>=8.5')
+libcurl = dependency('libcurl', version: '>=8.11')
 if cc.has_header_symbol('curl/curl.h', 'CURLOPT_PRIORITY_URGENCY', dependencies: libcurl)
   add_project_arguments('-DNS_CURL_HAVE_PRIORITY=1', language: 'c')
   message('libcurl: RFC 9218 request priorities')
 endif
-if libcurl.version().version_compare('<8.11')
-  warning('libcurl @0@ predates stable WebSocket support (curl 8.11): WebSocket will be unavailable at runtime unless this libcurl was built with the ws/wss protocols.'.format(libcurl.version()))
+libcurl_protocols = libcurl.get_variable(pkgconfig: 'supported_protocols', default_value: '')
+if libcurl_protocols != '' and not libcurl_protocols.split().contains('WS')
+  error('libcurl @0@ is built without the ws/wss protocols; WebSocket needs a libcurl with WebSocket support.'.format(libcurl.version()))
 endif
 libcrypto = dependency('libcrypto')
 libm = cc.find_library('m', required: false)

@@ -28,6 +28,8 @@ typedef struct ns_ws_callbacks {
     gboolean (*busy)  (gpointer user_data);
 } ns_ws_callbacks;
 
+gboolean ns_ws_available(void);
+
 ns_ws *ns_ws_new(const char        *url,
                  const char        *origin,
                  const char        *top_url,
