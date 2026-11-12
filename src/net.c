@@ -11,6 +11,7 @@
 #include "history.h"
 #include "csp.h"
 #include "connection_allowlist.h"
+#include "compression_dictionary.h"
 #include "debuglog.h"
 #include "ext.h"
 #include "js.h"
@@ -74,6 +75,7 @@ typedef struct ns_write_ctx {
     guint       decoder_seq;
     gboolean    decode_failed;
     GByteArray *decoded;
+    const ns_dictionary *dictionary;
 } ns_write_ctx;
 
 typedef struct ns_header_ctx {
@@ -3070,7 +3072,12 @@ ns_write_sync_decoder(ns_write_ctx *ctx)
     if (!hc || ctx->decoder_seq == hc->response_seq) return;
     ctx->decoder_seq = hc->response_seq;
     g_clear_pointer(&ctx->decoder, ns_content_decoder_free);
-    ctx->decoder = ns_content_decoder_new(hc->content_encoding);
+    gsize dictionary_len = 0;
+    const guint8 *dictionary = ctx->dictionary
+        ? ns_dictionary_data(ctx->dictionary, &dictionary_len) : NULL;
+    ctx->decoder = ns_content_decoder_new_with_dictionary(
+        hc->content_encoding, dictionary, dictionary_len,
+        ctx->dictionary ? ns_dictionary_hash(ctx->dictionary) : NULL);
 }
 
 static size_t
@@ -3126,6 +3133,7 @@ ns_body_sink_init(ns_write_ctx *ctx, GByteArray *body)
     ctx->decoder_seq = 0;
     ctx->decode_failed = FALSE;
     ctx->decoded = NULL;
+    ctx->dictionary = NULL;
 }
 
 static char *
@@ -5922,6 +5930,7 @@ about_settings_clear(void)
     ns_history_clear();
     g_history_clear_pending = TRUE;
     ns_cache_clear();
+    ns_dictionary_clear_all();
     ns_net_cookies_clear();
     ns_net_site_storage_clear();
 }
@@ -7208,6 +7217,37 @@ ns_net_hop_csp_kind(GPtrArray *extra_headers)
     return NS_CSP_KIND_COUNT;
 }
 
+static gboolean
+ns_net_url_is_trustworthy(const char *url)
+{
+    if (g_str_has_prefix(url, "https://")) return TRUE;
+    g_autofree char *host = ns_url_host_from(url);
+    return host && ns_host_is_loopback(host);
+}
+
+static gboolean
+ns_net_dictionary_request_eligible(const char *url, const char *top_url,
+                                   gboolean is_navigation,
+                                   GPtrArray *extra_headers)
+{
+    if (!ns_net_url_is_trustworthy(url)) return FALSE;
+    if (is_navigation || !top_url || !*top_url) return TRUE;
+    return ns_url_same_origin(top_url, url) ||
+           ns_fetch_wants_cors(extra_headers);
+}
+
+static void
+ns_net_dictionary_offer(const char *url, const char *header_block,
+                        const guint8 *body, gsize len)
+{
+    g_autofree char *offer =
+        ns_net_raw_header_values(header_block, "Use-As-Dictionary");
+    if (!offer || !*offer) return;
+    g_autofree char *cache_control =
+        ns_net_raw_header_values(header_block, "Cache-Control");
+    ns_dictionary_store(url, offer, cache_control, body, len);
+}
+
 static ns_response *
 ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                   const void *body, gsize body_len, const char *content_type,
@@ -7405,6 +7445,15 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             } else {
                 if (serve_stale)
                     ns_revalidate_in_background(url, top_url, extra_headers);
+                if (cached->body &&
+                    ns_net_dictionary_request_eligible(url, top_url,
+                                                       is_navigation,
+                                                       extra_headers))
+                    ns_net_dictionary_offer(cached->final_url
+                                                ? cached->final_url : url,
+                                            cached->policy_headers,
+                                            cached->body->data,
+                                            cached->body->len);
                 ns_response_free(resp);
                 ns_response *from_cache = response_from_cache_entry(cached);
                 ns_cache_entry_free(cached);
@@ -7615,8 +7664,32 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         }
     }
 
+    gboolean dictionary_eligible = request_http && is_simple_get(method) &&
+        ns_net_dictionary_request_eligible(url, top_url, is_navigation,
+                                           extra_headers);
+    ns_dictionary *dictionary = dictionary_eligible
+        ? ns_dictionary_match(url, ns_net_fetch_destination(extra_headers))
+        : NULL;
+    g_autofree char *dictionary_accept = NULL;
+    if (dictionary) {
+        g_autofree char *available = g_strdup_printf(
+            "Available-Dictionary: %s",
+            ns_dictionary_available_value(dictionary));
+        headers = curl_slist_append(headers, available);
+        const char *dictionary_id = ns_dictionary_id(dictionary);
+        if (dictionary_id && *dictionary_id && !strpbrk(dictionary_id, "\r\n\"\\")) {
+            g_autofree char *id_header =
+                g_strdup_printf("Dictionary-ID: \"%s\"", dictionary_id);
+            headers = curl_slist_append(headers, id_header);
+        }
+        dictionary_accept = g_strconcat(
+            g_accept_encoding ? g_accept_encoding : "",
+            ns_content_decode_dictionary_codings(), NULL);
+    }
+
     ns_write_ctx write_ctx;
     ns_body_sink_init(&write_ctx, resp->body);
+    write_ctx.dictionary = dictionary;
 
     ns_header_ctx header_ctx = {0};
     write_ctx.stream = g_hop_stream;
@@ -7644,7 +7717,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         .referer = referer,
         .referer_policy = cfg ? (int)cfg->referer_policy
                               : (int)NS_REFERER_STRICT_ORIGIN_WHEN_CROSS,
-        .accept_encoding = g_accept_encoding ? g_accept_encoding : "",
+        .accept_encoding = dictionary_accept ? dictionary_accept
+            : g_accept_encoding ? g_accept_encoding : "",
         .timeout_s = fetch_timeout,
         .connect_timeout_s = is_navigation ? 15L : 6L,
         .proxy = ns_net_pick_configured_proxy(url),
@@ -7679,6 +7753,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                                 out.error_message ? out.error_message
                                                   : "transport init failed");
         ns_hop_out_clear(&out);
+        ns_dictionary_unref(dictionary);
         if (headers) curl_slist_free_all(headers);
         g_free(header_ctx.etag);
         g_free(header_ctx.last_modified);
@@ -7804,6 +7879,12 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                          resp->body->data, resp->body->len);
         }
     }
+    if (transport_ok && dictionary_eligible && resp->status == 200 &&
+        !resp->error && resp->body && header_ctx.raw)
+        ns_net_dictionary_offer(resp->final_url ? resp->final_url : url,
+                                header_ctx.raw->str, resp->body->data,
+                                resp->body->len);
+    ns_dictionary_unref(dictionary);
     g_free(referer);
     g_free(cache_partition);
     g_free(top_origin);

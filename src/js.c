@@ -3962,7 +3962,8 @@ ns_tlist_supports(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
 {
     static const char *const link_rel_tokens[] = {
         "alternate", "apple-touch-icon", "apple-touch-icon-precomposed",
-        "canonical", "dns-prefetch", "expect", "icon", "manifest",
+        "canonical", "compression-dictionary", "dns-prefetch", "expect",
+        "icon", "manifest",
         "modulepreload", "next", "preconnect", "prefetch", "preload",
         "prerender", "stylesheet",
     };

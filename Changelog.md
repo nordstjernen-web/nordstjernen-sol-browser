@@ -3,6 +3,15 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Compression dictionary transport (RFC 9842) is supported. A response
+  with `Use-As-Dictionary` is kept as a dictionary for the URLs its
+  `match` pattern covers; later requests to them send
+  `Available-Dictionary` (and `Dictionary-ID`) and accept the `dcb`
+  (Brotli) and `dcz` (Zstandard) codings, which are decoded against the
+  dictionary after its hash is checked. `<link
+  rel="compression-dictionary">` fetches a dictionary ahead of use.
+  Dictionaries are held in memory per renderer and picked up again from
+  the HTTP cache when the dictionary resource is next requested.
 * Security: the `Connection-Allowlist` response header is enforced. A
   document that sends it may only connect to URLs matching one of its
   patterns (`response-origin`, or URL patterns with `*` wildcards and
