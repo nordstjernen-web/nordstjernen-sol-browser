@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* JS: the performance timeline reports long tasks. A task that keeps
+  the main thread for 50 ms or more adds a `longtask` entry and a
+  `long-animation-frame` entry (with `blockingDuration`), delivered to
+  `PerformanceObserver` and listed by `performance.getEntriesByType()`.
+  Script attribution (`scripts`) and the style and layout breakdown are
+  not measured and read as empty or zero.
 * HTML: `prerender` and `prerender_until_script` speculation rules are
   honoured as a prefetch of the target document, for same-origin URLs
   and matching links. The page is fetched ahead of the navigation, not

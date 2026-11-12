@@ -298,6 +298,33 @@ ns_perf_entry_to_js(JSContext *ctx, const ns_perf_entry *entry)
                       JS_NewString(ctx, e->type ? e->type : ""));
     JS_SetPropertyStr(ctx, o, "startTime", JS_NewFloat64(ctx, e->start_time));
     JS_SetPropertyStr(ctx, o, "duration",  JS_NewFloat64(ctx, e->duration));
+    if (e->type && strcmp(e->type, "longtask") == 0) {
+        JSValue attribution = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, attribution, "name", JS_NewString(ctx, "unknown"));
+        JS_SetPropertyStr(ctx, attribution, "entryType",
+                          JS_NewString(ctx, "taskattribution"));
+        JS_SetPropertyStr(ctx, attribution, "startTime", JS_NewFloat64(ctx, 0));
+        JS_SetPropertyStr(ctx, attribution, "duration", JS_NewFloat64(ctx, 0));
+        JS_SetPropertyStr(ctx, attribution, "containerType",
+                          JS_NewString(ctx, "window"));
+        JS_SetPropertyStr(ctx, attribution, "containerSrc", JS_NewString(ctx, ""));
+        JS_SetPropertyStr(ctx, attribution, "containerId", JS_NewString(ctx, ""));
+        JS_SetPropertyStr(ctx, attribution, "containerName", JS_NewString(ctx, ""));
+        JSValue list = JS_NewArray(ctx);
+        JS_SetPropertyUint32(ctx, list, 0, attribution);
+        JS_SetPropertyStr(ctx, o, "attribution", list);
+    }
+    if (e->type && strcmp(e->type, "long-animation-frame") == 0) {
+        double end = e->start_time + e->duration;
+        JS_SetPropertyStr(ctx, o, "renderStart", JS_NewFloat64(ctx, end));
+        JS_SetPropertyStr(ctx, o, "styleAndLayoutStart", JS_NewFloat64(ctx, end));
+        JS_SetPropertyStr(ctx, o, "blockingDuration",
+                          JS_NewFloat64(ctx, MAX(0.0, e->duration - 50.0)));
+        JS_SetPropertyStr(ctx, o, "firstUIEventTimestamp", JS_NewFloat64(ctx, 0));
+        JS_SetPropertyStr(ctx, o, "styleDuration", JS_NewFloat64(ctx, 0));
+        JS_SetPropertyStr(ctx, o, "forcedStyleDuration", JS_NewFloat64(ctx, 0));
+        JS_SetPropertyStr(ctx, o, "scripts", JS_NewArray(ctx));
+    }
     if (e->type && strcmp(e->type, "resource") == 0) {
         double end = e->start_time + e->duration;
         gboolean t = e->has_timing;
@@ -1047,7 +1074,10 @@ ns_perf_observer_ctor(JSContext *ctx, JSValueConst this_val,
 JSValue
 ns_perf_supported_entry_types(JSContext *ctx)
 {
-    static const char *types[] = { "mark", "measure", "navigation", "paint", "resource" };
+    static const char *types[] = {
+        "long-animation-frame", "longtask", "mark", "measure", "navigation",
+        "paint", "resource",
+    };
     JSValue arr = JS_NewArray(ctx);
     for (guint i = 0; i < G_N_ELEMENTS(types); i++)
         JS_SetPropertyUint32(ctx, arr, i, JS_NewString(ctx, types[i]));
@@ -1069,6 +1099,21 @@ ns_perf_push(ns_js *js, gconstpointer realm, const char *type,
     e->duration   = duration;
     g_ptr_array_add(js->perf_entries, e);
     ns_perf_observer_queue(js, e);
+}
+
+#define NS_PERF_LONG_TASK_US (50 * 1000)
+
+void
+ns_perf_note_task(ns_js *js, gint64 start_us, gint64 end_us)
+{
+    if (!js || js->worker_host || !js->perf_entries || start_us <= 0 ||
+        end_us - start_us < NS_PERF_LONG_TASK_US)
+        return;
+    double start = ns_perf_relative_ms(start_us, ns_js_time_origin_us(js, NULL));
+    double duration = (double)(end_us - start_us) / 1000.0;
+    ns_perf_push(js, NULL, "longtask", "self", start, duration);
+    ns_perf_push(js, NULL, "long-animation-frame", "long-animation-frame",
+                 start, duration);
 }
 
 JSValue

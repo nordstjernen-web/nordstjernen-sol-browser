@@ -991,6 +991,7 @@ ns_js_budget_push(ns_js *js, ns_budget_guard *g)
         js->task_epoch++;
         if (js->task_epoch == 0) js->task_epoch++;
         js->js_monitor_deadline_us = now + NS_JS_MONITOR_LIMIT_US;
+        js->task_start_us = now;
     }
     gint64 fresh = now + ns_js_eval_budget_us();
     if (g->saved == 0 || fresh < g->saved)
@@ -1002,8 +1003,10 @@ ns_js_budget_pop(ns_js *js, ns_budget_guard *g)
 {
     if (!js || !g) return;
     js->eval_deadline_us = g->saved;
-    if (g->saved == 0)
+    if (g->saved == 0) {
         js->js_monitor_deadline_us = 0;
+        ns_perf_note_task(js, js->task_start_us, g_get_monotonic_time());
+    }
 }
 
 typedef struct ns_listener {
