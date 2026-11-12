@@ -185,6 +185,7 @@ struct ns_js {
     int           next_raf_id;
     gint64        raf_last_us;
     gboolean      raf_held;
+    const ns_node *hover_node;
     ns_node      *raf_frame_ctx;
     JSValue       pristine_promise;
     JSValue       fonts_set;

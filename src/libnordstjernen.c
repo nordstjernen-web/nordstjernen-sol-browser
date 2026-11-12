@@ -194,8 +194,10 @@ browser_prune_cached_nodes(ns_browser *browser)
     if (!browser || !browser->doc) return;
     if (browser->press_node && !browser_node_alive(browser, browser->press_node))
         browser->press_node = NULL;
-    if (browser->hover_node && !browser_node_alive(browser, browser->hover_node))
+    if (browser->hover_node && !browser_node_alive(browser, browser->hover_node)) {
         browser->hover_node = NULL;
+        ns_js_set_hover_node(browser->js, NULL);
+    }
     if (browser->aux_press_node &&
         !browser_node_alive(browser, browser->aux_press_node))
         browser->aux_press_node = NULL;
@@ -3690,6 +3692,7 @@ ns_browser_hover_full(ns_browser *browser, int x, int y, int mods,
     const ns_node *prev = browser->hover_node;
     gboolean changed = node != prev;
     browser->hover_node = node;
+    ns_js_set_hover_node(browser->js, node);
 
     gboolean dirty = FALSE;
     if (browser->js) {

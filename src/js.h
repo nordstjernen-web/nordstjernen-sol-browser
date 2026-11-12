@@ -236,6 +236,7 @@ void ns_js_details_toggle_open(ns_js *js, ns_node *details, gboolean open);
 
 gboolean ns_js_run_animation_frame(ns_js *js);
 void     ns_js_hold_animation_frames(ns_js *js, gboolean hold);
+void     ns_js_set_hover_node(ns_js *js, const ns_node *node);
 
 gboolean ns_js_has_pending_animation_frame(const ns_js *js);
 gboolean ns_js_smooth_scroll_viewport(ns_js *js, double x, double y);
