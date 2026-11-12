@@ -28,8 +28,6 @@ typedef struct ns_ws_callbacks {
     gboolean (*busy)  (gpointer user_data);
 } ns_ws_callbacks;
 
-gboolean ns_ws_available(void);
-
 ns_ws *ns_ws_new(const char        *url,
                  const char        *origin,
                  const char        *top_url,
@@ -43,6 +41,8 @@ gboolean ns_ws_send_binary(ns_ws *ws, const guint8 *data, gsize len);
 void     ns_ws_close(ns_ws *ws, int code, const char *reason);
 
 int      ns_ws_state_get(ns_ws *ws);
+
+const char *ns_ws_protocol(ns_ws *ws);
 
 void     ns_ws_free(ns_ws *ws);
 
