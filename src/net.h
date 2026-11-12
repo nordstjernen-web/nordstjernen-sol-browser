@@ -124,6 +124,13 @@ void ns_net_set_blob_resolver(ns_net_blob_resolver resolver, gpointer user_data)
 void ns_net_csp_register(gconstpointer owner, const char *doc_url,
                          const char *const *headers);
 void ns_net_csp_unregister(gconstpointer owner);
+void ns_net_connection_allowlist_register(gconstpointer owner,
+                                          const char *doc_url,
+                                          const char *header,
+                                          gboolean replace);
+void ns_net_connection_allowlist_unregister(gconstpointer owner);
+gboolean ns_net_connection_allowlist_allows(const char *doc_url,
+                                            const char *url);
 gboolean ns_net_csp_allows(const char *doc_url, ns_csp_kind kind,
                            const char *url, const char *nonce,
                            gboolean parser_inserted);

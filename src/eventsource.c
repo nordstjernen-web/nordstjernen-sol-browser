@@ -360,7 +360,8 @@ ns_es_connect_once(ns_es *es, const char *url, gboolean *opened_out,
                    char **location_out)
 {
     *location_out = NULL;
-    if (!ns_net_policy_allows(url)) {
+    if (!ns_net_policy_allows(url) ||
+        !ns_net_connection_allowlist_allows(es->origin, url)) {
         *opened_out = FALSE;
         return FALSE;
     }

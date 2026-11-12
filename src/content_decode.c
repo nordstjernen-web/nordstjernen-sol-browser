@@ -23,7 +23,13 @@ typedef enum {
     NS_CODING_DEFLATE,
     NS_CODING_BR,
     NS_CODING_ZSTD,
+    NS_CODING_DCB,
+    NS_CODING_DCZ,
 } ns_coding;
+
+#define NS_DICT_HASH_LEN 32
+#define NS_DCB_MAGIC_LEN 4
+#define NS_DCZ_MAGIC_LEN 8
 
 typedef struct {
     ns_coding   coding;
@@ -32,6 +38,8 @@ typedef struct {
     gboolean    deflate_raw;
     gboolean    deflate_settled;
     GByteArray *deflate_probe;
+    GByteArray *dict_header;
+    gboolean    dict_header_done;
     z_stream    zs;
 #ifdef NS_HAVE_BROTLI_DEC
     BrotliDecoderState *br;
@@ -46,7 +54,23 @@ struct ns_content_decoder {
     int             n_stages;
     gsize           limit;
     gboolean        over_limit;
+    const guint8   *dictionary;
+    gsize           dictionary_len;
+    const guint8   *dictionary_hash;
 };
+
+const char *
+ns_content_decode_dictionary_codings(void)
+{
+    return ""
+#ifdef NS_HAVE_BROTLI_DEC
+           ", dcb"
+#endif
+#ifdef NS_HAVE_ZSTD
+           ", dcz"
+#endif
+        ;
+}
 
 const char *
 ns_content_decode_accept_encoding(void)
@@ -73,6 +97,10 @@ coding_from_token(const char *tok, gsize len, ns_coding *out)
 #endif
 #ifdef NS_HAVE_ZSTD
         { "zstd", NS_CODING_ZSTD },
+        { "dcz", NS_CODING_DCZ },
+#endif
+#ifdef NS_HAVE_BROTLI_DEC
+        { "dcb", NS_CODING_DCB },
 #endif
     };
     for (gsize i = 0; i < G_N_ELEMENTS(known); i++) {
@@ -95,11 +123,35 @@ stage_zlib_init(ns_decode_stage *st, int window_bits)
 }
 
 static gboolean
-stage_init(ns_decode_stage *st, ns_coding coding)
+stage_init(const ns_content_decoder *dec, ns_decode_stage *st, ns_coding coding)
 {
     memset(st, 0, sizeof *st);
     st->coding = coding;
     switch (coding) {
+    case NS_CODING_DCB:
+#ifdef NS_HAVE_BROTLI_DEC
+        if (!dec->dictionary) return FALSE;
+        st->dict_header = g_byte_array_new();
+        st->br = BrotliDecoderCreateInstance(NULL, NULL, NULL);
+        return st->br &&
+               BrotliDecoderAttachDictionary(st->br,
+                                             BROTLI_SHARED_DICTIONARY_RAW,
+                                             dec->dictionary_len,
+                                             dec->dictionary);
+#else
+        return FALSE;
+#endif
+    case NS_CODING_DCZ:
+#ifdef NS_HAVE_ZSTD
+        if (!dec->dictionary) return FALSE;
+        st->dict_header = g_byte_array_new();
+        st->zstd = ZSTD_createDStream();
+        return st->zstd && !ZSTD_isError(ZSTD_initDStream(st->zstd)) &&
+               !ZSTD_isError(ZSTD_DCtx_refPrefix(st->zstd, dec->dictionary,
+                                                 dec->dictionary_len));
+#else
+        return FALSE;
+#endif
     case NS_CODING_GZIP:
         return stage_zlib_init(st, 15 + 32);
     case NS_CODING_DEFLATE:
@@ -128,6 +180,7 @@ stage_clear(ns_decode_stage *st)
 {
     if (st->zlib_ready) inflateEnd(&st->zs);
     if (st->deflate_probe) g_byte_array_free(st->deflate_probe, TRUE);
+    if (st->dict_header) g_byte_array_free(st->dict_header, TRUE);
 #ifdef NS_HAVE_BROTLI_DEC
     if (st->br) BrotliDecoderDestroyInstance(st->br);
 #endif
@@ -208,16 +261,44 @@ stage_feed_deflate(ns_content_decoder *dec, ns_decode_stage *st,
 }
 
 static gboolean
+stage_dictionary_header(const ns_content_decoder *dec, ns_decode_stage *st,
+                        const guint8 **data, gsize *len)
+{
+    static const guint8 dcb_magic[NS_DCB_MAGIC_LEN] = { 0xff, 0x44, 0x43, 0x42 };
+    static const guint8 dcz_magic[NS_DCZ_MAGIC_LEN] =
+        { 0x5e, 0x2a, 0x4d, 0x18, 0x20, 0x00, 0x00, 0x00 };
+    gboolean brotli = st->coding == NS_CODING_DCB;
+    gsize magic_len = brotli ? NS_DCB_MAGIC_LEN : NS_DCZ_MAGIC_LEN;
+    gsize header_len = magic_len + NS_DICT_HASH_LEN;
+    gsize take = MIN(*len, header_len - st->dict_header->len);
+    g_byte_array_append(st->dict_header, *data, (guint)take);
+    *data += take;
+    *len -= take;
+    if (st->dict_header->len < header_len) return TRUE;
+    st->dict_header_done = TRUE;
+    return memcmp(st->dict_header->data, brotli ? dcb_magic : dcz_magic,
+                  magic_len) == 0 &&
+           memcmp(st->dict_header->data + magic_len, dec->dictionary_hash,
+                  NS_DICT_HASH_LEN) == 0;
+}
+
+static gboolean
 stage_feed(ns_content_decoder *dec, ns_decode_stage *st, const guint8 *data,
            gsize len, GByteArray *out)
 {
     if (st->done || len == 0) return TRUE;
     gsize produced = 0;
+    if ((st->coding == NS_CODING_DCB || st->coding == NS_CODING_DCZ) &&
+        !st->dict_header_done) {
+        if (!stage_dictionary_header(dec, st, &data, &len)) return FALSE;
+        if (len == 0) return TRUE;
+    }
     switch (st->coding) {
     case NS_CODING_GZIP:
         return zlib_run(dec, st, data, len, out, &produced) == Z_OK;
     case NS_CODING_DEFLATE:
         return stage_feed_deflate(dec, st, data, len, out);
+    case NS_CODING_DCB:
     case NS_CODING_BR: {
 #ifdef NS_HAVE_BROTLI_DEC
         const uint8_t *in = data;
@@ -239,6 +320,7 @@ stage_feed(ns_content_decoder *dec, ns_decode_stage *st, const guint8 *data,
         return FALSE;
 #endif
     }
+    case NS_CODING_DCZ:
     case NS_CODING_ZSTD: {
 #ifdef NS_HAVE_ZSTD
         ZSTD_inBuffer in = { data, len, 0 };
@@ -263,6 +345,16 @@ stage_feed(ns_content_decoder *dec, ns_decode_stage *st, const guint8 *data,
 ns_content_decoder *
 ns_content_decoder_new(const char *content_encoding)
 {
+    return ns_content_decoder_new_with_dictionary(content_encoding, NULL, 0,
+                                                  NULL);
+}
+
+ns_content_decoder *
+ns_content_decoder_new_with_dictionary(const char *content_encoding,
+                                       const guint8 *dictionary,
+                                       gsize dictionary_len,
+                                       const guint8 *dictionary_sha256)
+{
     if (!content_encoding || !*content_encoding) return NULL;
     ns_coding listed[NS_DECODE_MAX_STAGES];
     int n = 0;
@@ -281,8 +373,11 @@ ns_content_decoder_new(const char *content_encoding)
     }
     if (n == 0) return NULL;
     ns_content_decoder *dec = g_new0(ns_content_decoder, 1);
+    dec->dictionary = dictionary;
+    dec->dictionary_len = dictionary_len;
+    dec->dictionary_hash = dictionary_sha256;
     for (int i = 0; i < n; i++) {
-        if (!stage_init(&dec->stages[i], listed[n - 1 - i])) {
+        if (!stage_init(dec, &dec->stages[i], listed[n - 1 - i])) {
             dec->n_stages = i + 1;
             ns_content_decoder_free(dec);
             return NULL;
