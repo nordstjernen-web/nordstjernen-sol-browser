@@ -18,12 +18,14 @@ project's own license terms.
 
 ## Statically linked
 
-### lexbor — Apache License 2.0
+### Wuffs — Apache License 2.0
 
-> HTML / CSS / WHATWG URL parser.
-> <https://github.com/lexbor/lexbor>
+> Memory-safe PNG / GIF / BMP / JPEG decoders, transpiled from the
+> Wuffs language to C. Vendored as the single-file release in
+> `subprojects/wuffs/wuffs-v0.4.c`.
+> <https://github.com/google/wuffs-mirror-release-c>
 >
-> Copyright (c) 2018-2025 Alexander Borisov
+> Copyright (c) 2017 The Wuffs Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may
 not use this software except in compliance with the License. You may
@@ -36,18 +38,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 implied. See the License for the specific language governing permissions
 and limitations under the License.
-
-### Wuffs — Apache License 2.0
-
-> Memory-safe PNG / GIF / BMP / JPEG decoders, transpiled from the
-> Wuffs language to C. Vendored as the single-file release in
-> `subprojects/wuffs/wuffs-v0.4.c`.
-> <https://github.com/google/wuffs-mirror-release-c>
->
-> Copyright (c) 2017 The Wuffs Authors.
-
-Licensed under the Apache License, Version 2.0. See the lexbor section
-above for the license text (same license).
 
 ### quickjs-ng — MIT License
 
@@ -107,7 +97,7 @@ warranty. See <http://creativecommons.org/publicdomain/zero/1.0/>.
 > Copyright (c) The WebAssembly Micro Runtime contributors.
 
 Licensed under the Apache License, Version 2.0, with LLVM exceptions.
-See the lexbor section above for the base Apache 2.0 text; the full
+See the Wuffs section above for the base Apache 2.0 text; the full
 license including the LLVM exceptions is reproduced in
 `src/wamr/LICENSE`.
 
@@ -123,7 +113,7 @@ license including the LLVM exceptions is reproduced in
 >
 > Copyright Mozilla Foundation.
 
-Licensed under the Apache License, Version 2.0; see the lexbor section
+Licensed under the Apache License, Version 2.0; see the Wuffs section
 above for the text. The embedded WebAssembly decoders carry their own
 licences, shipped in the package's `wasm/` directory: OpenJPEG
 (BSD 2-Clause), the JBIG2 decoder from PDFium (BSD 3-Clause) and qcms
@@ -211,7 +201,7 @@ OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 >
 > Copyright (c) 1998-2026 The OpenSSL Project Authors. All Rights Reserved.
 
-Licensed under the Apache License, Version 2.0. See the lexbor section
+Licensed under the Apache License, Version 2.0. See the Wuffs section
 above for the license text (same license).
 
 ### libwebp — BSD 3-Clause License

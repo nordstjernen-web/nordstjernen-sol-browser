@@ -59,6 +59,17 @@ Changelog:
   redirect hop. A header that cannot be parsed blocks every connection.
   Navigations are not restricted, and
   `Connection-Allowlist-Report-Only` is not acted on.
+* HTML and URL parsing moved from the vendored lexbor library to the
+  project's own parsers in safe Rust, shared with Southstar: `src/html5_rs/`
+  (WHATWG tokenizer and tree builder) and `src/url_rs/` (WHATWG URL with
+  UTS #46 IDNA). The HTML parser builds DOM nodes directly instead of
+  building a second tree and copying it, which cut peak memory by about 45% when
+  parsing a 15 MB document. Text after `<frameset>` is now
+  handled as the standard says, and international host names follow UTS #46
+  more closely. `src/lexbor/` (about 289,000 lines of C) is gone.
+* Build: Rust (`rustc` 1.91 or newer) is now a required toolchain. meson
+  compiles the parser crates with plain `rustc`; no Cargo and no crates
+  are used.
 * WebCrypto: `crypto.subtle` supports ChaCha20-Poly1305 (generate,
   import, export, encrypt, decrypt, wrap and unwrap; 256-bit keys, 96-bit
   nonces, additional data), and the `raw-secret` key format for every

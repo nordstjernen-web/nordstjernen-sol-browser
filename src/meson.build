@@ -168,7 +168,7 @@ nordstjernen_engine_sources = files(
   'video_decode.c',
   'webcrypto.c',
   'ws.c',
-  'html_lexbor.c',
+  'html_parser.c',
   'json_string.c',
   'xml.c',
 )
@@ -275,7 +275,7 @@ if is_mobile
     libwuffs,
     libplmpeg,
     libuchardet,
-    liblexbor,
+    ns_parsers_rs_dep,
     libwamr,
     sqlite3,
     zlib,
@@ -300,7 +300,7 @@ else
     libwuffs,
     libplmpeg,
     libuchardet,
-    liblexbor,
+    ns_parsers_rs_dep,
     libwamr,
     sqlite3,
     zlib,
@@ -408,7 +408,7 @@ if host_machine.system() == 'netbsd'
 endif
 
 # The gmodule-2.0 dependency injects -Wl,--export-dynamic, which dumps every
-# internal engine symbol (~6000: ns_*, lexbor, quickjs) into the executables'
+# internal engine symbol (~6000: ns_*, quickjs) into the executables'
 # .dynsym. Combined with -Wl,-z,now that bloats the dynamic-linker symbol
 # resolution done on every process start — and the renderer is forked+exec'd
 # afresh, so it pays that cost on each cold start. A version script localises

@@ -32,8 +32,7 @@
 #include <glib/gstdio.h>
 #include <gmodule.h>
 
-#include <lexbor/unicode/idna.h>
-#include <lexbor/url/url.h>
+#include "parsers_rs.h"
 
 #include <libpsl.h>
 #include <sqlite3.h>
@@ -949,89 +948,11 @@ ns_net_parse_refresh(const char *input, double *time_out, char **url_out)
     return TRUE;
 }
 
-static lxb_status_t
-ns_url_str_append_cb(const lxb_char_t *data, size_t length, void *ctx)
-{
-    g_string_append_len((GString *)ctx, (const char *)data, (gssize)length);
-    return LXB_STATUS_OK;
-}
-
-static void
-ns_url_parser_destroy_tls(gpointer p)
-{
-    lxb_url_parser_t *parser = p;
-    if (!parser) return;
-    lxb_url_parser_memory_destroy(parser);
-    lxb_url_parser_destroy(parser, true);
-}
-
-static GPrivate g_url_parser_tls = G_PRIVATE_INIT(ns_url_parser_destroy_tls);
-
-static __thread int g_url_parser_depth;
-
-static lxb_url_parser_t *
-ns_url_parser_open(void)
-{
-    lxb_url_parser_t *parser = g_private_get(&g_url_parser_tls);
-    if (parser) {
-        lxb_url_parser_clean(parser);
-        g_url_parser_depth++;
-        return parser;
-    }
-    parser = lxb_url_parser_create();
-    if (!parser) return NULL;
-    if (lxb_url_parser_init(parser, NULL) != LXB_STATUS_OK) {
-        lxb_url_parser_destroy(parser, true);
-        return NULL;
-    }
-    g_private_set(&g_url_parser_tls, parser);
-    g_url_parser_depth++;
-    return parser;
-}
-
-static void
-ns_url_parser_close(lxb_url_parser_t *parser)
-{
-    if (!parser) return;
-    lxb_url_parser_clean(parser);
-    if (--g_url_parser_depth <= 0) {
-        g_url_parser_depth = 0;
-        lexbor_mraw_clean(parser->mraw);
-    }
-}
-
 char *
 ns_url_resolve_len(const char *base, const char *href, size_t href_len)
 {
     if (!href) return NULL;
-    if (href_len == 0 && !(base && *base)) return NULL;
-
-    lxb_url_parser_t *parser = ns_url_parser_open();
-    if (!parser) return NULL;
-
-    lxb_url_t *base_url = NULL;
-    if (base && *base) {
-        base_url = lxb_url_parse(parser, NULL,
-                                 (const lxb_char_t *)base, strlen(base));
-        lxb_url_parser_clean(parser);
-        if (!base_url) {
-            ns_url_parser_close(parser);
-            return NULL;
-        }
-    }
-    lxb_url_t *resolved = lxb_url_parse(parser, base_url,
-                                        (const lxb_char_t *)href, href_len);
-    char *out = NULL;
-    if (resolved) {
-        GString *s = g_string_new(NULL);
-        if (lxb_url_serialize(resolved, ns_url_str_append_cb, s, false)
-            == LXB_STATUS_OK && s->len > 0)
-            out = g_string_free(s, FALSE);
-        else
-            g_string_free(s, TRUE);
-    }
-    ns_url_parser_close(parser);
-    return out;
+    return ns_rs_url_resolve(base, base ? strlen(base) : 0, href, href_len);
 }
 
 char *
@@ -1040,135 +961,14 @@ ns_url_resolve(const char *base, const char *href)
     return ns_url_resolve_len(base, href, href ? strlen(href) : 0);
 }
 
-static gboolean
-ns_url_host_is_empty(const lxb_url_t *u)
-{
-    switch (u->host.type) {
-    case LXB_URL_HOST_TYPE__UNDEF:
-    case LXB_URL_HOST_TYPE_EMPTY:
-        return TRUE;
-    case LXB_URL_HOST_TYPE_OPAQUE:
-        return u->host.u.opaque.length == 0;
-    case LXB_URL_HOST_TYPE_DOMAIN:
-        return u->host.u.domain.length == 0;
-    default:
-        return FALSE;
-    }
-}
-
-static gboolean
-ns_url_is_special(const lxb_url_t *u)
-{
-    return u->scheme.type >= LXB_URL_SCHEMEL_TYPE_HTTP &&
-           u->scheme.type <= LXB_URL_SCHEMEL_TYPE_FILE;
-}
-
-static gboolean
-ns_url_has_credentials_or_port(const lxb_url_t *u)
-{
-    return u->username.length > 0 || u->password.length > 0 || u->has_port;
-}
-
-static void
-ns_url_host_setter(lxb_url_t *u, lxb_url_parser_t *parser,
-                   const char *v, size_t len, gboolean hostname_only)
-{
-    gboolean special = ns_url_is_special(u);
-    gboolean brackets = FALSE;
-    size_t colon = len, end = 0;
-    for (; end < len; end++) {
-        char c = v[end];
-        if (c == '/' || c == '?' || c == '#' || (special && c == '\\'))
-            break;
-        if (c == '[') brackets = TRUE;
-        else if (c == ']') brackets = FALSE;
-        else if (c == ':' && !brackets && colon == len) colon = end;
-    }
-    if (colon == len && end == 0 && !special &&
-        ns_url_has_credentials_or_port(u))
-        return;
-    if (colon == len || hostname_only ||
-        u->scheme.type == LXB_URL_SCHEMEL_TYPE_FILE) {
-        if (hostname_only)
-            (void) lxb_url_api_hostname_set(u, parser,
-                                            (const lxb_char_t *)v, len);
-        else
-            (void) lxb_url_api_host_set(u, parser,
-                                        (const lxb_char_t *)v, len);
-        return;
-    }
-    if (colon == 0) return;
-    if (lxb_url_api_hostname_set(u, parser, (const lxb_char_t *)v, colon)
-        != LXB_STATUS_OK)
-        return;
-    size_t digits = colon + 1;
-    while (digits < end && g_ascii_isdigit(v[digits])) digits++;
-    if (digits == colon + 1) return;
-    guint64 port = 0;
-    for (size_t i = colon + 1; i < digits && port <= 65535; i++)
-        port = port * 10 + (guint64)(v[i] - '0');
-    if (port > 65535) return;
-    (void) lxb_url_api_port_set(u, parser, (const lxb_char_t *)v + colon + 1,
-                                digits - colon - 1);
-}
-
-static void
-ns_url_apply_setter(lxb_url_t *u, lxb_url_parser_t *parser,
-                    const char *component, const char *value, size_t vlen)
-{
-    const lxb_char_t *v = (const lxb_char_t *)value;
-    gboolean userinfo_or_port = strcmp(component, "username") == 0 ||
-                                strcmp(component, "password") == 0 ||
-                                strcmp(component, "port") == 0;
-    if (userinfo_or_port && ns_url_host_is_empty(u))
-        return;
-    if (strcmp(component, "protocol") == 0)
-        (void) lxb_url_api_protocol_set(u, parser, v, vlen);
-    else if (strcmp(component, "username") == 0)
-        (void) lxb_url_api_username_set(u, v, vlen);
-    else if (strcmp(component, "password") == 0)
-        (void) lxb_url_api_password_set(u, v, vlen);
-    else if (strcmp(component, "host") == 0)
-        ns_url_host_setter(u, parser, value, vlen, FALSE);
-    else if (strcmp(component, "hostname") == 0)
-        ns_url_host_setter(u, parser, value, vlen, TRUE);
-    else if (strcmp(component, "port") == 0)
-        (void) lxb_url_api_port_set(u, parser, v, vlen);
-    else if (strcmp(component, "pathname") == 0)
-        (void) lxb_url_api_pathname_set(u, parser, v, vlen);
-    else if (strcmp(component, "search") == 0)
-        (void) lxb_url_api_search_set(u, parser, v, vlen);
-    else if (strcmp(component, "hash") == 0)
-        (void) lxb_url_api_hash_set(u, parser, v, vlen);
-}
-
 char *
 ns_url_set_component_len(const char *href, const char *component,
                          const char *value, size_t value_len)
 {
     if (!href || !component || !value) return NULL;
-
-    lxb_url_parser_t *parser = ns_url_parser_open();
-    if (!parser) return NULL;
-
-    lxb_url_t *u = lxb_url_parse(parser, NULL,
-                                 (const lxb_char_t *)href, strlen(href));
-    if (!u) {
-        ns_url_parser_close(parser);
-        return NULL;
-    }
-
-    ns_url_apply_setter(u, parser, component, value, value_len);
-
-    char *out = NULL;
-    GString *s = g_string_new(NULL);
-    if (lxb_url_serialize(u, ns_url_str_append_cb, s, false) == LXB_STATUS_OK
-        && s->len > 0)
-        out = g_string_free(s, FALSE);
-    else
-        g_string_free(s, TRUE);
-    ns_url_parser_close(parser);
-    return out;
+    return ns_rs_url_set_component(href, strlen(href),
+                                   component, strlen(component),
+                                   value, value_len);
 }
 
 static char *
@@ -1181,49 +981,11 @@ ns_url_to_ascii(const char *url)
     return ns_url_resolve(NULL, url);
 }
 
-static lxb_url_t *
-ns_url_parse_with_host(lxb_url_parser_t *parser, const char *url)
-{
-    lxb_url_t *u = lxb_url_parse(parser, NULL,
-                                 (const lxb_char_t *)url, strlen(url));
-    if (!u) return NULL;
-    if (u->host.type == LXB_URL_HOST_TYPE__UNDEF ||
-        u->host.type == LXB_URL_HOST_TYPE_EMPTY)
-        return NULL;
-    return u;
-}
-
 char *
 ns_url_origin_from(const char *url)
 {
     if (!url || !*url) return NULL;
-    if (g_ascii_strncasecmp(url, "blob:", 5) == 0 &&
-        ns_url_is_http_or_https(url + 5))
-        return ns_url_origin_from(url + 5);
-    if (!ns_url_is_http_or_https(url))
-        return NULL;
-
-    lxb_url_parser_t *parser = ns_url_parser_open();
-    if (!parser) return NULL;
-
-    lxb_url_t *u = ns_url_parse_with_host(parser, url);
-    char *out = NULL;
-    if (u) {
-        GString *s = g_string_new(NULL);
-        g_string_append_len(s, (const char *)u->scheme.name.data,
-                            (gssize)u->scheme.name.length);
-        g_string_append(s, "://");
-        if (lxb_url_serialize_host(&u->host, ns_url_str_append_cb, s)
-            == LXB_STATUS_OK) {
-            if (u->has_port)
-                g_string_append_printf(s, ":%u", (unsigned)u->port);
-            out = g_string_free(s, FALSE);
-        } else {
-            g_string_free(s, TRUE);
-        }
-    }
-    ns_url_parser_close(parser);
-    return out;
+    return ns_rs_url_origin(url, strlen(url), FALSE);
 }
 
 char *
@@ -1251,36 +1013,7 @@ static char *
 ns_url_origin_from_any(const char *url)
 {
     if (!url || !*url) return NULL;
-    lxb_url_parser_t *parser = ns_url_parser_open();
-    if (!parser) return NULL;
-    lxb_url_t *u = ns_url_parse_with_host(parser, url);
-    char *out = NULL;
-    if (u) {
-        GString *s = g_string_new(NULL);
-        g_string_append_len(s, (const char *)u->scheme.name.data,
-                            (gssize)u->scheme.name.length);
-        g_string_append(s, "://");
-        if (lxb_url_serialize_host(&u->host, ns_url_str_append_cb, s)
-            == LXB_STATUS_OK) {
-            unsigned port = u->has_port ? (unsigned)u->port : 0u;
-            if (!u->has_port) {
-                switch (u->scheme.type) {
-                case LXB_URL_SCHEMEL_TYPE_HTTP:
-                case LXB_URL_SCHEMEL_TYPE_WS:    port = 80;  break;
-                case LXB_URL_SCHEMEL_TYPE_HTTPS:
-                case LXB_URL_SCHEMEL_TYPE_WSS:   port = 443; break;
-                case LXB_URL_SCHEMEL_TYPE_FTP:   port = 21;  break;
-                default:                         break;
-                }
-            }
-            g_string_append_printf(s, ":%u", port);
-            out = g_string_free(s, FALSE);
-        } else {
-            g_string_free(s, TRUE);
-        }
-    }
-    ns_url_parser_close(parser);
-    return out;
+    return ns_rs_url_origin(url, strlen(url), TRUE);
 }
 
 gboolean
@@ -1372,22 +1105,7 @@ char *
 ns_url_host_from(const char *url)
 {
     if (!url) return NULL;
-
-    lxb_url_parser_t *parser = ns_url_parser_open();
-    if (!parser) return NULL;
-
-    lxb_url_t *u = ns_url_parse_with_host(parser, url);
-    char *out = NULL;
-    if (u) {
-        GString *s = g_string_new(NULL);
-        if (lxb_url_serialize_host(&u->host, ns_url_str_append_cb, s)
-            == LXB_STATUS_OK && s->len > 0)
-            out = g_string_free(s, FALSE);
-        else
-            g_string_free(s, TRUE);
-    }
-    ns_url_parser_close(parser);
-    return out;
+    return ns_rs_url_host(url, strlen(url));
 }
 
 void
@@ -1408,123 +1126,16 @@ ns_url_parts_free(ns_url_parts *parts)
     g_free(parts);
 }
 
-static char *
-ns_url_take_serialized(GString *s, lxb_status_t status)
-{
-    if (status != LXB_STATUS_OK) {
-        g_string_free(s, TRUE);
-        return g_strdup("");
-    }
-    return g_string_free(s, FALSE);
-}
-
-static ns_url_parts *
-ns_url_parts_new_depth(const char *url, int depth)
-{
-    if (!url) return NULL;
-
-    lxb_url_parser_t *parser = ns_url_parser_open();
-    if (!parser) return NULL;
-
-    lxb_url_t *u = lxb_url_parse(parser, NULL,
-                                 (const lxb_char_t *)url, strlen(url));
-    if (!u) {
-        ns_url_parser_close(parser);
-        return NULL;
-    }
-
-    ns_url_parts *p = g_new0(ns_url_parts, 1);
-
-    GString *s = g_string_new(NULL);
-    p->href = ns_url_take_serialized(s,
-        lxb_url_serialize(u, ns_url_str_append_cb, s, false));
-    if (!*p->href) {
-        g_free(p->href);
-        p->href = g_strdup(url);
-    }
-
-    s = g_string_new(NULL);
-    char *scheme = ns_url_take_serialized(s,
-        lxb_url_serialize_scheme(u, ns_url_str_append_cb, s));
-    p->protocol = *scheme ? g_strconcat(scheme, ":", NULL) : g_strdup("");
-    g_free(scheme);
-
-    if (u->host.type == LXB_URL_HOST_TYPE__UNDEF ||
-        u->host.type == LXB_URL_HOST_TYPE_EMPTY) {
-        p->hostname = g_strdup("");
-    } else {
-        s = g_string_new(NULL);
-        p->hostname = ns_url_take_serialized(s,
-            lxb_url_serialize_host(&u->host, ns_url_str_append_cb, s));
-    }
-
-    p->port = u->has_port ? g_strdup_printf("%u", (unsigned)u->port)
-                          : g_strdup("");
-
-    p->host = (*p->hostname && *p->port)
-        ? g_strconcat(p->hostname, ":", p->port, NULL)
-        : g_strdup(p->hostname);
-
-    gboolean tuple_origin = *p->hostname
-        && (strcmp(p->protocol, "http:") == 0
-            || strcmp(p->protocol, "https:") == 0
-            || strcmp(p->protocol, "ws:") == 0
-            || strcmp(p->protocol, "wss:") == 0
-            || strcmp(p->protocol, "ftp:") == 0);
-    p->origin = tuple_origin
-        ? g_strconcat(p->protocol, "//", p->host, NULL)
-        : g_strdup("null");
-
-    s = g_string_new(NULL);
-    p->pathname = ns_url_take_serialized(s,
-        lxb_url_serialize_path(&u->path, ns_url_str_append_cb, s));
-
-    if (depth == 0 && strcmp(p->protocol, "blob:") == 0 &&
-        p->pathname && *p->pathname) {
-        ns_url_parts *inner = ns_url_parts_new_depth(p->pathname, depth + 1);
-        if (inner) {
-            if (strcmp(inner->protocol, "http:") == 0 ||
-                strcmp(inner->protocol, "https:") == 0) {
-                g_free(p->origin);
-                p->origin = g_strdup(inner->origin);
-            }
-            ns_url_parts_free(inner);
-        }
-    }
-
-    if (u->query.length) {
-        s = g_string_new("?");
-        g_string_append_len(s, (const char *)u->query.data,
-                            (gssize)u->query.length);
-        p->search = g_string_free(s, FALSE);
-    } else {
-        p->search = g_strdup("");
-    }
-
-    if (u->fragment.length) {
-        s = g_string_new("#");
-        g_string_append_len(s, (const char *)u->fragment.data,
-                            (gssize)u->fragment.length);
-        p->hash = g_string_free(s, FALSE);
-    } else {
-        p->hash = g_strdup("");
-    }
-
-    p->username = u->username.length
-        ? g_strndup((const char *)u->username.data, u->username.length)
-        : g_strdup("");
-    p->password = u->password.length
-        ? g_strndup((const char *)u->password.data, u->password.length)
-        : g_strdup("");
-
-    ns_url_parser_close(parser);
-    return p;
-}
-
 ns_url_parts *
 ns_url_parts_new(const char *url)
 {
-    return ns_url_parts_new_depth(url, 0);
+    if (!url) return NULL;
+    ns_url_parts *p = g_new0(ns_url_parts, 1);
+    if (!ns_rs_url_parts(url, strlen(url), p)) {
+        g_free(p);
+        return NULL;
+    }
+    return p;
 }
 
 gboolean
@@ -3786,9 +3397,6 @@ about_diagnostics_html(void)
         diag_kv(s, "User agent", ua);
     }
     diag_kv(s, "JavaScript engine", ns_js_engine_version());
-#ifdef NS_LEXBOR_VERSION
-    diag_kv(s, "HTML / CSS (lexbor)", NS_LEXBOR_VERSION);
-#endif
     char *glibv = g_strdup_printf("%u.%u.%u", glib_major_version,
                                   glib_minor_version, glib_micro_version);
     diag_kv(s, "GLib", glibv);
@@ -5491,7 +5099,7 @@ static const char k_about_nordstjernen_template[] =
     "at your option. It comes with ABSOLUTELY NO WARRANTY.</p>"
     "<p>It bundles third-party open-source software under "
     "the MIT, BSD, Apache\xc2\xa0" "2.0, LGPL, MPL and zlib licenses, "
-    "including lexbor, QuickJS, Wuffs, GTK\xc2\xa0" "4, Cairo, "
+    "including QuickJS, Wuffs, GTK\xc2\xa0" "4, Cairo, "
     "libcurl, OpenSSL, uchardet, libwebp, libpsl, SQLite and zlib. Each "
     "component\xe2\x80\x99s copyright notice and full license text is "
     "reproduced in the notices.</p>"
