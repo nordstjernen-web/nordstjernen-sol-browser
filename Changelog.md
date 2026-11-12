@@ -3,10 +3,15 @@ Changelog:
 
 1.0.47-dev:
 ======
+* `CompressionStream` and `DecompressionStream` now compress and
+  decompress inside Workers. They passed bytes through unchanged there,
+  which broke PDF.js and any other script that inflates data in a
+  worker.
 * `docs/code-review-report.md` reviews the source for unused,
   duplicate and insecure code, code a library could replace, hardening
   libraries and Mozilla-project dependencies, with a ranked list of
-  proposed changes. No source file is changed by it.
+  proposed changes, and follow-up studies of expat for XML parsing and
+  of PDF.js as the PDF viewer.
 * Security: detached DOM nodes are no longer freed while the last
   layout may still point at them; they are released after the next
   layout instead. Fixes a possible use-after-free when a page removed

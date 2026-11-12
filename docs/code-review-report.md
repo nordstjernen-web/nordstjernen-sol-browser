@@ -3,8 +3,9 @@
 Review of Nordstjernen at commit `6ac1c8c` (1.0.47-dev, 2026-11-12): unused
 code, duplicate code, insecure code, code a library could replace, libraries
 that would harden the browser, and dependencies from the Mozilla project.
-Read-only review: no source file was changed. Every recommendation here is a
-proposal; nothing has been implemented.
+The review itself changed no source file, and every recommendation is a
+proposal. The one exception is an engine bug found while trying PDF.js
+(section 11), which is fixed.
 
 ## 1. Summary
 
@@ -26,9 +27,10 @@ proposal; nothing has been implemented.
 - **Duplication is re-implementation, not copy-paste** (1.2% exact clones).
   It is concentrated in CSS value scanning, `calc()` evaluation, SVG path
   parsing and JSON handling.
-- **Almost nothing should be replaced by a new library.** One honest external
-  candidate (`src/xml.c` → expat); the other wins use code already linked or
-  already in the tree.
+- **Almost nothing should be replaced by a new library.** The wins use code
+  already linked or already in the tree. expat for `src/xml.c` was the one
+  external candidate; on closer study (section 10) it buys conformance, not
+  safety.
 - **Build hardening is good on Linux x86-64 and thinner elsewhere**: no
   aarch64 branch protection, no explicit Windows flags, two subprojects built
   without the hardening flags, and no sanitizer, fuzzing or static-analysis
@@ -339,7 +341,7 @@ regex code exists in first-party files; digests go through OpenSSL or
 
 | # | Code | Replacement | Verdict |
 |---|------|-------------|---------|
-| L1 | `src/xml.c` (612 lines): XML parser for XHTML, `DOMParser` and XHR | **expat** | The one honest external candidate. The in-tree parser passes unknown or unterminated entity references through as text and accepts `nbsp` without a DTD (`xml.c:122-158`), where XML requires a fatal error. expat gives exact well-formedness and built-in amplification limits, and replaces ~350 lines; the namespace-to-node mapping stays. Cost: one new direct dependency, already present on Linux through fontconfig |
+| L1 | `src/xml.c` (612 lines): XML parser for XHTML, `DOMParser` and XHR | tighten in-tree; **expat** only if exact conformance becomes a goal | Researched in section 10. The in-tree parser accepts 19 of 22 malformed test documents and mishandles 3 of 7 well-formed ones; expat gets all 29 right. But expat is not a hardening step: it had eight security releases in 2026, including out-of-bounds writes and a use-after-free, and Firefox runs it inside a WebAssembly sandbox |
 | L2 | `json_find_value`, `src/ipc_http.c:546-630`, and its Rust twin | in-tree `src/gtk/rjson.c` | Win, no new dependency (D5) |
 | L3 | Budgeted base64 for `data:` URLs, `src/net.c:4353-4431` | GLib `g_base64_decode_step` in chunks | ~55 lines; confirm the forgiving-base64 rules are kept |
 | L4 | UTF-8 encoding of a code point, `src/js.c:24206-24228` | `g_unichar_to_utf8` | 23 lines |
@@ -369,7 +371,7 @@ defensive mode with `trusted_schema` off, curl HSTS, ECH and DoH, and
 |---|-----------|--------------|---------|
 | H1 | **A hardened allocator for the renderer**: GrapheneOS hardened_malloc (Linux 64-bit), LLVM Scudo, or mimalloc in secure mode | Guard pages, quarantine, randomised slots, out-of-line metadata. Today the only allocator hardening is freed-memory poisoning (`src/security.c:1516`), and only on glibc. The JS heap is caged, but the DOM, layout and CSS live in the system heap | **Recommended.** Highest-value library change. Measure with `docs/Benchmarking.md` first; ship as a build option for the renderer only |
 | H2 | **OpenType Sanitizer (OTS)** | Validates and rewrites web fonts before FreeType and HarfBuzz see them. Fonts are attacker bytes handed to two large C libraries (`src/font.c:542`) | **Recommended to evaluate.** C++ and not widely packaged, so it would be a wrap. Chrome and Firefox both use it for this reason |
-| H3 | **expat** | Hardened XML parsing (L1) | Recommended with L1 |
+| H3 | **expat** | Exact XML well-formedness (L1) | **Not a hardening measure**; see section 10 |
 | H4 | **libfido2** (Yubico, C) | A maintained CTAP implementation for roaming authenticators, if WebAuthn on Linux is to go beyond what exists | Evaluate when Linux WebAuthn is next touched |
 | H5 | **More Wuffs** | The vendored release also carries memory-safe deflate, gzip, zlib, LZW and JSON decoders | Low priority: zlib is not the weak point |
 | H6 | **Certificate revocation** | No `CURLOPT_SSL_VERIFYSTATUS` or CRL use was found, so a revoked certificate is accepted | Open design question; see M4 |
@@ -400,7 +402,7 @@ Mozilla's **CA root programme** through the system trust store.
 |---|-----------|-------------------|------------------------------|---------|
 | M1 | **cubeb** | C/C++, ISC | Audio output and capture, replacing SDL2 in `src/audio/main.c` and `src/mic.c`. SDL2 is a full game library used here for one audio device | Plausible. Smaller and audio-only, with the same backend coverage. Cost: CMake build and uneven distribution packaging, so it would be a wrap. Worth doing only if SDL2 becomes a problem |
 | M2 | **encoding_rs** through `encoding_c` | Rust, MIT/Apache-2.0 | WHATWG-exact legacy decoding in place of `g_convert` | **Not recommended**: lexbor's encoding module is already in the tree and does the same job in C (L6). Use that |
-| M3 | **PDF.js** | JavaScript, Apache-2.0 | Replaces poppler (`src/pdf.c`). PDF parsing would move from a large C++ library to JavaScript inside the caged engine and the sandbox | The largest hardening gain of anything in this table, and the largest risk: it needs complete Canvas 2D and good JS performance, and adds megabytes of script. Try it as an experiment against `data/render-tests/` before deciding |
+| M3 | **PDF.js** | JavaScript, Apache-2.0 | Replaces poppler (`src/pdf.c`). PDF parsing would move from a large C++ library to JavaScript inside the caged engine and the sandbox | Researched in section 11: unmodified PDF.js 6.5.438 opens and renders correctly in this engine once one engine bug is fixed. Worth a prototype behind a build option |
 | M4 | **CRLite** (`rust-cascade`) and Mozilla's revocation data | Rust, MPL-2.0 | Offline certificate revocation checking (H6) | Technically the best design for revocation. But the filters are fetched from Mozilla's servers on a schedule, which sits badly with "does not phone home", and it needs Rust with crates. Decide the revocation question first |
 | M5 | **mp4parse-rust** (`mp4parse_capi`) | Rust, MPL-2.0 | A memory-safe MP4 parser in place of `src/mp4.c` | Not recommended. `mp4.c` is 583 bounds-checked lines built only without libav, and this needs cargo |
 | M6 | **chardetng** | Rust, MIT/Apache-2.0 | Firefox's current charset detector, in place of uchardet | Not recommended. uchardet is packaged everywhere and runs only as the last fallback |
@@ -413,7 +415,8 @@ Mozilla's **CA root programme** through the system trust store.
 
 Summary: no Mozilla library is a clear win as a new linked dependency today.
 cubeb is the only C one that fits, and it solves no present problem. PDF.js
-is the interesting experiment. Most of the rest are Rust crates that need
+is the exception: it is not linked at all, it runs as script, and the trial
+in section 11 shows it working. Most of the rest are Rust crates that need
 cargo, which the tree deliberately avoids (`-Dipc_rust` uses no crates).
 
 ## 9. Suggested order of work
@@ -429,8 +432,211 @@ cargo, which the tree deliberately avoids (`-Dipc_rust` uses no crates).
 6. **De-duplication with behavioural effect**: D5, D6, D7, D9.
 7. **De-duplication for size**: D3, D4, D8, D10–D16; D1 and D2 when next
    touched.
-8. **Library decisions for the owner**: H1 (hardened allocator), L1/H3
-   (expat), H2 (OTS), H6/M4 (revocation), M3 (PDF.js experiment).
+8. **Library decisions for the owner**: H1 (hardened allocator), H2 (OTS),
+   H6/M4 (revocation), L1 (tighten `src/xml.c`, section 10), M3 (PDF.js
+   prototype, section 11).
 9. **Further review**: `src/js.c` typed-array and structured-clone paths and
    DOM node lifetime were not covered and are where a memory-safety bug is
    most likely to be.
+
+## 10. Follow-up: `src/xml.c` and expat
+
+The first version of this report called expat "hardened XML parsing". That
+was wrong, and this section replaces it. expat is the more correct parser by
+a wide margin, but it is not the safer one.
+
+### What was measured
+
+The browser was built at this commit and 29 small documents were run through
+`DOMParser.parseFromString(…, "application/xml")` in headless mode, then
+through expat 2.9.0 (Python's `pyexpat`).
+
+| Group | In-tree `src/xml.c` | expat |
+|-------|---------------------|-------|
+| 22 documents that are not well-formed | **19 accepted**, 3 rejected | 22 rejected |
+| 7 well-formed documents | 4 right, **3 wrong** | 7 right |
+
+Malformed input the in-tree parser accepts: text or a second element after
+the root (`<a/>junk`, `<a/><b/>`, silently dropped), duplicate attributes,
+`<` in an attribute value, undefined entities, a bare `&`, `&#xZZ;`,
+references to U+0000 and U+0001, raw control characters, `]]>` in text, `--`
+in a comment, unbound element and attribute prefixes, attributes with no
+space between them, an XML declaration inside the document, and a name
+containing U+00D7. It rejects only a mismatched end tag, an unquoted
+attribute and a name starting with a digit.
+
+Well-formed input it gets wrong:
+
+- an internal entity (`<!ENTITY e "hello">` … `&e;`) is left as the literal
+  text `&e;`, because the DOCTYPE internal subset is skipped
+  (`src/xml.c:285-289`). Illustrator-exported SVG uses such entities for its
+  namespace URIs;
+- an attribute default from `<!ATTLIST>` is not applied;
+- 300 nested elements are rejected (`XML_MAX_DEPTH` is 256, `src/xml.c:192`),
+  because the parser recurses per element.
+
+Two further points from reading the code:
+
+- **There are two XML scanners.** `ns_xml_well_formed`
+  (`src/html_lexbor.c:518-605`) is a separate tag-balance checker run before
+  `ns_xml_parse` for XHTML documents and frames. `DOMParser` and XHR call
+  only the parser, so the same bytes are judged differently by path. Its
+  root-namespace lookup (`html_lexbor.c:497-515`) scans the start tag for
+  `xmlns` after whitespace without regard to quotes, so the text
+  ` xmlns='…'` inside another attribute's value is taken as the namespace.
+- **Entity scanning is quadratic.** Each `&` without a `;` makes
+  `xml_decode_text` search to the end of the text run
+  (`src/xml.c:129`). Measured: 100,000 ampersands take 75 ms, 200,000 take
+  284 ms, 400,000 take 966 ms. expat rejects the same input in under 1 ms.
+
+No memory-safety problem was found in `src/xml.c`; it was read in full.
+
+### What expat would cost
+
+expat's 2026 record, from its release announcements:
+
+| Release | Fixes |
+|---------|-------|
+| 2.7.4 (January) | NULL dereference, integer overflow |
+| 2.7.5, 2.8.0, 2.8.1 | security fixes, including insufficient hash-salt entropy and a quadratic attribute check |
+| 2.8.2 (June) | 13 CVEs: nine integer overflows, one out-of-bounds write, three missing integrity checks |
+| 2.8.4 | out-of-bounds read, use-after-free with custom encoding handlers, quadratic `storeAtts()` |
+| 2.9.0 (October) | two CVEs, one a missing length check in `XML_ParseBuffer` |
+| 2.10.0 (2 November) | four CVEs |
+
+The maintainer closed the project to new vulnerability reports for part of
+the summer. Firefox, the largest browser user of expat, runs it inside an
+RLBox WebAssembly sandbox for this reason. Chrome is replacing its XML parser
+(libxml2) with a memory-safe one written in Rust. Neither major engine now
+runs a C XML parser unsandboxed on web content.
+
+Linking expat would therefore add a memory-unsafe parser with a heavy
+advisory stream to the renderer, and make the browser's exposure depend on
+how quickly each distribution ships expat updates. The sandbox contains it,
+but section 2 shows what a compromised renderer can still reach.
+
+What expat would give: all 29 cases right, internal entities with built-in
+amplification limits, exact error line and column for `parsererror`, an
+iterative element loop with no depth limit, and namespace triplets
+(`XML_SetReturnNSTriplet`) that map directly onto `xml_apply_namespace`.
+About 350 lines would go, counting `ns_xml_well_formed`. Packaging is not an
+obstacle: fontconfig already requires it on every desktop platform
+(`libfontconfig-dev` depends on `libexpat1-dev`), and the Android sysroot
+already builds it (`android/scripts/build-deps.sh:21`). XHTML named entities
+would need a small in-memory DTD generated from lexbor's table, served
+through expat's external-entity handler.
+
+### Recommendation
+
+1. **Tighten the in-tree parser.** Make the parser the single authority and
+   delete `ns_xml_well_formed`. Add the missing well-formedness checks
+   (content after the root, duplicate attributes, `<` in attribute values,
+   undefined entities and bare `&` as errors, character-reference syntax and
+   range, legal characters, `]]>` in text, unbound prefixes, whitespace
+   between attributes). Fix the quadratic scan by bounding the search for
+   `;`. Replace the recursion with an explicit stack. Roughly 200 lines
+   added and 110 removed, no new dependency, no new attack surface.
+2. **Internal entities** are the one part that is risky to write by hand,
+   because expansion needs amplification limits. Either support only
+   non-nested internal entities with a hard size cap, or report documents
+   that declare them as unsupported. Decide when item 1 is done.
+3. **Revisit expat only if exact XML conformance becomes a goal**, and then
+   treat it as a correctness dependency that needs the sandbox, not as
+   hardening.
+
+Sources: [Expat 2.8.2 released](https://blog.hartwork.org/posts/expat-2-8-2-released/),
+[Expat 2.7.4 released](https://blog.hartwork.org/posts/expat-2-7-4-released/),
+[oss-security, expat 2.9.0](https://www.openwall.com/lists/oss-security/2026/10/05/16),
+[oss-security, expat 2.10.0](https://www.openwall.com/lists/oss-security/2026/11/02/6),
+[Mageia advisory for 2.8.4](https://advisories.mageia.org/MGASA-2026-0378.html),
+[Mozilla bug 1688452, sandbox libexpat using RLBox](https://bugzilla.mozilla.org/show_bug.cgi?id=1688452),
+[Chrome: removing XSLT](https://developer.chrome.com/docs/web-platform/deprecating-xslt),
+[blink-dev: XML parsing in Rust](https://groups.google.com/a/chromium.org/g/blink-dev/c/A-EM4e-JrTA).
+
+## 11. Follow-up: PDF.js
+
+### The trial
+
+The browser was built at this commit with the default QuickJS engine.
+`pdfjs-dist` 6.5.438 (1 November 2026, Apache-2.0), the current release, was
+served from a local web server with a page that imports `build/pdf.mjs`,
+starts the module worker `build/pdf.worker.mjs`, opens the 14-page
+TraceMonkey paper that PDF.js uses as its own demo, and draws to a canvas.
+The modern build was used, unmodified; the legacy build was not needed.
+
+First result: the library loaded, the worker started and the document opened
+(14 pages), but every page was blank and the worker logged `Unknown command`
+for raw zlib data. Cause: an engine bug. `CompressionStream` and
+`DecompressionStream` were a silent pass-through inside Workers, because the
+zlib natives were bound only in window realms and the script fell back to an
+identity transform. PDF.js inflates Flate streams with
+`DecompressionStream`. The bug is fixed in the same change set as this
+section (`ns_zlib_install` in `src/js.c`).
+
+With that fix:
+
+| Measure | Result |
+|---------|--------|
+| Library import | about 200 ms |
+| Open document | 380–530 ms |
+| Render one page at 795×1029 | 126–338 ms |
+| All 14 pages | 3.9 s |
+| Text extraction, page 1 | 182 items, correct |
+| Visual check, page 1 | correct: embedded fonts, two-column layout, superscripts |
+| Current poppler path, same file | about 2.3 s for all 14 pages, as images |
+
+One document was tested. Not tested: JPEG 2000 and JBIG2 images (PDF.js
+decodes these with WebAssembly modules, which would run under WAMR),
+encrypted files, forms, CJK character maps, scanned documents, very large
+files, memory use against the 512 MB worker limit, and the `pdf_viewer.mjs`
+component with its text and annotation layers.
+
+### What it would replace
+
+`src/pdf.c` (172 lines) hands the bytes to poppler, renders each page to a
+PNG, and builds an HTML page of `<img>` elements, capped at 300 pages. The
+result has no selectable text, no search, no links and no zoom beyond image
+scaling.
+
+| | poppler path | PDF.js |
+|---|--------------|--------|
+| Parser of hostile bytes | about 4 MB of C++ in the renderer, plus its own dependencies | JavaScript inside the caged heap; image decoders in WebAssembly |
+| Text selection, search, links | no | yes |
+| Rendering | all pages up front | per page, on demand |
+| Speed, this document | about 0.17 s per page | about 0.28 s per page |
+| Size | system library | 0.47 MB display + 1.27 MB worker (minified), 0.42 MB WebAssembly decoders, 2.5 MB character maps and standard fonts |
+| Availability | optional; absent builds show a notice | every build, every platform, including Android |
+| Upkeep | distribution updates | each PDF.js release may need newer JavaScript features; version 6 uses `Map.prototype.getOrInsertComputed`, iterator helpers and `Intl.Segmenter` |
+
+On security, PDF.js is the stronger design: a memory-safety bug in PDF
+parsing becomes a bug in script the engine already has to contain. It has
+its own history to respect: CVE-2024-4367 allowed script execution in the
+viewer's origin through a crafted font. The viewer page must therefore have
+no privileges, its own origin, a strict CSP, and `isEvalSupported: false`.
+
+### Open questions for the owner
+
+- **The Mozilla rule.** PDF.js is Mozilla code, though not engine code. It
+  needs an explicit decision.
+- **Shipping.** Committing 2–5 MB of third-party script sits badly with a
+  tree meant to be readable by one person. The wgpu-native model fits
+  better: a pinned, checksummed fetch at build time, never committed.
+- **Licence.** Apache-2.0 is compatible with GPL-3.0-or-later. Its fit with
+  NSL-1.0 needs checking, and the bundled OpenJPEG, JBIG2 and qcms modules
+  carry their own licences.
+- **No JIT.** Text documents are fine. Scanned and image-heavy documents are
+  the likely weak spot and need measuring.
+
+### Recommendation
+
+Build a prototype behind a meson option, leaving the poppler path as it is:
+an internal, unprivileged viewer page that uses the PDF.js display API with
+lazy per-page rendering and the text layer, not Mozilla's full viewer UI.
+Run it against a corpus (the PDF.js test PDFs are public) for correctness,
+time and memory before deciding to switch the default. A side benefit is
+already visible: PDF.js is a demanding conformance test for the engine, and
+found a real bug in its first run.
+
+Sources: [PDF.js releases](https://github.com/mozilla/pdf.js/releases),
+[PDF.js FAQ](https://github.com/mozilla/pdf.js/wiki/Frequently-Asked-Questions).
+
