@@ -3945,10 +3945,13 @@ ns_storage_file_value(const char *value)
     return g_uri_escape_string(value, NS_STORAGE_VALUE_PLAIN, TRUE);
 }
 
+static __thread GSList *g_storage_unflushed;
+
 static void
 ns_storage_flush(ns_js *js)
 {
     if (!js) return;
+    g_storage_unflushed = g_slist_remove(g_storage_unflushed, js);
     if (js->local_storage_flush_source) {
         g_source_remove(js->local_storage_flush_source);
         js->local_storage_flush_source = 0;
@@ -3997,8 +4000,16 @@ ns_storage_schedule_flush(ns_js *js)
 {
     if (!js || !js->local_storage_dirty || js->local_storage_disabled) return;
     if (js->local_storage_flush_source) return;
+    g_storage_unflushed = g_slist_prepend(g_storage_unflushed, js);
     js->local_storage_flush_source =
         g_timeout_add(1000, ns_storage_flush_timer, js);
+}
+
+static void
+ns_storage_flush_unflushed(void)
+{
+    while (g_storage_unflushed)
+        ns_storage_flush(g_storage_unflushed->data);
 }
 
 static GHashTable *
@@ -4127,6 +4138,7 @@ ns_storage_load_for(ns_js *js, const char *new_url)
     js->local_storage_origin = new_origin;
     js->local_storage_path = ns_storage_path_for_origin(new_origin);
     if (!js->local_storage_path) return;
+    ns_storage_flush_unflushed();
     GKeyFile *kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, js->local_storage_path, G_KEY_FILE_NONE, NULL)) {
         gsize n = 0;
