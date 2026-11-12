@@ -1493,6 +1493,7 @@ static void browser_js_form_submit(const ns_node *form, const ns_node *submitter
                                    gpointer user_data);
 
 static char *g_pending_permissions_policy;
+static char *g_pending_connection_allowlist;
 
 static ns_browser *
 browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
@@ -1580,6 +1581,9 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_add_csp_header(b->js, csp_header);
         ns_js_set_permissions_policy(b->js, g_pending_permissions_policy);
         g_clear_pointer(&g_pending_permissions_policy, g_free);
+        ns_js_set_connection_allowlist(b->js, base,
+                                       g_pending_connection_allowlist);
+        g_clear_pointer(&g_pending_connection_allowlist, g_free);
         ns_js_set_document_sandbox(b->js, doc, csp_header);
         browser_apply_meta_csp(b->js, doc, 0);
         const ns_config *run_cfg = ns_config_get();
@@ -2049,6 +2053,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     g_free(g_pending_permissions_policy);
     g_pending_permissions_policy =
         ns_net_raw_header_values(resp->raw_headers, "Permissions-Policy");
+    g_free(g_pending_connection_allowlist);
+    g_pending_connection_allowlist =
+        ns_net_raw_header_values(resp->raw_headers, "Connection-Allowlist");
 
     char *doc_charset = NULL;
     char *decoded = ns_html_decode_body_full((const char *)resp->body->data,

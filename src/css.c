@@ -590,6 +590,8 @@ static const prop_def kPropDefs[] = {
       "auto", "auto | none | all" },
     { NS_CSS_TEXT_DECORATION_SKIP_SPACES, "text-decoration-skip-spaces", PROP_DEF_KEYWORDS, TRUE,
       "start end", "none | all | [start] [end]" },
+    { NS_CSS_TEXT_DECORATION_INSET, "text-decoration-inset", PROP_DEF_LENGTH, FALSE,
+      "auto", "auto | <length>" },
     { NS_CSS_TEXT_EMPHASIS_STYLE, "text-emphasis-style", PROP_DEF_KEYWORDS, TRUE,
       "none", "none | <string> | [filled* open] [dot circle double-circle triangle sesame]" },
     { NS_CSS_TEXT_EMPHASIS_COLOR, "text-emphasis-color", PROP_DEF_COLOR, TRUE,
@@ -16991,6 +16993,26 @@ is_font_variation_settings_value(const char *s)
     return FALSE;
 }
 
+static const char *
+css_find_function_call(const char *text, const char *name)
+{
+    gsize len = strlen(name);
+    for (const char *p = text; *p; p++) {
+        if (g_ascii_strncasecmp(p, name, len) != 0 || p[len] != '(') continue;
+        if (p > text && (is_ident(p[-1]) || p[-1] == '-')) continue;
+        return p;
+    }
+    return NULL;
+}
+
+static gboolean
+css_value_has_element_function(const char *text)
+{
+    return text && (css_find_function_call(text, "random") ||
+                    css_find_function_call(text, "sibling-index") ||
+                    css_find_function_call(text, "sibling-count"));
+}
+
 static gboolean
 css_value_has_container_unit(const char *text)
 {
@@ -19187,7 +19209,8 @@ parse_declaration_block(const char **pp, const char *end,
             continue;
         }
         if (capture && (strstr(raw_vtext, "var(") || strstr(raw_vtext, "attr(") ||
-                        css_value_has_container_unit(raw_vtext))) {
+                        css_value_has_container_unit(raw_vtext) ||
+                        css_value_has_element_function(raw_vtext))) {
             if (!capture->pending) {
                 capture->pending = g_array_new(FALSE, FALSE,
                                                sizeof(ns_css_pending_decl));
@@ -32232,7 +32255,10 @@ pending_uses_attr(const GArray *pending_matches)
     if (!pending_matches) return FALSE;
     for (guint i = 0; i < pending_matches->len; i++) {
         const pending_match *e = &g_array_index((GArray *)pending_matches, pending_match, i);
-        if (e->pd && e->pd->raw_vtext && strstr(e->pd->raw_vtext, "attr(")) return TRUE;
+        if (e->pd && e->pd->raw_vtext &&
+            (strstr(e->pd->raw_vtext, "attr(") ||
+             css_value_has_element_function(e->pd->raw_vtext)))
+            return TRUE;
     }
     return FALSE;
 }
@@ -32352,6 +32378,163 @@ append_pending_decls(const pending_match *pm, const char *value_text,
     return any;
 }
 
+static void
+element_sibling_position(const ns_node *node, int *index, int *count)
+{
+    *index = 1;
+    *count = 1;
+    if (!node || !node->parent) return;
+    int seen = 0;
+    for (const ns_node *sib = node->parent->first_child; sib;
+         sib = sib->next_sibling) {
+        if (sib->kind != NS_NODE_ELEMENT) continue;
+        seen++;
+        if (sib == node) *index = seen;
+    }
+    if (seen > 0) *count = seen;
+}
+
+static double
+css_random_unit(const ns_node *node, const char *key, gboolean element_shared)
+{
+    static guint64 seed;
+    if (!seed) seed = ((guint64)g_random_int() << 32) | g_random_int() | 1;
+    guint64 h = seed ^ (element_shared ? 0 : (guint64)(gsize)node * 0x9e3779b97f4a7c15ULL);
+    for (const char *p = key; *p; p++)
+        h = (h ^ (guchar)g_ascii_tolower(*p)) * 0x100000001b3ULL;
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccdULL;
+    h ^= h >> 33;
+    return (double)(h >> 11) / (double)(G_GUINT64_CONSTANT(1) << 53);
+}
+
+static gboolean
+css_random_sharing(const char *arg, char **ident, gboolean *element_shared,
+                   gboolean *fixed, double *fixed_value)
+{
+    g_auto(GStrv) words = g_strsplit_set(arg, " \t\r\n\f", -1);
+    gboolean any = FALSE;
+    for (char **w = words; *w; w++) {
+        if (!**w) continue;
+        if (g_ascii_strcasecmp(*w, "auto") == 0) {
+            any = TRUE;
+        } else if (g_ascii_strcasecmp(*w, "element-shared") == 0) {
+            *element_shared = TRUE;
+            any = TRUE;
+        } else if ((*w)[0] == '-' && (*w)[1] == '-') {
+            g_free(*ident);
+            *ident = g_strdup(*w);
+            any = TRUE;
+        } else if (g_ascii_strcasecmp(*w, "fixed") == 0 && w[1]) {
+            char *end = NULL;
+            double v = g_ascii_strtod(w[1], &end);
+            if (!end || *end || v < 0 || v >= 1) return FALSE;
+            *fixed = TRUE;
+            *fixed_value = v;
+            return w[2] == NULL || !*w[2];
+        } else {
+            return FALSE;
+        }
+    }
+    return any;
+}
+
+static char *
+css_random_replacement(const char *args, gsize args_len, const ns_node *node,
+                       const char *prop, int occurrence)
+{
+    g_autofree char *inner = g_strndup(args, args_len);
+    GPtrArray *parts = cq_split_commas(inner);
+    g_autofree char *ident = NULL;
+    gboolean element_shared = FALSE, fixed = FALSE;
+    double fixed_value = 0;
+    guint first = 0;
+    char *out = NULL;
+    if (parts->len >= 3) {
+        g_autofree char *head = g_strstrip(g_strdup(parts->pdata[0]));
+        if (css_random_sharing(head, &ident, &element_shared, &fixed,
+                               &fixed_value))
+            first = 1;
+    }
+    guint count = parts->len - first;
+    if (count < 2 || count > 3) goto done;
+    {
+        g_autofree char *key = ident ? g_strdup(ident)
+            : g_strdup_printf("%s#%d", prop ? prop : "", occurrence);
+        double r = fixed ? fixed_value
+                         : css_random_unit(node, key, element_shared);
+        char number[G_ASCII_DTOSTR_BUF_SIZE];
+        g_ascii_formatd(number, sizeof number, "%.6f", r);
+        const char *lo = g_strstrip(parts->pdata[first]);
+        const char *hi = g_strstrip(parts->pdata[first + 1]);
+        if (count == 3)
+            out = g_strdup_printf(
+                "calc((%s) + round(down, ((%s) - (%s)) * %s, (%s)))",
+                lo, hi, lo, number,
+                (const char *)g_strstrip(parts->pdata[first + 2]));
+        else
+            out = g_strdup_printf("calc((%s) + ((%s) - (%s)) * %s)",
+                                  lo, hi, lo, number);
+    }
+done:
+    g_ptr_array_free(parts, TRUE);
+    return out;
+}
+
+static char *
+substitute_element_functions(const char *text, const ns_node *node,
+                             const char *prop, int depth)
+{
+    if (depth > 8) return NULL;
+    int index = 1, count = 1;
+    element_sibling_position(node, &index, &count);
+    GString *out = g_string_new(NULL);
+    int occurrence = 0;
+    const char *end = text + strlen(text);
+    for (const char *p = text; *p;) {
+        gboolean boundary = p == text || !(is_ident(p[-1]) || p[-1] == '-');
+        if (boundary && g_ascii_strncasecmp(p, "random(", 7) == 0) {
+            const char *close = cq_match_paren(p + 6, end);
+            if (!close) break;
+            g_autofree char *args = g_strndup(p + 7, (gsize)(close - p - 7));
+            g_autofree char *nested =
+                substitute_element_functions(args, node, prop, depth + 1);
+            char *replacement = nested
+                ? css_random_replacement(nested, strlen(nested), node, prop,
+                                         occurrence++)
+                : NULL;
+            if (!replacement) {
+                g_string_free(out, TRUE);
+                return NULL;
+            }
+            g_string_append(out, replacement);
+            g_free(replacement);
+            p = close + 1;
+            continue;
+        }
+        const char *fn = NULL;
+        int value = 0;
+        if (boundary && g_ascii_strncasecmp(p, "sibling-index(", 14) == 0) {
+            fn = p + 14;
+            value = index;
+        } else if (boundary &&
+                   g_ascii_strncasecmp(p, "sibling-count(", 14) == 0) {
+            fn = p + 14;
+            value = count;
+        }
+        if (fn) {
+            while (is_ws(*fn)) fn++;
+            if (*fn == ')') {
+                g_string_append_printf(out, "%d", value);
+                p = fn + 1;
+                continue;
+            }
+        }
+        g_string_append_c(out, *p++);
+    }
+    return g_string_free(out, FALSE);
+}
+
 static char *
 pending_substituted_value(const pending_match *pm, const ns_var_map *vars,
                           const ns_node *node)
@@ -32367,6 +32550,12 @@ pending_substituted_value(const pending_match *pm, const ns_var_map *vars,
             g_free(substituted);
             substituted = NULL;
         }
+    }
+    if (substituted && css_value_has_element_function(substituted)) {
+        char *resolved = substitute_element_functions(substituted, node,
+                                                      pm->pd->pname, 0);
+        g_free(substituted);
+        substituted = resolved;
     }
     if (substituted) {
         gboolean important = FALSE;

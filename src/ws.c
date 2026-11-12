@@ -462,6 +462,13 @@ ns_ws_worker_curl(gpointer data)
         ns_ws_unref(ws);
         return NULL;
     }
+    if (!ns_net_connection_allowlist_allows(ws->origin, ws->url)) {
+        ns_ws_dispatch_error(ws, "blocked by Connection-Allowlist");
+        ns_ws_dispatch_close(ws, 1006, "blocked by Connection-Allowlist",
+                             FALSE);
+        ns_ws_unref(ws);
+        return NULL;
+    }
     CURL *curl = curl_easy_init();
     if (!curl) {
         ns_ws_dispatch_error(ws, "curl init failed");

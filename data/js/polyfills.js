@@ -7791,6 +7791,454 @@
         });
     }
 
+    (function () {
+        var nav = global.navigator;
+        if (!nav || nav.mediaSession || ndWorkerScope) return;
+        var actions = ['play', 'pause', 'seekbackward', 'seekforward',
+            'previoustrack', 'nexttrack', 'skipad', 'stop', 'seekto',
+            'togglemicrophone', 'togglecamera', 'togglescreenshare',
+            'hangup', 'previousslide', 'nextslide', 'enterpictureinpicture'];
+        var keyActions = {
+            MediaPlay: 'play', MediaPause: 'pause', MediaStop: 'stop',
+            MediaTrackNext: 'nexttrack', MediaTrackPrevious: 'previoustrack',
+            MediaFastForward: 'seekforward', MediaRewind: 'seekbackward'
+        };
+        var metadataState = new WeakMap();
+
+        function resolveArtwork(list) {
+            var out = [];
+            if (list === undefined || list === null) return out;
+            for (var i = 0; i < list.length; i++) {
+                var image = list[i] || {};
+                var src;
+                try {
+                    src = new URL(String(image.src), global.document
+                        ? global.document.baseURI : undefined).href;
+                } catch (e) {
+                    throw new TypeError("Failed to construct 'MediaMetadata': " +
+                        "invalid artwork src");
+                }
+                out.push(Object.freeze({
+                    src: src,
+                    sizes: image.sizes === undefined ? '' : String(image.sizes),
+                    type: image.type === undefined ? '' : String(image.type)
+                }));
+            }
+            return out;
+        }
+
+        function MediaMetadata(init) {
+            if (!(this instanceof MediaMetadata))
+                throw new TypeError("Failed to construct 'MediaMetadata': " +
+                    "Please use the 'new' operator");
+            init = init === undefined || init === null ? {} : init;
+            metadataState.set(this, {
+                title: init.title === undefined ? '' : String(init.title),
+                artist: init.artist === undefined ? '' : String(init.artist),
+                album: init.album === undefined ? '' : String(init.album),
+                artwork: resolveArtwork(init.artwork)
+            });
+        }
+        function metadataField(name) {
+            Object.defineProperty(MediaMetadata.prototype, name, {
+                configurable: true, enumerable: true,
+                get: function () { return metadataState.get(this)[name]; },
+                set: function (v) { metadataState.get(this)[name] = String(v); }
+            });
+        }
+        metadataField('title');
+        metadataField('artist');
+        metadataField('album');
+        Object.defineProperty(MediaMetadata.prototype, 'artwork', {
+            configurable: true, enumerable: true,
+            get: function () {
+                return Object.freeze(metadataState.get(this).artwork.slice());
+            },
+            set: function (v) {
+                metadataState.get(this).artwork = resolveArtwork(v);
+            }
+        });
+        defineCtor('MediaMetadata', nativeize(MediaMetadata));
+
+        var handlers = {};
+        var metadata = null;
+        var playbackState = 'none';
+        var session = {};
+
+        function MediaSession() {
+            throw new TypeError('Illegal constructor');
+        }
+        MediaSession.prototype = session;
+        Object.defineProperty(session, 'constructor', {
+            value: MediaSession, writable: true, configurable: true
+        });
+        Object.defineProperty(session, 'metadata', {
+            configurable: true, enumerable: true,
+            get: function () { return metadata; },
+            set: function (v) {
+                if (v !== null && !(v instanceof MediaMetadata))
+                    throw new TypeError("Failed to set the 'metadata' property " +
+                        "on 'MediaSession': not a MediaMetadata");
+                metadata = v;
+            }
+        });
+        Object.defineProperty(session, 'playbackState', {
+            configurable: true, enumerable: true,
+            get: function () { return playbackState; },
+            set: function (v) {
+                v = String(v);
+                if (v === 'none' || v === 'paused' || v === 'playing')
+                    playbackState = v;
+            }
+        });
+        session.setActionHandler = nativeize(function setActionHandler(action, handler) {
+            action = String(action);
+            if (actions.indexOf(action) < 0)
+                throw new TypeError("Failed to execute 'setActionHandler' on " +
+                    "'MediaSession': '" + action + "' is not a valid action");
+            if (handler === null || handler === undefined) delete handlers[action];
+            else if (typeof handler === 'function') handlers[action] = handler;
+            else throw new TypeError("Failed to execute 'setActionHandler' on " +
+                "'MediaSession': the handler is not a function");
+        });
+        session.setPositionState = nativeize(function setPositionState(state) {
+            if (state === undefined || state === null ||
+                Object.keys(state).length === 0)
+                return;
+            var duration = Number(state.duration);
+            if (state.duration === undefined || isNaN(duration) || duration < 0)
+                throw new TypeError("Failed to execute 'setPositionState' on " +
+                    "'MediaSession': invalid duration");
+            if (state.position !== undefined) {
+                var position = Number(state.position);
+                if (isNaN(position) || position < 0 || position > duration)
+                    throw new TypeError("Failed to execute 'setPositionState' " +
+                        "on 'MediaSession': invalid position");
+            }
+            if (state.playbackRate !== undefined) {
+                var rate = Number(state.playbackRate);
+                if (isNaN(rate) || rate === 0)
+                    throw new TypeError("Failed to execute 'setPositionState' " +
+                        "on 'MediaSession': invalid playbackRate");
+            }
+        });
+        ['setMicrophoneActive', 'setCameraActive', 'setScreenshareActive']
+            .forEach(function (name) {
+                session[name] = nativeize(function () {
+                    return Promise.resolve(undefined);
+                });
+            });
+        defineCtor('MediaSession', nativeize(MediaSession));
+        var instance = Object.create(session);
+        try {
+            Object.defineProperty(nav, 'mediaSession', {
+                configurable: true, enumerable: true,
+                get: function () { return instance; }
+            });
+        } catch (e) {}
+
+        function runAction(action) {
+            var handler = handlers[action];
+            if (!handler) return false;
+            try { handler({ action: action }); } catch (e) {
+                if (global.reportError) global.reportError(e);
+            }
+            return true;
+        }
+        function playPauseAction() {
+            if (playbackState === 'playing') return 'pause';
+            if (playbackState === 'paused') return 'play';
+            var media = global.document
+                ? global.document.querySelectorAll('video,audio') : [];
+            for (var i = 0; i < media.length; i++)
+                if (!media[i].paused) return 'pause';
+            return 'play';
+        }
+        if (global.document && global.document.addEventListener) {
+            global.document.addEventListener('keydown', function (e) {
+                var action = e.key === 'MediaPlayPause'
+                    ? playPauseAction() : keyActions[e.key];
+                if (action && runAction(action)) e.preventDefault();
+            }, true);
+        }
+    })();
+
+    (function () {
+        if (typeof global.TextDecoderStream !== 'function' ||
+            typeof global.ReadableStream !== 'function') return;
+        function emptyTextStream() {
+            return new ReadableStream({ start: function (c) { c.close(); } });
+        }
+        function bodyTextStream() {
+            var body = this.body;
+            return body ? body.pipeThrough(new TextDecoderStream())
+                        : emptyTextStream();
+        }
+        if (typeof global.Response === 'function')
+            defineMethod(global.Response.prototype, 'textStream',
+                nativeize(function textStream() { return bodyTextStream.call(this); }));
+        if (typeof global.Request === 'function')
+            defineMethod(global.Request.prototype, 'textStream',
+                nativeize(function textStream() { return bodyTextStream.call(this); }));
+        if (typeof global.Blob === 'function' &&
+            typeof global.Blob.prototype.stream === 'function')
+            defineMethod(global.Blob.prototype, 'textStream',
+                nativeize(function textStream() {
+                    return this.stream().pipeThrough(new TextDecoderStream());
+                }));
+    })();
+
+    (function () {
+        var Path = global.SVGPathElement;
+        if (typeof Path !== 'function' || !Path.prototype ||
+            typeof Path.prototype.getPathData === 'function') return;
+        var arity = { M: 2, L: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, T: 2, A: 7, Z: 0 };
+
+        function parsePath(d) {
+            var out = [], i = 0, n = d.length, command = null;
+            function skip() {
+                while (i < n && /[\s,]/.test(d[i])) i++;
+            }
+            function number() {
+                skip();
+                var m = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/.exec(d.slice(i));
+                if (!m) return NaN;
+                i += m[0].length;
+                return parseFloat(m[0]);
+            }
+            function flag() {
+                skip();
+                if (d[i] !== '0' && d[i] !== '1') return NaN;
+                return d[i++] === '1' ? 1 : 0;
+            }
+            for (;;) {
+                skip();
+                if (i >= n) break;
+                var ch = d[i];
+                if (/[a-zA-Z]/.test(ch)) {
+                    if (arity[ch.toUpperCase()] === undefined) break;
+                    command = ch;
+                    i++;
+                } else if (command === null || command === 'Z' || command === 'z') {
+                    break;
+                }
+                if (out.length === 0 && command !== 'M' && command !== 'm') break;
+                var count = arity[command.toUpperCase()];
+                var values = [], bad = false;
+                for (var k = 0; k < count; k++) {
+                    var isFlag = command.toUpperCase() === 'A' && (k === 3 || k === 4);
+                    var v = isFlag ? flag() : number();
+                    if (isNaN(v)) { bad = true; break; }
+                    values.push(v);
+                }
+                if (bad) break;
+                out.push({ type: command, values: values });
+                if (command === 'M') command = 'L';
+                else if (command === 'm') command = 'l';
+            }
+            return out;
+        }
+
+        function arcToCubics(x1, y1, rx, ry, angle, large, sweep, x2, y2) {
+            if (x1 === x2 && y1 === y2) return [];
+            rx = Math.abs(rx);
+            ry = Math.abs(ry);
+            if (rx === 0 || ry === 0) return [[x1, y1, x2, y2, x2, y2]];
+            var phi = angle * Math.PI / 180;
+            var cos = Math.cos(phi), sin = Math.sin(phi);
+            var dx = (x1 - x2) / 2, dy = (y1 - y2) / 2;
+            var px = cos * dx + sin * dy, py = -sin * dx + cos * dy;
+            var lambda = px * px / (rx * rx) + py * py / (ry * ry);
+            if (lambda > 1) {
+                rx *= Math.sqrt(lambda);
+                ry *= Math.sqrt(lambda);
+            }
+            var num = rx * rx * ry * ry - rx * rx * py * py - ry * ry * px * px;
+            var den = rx * rx * py * py + ry * ry * px * px;
+            var coef = Math.sqrt(Math.max(0, num / den)) * (large === sweep ? -1 : 1);
+            var cxp = coef * rx * py / ry, cyp = -coef * ry * px / rx;
+            var cx = cos * cxp - sin * cyp + (x1 + x2) / 2;
+            var cy = sin * cxp + cos * cyp + (y1 + y2) / 2;
+            function vectorAngle(ux, uy, vx, vy) {
+                var a = Math.atan2(vy, vx) - Math.atan2(uy, ux);
+                return a;
+            }
+            var start = vectorAngle(1, 0, (px - cxp) / rx, (py - cyp) / ry);
+            var delta = vectorAngle((px - cxp) / rx, (py - cyp) / ry,
+                                    (-px - cxp) / rx, (-py - cyp) / ry);
+            if (!sweep && delta > 0) delta -= 2 * Math.PI;
+            else if (sweep && delta < 0) delta += 2 * Math.PI;
+            var pieces = Math.max(1, Math.ceil(Math.abs(delta) / (Math.PI / 2) - 1e-9));
+            var step = delta / pieces;
+            var t = 4 / 3 * Math.tan(step / 4);
+            var out = [];
+            function point(a) {
+                var ex = rx * Math.cos(a), ey = ry * Math.sin(a);
+                return [cos * ex - sin * ey + cx, sin * ex + cos * ey + cy];
+            }
+            function derivative(a) {
+                var ex = -rx * Math.sin(a), ey = ry * Math.cos(a);
+                return [cos * ex - sin * ey, sin * ex + cos * ey];
+            }
+            for (var k = 0; k < pieces; k++) {
+                var a1 = start + k * step, a2 = a1 + step;
+                var p1 = point(a1), p2 = point(a2);
+                var d1 = derivative(a1), d2 = derivative(a2);
+                out.push([p1[0] + t * d1[0], p1[1] + t * d1[1],
+                          p2[0] - t * d2[0], p2[1] - t * d2[1],
+                          k === pieces - 1 ? x2 : p2[0],
+                          k === pieces - 1 ? y2 : p2[1]]);
+            }
+            return out;
+        }
+
+        function normalize(segments) {
+            var out = [];
+            var x = 0, y = 0, sx = 0, sy = 0;
+            var cx = null, cy = null, qx = null, qy = null;
+            segments.forEach(function (seg) {
+                var rel = seg.type !== seg.type.toUpperCase();
+                var type = seg.type.toUpperCase();
+                var v = seg.values.slice();
+                var ox = rel ? x : 0, oy = rel ? y : 0;
+                var ncx = null, ncy = null, nqx = null, nqy = null;
+                if (type === 'M') {
+                    x = v[0] + ox; y = v[1] + oy; sx = x; sy = y;
+                    out.push({ type: 'M', values: [x, y] });
+                } else if (type === 'L') {
+                    x = v[0] + ox; y = v[1] + oy;
+                    out.push({ type: 'L', values: [x, y] });
+                } else if (type === 'H') {
+                    x = v[0] + ox;
+                    out.push({ type: 'L', values: [x, y] });
+                } else if (type === 'V') {
+                    y = v[0] + oy;
+                    out.push({ type: 'L', values: [x, y] });
+                } else if (type === 'C') {
+                    out.push({ type: 'C', values: [v[0] + ox, v[1] + oy,
+                        v[2] + ox, v[3] + oy, v[4] + ox, v[5] + oy] });
+                    ncx = v[2] + ox; ncy = v[3] + oy;
+                    x = v[4] + ox; y = v[5] + oy;
+                } else if (type === 'S') {
+                    var c1x = cx === null ? x : 2 * x - cx;
+                    var c1y = cy === null ? y : 2 * y - cy;
+                    out.push({ type: 'C', values: [c1x, c1y, v[0] + ox, v[1] + oy,
+                        v[2] + ox, v[3] + oy] });
+                    ncx = v[0] + ox; ncy = v[1] + oy;
+                    x = v[2] + ox; y = v[3] + oy;
+                } else if (type === 'Q' || type === 'T') {
+                    var kx, ky, ex, ey;
+                    if (type === 'Q') {
+                        kx = v[0] + ox; ky = v[1] + oy; ex = v[2] + ox; ey = v[3] + oy;
+                    } else {
+                        kx = qx === null ? x : 2 * x - qx;
+                        ky = qy === null ? y : 2 * y - qy;
+                        ex = v[0] + ox; ey = v[1] + oy;
+                    }
+                    out.push({ type: 'C', values: [
+                        x + 2 / 3 * (kx - x), y + 2 / 3 * (ky - y),
+                        ex + 2 / 3 * (kx - ex), ey + 2 / 3 * (ky - ey), ex, ey] });
+                    nqx = kx; nqy = ky;
+                    x = ex; y = ey;
+                } else if (type === 'A') {
+                    var tx = v[5] + ox, ty = v[6] + oy;
+                    var rx = Math.abs(v[0]), ry = Math.abs(v[1]);
+                    if (rx === 0 || ry === 0) {
+                        out.push({ type: 'L', values: [tx, ty] });
+                    } else {
+                        arcToCubics(x, y, rx, ry, v[2], v[3], v[4], tx, ty)
+                            .forEach(function (c) {
+                                out.push({ type: 'C', values: c });
+                            });
+                    }
+                    x = tx; y = ty;
+                } else if (type === 'Z') {
+                    out.push({ type: 'Z', values: [] });
+                    x = sx; y = sy;
+                }
+                cx = ncx; cy = ncy; qx = nqx; qy = nqy;
+            });
+            return out;
+        }
+
+        function serialize(pathData) {
+            var parts = [];
+            for (var i = 0; i < pathData.length; i++) {
+                var seg = pathData[i];
+                if (!seg || typeof seg.type !== 'string' ||
+                    arity[seg.type.toUpperCase()] === undefined)
+                    throw new TypeError("Failed to execute 'setPathData' on " +
+                        "'SVGPathElement': invalid path segment");
+                var values = seg.values ? Array.prototype.map.call(seg.values, Number) : [];
+                if (values.length !== arity[seg.type.toUpperCase()] ||
+                    values.some(function (n) { return !isFinite(n); }))
+                    throw new TypeError("Failed to execute 'setPathData' on " +
+                        "'SVGPathElement': invalid path segment values");
+                parts.push(seg.type + (values.length ? ' ' + values.join(' ') : ''));
+            }
+            return parts.join(' ');
+        }
+
+        function segmentLength(from, seg) {
+            if (seg.type === 'L' || seg.type === 'Z')
+                return Math.hypot(seg.to[0] - from[0], seg.to[1] - from[1]);
+            if (seg.type !== 'C') return 0;
+            var v = seg.values, total = 0, px = from[0], py = from[1];
+            for (var k = 1; k <= 32; k++) {
+                var t = k / 32, u = 1 - t;
+                var nx = u * u * u * from[0] + 3 * u * u * t * v[0] +
+                         3 * u * t * t * v[2] + t * t * t * v[4];
+                var ny = u * u * u * from[1] + 3 * u * u * t * v[1] +
+                         3 * u * t * t * v[3] + t * t * t * v[5];
+                total += Math.hypot(nx - px, ny - py);
+                px = nx; py = ny;
+            }
+            return total;
+        }
+
+        defineMethod(Path.prototype, 'getPathData', nativeize(function getPathData(settings) {
+            var segments = parsePath(this.getAttribute('d') || '');
+            return settings && settings.normalize ? normalize(segments) : segments;
+        }));
+        defineMethod(Path.prototype, 'setPathData', nativeize(function setPathData(pathData) {
+            if (pathData === null || pathData === undefined ||
+                typeof pathData.length !== 'number')
+                throw new TypeError("Failed to execute 'setPathData' on " +
+                    "'SVGPathElement': the value is not a sequence");
+            this.setAttribute('d', serialize(pathData));
+        }));
+        defineMethod(Path.prototype, 'getPathSegmentAtLength',
+            nativeize(function getPathSegmentAtLength(distance) {
+                distance = Number(distance);
+                if (!isFinite(distance))
+                    throw new TypeError("Failed to execute " +
+                        "'getPathSegmentAtLength' on 'SVGPathElement': " +
+                        "the distance is not finite");
+                var raw = parsePath(this.getAttribute('d') || '');
+                if (!raw.length) return null;
+                var from = [0, 0], start = [0, 0], walked = 0, last = null;
+                var target = Math.max(0, distance);
+                for (var i = 0; i < raw.length; i++) {
+                    var pieces = normalize(raw.slice(0, i + 1));
+                    var before = normalize(raw.slice(0, i)).length;
+                    for (var k = before; k < pieces.length; k++) {
+                        var piece = pieces[k], to;
+                        if (piece.type === 'M') {
+                            from = start = piece.values.slice();
+                            continue;
+                        }
+                        to = piece.type === 'Z' ? start : piece.values.slice(-2);
+                        walked += segmentLength(from, {
+                            type: piece.type, values: piece.values, to: to });
+                        from = to;
+                    }
+                    if (raw[i].type.toUpperCase() !== 'M') last = raw[i];
+                    if (last && walked >= target) return last;
+                }
+                return last;
+            }));
+    })();
+
     var navigator = global.navigator;
     if (navigator && !navigator.locks) {
         try {

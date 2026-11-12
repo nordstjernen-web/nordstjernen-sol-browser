@@ -4306,6 +4306,16 @@ decoration_em(const ns_inline_attr *r, const ns_style *s)
     return length_or(from ? from->values[NS_CSS_FONT_SIZE] : NULL, 16);
 }
 
+static double
+decoration_inset_px(const ns_inline_attr *r, double em)
+{
+    double px = 0;
+    const ns_css_value *v =
+        r && r->style ? r->style->values[NS_CSS_TEXT_DECORATION_INSET] : NULL;
+    return v && v->kind != NS_CSS_V_KEYWORD &&
+           decoration_length_px(v, em, &px) ? px : 0;
+}
+
 static gboolean
 decoration_has_custom_metrics(const ns_inline_attr *r, const ns_style *s)
 {
@@ -4314,6 +4324,7 @@ decoration_has_custom_metrics(const ns_inline_attr *r, const ns_style *s)
     if (decoration_length_px(decoration_value_of(r, s, NS_CSS_TEXT_DECORATION_THICKNESS),
                              em, &px))
         return TRUE;
+    if (decoration_inset_px(r, em) != 0) return TRUE;
     return r->kind == NS_INLINE_UNDERLINE &&
            decoration_length_px(decoration_value_of(r, s, NS_CSS_TEXT_UNDERLINE_OFFSET),
                                 em, &px);
@@ -4430,6 +4441,10 @@ paint_dashed_decoration_piece(cairo_t *cr, const dashed_decoration *d,
     double x0 = dx + d->text_x + (double)MIN(xa, xb) / NS_PANGO_SCALE;
     double x1 = dx + d->text_x + (double)MAX(xa, xb) / NS_PANGO_SCALE;
     double em = decoration_em(r, d->box->style);
+    double inset = decoration_inset_px(r, em);
+    x0 += inset;
+    x1 -= inset;
+    if (x1 <= x0) return;
     double thick = decoration_thickness_px(r, d->box->style, em);
     double uy = dy + dashed_decoration_y(r, d->box->style, d->base_y, em, thick);
     const ns_css_value *dc =

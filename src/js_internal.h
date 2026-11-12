@@ -283,6 +283,7 @@ struct ns_js {
     int           lifecycle_phase;
     gint64        lifecycle_start_us;
     gint64        eval_deadline_us;
+    gint64        task_start_us;
     gint64        js_monitor_deadline_us;
     gboolean      halted;
     gboolean      in_pump;
@@ -823,6 +824,7 @@ gboolean ns_js_get_bool_prop(JSContext *ctx, JSValueConst obj, const char *key,
 
 void ns_perf_observer_release(JSContext *ctx, ns_perf_observer *o);
 double ns_perf_now_ms(const ns_js *js);
+void ns_perf_note_task(ns_js *js, gint64 start_us, gint64 end_us);
 typedef struct ns_realm_origin {
     gint64 origin_us;
     double origin_real_ms;

@@ -457,7 +457,8 @@ preload_collect(const ns_node *n, const char *base, gboolean include_images,
         } else if (rel && rel_has_token(rel, "stylesheet")) {
             preload_add_hinted(out, seen, base, ns_element_get_attr(n, "href"),
                                NS_FETCH_DEST_STYLE, n);
-        } else if (rel && rel_has_token(rel, "prefetch")) {
+        } else if (rel && (rel_has_token(rel, "prefetch") ||
+                           rel_has_token(rel, "compression-dictionary"))) {
             preload_add_hinted(out, seen, base, ns_element_get_attr(n, "href"),
                                NS_FETCH_DEST_DEFAULT, n);
         } else if (rel && (rel_has_token(rel, "preload") ||

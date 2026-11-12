@@ -3,6 +3,62 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Removed the last XSLT surface: the empty `XSLTProcessor` constructor
+  and the `xslt` value of `<link as>`. The engine never ran XSLT, so
+  feature detection now reports that truthfully, in line with its
+  removal from other browsers.
+* JS: the performance timeline reports long tasks. A task that keeps
+  the main thread for 50 ms or more adds a `longtask` entry and a
+  `long-animation-frame` entry (with `blockingDuration`), delivered to
+  `PerformanceObserver` and listed by `performance.getEntriesByType()`.
+  Script attribution (`scripts`) and the style and layout breakdown are
+  not measured and read as empty or zero.
+* HTML: `prerender` and `prerender_until_script` speculation rules are
+  honoured as a prefetch of the target document, for same-origin URLs
+  and matching links. The page is fetched ahead of the navigation, not
+  rendered ahead of it, so `document.prerendering` stays false.
+* CSS: `random()` is supported in style sheet declarations, with the
+  optional step and the sharing options (`auto`, a dashed identifier,
+  `element-shared`, `fixed <number>`). A value stays the same for an
+  element across restyles and differs between elements.
+* CSS: `sibling-index()` and `sibling-count()` now resolve to each
+  element's own position in ordinary declarations; they evaluated as 1
+  outside container queries.
+* CSS: `text-decoration-inset` with `auto` or one length shortens (or,
+  when negative, extends) underlines, overlines and line-throughs at
+  both ends. The two-value form is not supported yet.
+* JS: text modules. `import text from "./file.txt" with { type: "text"
+  }` and the dynamic `import(url, { with: { type: "text" } })` load a
+  resource as a string, for `http(s):`, `data:` and `blob:` URLs.
+* JS: `Response`, `Request` and `Blob` have `textStream()`, a
+  `ReadableStream` of decoded text. A response returned by `fetch()` is
+  now an instance of `Response`, so it inherits prototype methods.
+* SVG: the Path Data API. `SVGPathElement` has `getPathData()` (with
+  `{ normalize: true }` reducing a path to absolute `M`, `L`, `C` and
+  `Z`), `setPathData()` and `getPathSegmentAtLength()`.
+* JS: the Media Session API is available: `navigator.mediaSession` with
+  `metadata` (`MediaMetadata`), `playbackState`, `setActionHandler()`,
+  `setPositionState()` and the promise-returning
+  `setMicrophoneActive()` / `setCameraActive()` /
+  `setScreenshareActive()`. The media keys delivered to a page (play,
+  pause, stop, next, previous, seek) run the page's action handlers.
+* Compression dictionary transport (RFC 9842) is supported. A response
+  with `Use-As-Dictionary` is kept as a dictionary for the URLs its
+  `match` pattern covers; later requests to them send
+  `Available-Dictionary` (and `Dictionary-ID`) and accept the `dcb`
+  (Brotli) and `dcz` (Zstandard) codings, which are decoded against the
+  dictionary after its hash is checked. `<link
+  rel="compression-dictionary">` fetches a dictionary ahead of use.
+  Dictionaries are held in memory per renderer and picked up again from
+  the HTTP cache when the dictionary resource is next requested.
+* Security: the `Connection-Allowlist` response header is enforced. A
+  document that sends it may only connect to URLs matching one of its
+  patterns (`response-origin`, or URL patterns with `*` wildcards and
+  regular-expression groups): subresources, `fetch()`, XHR, WebSocket,
+  EventSource and preconnects to anything else are blocked, on every
+  redirect hop. A header that cannot be parsed blocks every connection.
+  Navigations are not restricted, and
+  `Connection-Allowlist-Report-Only` is not acted on.
 * HTML and URL parsing moved from the vendored lexbor library to the
   project's own parsers in safe Rust, shared with Southstar: `src/html5_rs/`
   (WHATWG tokenizer and tree builder) and `src/url_rs/` (WHATWG URL with

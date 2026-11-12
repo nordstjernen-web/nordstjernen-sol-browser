@@ -304,6 +304,7 @@ static gboolean ns_popup_blocked_for(ns_js *js, JSContext *realm);
 static void ns_fullscreen_request_clear(ns_js *js);
 static void ns_fullscreen_request_resume(ns_js *js, gboolean allow);
 static void ns_js_capability_request(ns_capability capability, const char *origin);
+static void ns_set_instance_proto(JSContext *ctx, JSValueConst object, const char *constructor_name);
 static int ns_js_capability_state(ns_js *js, JSContext *realm, ns_capability capability, char **origin_out);
 static gboolean ns_js_doc_contains(const ns_js *js, const ns_node *node);
 static JSValue ns_popup_open(JSContext *ctx, ns_js *js, const char *url,
@@ -990,6 +991,7 @@ ns_js_budget_push(ns_js *js, ns_budget_guard *g)
         js->task_epoch++;
         if (js->task_epoch == 0) js->task_epoch++;
         js->js_monitor_deadline_us = now + NS_JS_MONITOR_LIMIT_US;
+        js->task_start_us = now;
     }
     gint64 fresh = now + ns_js_eval_budget_us();
     if (g->saved == 0 || fresh < g->saved)
@@ -1001,8 +1003,10 @@ ns_js_budget_pop(ns_js *js, ns_budget_guard *g)
 {
     if (!js || !g) return;
     js->eval_deadline_us = g->saved;
-    if (g->saved == 0)
+    if (g->saved == 0) {
         js->js_monitor_deadline_us = 0;
+        ns_perf_note_task(js, js->task_start_us, g_get_monotonic_time());
+    }
 }
 
 typedef struct ns_listener {
@@ -1910,6 +1914,17 @@ ns_js_set_permissions_policy(ns_js *js, const char *header_value)
     g_free(js->permissions_policy);
     js->permissions_policy = header_value && *header_value
         ? g_strdup(header_value) : NULL;
+}
+
+void
+ns_js_set_connection_allowlist(ns_js *js, const char *document_url,
+                               const char *header_value)
+{
+    if (!js || js->worker_host) return;
+    ns_net_connection_allowlist_unregister(js);
+    if (header_value && *header_value)
+        ns_net_connection_allowlist_register(js, document_url, header_value,
+                                             TRUE);
 }
 
 static JSValue
@@ -3951,7 +3966,8 @@ ns_tlist_supports(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
 {
     static const char *const link_rel_tokens[] = {
         "alternate", "apple-touch-icon", "apple-touch-icon-precomposed",
-        "canonical", "dns-prefetch", "expect", "icon", "manifest",
+        "canonical", "compression-dictionary", "dns-prefetch", "expect",
+        "icon", "manifest",
         "modulepreload", "next", "preconnect", "prefetch", "preload",
         "prerender", "stylesheet",
     };
@@ -6161,7 +6177,7 @@ static const char *const kwr_kind[]     = {
 static const char *const kwr_as[]       = {
     "fetch", "audio", "document", "embed", "font", "image", "manifest",
     "object", "report", "script", "sharedworker", "style", "track", "video",
-    "worker", "xslt",
+    "worker",
 };
 static const char *const kwr_preload[]  = { "none", "metadata", "auto" };
 static const char *const kwr_popovertargetaction[] = { "toggle", "show", "hide" };
@@ -10471,6 +10487,7 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
             return;
         }
         JSValue r = JS_NewObject(st->ctx);
+        ns_set_instance_proto(st->ctx, r, "Response");
         JS_SetPropertyStr(st->ctx, r, "ok",
             JS_NewBool(st->ctx, allow && resp->status >= 200 && resp->status < 300));
         long status = allow ? resp->status : 0;
@@ -67853,7 +67870,7 @@ static void
 ns_js_setup_document_interfaces(ns_js *js, JSContext *ctx, JSValueConst global)
 {
     static const ns_fn_def shim_ctors[] = {
-        { "XMLDocument", 0 }, { "XSLTProcessor", 0 },
+        { "XMLDocument", 0 },
         { "Range", 0 }, { "NodeFilter", 0 },
         { "DOMTokenList", 0 }, { "NodeList", 0 }, { "HTMLCollection", 0 },
         { "CSSStyleSheet", 0 }, { "CSSStyleDeclaration", 0 },
@@ -68429,6 +68446,7 @@ ns_js_free(ns_js *js)
     if (js->import_map) g_ptr_array_free(js->import_map, TRUE);
     if (js->csp) { ns_csp_free(js->csp); js->csp = NULL; }
     if (js->csp_headers) ns_net_csp_unregister(js);
+    ns_net_connection_allowlist_unregister(js);
     g_clear_pointer(&js->csp_headers, g_ptr_array_unref);
     g_free(js->early_inject_src);
     g_free(js->local_storage_origin);
@@ -69846,8 +69864,16 @@ ns_speculation_where_matches(JSContext *ctx, JSValueConst where,
 }
 
 static void
+ns_speculation_prefetch(ns_js *js, const char *url, gboolean same_origin_only)
+{
+    if (same_origin_only && !ns_url_same_origin(js->current_url, url)) return;
+    ns_engine_prefetch_document(url, js->current_url);
+}
+
+static void
 ns_speculation_prefetch_links(ns_js *js, const ns_node *n, JSValueConst where,
-                              const char *base, int depth)
+                              const char *base, gboolean same_origin_only,
+                              int depth)
 {
     if (!n || depth >= 512) return;
     const char *raw = n->kind == NS_NODE_ELEMENT && n->name &&
@@ -69858,11 +69884,12 @@ ns_speculation_prefetch_links(ns_js *js, const ns_node *n, JSValueConst where,
         JSValue link = href ? ns_make_element(js->ctx, n) : JS_UNDEFINED;
         if (href && ns_speculation_where_matches(js->ctx, where, link, href,
                                                  base, 0))
-            ns_engine_prefetch_document(href, js->current_url);
+            ns_speculation_prefetch(js, href, same_origin_only);
         JS_FreeValue(js->ctx, link);
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_speculation_prefetch_links(js, c, where, base, depth + 1);
+        ns_speculation_prefetch_links(js, c, where, base, same_origin_only,
+                                      depth + 1);
 }
 
 static gboolean
@@ -69875,17 +69902,12 @@ ns_speculation_rule_is_eager(JSContext *ctx, JSValueConst rule,
 }
 
 static void
-ns_js_apply_speculation_rules(ns_js *js, const char *text, gsize len,
-                              const char *base)
+ns_js_apply_speculation_rule_list(ns_js *js, JSValueConst root,
+                                  const char *action, const char *base,
+                                  gboolean same_origin_only)
 {
-    if (!js || !text || !base || !js->current_url || !js->current_doc) return;
     JSContext *ctx = js->ctx;
-    JSValue root = JS_ParseJSON(ctx, text, len, "speculationrules");
-    if (JS_IsException(root)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        return;
-    }
-    JSValue rules = JS_IsObject(root) ? JS_GetPropertyStr(ctx, root, "prefetch")
+    JSValue rules = JS_IsObject(root) ? JS_GetPropertyStr(ctx, root, action)
                                       : JS_UNDEFINED;
     uint32_t n = 0;
     if (JS_IsArray(rules)) n = ns_js_array_length(ctx, rules);
@@ -69900,17 +69922,35 @@ ns_js_apply_speculation_rules(ns_js *js, const char *text, gsize len,
             JSValue item = JS_GetPropertyUint32(ctx, urls, u);
             const char *raw = JS_IsString(item) ? JS_ToCString(ctx, item) : NULL;
             g_autofree char *abs = raw ? ns_url_resolve(base, raw) : NULL;
-            if (abs) ns_engine_prefetch_document(abs, js->current_url);
+            if (abs) ns_speculation_prefetch(js, abs, same_origin_only);
             if (raw) JS_FreeCString(ctx, raw);
             JS_FreeValue(ctx, item);
         }
         if (JS_IsObject(where) && ns_speculation_rule_is_eager(ctx, rule, FALSE))
-            ns_speculation_prefetch_links(js, js->current_doc, where, base, 0);
+            ns_speculation_prefetch_links(js, js->current_doc, where, base,
+                                          same_origin_only, 0);
         JS_FreeValue(ctx, where);
         JS_FreeValue(ctx, urls);
         JS_FreeValue(ctx, rule);
     }
     JS_FreeValue(ctx, rules);
+}
+
+static void
+ns_js_apply_speculation_rules(ns_js *js, const char *text, gsize len,
+                              const char *base)
+{
+    if (!js || !text || !base || !js->current_url || !js->current_doc) return;
+    JSContext *ctx = js->ctx;
+    JSValue root = JS_ParseJSON(ctx, text, len, "speculationrules");
+    if (JS_IsException(root)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return;
+    }
+    ns_js_apply_speculation_rule_list(js, root, "prefetch", base, FALSE);
+    ns_js_apply_speculation_rule_list(js, root, "prerender", base, TRUE);
+    ns_js_apply_speculation_rule_list(js, root, "prerender_until_script", base,
+                                      TRUE);
     JS_FreeValue(ctx, root);
 }
 
@@ -70058,21 +70098,53 @@ ns_js_json_module_init(JSContext *ctx, JSModuleDef *m)
                               JS_GetModulePrivateValue(ctx, m));
 }
 
-static JSModuleDef *
-ns_js_make_json_module(JSContext *ctx, const char *module_name,
-                       const char *body, gsize body_len)
+typedef enum {
+    NS_MODULE_JAVASCRIPT,
+    NS_MODULE_JSON,
+    NS_MODULE_TEXT
+} ns_module_kind;
+
+static ns_module_kind
+ns_js_module_kind_of(JSContext *ctx, JSValueConst attributes)
 {
-    char *json_text = g_strndup(body, body_len);
-    JSValue json = JS_ParseJSON(ctx, json_text, body_len, module_name);
-    g_free(json_text);
-    if (JS_IsException(json)) return NULL;
+    if (ns_js_attrs_type_is(ctx, attributes, "json")) return NS_MODULE_JSON;
+    if (ns_js_attrs_type_is(ctx, attributes, "text")) return NS_MODULE_TEXT;
+    return NS_MODULE_JAVASCRIPT;
+}
+
+static JSValue
+ns_js_text_module_value(JSContext *ctx, const char *body, gsize body_len)
+{
+    if (body_len >= 3 && memcmp(body, "\xef\xbb\xbf", 3) == 0) {
+        body += 3;
+        body_len -= 3;
+    }
+    g_autofree char *valid = g_utf8_validate_len(body, body_len, NULL)
+        ? NULL : g_utf8_make_valid(body, (gssize)body_len);
+    return valid ? JS_NewString(ctx, valid)
+                 : JS_NewStringLen(ctx, body, body_len);
+}
+
+static JSModuleDef *
+ns_js_make_data_module(JSContext *ctx, const char *module_name,
+                       const char *body, gsize body_len, ns_module_kind kind)
+{
+    JSValue value;
+    if (kind == NS_MODULE_TEXT) {
+        value = ns_js_text_module_value(ctx, body, body_len);
+    } else {
+        char *json_text = g_strndup(body, body_len);
+        value = JS_ParseJSON(ctx, json_text, body_len, module_name);
+        g_free(json_text);
+    }
+    if (JS_IsException(value)) return NULL;
     JSModuleDef *m = JS_NewCModule(ctx, module_name, ns_js_json_module_init);
     if (!m) {
-        JS_FreeValue(ctx, json);
+        JS_FreeValue(ctx, value);
         return NULL;
     }
     JS_AddModuleExport(ctx, m, "default");
-    JS_SetModulePrivateValue(ctx, m, json);
+    JS_SetModulePrivateValue(ctx, m, value);
     return m;
 }
 
@@ -70480,12 +70552,13 @@ mime_essence(const char *ct)
 }
 
 static gboolean
-module_mime_acceptable(const char *content_type, gboolean json_module)
+module_mime_acceptable(const char *content_type, ns_module_kind kind)
 {
+    if (kind == NS_MODULE_TEXT) return TRUE;
     char *essence = mime_essence(content_type);
     if (!essence) return FALSE;
     gboolean ok;
-    if (json_module) {
+    if (kind == NS_MODULE_JSON) {
         ok = strcmp(essence, "application/json") == 0 ||
              strcmp(essence, "text/json") == 0 ||
              g_str_has_suffix(essence, "+json");
@@ -70501,7 +70574,7 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
                     JSValueConst attributes)
 {
     ns_js *js = opaque;
-    gboolean json_module = ns_js_attrs_type_is(ctx, attributes, "json");
+    ns_module_kind kind = ns_js_module_kind_of(ctx, attributes);
     if (!module_name) return NULL;
     if (js && (js->module_load_count > NS_MODULE_LOAD_MAX_COUNT ||
                js->module_load_bytes > NS_MODULE_LOAD_MAX_BYTES)) {
@@ -70525,9 +70598,9 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
             return NULL;
         }
         if (js) js->module_load_bytes += body_len;
-        if (json_module) {
-            JSModuleDef *m = ns_js_make_json_module(ctx, module_name,
-                                                    body, body_len);
+        if (kind != NS_MODULE_JAVASCRIPT) {
+            JSModuleDef *m = ns_js_make_data_module(ctx, module_name,
+                                                    body, body_len, kind);
             g_free(body);
             if (!m) ns_js_log_module_compile_error(js, ctx, module_name);
             return m;
@@ -70560,8 +70633,9 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
             js->module_load_count++;
             js->module_load_bytes += body_len;
         }
-        if (json_module)
-            return ns_js_make_json_module(ctx, module_name, body, body_len);
+        if (kind != NS_MODULE_JAVASCRIPT)
+            return ns_js_make_data_module(ctx, module_name, body, body_len,
+                                          kind);
         JSValue func_val =
             ns_js_compile_module_cached(ctx, body, body_len, module_name);
         if (JS_IsException(func_val)) {
@@ -70597,7 +70671,7 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
         .document_url = ns_js_realm_document_url(js, ctx),
         .cors_mode = TRUE,
     };
-    const char *const *accept = json_module
+    const char *const *accept = kind != NS_MODULE_JAVASCRIPT
         ? NULL : ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT);
     GPtrArray *headers = g_ptr_array_new();
     for (int i = 0; accept && accept[i]; i++)
@@ -70632,9 +70706,10 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
         ns_response_free(resp);
         return NULL;
     }
-    if (!module_mime_acceptable(resp->content_type, json_module)) {
+    if (!module_mime_acceptable(resp->content_type, kind)) {
         JS_ThrowTypeError(ctx, "%s module %s has disallowed MIME type %s",
-                          json_module ? "JSON" : "JavaScript", module_name,
+                          kind == NS_MODULE_JSON ? "JSON" : "JavaScript",
+                          module_name,
                           resp->content_type ? resp->content_type : "(none)");
         ns_response_free(resp);
         return NULL;
@@ -70643,9 +70718,9 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
     char *copy = g_strndup((const char *)resp->body->data, resp->body->len);
     gsize copy_len = resp->body->len;
     ns_response_free(resp);
-    if (json_module) {
-        JSModuleDef *m = ns_js_make_json_module(ctx, module_name,
-                                                copy, copy_len);
+    if (kind != NS_MODULE_JAVASCRIPT) {
+        JSModuleDef *m = ns_js_make_data_module(ctx, module_name,
+                                                copy, copy_len, kind);
         g_free(copy);
         if (!m) ns_js_log_module_compile_error(js, ctx, module_name);
         return m;
@@ -73963,6 +74038,12 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         g_autofree char *frame_policy = resp
             ? ns_net_raw_header_values(resp->raw_headers, "Permissions-Policy")
             : NULL;
+        g_autofree char *frame_allowlist = resp
+            ? ns_net_raw_header_values(resp->raw_headers, "Connection-Allowlist")
+            : NULL;
+        if (frame_allowlist && *frame_allowlist && resp->final_url)
+            ns_net_connection_allowlist_register(js, resp->final_url,
+                                                 frame_allowlist, FALSE);
         if (frame_policy && *frame_policy)
             ns_element_set_attr(iframe, "data-nd-frame-pp", frame_policy);
         else
