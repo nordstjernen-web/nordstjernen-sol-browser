@@ -234,6 +234,7 @@ struct ns_js {
     struct ns_anim *anim;
     GHashTable   *js_image_loads;
     GHashTable   *orphan_nodes;
+    gboolean      orphaned_since_layout;
     GPtrArray    *listeners;
     GHashTable   *listener_index;
     GHashTable   *pinned_wrappers_set;
