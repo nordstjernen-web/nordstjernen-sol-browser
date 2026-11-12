@@ -10,6 +10,7 @@
 #include "content_decode.h"
 #include "history.h"
 #include "csp.h"
+#include "connection_allowlist.h"
 #include "debuglog.h"
 #include "ext.h"
 #include "js.h"
@@ -7091,6 +7092,82 @@ ns_net_csp_allows(const char *doc_url, ns_csp_kind kind, const char *url,
     return ok;
 }
 
+typedef struct {
+    gconstpointer      owner;
+    ns_conn_allowlist *list;
+} ns_net_conn_entry;
+
+static GMutex      g_conn_allowlist_lock;
+static GHashTable *g_conn_allowlist_by_origin;
+
+static void
+ns_net_conn_entry_free(gpointer p)
+{
+    ns_net_conn_entry *e = p;
+    if (!e) return;
+    ns_conn_allowlist_free(e->list);
+    g_free(e);
+}
+
+void
+ns_net_connection_allowlist_unregister(gconstpointer owner)
+{
+    g_mutex_lock(&g_conn_allowlist_lock);
+    if (g_conn_allowlist_by_origin) {
+        GHashTableIter it;
+        gpointer k, v;
+        g_hash_table_iter_init(&it, g_conn_allowlist_by_origin);
+        while (g_hash_table_iter_next(&it, &k, &v))
+            if (((ns_net_conn_entry *)v)->owner == owner)
+                g_hash_table_iter_remove(&it);
+    }
+    g_mutex_unlock(&g_conn_allowlist_lock);
+}
+
+void
+ns_net_connection_allowlist_register(gconstpointer owner, const char *doc_url,
+                                     const char *header, gboolean replace)
+{
+    g_autofree char *origin = doc_url ? ns_url_origin_from(doc_url) : NULL;
+    if (!origin || !*origin || strcmp(origin, "null") == 0) return;
+    ns_conn_allowlist *list = ns_conn_allowlist_parse(header, origin);
+    if (!list) return;
+    g_mutex_lock(&g_conn_allowlist_lock);
+    if (!g_conn_allowlist_by_origin)
+        g_conn_allowlist_by_origin =
+            g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                  ns_net_conn_entry_free);
+    if (replace || !g_hash_table_contains(g_conn_allowlist_by_origin, origin)) {
+        ns_net_conn_entry *e = g_new0(ns_net_conn_entry, 1);
+        e->owner = owner;
+        e->list = g_steal_pointer(&list);
+        g_hash_table_replace(g_conn_allowlist_by_origin,
+                             g_steal_pointer(&origin), e);
+    }
+    g_mutex_unlock(&g_conn_allowlist_lock);
+    ns_conn_allowlist_free(list);
+}
+
+gboolean
+ns_net_connection_allowlist_allows(const char *doc_url, const char *url)
+{
+    if (!doc_url || !*doc_url || !url) return TRUE;
+    if (g_ascii_strncasecmp(url, "http://", 7) != 0 &&
+        g_ascii_strncasecmp(url, "https://", 8) != 0 &&
+        g_ascii_strncasecmp(url, "ws://", 5) != 0 &&
+        g_ascii_strncasecmp(url, "wss://", 6) != 0)
+        return TRUE;
+    g_autofree char *origin = ns_url_origin_from(doc_url);
+    if (!origin || !*origin) return TRUE;
+    gboolean ok = TRUE;
+    g_mutex_lock(&g_conn_allowlist_lock);
+    ns_net_conn_entry *e = g_conn_allowlist_by_origin
+        ? g_hash_table_lookup(g_conn_allowlist_by_origin, origin) : NULL;
+    if (e) ok = ns_conn_allowlist_allows(e->list, url);
+    g_mutex_unlock(&g_conn_allowlist_lock);
+    return ok;
+}
+
 static gboolean
 ns_net_csp_upgrades_insecure(const char *doc_url)
 {
@@ -7166,6 +7243,11 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         !ns_net_csp_allows(top_url, policy_kind, url, NULL, FALSE)) {
         resp->final_url = g_strdup(url);
         resp->error = g_strdup("blocked by Content-Security-Policy");
+        return resp;
+    }
+    if (!is_navigation && !ns_net_connection_allowlist_allows(top_url, url)) {
+        resp->final_url = g_strdup(url);
+        resp->error = g_strdup("blocked by Connection-Allowlist");
         return resp;
     }
 
@@ -8647,7 +8729,8 @@ ns_preconnect_thread(GTask *task, gpointer source_object, gpointer task_data,
     g_preconnect_active++;
     g_mutex_unlock(&g_fetch_throttle_mutex);
     gboolean refused = g_atomic_int_get(&g_net_aborting) ||
-                       !ns_net_policy_allows(url);
+                       !ns_net_policy_allows(url) ||
+                       !ns_net_connection_allowlist_allows(document_url, url);
     CURL *curl = refused ? NULL : curl_easy_init();
     if (curl) {
         ns_net_address_guard address_guard;

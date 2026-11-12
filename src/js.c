@@ -1912,6 +1912,17 @@ ns_js_set_permissions_policy(ns_js *js, const char *header_value)
         ? g_strdup(header_value) : NULL;
 }
 
+void
+ns_js_set_connection_allowlist(ns_js *js, const char *document_url,
+                               const char *header_value)
+{
+    if (!js || js->worker_host) return;
+    ns_net_connection_allowlist_unregister(js);
+    if (header_value && *header_value)
+        ns_net_connection_allowlist_register(js, document_url, header_value,
+                                             TRUE);
+}
+
 static JSValue
 ns_feature_policy_allows(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
@@ -68429,6 +68440,7 @@ ns_js_free(ns_js *js)
     if (js->import_map) g_ptr_array_free(js->import_map, TRUE);
     if (js->csp) { ns_csp_free(js->csp); js->csp = NULL; }
     if (js->csp_headers) ns_net_csp_unregister(js);
+    ns_net_connection_allowlist_unregister(js);
     g_clear_pointer(&js->csp_headers, g_ptr_array_unref);
     g_free(js->early_inject_src);
     g_free(js->local_storage_origin);
@@ -73963,6 +73975,12 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         g_autofree char *frame_policy = resp
             ? ns_net_raw_header_values(resp->raw_headers, "Permissions-Policy")
             : NULL;
+        g_autofree char *frame_allowlist = resp
+            ? ns_net_raw_header_values(resp->raw_headers, "Connection-Allowlist")
+            : NULL;
+        if (frame_allowlist && *frame_allowlist && resp->final_url)
+            ns_net_connection_allowlist_register(js, resp->final_url,
+                                                 frame_allowlist, FALSE);
         if (frame_policy && *frame_policy)
             ns_element_set_attr(iframe, "data-nd-frame-pp", frame_policy);
         else

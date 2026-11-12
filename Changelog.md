@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: the `Connection-Allowlist` response header is enforced. A
+  document that sends it may only connect to URLs matching one of its
+  patterns (`response-origin`, or URL patterns with `*` wildcards and
+  regular-expression groups): subresources, `fetch()`, XHR, WebSocket,
+  EventSource and preconnects to anything else are blocked, on every
+  redirect hop. A header that cannot be parsed blocks every connection.
+  Navigations are not restricted, and
+  `Connection-Allowlist-Report-Only` is not acted on.
 * WebCrypto: `crypto.subtle` supports ChaCha20-Poly1305 (generate,
   import, export, encrypt, decrypt, wrap and unwrap; 256-bit keys, 96-bit
   nonces, additional data), and the `raw-secret` key format for every

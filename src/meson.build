@@ -112,6 +112,7 @@ nordstjernen_engine_sources = files(
   'cache.c',
   'capability.c',
   'config.c',
+  'connection_allowlist.c',
   'cookies.c',
   'csp.c',
   'css.c',
