@@ -10,10 +10,12 @@
 
 #include <glib/gstdio.h>
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -2073,6 +2075,51 @@ ns_rproc_http_export(ns_rproc_http *r, const char *path)
     return ok == 0 ? 0 : -1;
 }
 
+#define NS_PRINT_MAX_SHEETS 2000
+#define NS_PRINT_MAX_SIDE   30000
+#define NS_PRINT_MAX_BYTES  (1024.0 * 1024.0 * 1024.0)
+
+static cairo_surface_t *
+print_sheet_load(const char *path, double width, double height)
+{
+    if (!(width >= 1) || !(height >= 1) || width > NS_PRINT_MAX_SIDE ||
+        height > NS_PRINT_MAX_SIDE || width * height * 4.0 > NS_PRINT_MAX_BYTES)
+        return NULL;
+    int w = (int)width, h = (int)height;
+    size_t row = (size_t)w * 4u;
+#ifdef _WIN32
+    int fd = g_open(path, O_RDONLY | O_BINARY, 0);
+#else
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+#endif
+    if (fd < 0)
+        return NULL;
+    struct stat st;
+    FILE *f = NULL;
+    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
+        (guint64)st.st_size == (guint64)row * (guint64)h)
+        f = fdopen(fd, "rb");
+    if (!f) {
+        close(fd);
+        return NULL;
+    }
+    cairo_surface_t *img = cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
+    gboolean ok = cairo_surface_status(img) == CAIRO_STATUS_SUCCESS;
+    if (ok) {
+        unsigned char *data = cairo_image_surface_get_data(img);
+        size_t stride = (size_t)cairo_image_surface_get_stride(img);
+        for (int y = 0; ok && y < h; y++)
+            ok = fread(data + (size_t)y * stride, 1, row, f) == row;
+        cairo_surface_mark_dirty(img);
+    }
+    fclose(f);
+    if (!ok) {
+        cairo_surface_destroy(img);
+        return NULL;
+    }
+    return img;
+}
+
 GPtrArray *
 ns_rproc_http_print(ns_rproc_http *r, ns_print_setup *out_setup,
                     double *out_scale)
@@ -2114,20 +2161,17 @@ ns_rproc_http_print(ns_rproc_http *r, ns_print_setup *out_setup,
     json_get_double(body, "ml", &out_setup->margin_left);
     free(body);
 
+    double sheet_w = ceil(out_setup->width * scale);
+    double sheet_h = ceil(out_setup->height * scale);
     GPtrArray *sheets = g_ptr_array_new();
-    for (long i = 0; i < pages; i++) {
-        char *path = g_strdup_printf("%s-%ld.png", prefix, i);
-        if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
-            g_free(path);
-            break;
-        }
-        cairo_surface_t *img = cairo_image_surface_create_from_png(path);
-        if (cairo_surface_status(img) == CAIRO_STATUS_SUCCESS)
-            g_ptr_array_add(sheets, img);
-        else
-            cairo_surface_destroy(img);
+    for (long i = 0; i < pages && i < NS_PRINT_MAX_SHEETS; i++) {
+        char *path = g_strdup_printf("%s-%ld.raw", prefix, i);
+        cairo_surface_t *img = print_sheet_load(path, sheet_w, sheet_h);
         g_remove(path);
         g_free(path);
+        if (!img)
+            break;
+        g_ptr_array_add(sheets, img);
     }
     g_free(prefix);
 
