@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* WebCrypto: `crypto.subtle` supports ChaCha20-Poly1305 (generate,
+  import, export, encrypt, decrypt, wrap and unwrap; 256-bit keys, 96-bit
+  nonces, additional data), and the `raw-secret` key format for every
+  symmetric algorithm.
 * Security: Permissions Policy is supported. The `Permissions-Policy`
   response header and the `<iframe allow>` attribute (with
   `allowfullscreen`) decide which features a document and its frames may

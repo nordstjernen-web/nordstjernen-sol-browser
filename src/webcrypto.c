@@ -145,12 +145,23 @@ ns_crypto_okp_name(const char *algo)
     return NULL;
 }
 
+static gboolean
+ns_crypto_is_chacha(const char *algo)
+{
+    return algo && !g_ascii_strcasecmp(algo, "ChaCha20-Poly1305");
+}
+
 ns_crypto_key *
 ns_crypto_generate_secret(const char *algo, const char *hash, int length_bits,
                           gboolean extractable, guint32 usages, char **err)
 {
     if (length_bits <= 0 || length_bits % 8 != 0 || length_bits > 4096) {
         if (err) *err = g_strdup("OperationError: invalid key length");
+        return NULL;
+    }
+    if (ns_crypto_is_chacha(algo) && length_bits != 256) {
+        if (err) *err = g_strdup("OperationError: ChaCha20-Poly1305 keys are "
+                                 "256 bits");
         return NULL;
     }
     if (algo && g_ascii_strncasecmp(algo, "AES", 3) == 0 &&
@@ -271,9 +282,23 @@ ns_crypto_import_raw(const char *format, const guint8 *data, gsize len,
     gboolean symmetric = !g_ascii_strcasecmp(algo, "HMAC") ||
                          !g_ascii_strncasecmp(algo, "AES", 3) ||
                          !g_ascii_strcasecmp(algo, "PBKDF2") ||
-                         !g_ascii_strcasecmp(algo, "HKDF");
+                         !g_ascii_strcasecmp(algo, "HKDF") ||
+                         ns_crypto_is_chacha(algo);
 
+    if (!g_strcmp0(format, "raw-secret")) {
+        if (!symmetric) {
+            if (err) *err = g_strdup("NotSupportedError: raw-secret is for "
+                                     "symmetric keys");
+            return NULL;
+        }
+        format = "raw";
+    }
     if (!g_strcmp0(format, "raw") && symmetric) {
+        if (ns_crypto_is_chacha(algo) && len != 32) {
+            if (err) *err = g_strdup("DataError: invalid ChaCha20-Poly1305 key "
+                                     "length");
+            return NULL;
+        }
         if (!g_ascii_strncasecmp(algo, "AES", 3) &&
             len != 16 && len != 24 && len != 32) {
             if (err) *err = g_strdup("DataError: invalid AES key length");
@@ -520,7 +545,8 @@ guint8 *
 ns_crypto_export_raw(const char *format, const ns_crypto_key *k, gsize *out_len,
                      char **err)
 {
-    if (!g_strcmp0(format, "raw") && k->raw) {
+    if ((!g_strcmp0(format, "raw") || !g_strcmp0(format, "raw-secret")) &&
+        k->raw) {
         *out_len = k->raw_len;
         return g_memdup2(k->raw, k->raw_len);
     }
@@ -1113,12 +1139,62 @@ ns_crypto_rsa_oaep(const ns_crypto_key *k, const ns_crypto_params *p,
     return out;
 }
 
+static guint8 *
+ns_crypto_chacha(const ns_crypto_key *k, const ns_crypto_params *p,
+                 const guint8 *data, gsize len, gboolean enc, gsize *out_len,
+                 char **err)
+{
+    enum { TAG_LEN = 16 };
+    if (!k->raw || k->raw_len != 32)
+        return ns_crypto_err(err, "OperationError: invalid ChaCha20-Poly1305 key");
+    if (!p->iv || p->iv_len != 12)
+        return ns_crypto_err(err, "OperationError: ChaCha20-Poly1305 needs a "
+                                  "12-byte IV");
+    if (p->tag_bits > 0 && p->tag_bits != 128)
+        return ns_crypto_err(err, "OperationError: ChaCha20-Poly1305 tags are "
+                                  "128 bits");
+    if (!enc && len < TAG_LEN)
+        return ns_crypto_err(err, "OperationError: decrypt");
+    if (len > (gsize)G_MAXINT - 64 || p->aad_len > (gsize)G_MAXINT)
+        return ns_crypto_err(err, "OperationError: data too long");
+
+    gsize body_len = enc ? len : len - TAG_LEN;
+    guint8 *out = g_malloc(body_len + TAG_LEN + 1);
+    guint8 tag[TAG_LEN];
+    if (!enc) memcpy(tag, data + body_len, TAG_LEN);
+    int outl = 0, finl = 0;
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    gboolean ok = ctx &&
+        EVP_CipherInit_ex(ctx, EVP_chacha20_poly1305(), NULL, NULL, NULL, enc) &&
+        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, 12, NULL) &&
+        EVP_CipherInit_ex(ctx, NULL, NULL, k->raw, p->iv, enc) &&
+        (enc || EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, TAG_LEN, tag)) &&
+        (!p->aad_len ||
+         EVP_CipherUpdate(ctx, NULL, &outl, p->aad, (int)p->aad_len)) &&
+        (!body_len ||
+         EVP_CipherUpdate(ctx, out, &outl, data, (int)body_len)) &&
+        EVP_CipherFinal_ex(ctx, out + body_len, &finl) &&
+        (!enc || EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, TAG_LEN,
+                                     out + body_len));
+    EVP_CIPHER_CTX_free(ctx);
+    if (!ok) {
+        OPENSSL_cleanse(out, body_len + TAG_LEN);
+        g_free(out);
+        return ns_crypto_err(err, enc ? "OperationError: encrypt"
+                                      : "OperationError: decrypt");
+    }
+    *out_len = enc ? body_len + TAG_LEN : body_len;
+    return out;
+}
+
 guint8 *
 ns_crypto_encrypt(const ns_crypto_key *k, const ns_crypto_params *p,
                   const guint8 *data, gsize len, gsize *out_len, char **err)
 {
     if (ns_crypto_is_aes(k->algo))
         return ns_crypto_aes(k, p, data, len, TRUE, out_len, err);
+    if (ns_crypto_is_chacha(k->algo))
+        return ns_crypto_chacha(k, p, data, len, TRUE, out_len, err);
     if (!g_strcmp0(k->algo, "RSA-OAEP"))
         return ns_crypto_rsa_oaep(k, p, data, len, TRUE, out_len, err);
     if (err) *err = g_strdup("NotSupportedError: encrypt");
@@ -1131,6 +1207,8 @@ ns_crypto_decrypt(const ns_crypto_key *k, const ns_crypto_params *p,
 {
     if (ns_crypto_is_aes(k->algo))
         return ns_crypto_aes(k, p, data, len, FALSE, out_len, err);
+    if (ns_crypto_is_chacha(k->algo))
+        return ns_crypto_chacha(k, p, data, len, FALSE, out_len, err);
     if (!g_strcmp0(k->algo, "RSA-OAEP"))
         return ns_crypto_rsa_oaep(k, p, data, len, FALSE, out_len, err);
     if (err) *err = g_strdup("NotSupportedError: decrypt");

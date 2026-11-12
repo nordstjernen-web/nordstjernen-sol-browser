@@ -12709,7 +12709,7 @@ ns_wc_canon(const char *n)
 {
     static const char *names[] = {
         "RSASSA-PKCS1-v1_5", "RSA-PSS", "RSA-OAEP",
-        "AES-GCM", "AES-CBC", "AES-CTR", "AES-KW",
+        "AES-GCM", "AES-CBC", "AES-CTR", "AES-KW", "ChaCha20-Poly1305",
         "HMAC", "ECDSA", "ECDH", "PBKDF2", "HKDF",
         "Ed25519", "X25519",
         "SHA-1", "SHA-256", "SHA-384", "SHA-512",
@@ -12725,7 +12725,8 @@ static gboolean
 ns_wc_is_symmetric(const char *n)
 {
     return n && (!g_strcmp0(n, "HMAC") || !g_ascii_strncasecmp(n, "AES-", 4) ||
-                 !g_strcmp0(n, "PBKDF2") || !g_strcmp0(n, "HKDF"));
+                 !g_strcmp0(n, "PBKDF2") || !g_strcmp0(n, "HKDF") ||
+                 !g_strcmp0(n, "ChaCha20-Poly1305"));
 }
 
 static int
@@ -13055,6 +13056,8 @@ ns_subtle_generateKey(JSContext *ctx, JSValueConst this_val,
         int bits = a.length;
         if (!g_strcmp0(a.name, "HMAC") && bits <= 0)
             bits = ns_wc_hmac_default_bits(a.hash);
+        if (!g_strcmp0(a.name, "ChaCha20-Poly1305"))
+            bits = 256;
         ns_crypto_key *k = ns_crypto_generate_secret(a.name, a.hash, bits, ext,
                                                      usages, &err);
         if (k) ns_wc_resolve(ctx, resolvers, ns_wc_make_key(ctx, k));
@@ -13193,6 +13196,8 @@ ns_wc_export_jwk(JSContext *ctx, ns_crypto_key *k, char **err)
         char *b = ns_b64url_encode(k->raw, k->raw_len);
         JS_SetPropertyStr(ctx, o, "kty", JS_NewString(ctx, "oct"));
         JS_SetPropertyStr(ctx, o, "k", JS_NewString(ctx, b));
+        if (!g_strcmp0(k->algo, "ChaCha20-Poly1305"))
+            JS_SetPropertyStr(ctx, o, "alg", JS_NewString(ctx, "C20P"));
         g_free(b);
         return o;
     }
