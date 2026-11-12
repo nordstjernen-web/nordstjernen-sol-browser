@@ -1719,10 +1719,17 @@ ns_js_realm_origin_is_opaque(ns_js *js, JSContext *realm)
 {
     if (js && js->worker_host) return js->worker_host->opaque_origin;
     ns_node *frame = ns_js_frame_of_realm(js, realm);
-    if (!frame) return FALSE;
-    unsigned sandbox = ns_iframe_effective_sandbox(frame);
+    unsigned sandbox = frame ? ns_iframe_effective_sandbox(frame)
+                             : (js ? js->document_sandbox : 0);
     return (sandbox & NS_SANDBOX_ACTIVE) &&
            !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN);
+}
+
+static gboolean
+ns_js_document_origin_is_opaque(const ns_js *js)
+{
+    return js && (js->document_sandbox & NS_SANDBOX_ACTIVE) &&
+           !(js->document_sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN);
 }
 
 static void
@@ -4028,7 +4035,11 @@ static void
 ns_partition_apply(ns_js *js, const char *new_url)
 {
     if (!js) return;
-    char *origin = ns_url_origin_from(new_url);
+    gboolean opaque = ns_js_document_origin_is_opaque(js);
+    if (opaque && js->partition_key &&
+        g_str_has_prefix(js->partition_key, "opaque://"))
+        return;
+    char *origin = opaque ? NULL : ns_url_origin_from(new_url);
     char *new_key;
     if (origin && *origin) {
         new_key = origin;
@@ -4071,6 +4082,13 @@ ns_storage_load_for(ns_js *js, const char *new_url)
     ns_partition_apply(js, new_url);
     if (js->local_storage_disabled) {
         g_hash_table_remove_all(js->local_storage);
+        return;
+    }
+    if (ns_js_document_origin_is_opaque(js)) {
+        ns_storage_flush(js);
+        g_hash_table_remove_all(js->local_storage);
+        g_clear_pointer(&js->local_storage_origin, g_free);
+        g_clear_pointer(&js->local_storage_path, g_free);
         return;
     }
     char *new_origin = ns_url_origin_from(new_url);
@@ -30615,6 +30633,8 @@ ns_worker_js_abandon(ns_js *js)
     g_free(js);
 }
 
+static void ns_zlib_install(JSContext *ctx, JSValueConst global);
+
 static ns_js *
 ns_worker_js_new(ns_worker_host *host)
 {
@@ -30764,6 +30784,7 @@ ns_worker_js_new(ns_worker_host *host)
     ns_install_abort_signal_interface(ctx, global);
     ns_net_install_interfaces(ctx, global);
     ns_idb_install(ctx, global);
+    ns_zlib_install(ctx, global);
     ns_js_eval_engine_bundle(js, &ns_polyfills_bundle, "<polyfills>");
     {
         JSValue g = JS_GetGlobalObject(ctx);
@@ -61347,6 +61368,18 @@ ns_zlib_finish(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 }
 
 static void
+ns_zlib_install(JSContext *ctx, JSValueConst global)
+{
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    ns_new_class_id(&ns_zlib_class_id);
+    if (!JS_IsRegisteredClass(rt, ns_zlib_class_id))
+        JS_NewClass(rt, ns_zlib_class_id, &ns_zlib_class);
+    ns_bind_fn(ctx, global, "__ns_zlib_create", ns_zlib_create, 2);
+    ns_bind_fn(ctx, global, "__ns_zlib_push",   ns_zlib_push,   2);
+    ns_bind_fn(ctx, global, "__ns_zlib_finish", ns_zlib_finish, 1);
+}
+
+static void
 ns_define_element_unscopables(JSContext *ctx, JSValue proto)
 {
     JSValue gobj = JS_GetGlobalObject(ctx);
@@ -64100,8 +64133,6 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_worker_install_constructor(ctx, global);
     ns_new_class_id(&ns_ws_class_id);
     JS_NewClass(js->rt, ns_ws_class_id, &ns_ws_class);
-    ns_new_class_id(&ns_zlib_class_id);
-    JS_NewClass(js->rt, ns_zlib_class_id, &ns_zlib_class);
     ns_bind_ctor(ctx, global, "WebSocket",      ns_window_websocket_ctor,    2);
     {
         JSValue ws = JS_GetPropertyStr(ctx, global, "WebSocket");
@@ -67752,9 +67783,7 @@ ns_js_setup_document_interfaces(ns_js *js, JSContext *ctx, JSValueConst global)
     ns_link_class_ctor(ctx, global, "DOMStringMap", ns_dataset_class_id);
     ns_link_class_ctor(ctx, global, "DOMTokenList", ns_token_list_class_id);
 
-    ns_bind_fn(ctx, global, "__ns_zlib_create", ns_zlib_create, 2);
-    ns_bind_fn(ctx, global, "__ns_zlib_push",   ns_zlib_push,   2);
-    ns_bind_fn(ctx, global, "__ns_zlib_finish", ns_zlib_finish, 1);
+    ns_zlib_install(ctx, global);
     ns_bind_fn(ctx, global, "__ndNativeRange",  ns_native_range, 0);
 
     ns_install_hasinstance(ctx, global);
@@ -74566,6 +74595,16 @@ ns_js_add_csp_header(ns_js *js, const char *header_value)
     } else {
         js->csp = parsed;
     }
+}
+
+void
+ns_js_set_document_sandbox(ns_js *js, const char *csp_header)
+{
+    if (!js) return;
+    g_autofree char *tokens = ns_csp_header_sandbox_tokens(csp_header);
+    js->document_sandbox = tokens ? ns_sandbox_from_policy_lines(tokens) : 0;
+    if (ns_js_document_origin_is_opaque(js))
+        ns_storage_load_for(js, js->current_url);
 }
 
 const char *

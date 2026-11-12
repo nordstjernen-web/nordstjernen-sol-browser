@@ -1391,6 +1391,8 @@ browser_prepare_document_response(ns_response *resp)
     } else if (browser_content_type_is_pdf(resp->content_type)) {
         html = ns_pdf_document_html(resp->body->data, resp->body->len,
                                     final_url);
+        g_free(resp->csp_header);
+        resp->csp_header = g_strdup(ns_pdf_document_csp());
     } else if (browser_content_type_is_json(resp->content_type)) {
         char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
                                                  resp->body->len,
@@ -1572,6 +1574,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         if (g_opener_token)
             ns_js_set_opener(b->js, g_opener_token, g_opener_origin);
         ns_js_add_csp_header(b->js, csp_header);
+        ns_js_set_document_sandbox(b->js, csp_header);
         browser_apply_meta_csp(b->js, doc, 0);
         const ns_config *run_cfg = ns_config_get();
         if (!run_cfg || run_cfg->javascript_enabled)
@@ -1965,11 +1968,11 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         !headers_have_no_store(resp->raw_headers);
     char *refresh_hdr = g_strdup(resp->refresh);
     char *doc_language = g_strdup(resp->content_language);
-    char *csp_header = g_strdup(resp->csp_header);
     g_free(file_url);
     g_free(stripped_url);
     g_free(https_url);
     browser_prepare_document_response(resp);
+    char *csp_header = g_strdup(resp->csp_header);
 
     char *doc_charset = NULL;
     char *decoded = ns_html_decode_body_full((const char *)resp->body->data,

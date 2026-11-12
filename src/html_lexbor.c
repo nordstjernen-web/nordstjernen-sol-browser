@@ -483,127 +483,6 @@ ns_media_extract_standard(const ns_node *root)
     g_free(embed);
 }
 
-static const char *
-xml_skip_until(const char *p, const char *end, const char *delim)
-{
-    size_t dl = strlen(delim);
-    while (p + dl <= end) {
-        if (memcmp(p, delim, dl) == 0) return p + dl;
-        p++;
-    }
-    return NULL;
-}
-
-static char *
-xml_root_default_namespace(const char *s, const char *end)
-{
-    for (const char *p = s; p < end; p++) {
-        if (p != s && !g_ascii_isspace(p[-1])) continue;
-        if (end - p < 5 || strncmp(p, "xmlns", 5) != 0) continue;
-        const char *a = p + 5;
-        while (a < end && g_ascii_isspace(*a)) a++;
-        if (a >= end || *a != '=') continue;
-        a++;
-        while (a < end && g_ascii_isspace(*a)) a++;
-        if (a >= end || (*a != '"' && *a != '\'')) continue;
-        char q = *a++;
-        const char *v = a;
-        while (a < end && *a != q) a++;
-        return g_strndup(v, (gsize)(a - v));
-    }
-    return NULL;
-}
-
-gboolean
-ns_xml_well_formed(const char *input, gssize len, char **out_root_ns)
-{
-    if (out_root_ns) *out_root_ns = NULL;
-    if (!input) return FALSE;
-    size_t n = (len < 0) ? strlen(input) : (size_t)len;
-    const char *p = input;
-    const char *end = input + n;
-    GPtrArray *stack = g_ptr_array_new_with_free_func(g_free);
-    gboolean ok = TRUE;
-    gboolean root_seen = FALSE;
-    gboolean root_closed = FALSE;
-
-    while (p < end && ok) {
-        if (*p != '<') { p++; continue; }
-        const char *q = p + 1;
-        if (q < end && *q == '!') {
-            if (end - q >= 3 && strncmp(q, "!--", 3) == 0) {
-                const char *e = xml_skip_until(q + 3, end, "-->");
-                if (!e) { ok = FALSE; break; }
-                p = e; continue;
-            }
-            if (end - q >= 8 && strncmp(q, "![CDATA[", 8) == 0) {
-                const char *e = xml_skip_until(q + 8, end, "]]>");
-                if (!e) { ok = FALSE; break; }
-                p = e; continue;
-            }
-            const char *e = ns_xml_declaration_end(q + 1, end);
-            if (e >= end) { ok = FALSE; break; }
-            p = e + 1; continue;
-        }
-        if (q < end && *q == '?') {
-            const char *e = xml_skip_until(q + 1, end, "?>");
-            if (!e) { ok = FALSE; break; }
-            p = e; continue;
-        }
-        gboolean is_end = (q < end && *q == '/');
-        if (is_end) q++;
-        const char *te = q;
-        char quote = 0;
-        while (te < end) {
-            char c = *te;
-            if (quote) { if (c == quote) quote = 0; }
-            else if (c == '"' || c == '\'') quote = c;
-            else if (c == '>') break;
-            te++;
-        }
-        if (te >= end) { ok = FALSE; break; }
-        gboolean self_close = FALSE;
-        const char *inner_end = te;
-        if (!is_end) {
-            const char *t = te - 1;
-            while (t > q && g_ascii_isspace(*t)) t--;
-            if (*t == '/') { self_close = TRUE; inner_end = t; }
-        }
-        const char *ne = q;
-        while (ne < inner_end && !g_ascii_isspace(*ne) && *ne != '/') ne++;
-        if (ne == q) { ok = FALSE; break; }
-        char *name = g_strndup(q, (gsize)(ne - q));
-
-        if (is_end) {
-            if (stack->len == 0 ||
-                strcmp(g_ptr_array_index(stack, stack->len - 1), name) != 0) {
-                ok = FALSE; g_free(name); break;
-            }
-            g_ptr_array_remove_index(stack, stack->len - 1);
-            if (stack->len == 0) root_closed = TRUE;
-            g_free(name);
-        } else {
-            if (root_closed) { ok = FALSE; g_free(name); break; }
-            if (!root_seen) {
-                root_seen = TRUE;
-                if (out_root_ns)
-                    *out_root_ns = xml_root_default_namespace(ne, inner_end);
-            }
-            if (self_close) {
-                if (stack->len == 0) root_closed = TRUE;
-                g_free(name);
-            } else {
-                g_ptr_array_add(stack, name);
-            }
-        }
-        p = te + 1;
-    }
-    if (ok && (stack->len != 0 || !root_seen)) ok = FALSE;
-    g_ptr_array_free(stack, TRUE);
-    if (!ok && out_root_ns) { g_free(*out_root_ns); *out_root_ns = NULL; }
-    return ok;
-}
-
 static gboolean
 ns_text_all_whitespace(const char *s)
 {
@@ -770,7 +649,6 @@ ns_xml_mark_parser_inserted(ns_node *n, int depth)
 static ns_node *
 ns_xhtml_parse_document(const char *input, size_t len, gboolean scripting)
 {
-    if (!ns_xml_well_formed(input, (gssize)len, NULL)) return NULL;
     ns_node *root = ns_xml_parse_html_entities(input, (gssize)len);
     if (!root) return NULL;
     root->flags |= NS_NODE_XML_DOC;

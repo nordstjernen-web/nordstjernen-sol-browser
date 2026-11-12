@@ -3,6 +3,32 @@ Changelog:
 
 1.0.47-dev:
 ======
+* PDF documents open in a built-in viewer based on PDF.js instead of
+  page images from poppler: text can be selected, links
+  work, and pages render as they scroll into view. The viewer runs as
+  sandboxed script with no network access and no access to the site's
+  cookies or storage. The PDF.js release is fetched at build time
+  (`-Dpdfjs`); poppler remains the fallback when it is not built.
+* Security: a `Content-Security-Policy: sandbox` header on a top-level
+  document now gives the document an opaque origin for cookies,
+  storage, IndexedDB and fetch, as it already did for framed documents.
+* XML parsing (`DOMParser`, XHR, XHTML documents and frames) now checks
+  well-formedness properly: content after the root element, duplicate
+  attributes, `<` in attribute values, undefined entities, bad character
+  references, unbound namespace prefixes and similar errors are reported
+  instead of accepted. Internal DTD entities are expanded, within a
+  size budget. Elements may nest 512 deep instead of 256.
+* Security: an XML text run of `&` characters no longer takes quadratic
+  time to parse.
+* `CompressionStream` and `DecompressionStream` now compress and
+  decompress inside Workers. They passed bytes through unchanged there,
+  which broke PDF.js and any other script that inflates data in a
+  worker.
+* `docs/code-review-report.md` reviews the source for unused,
+  duplicate and insecure code, code a library could replace, hardening
+  libraries and Mozilla-project dependencies, with a ranked list of
+  proposed changes, and follow-up studies of expat for XML parsing and
+  of PDF.js as the PDF viewer.
 * Security: detached DOM nodes are no longer freed while the last
   layout may still point at them; they are released after the next
   layout instead. Fixes a possible use-after-free when a page removed

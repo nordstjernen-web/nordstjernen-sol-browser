@@ -365,6 +365,12 @@ if have_poppler
   add_project_arguments('-DNS_HAVE_POPPLER=1', language: 'c')
 endif
 
+pdfjs_sub = subproject('pdfjs-dist', required: get_option('pdfjs'))
+have_pdfjs = pdfjs_sub.found()
+if have_pdfjs
+  add_project_arguments('-DNS_HAVE_PDFJS=1', language: 'c')
+endif
+
 libfontconfig = dependency('fontconfig', required: false)
 have_fontconfig = libfontconfig.found()
 if have_fontconfig
@@ -728,6 +734,8 @@ summary({'WebAssembly (WAMR)': have_wasm,
          'WebAssembly SIMD (SIMDe)': have_wasm_simd}, section: 'Features')
 summary({'WebGL (glslang shader validator)': have_glslang}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
+summary({'PDF viewer (PDF.js)': have_pdfjs}, section: 'Features')
+summary({'PDF fallback (poppler)': have_poppler}, section: 'Features')
 summary({'H.264/AAC OS decoders': media_os_backend}, section: 'Features')
 summary({'JPEG XL images (libjxl)': have_jxl}, section: 'Features')
 summary({'GTK 4 shell': have_gtk}, section: 'Shells')

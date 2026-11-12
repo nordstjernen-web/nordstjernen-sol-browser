@@ -88,6 +88,23 @@ wpt_hook_h = custom_target(
             'ns_wpt_hook_src'],
 )
 
+pdf_viewer_embedded = {}
+if have_pdfjs
+  pdf_viewer_embedded = pdfjs_sub.get_variable('pdfjs_embedded') + {
+    'pdf_viewer_js': files('../data/js/pdf-viewer.js'),
+    'pdf_viewer_css': files('../data/js/pdf-viewer.css'),
+  }
+endif
+pdf_viewer_headers = []
+foreach name, src : pdf_viewer_embedded
+  pdf_viewer_headers += custom_target(
+    name + '.h',
+    input: ['../scripts/embed-text.py', src],
+    output: name + '.h',
+    command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@', 'ns_' + name],
+  )
+endforeach
+
 nordstjernen_engine_sources = files(
   'anim.c',
   'bytecode_cache.c',
@@ -197,6 +214,7 @@ endif
 
 nordstjernen_engine_sources += media_os_sources
 nordstjernen_engine_sources += [sb_key_h]
+nordstjernen_engine_sources += pdf_viewer_headers
 if have_os_mp4
   nordstjernen_engine_sources += files('mp4.c', 'video_mp4.c')
 endif

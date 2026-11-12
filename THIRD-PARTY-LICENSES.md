@@ -113,6 +113,24 @@ license including the LLVM exceptions is reproduced in
 
 ---
 
+### PDF.js — Apache License 2.0
+
+> PDF viewer library. Not in the source tree: the pinned `pdfjs-dist`
+> release is fetched by `subprojects/pdfjs-dist.wrap` at build time and
+> its `pdf.min.mjs`, `pdf.worker.min.mjs` and WebAssembly image decoders
+> are embedded in the engine binary (`-Dpdfjs`).
+> <https://github.com/mozilla/pdf.js>
+>
+> Copyright Mozilla Foundation.
+
+Licensed under the Apache License, Version 2.0; see the lexbor section
+above for the text. The embedded WebAssembly decoders carry their own
+licences, shipped in the package's `wasm/` directory: OpenJPEG
+(BSD 2-Clause), the JBIG2 decoder from PDFium (BSD 3-Clause) and qcms
+(MIT).
+
+---
+
 ### ICU4X calendar data and CLDR time zone names — Unicode License v3
 
 > Chinese, Korean and Umm al-Qura year tables

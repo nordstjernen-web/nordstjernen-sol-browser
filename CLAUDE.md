@@ -430,7 +430,12 @@ don't add `meson test` targets.
 
 - Don't introduce Mozilla/Gecko code, WebKit code, or any other
   upstream browser engine source. Nordstjernen is an independent
-  implementation, not a fork.
+  implementation, not a fork. The one
+  exception is the PDF viewer: PDF.js (Mozilla, Apache-2.0) is not engine
+  code; it runs as ordinary sandboxed script on the page that shows a PDF
+  (`src/pdf.c`, `data/js/pdf-viewer.js`). It is fetched at build time
+  through `subprojects/pdfjs-dist.wrap` and embedded, never committed;
+  `-Dpdfjs=disabled` drops it and poppler, when built, takes over.
 - **Don't add site-specific hacks.** No per-site rendering shims, no
   hardcoded hostnames, no grepping a site's private JSON (e.g.
   `ytInitialPlayerResponse`, `mediaDefinitions`, `ytimg`, `movie_player`).

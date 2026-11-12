@@ -3800,8 +3800,10 @@ about_diagnostics_html(void)
     diag_feature(s, "JPEG XL images", FALSE);
 #endif
     diag_feature(s, "SVG images", TRUE);
-#ifdef NS_HAVE_POPPLER
-    diag_feature(s, "Inline PDF viewer", TRUE);
+#ifdef NS_HAVE_PDFJS
+    diag_feature(s, "Inline PDF viewer (PDF.js)", TRUE);
+#elif defined(NS_HAVE_POPPLER)
+    diag_feature(s, "Inline PDF viewer (poppler)", TRUE);
 #else
     diag_feature(s, "Inline PDF viewer", FALSE);
 #endif

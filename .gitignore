@@ -50,6 +50,7 @@ compile_commands.json
 /subprojects/quickjs/
 /subprojects/wgpu-native-*/
 /subprojects/simde-*/
+/subprojects/pdfjs-dist-*/
 
 # CMake (in case)
 CMakeCache.txt
