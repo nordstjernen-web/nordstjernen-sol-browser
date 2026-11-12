@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* `text-shadow` set on an inline element (a link or span inside a line)
+  is painted; only the block's own shadow was. Shadows of right-aligned
+  and centred text are no longer cut off, and a shadow list may hold 16
+  shadows instead of 8.
+* A CSS `background-image` on a `<canvas>` element is loaded and
+  painted.
+* Layout: an empty block with `clear` set, but no float to clear, lets
+  its margins collapse through like any other empty block.
 * Security: lexbor is updated to upstream `e651d6b`, which fixes a
   double free and a read of an unset pointer when memory runs out while
   a document or its parser is being created.

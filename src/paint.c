@@ -3172,16 +3172,20 @@ static gboolean
 inline_text_src_extents(const inline_text_src *src, double *x0, double *y0,
                         double *w, double *h)
 {
-    int lw = 0, lh = 0;
-    ns_pango_layout_get_pixel_size(src->layout, &lw, &lh);
-    if (lw <= 0 || lh <= 0) return FALSE;
+    NsPangoRectangle ink, logical;
+    ns_pango_layout_get_pixel_extents(src->layout, &ink, &logical);
+    int left = MIN(ink.x, logical.x);
+    int top = MIN(ink.y, logical.y);
+    int right = MAX(ink.x + ink.width, logical.x + logical.width);
+    int bottom = MAX(ink.y + ink.height, logical.y + logical.height);
+    if (right <= left || bottom <= top) return FALSE;
     double sx0 = 0, sy0 = 0, sx1 = 0, sy1 = 0;
     if (src->layers && src->layer == k_inline_all_layers)
         ns_inline_shift_bounds(src->box, &sx0, &sy0, &sx1, &sy1);
-    *x0 = sx0;
-    *y0 = sy0;
-    *w = lw + sx1 - sx0;
-    *h = lh + sy1 - sy0;
+    *x0 = left + sx0;
+    *y0 = top + sy0;
+    *w = right - left + sx1 - sx0;
+    *h = bottom - top + sy1 - sy0;
     return TRUE;
 }
 
@@ -5632,14 +5636,173 @@ paint_inline_text(cairo_t *cr, const ns_box *b, const inline_text_src *src,
     paint_inline_text_strokes(cr, b, src, text_x, y_origin);
 }
 
+static const ns_css_shadow_list *
+style_text_shadow(const ns_style *s)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_TEXT_SHADOW] : NULL;
+    if (!v || v->kind != NS_CSS_V_SHADOW || v->u.shadow.n <= 0) return NULL;
+    return inline_box_is_hidden(s) ? NULL : &v->u.shadow;
+}
+
+static gboolean
+text_shadow_equal(const ns_css_shadow_list *a, const ns_css_shadow_list *b)
+{
+    if (a == b) return TRUE;
+    if (!a || !b || a->n != b->n) return FALSE;
+    for (int i = 0; i < a->n; i++) {
+        const ns_css_shadow *p = &a->s[i], *q = &b->s[i];
+        if (p->x != q->x || p->y != q->y || p->blur != q->blur ||
+            p->r != q->r || p->g != q->g || p->b != q->b || p->a != q->a)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+inline_text_shadow_varies(const ns_box *b, const ns_style *base)
+{
+    const ns_css_shadow_list *own = style_text_shadow(base);
+    for (guint i = 0; b->attrs && i < b->attrs->len; i++) {
+        const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, i);
+        if (text_style_attr_rank(r) != G_MAXSIZE &&
+            !text_shadow_equal(style_text_shadow(r->style), own))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+paint_text_shadow_path(cairo_t *cr, const cairo_path_t *path, double x0,
+                       double y0, double w, double h, const ns_css_shadow *sh)
+{
+    text_shadow_geom g;
+    text_shadow_geom_for(sh, w, h, &g);
+    cairo_save(cr);
+    cairo_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0,
+                          sh->b / 255.0, sh->a / 255.0);
+    cairo_surface_t *mask = g.blur > 0 && g.mw <= 4096 && g.mh <= 4096
+        ? cairo_image_surface_create(CAIRO_FORMAT_A8, g.mw, g.mh) : NULL;
+    if (mask && cairo_surface_status(mask) == CAIRO_STATUS_SUCCESS) {
+        cairo_t *mcr = cairo_create(mask);
+        cairo_scale(mcr, 1.0 / g.ds, 1.0 / g.ds);
+        cairo_translate(mcr, g.pad * g.ds - x0, g.pad * g.ds - y0);
+        cairo_append_path(mcr, path);
+        cairo_fill(mcr);
+        cairo_destroy(mcr);
+        cairo_surface_flush(mask);
+        unsigned char *data = cairo_image_surface_get_data(mask);
+        int stride = cairo_image_surface_get_stride(mask);
+        ns_box_blur_a8(data, g.mw, g.mh, stride, g.blur_s);
+        ns_box_blur_a8(data, g.mw, g.mh, stride, g.blur_s);
+        cairo_surface_mark_dirty(mask);
+        paint_text_shadow_mask(cr, mask, g.ds, x0 + sh->x - g.pad * g.ds,
+                               y0 + sh->y - g.pad * g.ds);
+    } else {
+        cairo_translate(cr, sh->x, sh->y);
+        cairo_new_path(cr);
+        cairo_append_path(cr, path);
+        cairo_fill(cr);
+    }
+    if (mask) cairo_surface_destroy(mask);
+    cairo_restore(cr);
+}
+
+typedef struct text_shadow_walk {
+    cairo_t *cr;
+    const ns_style **owner;
+    gsize n;
+    NsPangoGlyphString *one;
+    const ns_style *style;
+    const ns_css_shadow_list *shadow;
+} text_shadow_walk;
+
+static void
+text_shadow_flush(text_shadow_walk *w)
+{
+    if (w->shadow && cairo_has_current_point(w->cr)) {
+        double x0, y0, x1, y1;
+        cairo_path_extents(w->cr, &x0, &y0, &x1, &y1);
+        cairo_path_t *path = cairo_copy_path(w->cr);
+        for (int si = w->shadow->n - 1; si >= 0; si--)
+            paint_text_shadow_path(w->cr, path, x0, y0, x1 - x0, y1 - y0,
+                                   &w->shadow->s[si]);
+        cairo_path_destroy(path);
+    }
+    cairo_new_path(w->cr);
+}
+
+static void
+text_shadow_run(const NsPangoLayoutRun *run, double x, double y,
+                gpointer data)
+{
+    text_shadow_walk *w = data;
+    const NsPangoGlyphString *gs = run->glyphs;
+    for (int g = 0; g < gs->num_glyphs; g++) {
+        gsize byte = (gsize)(run->item->offset + gs->log_clusters[g]);
+        const ns_style *s = w->owner[MIN(byte, w->n)];
+        if (s != w->style) {
+            const ns_css_shadow_list *shadow = style_text_shadow(s);
+            if (!text_shadow_equal(shadow, w->shadow)) {
+                text_shadow_flush(w);
+                w->shadow = shadow;
+            }
+            w->style = s;
+        }
+        if (w->shadow && glyph_has_outline(&gs->glyphs[g])) {
+            w->one->glyphs[0] = gs->glyphs[g];
+            w->one->log_clusters[0] = 0;
+            cairo_move_to(w->cr, x, y);
+            ns_pango_cairo_glyph_string_path(w->cr, run->item->analysis.font,
+                                             w->one);
+        }
+        x += (double)gs->glyphs[g].geometry.width / NS_PANGO_SCALE;
+    }
+}
+
+static void
+paint_inline_span_shadows(cairo_t *cr, const ns_box *b, const ns_style *base,
+                          const inline_text_src *src, double text_x,
+                          double y_origin)
+{
+    gsize n = strlen(ns_pango_layout_get_text(src->layout));
+    text_shadow_walk w = {
+        .cr = cr, .owner = inline_byte_styles(b, base, n), .n = n,
+        .one = ns_pango_glyph_string_new(),
+    };
+    ns_pango_glyph_string_set_size(w.one, 1);
+    cairo_save(cr);
+    cairo_new_path(cr);
+    if (src->layers) {
+        inline_text_src layer = *src;
+        for (guint k = 0; k < src->layers->owners->len; k++) {
+            double dx, dy;
+            inline_layer_offset(b, src->layers, k, &dx, &dy);
+            layer.layer = k;
+            inline_layer_runs_visit(b, &layer, text_x + dx, y_origin + dy,
+                                    text_shadow_run, &w);
+        }
+    } else {
+        inline_lines_runs_visit(b, src->layout, text_x, y_origin,
+                                text_shadow_run, &w);
+    }
+    text_shadow_flush(&w);
+    cairo_restore(cr);
+    ns_pango_glyph_string_free(w.one);
+    g_free(w.owner);
+}
+
 static void
 paint_inline_text_shadows(cairo_t *cr, const ns_box *b, const ns_style *s,
                           NsPangoLayout *layout, double text_x,
                           double y_origin)
 {
+    inline_text_src src = inline_text_src_of(b, layout, k_inline_all_layers);
+    if (inline_text_shadow_varies(b, s)) {
+        paint_inline_span_shadows(cr, b, s, &src, text_x, y_origin);
+        return;
+    }
     const ns_css_value *v = s ? s->values[NS_CSS_TEXT_SHADOW] : NULL;
     if (!v || v->kind != NS_CSS_V_SHADOW) return;
-    inline_text_src src = inline_text_src_of(b, layout, k_inline_all_layers);
     for (int si = v->u.shadow.n - 1; si >= 0; si--)
         paint_text_shadow_layer(cr, &src, text_x, y_origin,
                                 &v->u.shadow.s[si]);
