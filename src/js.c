@@ -1725,6 +1725,14 @@ ns_js_realm_origin_is_opaque(ns_js *js, JSContext *realm)
            !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN);
 }
 
+static void
+ns_js_park_orphan(ns_js *js, ns_node *n)
+{
+    if (!js || !js->orphan_nodes) return;
+    g_hash_table_add(js->orphan_nodes, n);
+    js->orphaned_since_layout = TRUE;
+}
+
 static gboolean
 ns_origin_matches(gboolean opaque, const char *doc_url, const char *url)
 {
@@ -7984,7 +7992,7 @@ ns_element_split_text(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, n->parent, tail, NULL,
                                       tail->prev_sibling, tail->next_sibling);
     } else if (_j) {
-        g_hash_table_add(_j->orphan_nodes, tail);
+        ns_js_park_orphan(_j, tail);
     }
     if (_j) ns_js_note_mutation(_j, n);
     return ns_make_element(ctx, tail);
@@ -8793,7 +8801,7 @@ static void
 ns_js_orphan_node(ns_js *js, ns_node *n)
 {
     if (js && js->orphan_nodes)
-        g_hash_table_add(js->orphan_nodes, n);
+        ns_js_park_orphan(js, n);
     else {
         if (js) ns_js_purge_subtree_rafs(js, n);
         ns_node_free(n);
@@ -8813,7 +8821,7 @@ ns_js_clear_children(ns_js *js, ns_node *n)
         if (!ns_dom_hidden_child(c)) {
             ns_node_remove(c);
             ns_js_index_child_change(js, n, NULL, c);
-            g_hash_table_add(js->orphan_nodes, c);
+            ns_js_park_orphan(js, c);
         }
         c = next;
     }
@@ -8870,7 +8878,7 @@ ns_element_clear_children_collect(ns_js *js, ns_node *n)
         if (!ns_dom_hidden_child(c)) {
             ns_ce_disconnect_subtree(js, c);
             ns_node_remove(c);
-            g_hash_table_add(js->orphan_nodes, c);
+            ns_js_park_orphan(js, c);
             g_ptr_array_add(removed, c);
         }
         c = next;
@@ -9233,7 +9241,7 @@ ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
         if (_j) ns_ce_disconnect_subtree(_j, self);
         ns_node_remove(self);
         if (_j) {
-            g_hash_table_add(_j->orphan_nodes, self);
+            ns_js_park_orphan(_j, self);
             GPtrArray *removed = g_ptr_array_new();
             g_ptr_array_add(removed, self);
             ns_js_record_child_change_arrays(_j, parent, kids, removed,
@@ -9354,7 +9362,7 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
         if (_j) {
             ns_ce_disconnect_subtree(_j, oc);
             ns_node_remove(oc);
-            g_hash_table_add(_j->orphan_nodes, oc);
+            ns_js_park_orphan(_j, oc);
             ns_js_index_child_change(_j, self, NULL, oc);
         } else {
             ns_node_remove(oc);
@@ -21170,7 +21178,7 @@ ns_window_document_fragment_ctor(JSContext *ctx, JSValueConst this_val,
     if (!js_from_ctx(ctx)) return JS_NULL;
     ns_node *frag = ns_node_new_document();
     frag->flags |= NS_NODE_FRAGMENT;
-    g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, frag);
+    ns_js_park_orphan(js_from_ctx(ctx), frag);
     return ns_make_element(ctx, frag);
 }
 
@@ -21192,7 +21200,7 @@ ns_char_data_ctor(JSContext *ctx, int argc, JSValueConst *argv,
         dup = g_strdup("");
     }
     ns_node *n = make(dup, (guint32)len);
-    g_hash_table_add(js->orphan_nodes, n);
+    ns_js_park_orphan(js, n);
     JSValue wrapper = ns_make_element(ctx, n);
     ns_tag_caller_document(ctx, wrapper);
     return wrapper;
@@ -21237,7 +21245,7 @@ ns_window_image_ctor(JSContext *ctx, JSValueConst this_val,
             ns_element_set_attr(el, "height", buf);
         }
     }
-    g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, el);
+    ns_js_park_orphan(js_from_ctx(ctx), el);
     return ns_make_element(ctx, el);
 }
 
@@ -21252,7 +21260,7 @@ ns_window_audio_ctor(JSContext *ctx, JSValueConst this_val,
         const char *s = JS_ToCString(ctx, argv[0]);
         if (s) { ns_element_set_attr(el, "src", s); JS_FreeCString(ctx, s); }
     }
-    g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, el);
+    ns_js_park_orphan(js_from_ctx(ctx), el);
     return ns_make_element(ctx, el);
 }
 
@@ -21278,7 +21286,7 @@ ns_window_option_ctor(JSContext *ctx, JSValueConst this_val,
         ns_element_set_attr(el, "defaultSelected", "");
     if (argc >= 4 && JS_ToBool(ctx, argv[3]))
         ns_element_set_attr(el, "selected", "");
-    g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, el);
+    ns_js_park_orphan(js_from_ctx(ctx), el);
     return ns_make_element(ctx, el);
 }
 
@@ -21353,7 +21361,7 @@ ns_dom_parser_parseFromString(JSContext *ctx, JSValueConst this_val,
     if (!doc) { if (mime) JS_FreeCString(ctx, mime); return JS_NULL; }
     ns_node_take_strings(doc);
     ns_mark_scripts_already_started(doc);
-    if (js_from_ctx(ctx)) g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, doc);
+    if (js_from_ctx(ctx)) ns_js_park_orphan(js_from_ctx(ctx), doc);
     JSValue cu = JS_GetPropertyStr(ctx, this_val, "__ns_creator_url");
     const char *doc_url = JS_IsString(cu) ? JS_ToCString(ctx, cu) : NULL;
     JSValue wrapper = ns_make_realm_document(ctx, doc, doc_url, "UTF-8",
@@ -25757,7 +25765,7 @@ ns_window_event_ctor(JSContext *ctx, JSValueConst this_val,
             ns_node *node = ns_node_new_element(ns_ce_key_name(tag));
             if (node) {
                 ns_node_arm_js_invalidate(node);
-                if (js->orphan_nodes) g_hash_table_add(js->orphan_nodes, node);
+                if (js->orphan_nodes) ns_js_park_orphan(js, node);
                 JSValue elem = ns_make_element(ctx, node);
                 ns_tag_caller_document(ctx, elem);
                 JSValue proto = JS_GetPropertyStr(ctx, this_val, "prototype");
@@ -37875,7 +37883,7 @@ ns_element_removeChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     if (_j2) ns_ce_disconnect_subtree(_j2, child);
     ns_node_remove(child);
     if (_j2) {
-        g_hash_table_add(_j2->orphan_nodes, child);
+        ns_js_park_orphan(_j2, child);
         ns_js_note_mutation(_j2, parent);
         ns_js_record_child_change(_j2, parent, NULL, child,
                                   saved_prev, saved_next);
@@ -38250,7 +38258,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
         ns_node_remove(oldc);
         if (_j) {
             ns_ce_disconnect_subtree(_j, oldc);
-            g_hash_table_add(_j->orphan_nodes, oldc);
+            ns_js_park_orphan(_j, oldc);
             ns_js_record_child_change(_j, parent, NULL, oldc, o_prev, o_next);
         }
         ns_node *c = newc->first_child;
@@ -38304,7 +38312,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
     oldc->next_sibling = NULL;
     if (_j) {
         ns_ce_disconnect_subtree(_j, oldc);
-        g_hash_table_add(_j->orphan_nodes, oldc);
+        ns_js_park_orphan(_j, oldc);
         ns_js_note_mutation(_j, parent);
         ns_js_record_child_change(_j, parent, newc, oldc,
                                   newc->prev_sibling, newc->next_sibling);
@@ -38769,7 +38777,7 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
         }
         ns_node_remove(self);
         if (_j) {
-            g_hash_table_add(_j->orphan_nodes, self);
+            ns_js_park_orphan(_j, self);
             ns_js_record_child_change(_j, parent, NULL, self,
                                       saved_prev, saved_next);
         }
@@ -38842,7 +38850,7 @@ ns_element_cloneNode(JSContext *ctx, JSValueConst this_val,
     if (src->kind == NS_NODE_DOCUMENT && !(src->flags & NS_NODE_FRAGMENT)) {
         ns_node *copy = ns_node_clone(src, deep);
         if (!copy) return JS_NULL;
-        if (js_from_ctx(ctx)) g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, copy);
+        if (js_from_ctx(ctx)) ns_js_park_orphan(js_from_ctx(ctx), copy);
         JSValue xmlv = JS_GetPropertyStr(ctx, this_val, "__ndXmlDoc");
         gboolean is_xml = JS_ToBool(ctx, xmlv);
         JS_FreeValue(ctx, xmlv);
@@ -38870,7 +38878,7 @@ ns_element_cloneNode(JSContext *ctx, JSValueConst this_val,
     if (!copy) return JS_NULL;
     ns_js *_j = js_from_ctx(ctx);
     if (_j) {
-        g_hash_table_add(_j->orphan_nodes, copy);
+        ns_js_park_orphan(_j, copy);
         if (!ns_node_in_template_content(src))
             ns_ce_upgrade_subtree_detached(_j, copy);
     }
@@ -38932,7 +38940,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
                 if (_j) ns_ce_disconnect_subtree(_j, target);
                 ns_node_remove(target);
                 if (_j) {
-                    g_hash_table_add(_j->orphan_nodes, target);
+                    ns_js_park_orphan(_j, target);
                     ns_js_record_child_change(_j, old_parent, NULL, target,
                                               saved_prev, saved_next);
                     ns_js_note_mutation(_j, old_parent);
@@ -38950,7 +38958,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
     if (_j) ns_ce_disconnect_subtree(_j, n);
     ns_node_remove(n);
     if (_j) {
-        g_hash_table_add(_j->orphan_nodes, n);
+        ns_js_park_orphan(_j, n);
         ns_js_record_child_change(_j, old_parent, NULL, n,
                                   saved_prev, saved_next);
         ns_js_note_mutation(_j, old_parent);
@@ -39540,7 +39548,7 @@ ns_attr_to_js(JSContext *ctx, JSValueConst owner, const ns_attr *a,
         JSValue kids = JS_NewArray(ctx);
         if (*aval) {
             ns_node *tn = ns_node_new_text(g_strdup(aval));
-            if (js && js->orphan_nodes) g_hash_table_add(js->orphan_nodes, tn);
+            if (js && js->orphan_nodes) ns_js_park_orphan(js, tn);
             JSValue tnw = ns_make_element(ctx, tn);
             JS_SetPropertyUint32(ctx, kids, 0, JS_DupValue(ctx, tnw));
             JS_SetPropertyStr(ctx, entry, "firstChild", JS_DupValue(ctx, tnw));
@@ -42856,6 +42864,7 @@ ns_js_set_layout_root(ns_js *js, const struct ns_box *root)
     js->layout_root = root;
     ns_js_sync_window_metrics(js);
     if (root) {
+        js->orphaned_since_layout = FALSE;
         ns_js_promote_deferred_iframes(js);
         ns_js_observers_after_layout(js);
     }
@@ -57112,7 +57121,7 @@ ns_document_set_body(JSContext *ctx, JSValueConst this_val,
             ns_node *old_prev = old_body->prev_sibling;
             ns_node_remove(old_body);
             if (js) {
-                g_hash_table_add(js->orphan_nodes, old_body);
+                ns_js_park_orphan(js, old_body);
                 ns_js_record_child_change(js, root, NULL, old_body,
                                           old_prev, reference);
             }
@@ -57907,7 +57916,7 @@ ns_range_createContextualFragment(JSContext *ctx, JSValueConst this_val,
         }
     }
     if (src) JS_FreeCString(ctx, src);
-    g_hash_table_add(js->orphan_nodes, frag);
+    ns_js_park_orphan(js, frag);
     return ns_make_element(ctx, frag);
 }
 
@@ -58760,7 +58769,7 @@ ns_document_adopt_node(JSContext *ctx, JSValueConst this_val,
         ns_node *sp = node->prev_sibling, *sn = node->next_sibling;
         ns_node_remove(node);
         if (_j) {
-            g_hash_table_add(_j->orphan_nodes, node);
+            ns_js_park_orphan(_j, node);
             ns_js_record_child_change(_j, p, NULL, node, sp, sn);
         }
     }
@@ -58796,7 +58805,7 @@ ns_document_import_node(JSContext *ctx, JSValueConst this_val,
     ns_adopt_owner_walk(ctx, this_val, copy, 0);
     ns_js *_j = js_from_ctx(ctx);
     if (_j) {
-        g_hash_table_add(_j->orphan_nodes, copy);
+        ns_js_park_orphan(_j, copy);
         ns_ce_upgrade_subtree_detached(_j, copy);
     }
     return ns_make_element(ctx, copy);
@@ -64637,7 +64646,7 @@ ns_document_createElement(JSContext *ctx, JSValueConst this_val,
         }
         JS_FreeValue(ctx, isv);
     }
-    g_hash_table_add(js->orphan_nodes, el);
+    ns_js_park_orphan(js, el);
     JSValue wrapper = ns_make_element(ctx, el);
     ns_tag_owner_document(ctx, this_val, wrapper);
     if (js->ce_registry) {
@@ -64657,7 +64666,7 @@ ns_document_createTextNode(JSContext *ctx, JSValueConst this_val,
     char *dup = g_strdup(text);
     JS_FreeCString(ctx, text);
     ns_node *n = ns_node_new_text(dup);
-    g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, n);
+    ns_js_park_orphan(js_from_ctx(ctx), n);
     JSValue wrapper = ns_make_element(ctx, n);
     ns_tag_owner_document(ctx, this_val, wrapper);
     return wrapper;
@@ -64727,7 +64736,7 @@ ns_document_createElementNS(JSContext *ctx, JSValueConst this_val,
         el->flags |= NS_NODE_XML_DOC;
     JS_FreeCString(ctx, name);
     if (ns) JS_FreeCString(ctx, ns);
-    g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, el);
+    ns_js_park_orphan(js_from_ctx(ctx), el);
     JSValue wrapper = ns_make_element(ctx, el);
     ns_tag_owner_document(ctx, this_val, wrapper);
     return wrapper;
@@ -64742,7 +64751,7 @@ ns_document_createComment(JSContext *ctx, JSValueConst this_val,
     char *dup = text ? g_strdup(text) : g_strdup("");
     if (text) JS_FreeCString(ctx, text);
     ns_node *n = ns_node_new_comment(dup);
-    g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, n);
+    ns_js_park_orphan(js_from_ctx(ctx), n);
     JSValue wrapper = ns_make_element(ctx, n);
     ns_tag_owner_document(ctx, this_val, wrapper);
     return wrapper;
@@ -64772,7 +64781,7 @@ ns_document_createCDATASection(JSContext *ctx, JSValueConst this_val,
     ns_node *n = ns_node_new_text(g_strdup(data));
     JS_FreeCString(ctx, data);
     n->flags |= NS_NODE_CDATA;
-    g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, n);
+    ns_js_park_orphan(js_from_ctx(ctx), n);
     JSValue wrapper = ns_make_element(ctx, n);
     ns_tag_owner_document(ctx, this_val, wrapper);
     return wrapper;
@@ -64860,7 +64869,7 @@ ns_document_createProcessingInstruction(JSContext *ctx,
     n->name = g_strdup(target);
     n->flags |= NS_NODE_OWN_NAME | NS_NODE_PI;
     JS_FreeCString(ctx, data);
-    g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, n);
+    ns_js_park_orphan(js_from_ctx(ctx), n);
     JSValue wrapper = ns_make_element(ctx, n);
     JS_DefinePropertyValueStr(ctx, wrapper, "target",
         JS_NewString(ctx, target), 0);
@@ -65235,7 +65244,7 @@ ns_document_createDocumentFragment(JSContext *ctx, JSValueConst this_val,
     if (!js_from_ctx(ctx)) return JS_NULL;
     ns_node *frag = ns_node_new_document();
     frag->flags |= NS_NODE_FRAGMENT;
-    g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, frag);
+    ns_js_park_orphan(js_from_ctx(ctx), frag);
     JSValue wrapper = ns_make_element(ctx, frag);
     ns_tag_owner_document(ctx, this_val, wrapper);
     return wrapper;
@@ -65276,7 +65285,7 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
         ns_node_append_child(head, title_el);
     }
     ns_node_append_child(html, body);
-    g_hash_table_add(js->orphan_nodes, doc);
+    ns_js_park_orphan(js, doc);
     JSValue wrapper = ns_make_realm_document(ctx, doc, "about:blank", "UTF-8",
                                              "text/html", FALSE, TRUE);
     if (JS_IsObject(wrapper)) {
@@ -65663,7 +65672,7 @@ ns_make_synth_xml_document(JSContext *ctx)
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_NULL;
     ns_node *doc = ns_node_new_document();
-    g_hash_table_add(js->orphan_nodes, doc);
+    ns_js_park_orphan(js, doc);
     JSValue wrapper = ns_make_realm_document(ctx, doc, "about:blank", "UTF-8",
                                              "application/xml", TRUE, TRUE);
     if (JS_IsObject(wrapper))
@@ -65700,7 +65709,7 @@ ns_impl_create_document_type(JSContext *ctx, JSValueConst this_val,
     ns_element_set_attr(dt, "publicId", public_id);
     ns_element_set_attr(dt, "systemId", system_id);
     dt->kind = NS_NODE_DOCTYPE;
-    g_hash_table_add(js->orphan_nodes, dt);
+    ns_js_park_orphan(js, dt);
     JSValue wrapper = ns_make_element(ctx, dt);
     JSValue impl_doc = JS_GetPropertyStr(ctx, this_val, "__ndDocument");
     if (JS_IsObject(impl_doc))
@@ -72165,6 +72174,7 @@ ns_js_sweep_orphans(ns_js *js)
     if (!js || !js->orphan_nodes || g_hash_table_size(js->orphan_nodes) == 0) return;
     if (js->eval_depth > 0 || js->callback_depth > 0 || js->dispatch_depth > 0)
         return;
+    if (js->orphaned_since_layout) return;
     gint64 now = g_get_monotonic_time();
     if (js->last_orphan_sweep_us != 0 && now - js->last_orphan_sweep_us < 250000)
         return;
@@ -72224,7 +72234,7 @@ ns_js_iframe_clear_content(ns_js *js, ns_node *iframe)
         if (c->kind == NS_NODE_DOCUMENT) {
             ns_node_remove(c);
             ns_js_unpin_subtree(js, c);
-            if (js->orphan_nodes) g_hash_table_add(js->orphan_nodes, c);
+            if (js->orphan_nodes) ns_js_park_orphan(js, c);
         }
         c = next;
     }
