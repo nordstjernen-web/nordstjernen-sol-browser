@@ -73083,24 +73083,56 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
     g_array_free(tasks, TRUE);
 }
 
+static GPtrArray *
+ns_iframe_ancestor_urls(ns_js *js, const ns_node *iframe)
+{
+    GPtrArray *urls = g_ptr_array_new();
+    const ns_node *child = iframe;
+    for (const ns_node *p = iframe ? iframe->parent : NULL; p;
+         child = p, p = p->parent) {
+        if (!ns_js_is_frame_document_edge(child, p)) continue;
+        const char *fu = ns_element_get_attr(p, "data-nd-frame-url");
+        if (fu && *fu) g_ptr_array_add(urls, (gpointer)fu);
+    }
+    const char *top = ns_js_top_url(js);
+    g_ptr_array_add(urls, (gpointer)(top && *top ? top : "about:blank"));
+    return urls;
+}
+
 static gboolean
-ns_iframe_framing_blocked(const char *embedder_url, const char *framed_url,
-                          ns_response *resp)
+ns_xframe_options_blocks(const char *header, const char *framed_url,
+                         const GPtrArray *ancestors)
+{
+    g_auto(GStrv) tokens = g_strsplit(header, ",", -1);
+    gboolean same_origin_only = FALSE;
+    for (char **t = tokens; *t; t++) {
+        const char *v = g_strstrip(*t);
+        if (g_ascii_strcasecmp(v, "deny") == 0) return TRUE;
+        if (g_ascii_strcasecmp(v, "sameorigin") == 0) same_origin_only = TRUE;
+    }
+    if (!same_origin_only) return FALSE;
+    for (guint i = 0; i < ancestors->len; i++)
+        if (!ns_url_same_origin(framed_url, g_ptr_array_index(ancestors, i)))
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_iframe_framing_blocked(ns_js *js, const ns_node *iframe,
+                          const char *framed_url, ns_response *resp)
 {
     if (!resp) return FALSE;
-    if (resp->xframe_options && *resp->xframe_options) {
-        g_autofree char *v = g_strdup(resp->xframe_options);
-        g_strstrip(v);
-        if (g_ascii_strcasecmp(v, "deny") == 0)
-            return TRUE;
-        if (g_ascii_strcasecmp(v, "sameorigin") == 0 &&
-            !ns_url_same_origin(framed_url, embedder_url))
-            return TRUE;
-    }
+    g_autoptr(GPtrArray) ancestors = ns_iframe_ancestor_urls(js, iframe);
+    if (resp->xframe_options && *resp->xframe_options &&
+        ns_xframe_options_blocks(resp->xframe_options, framed_url, ancestors))
+        return TRUE;
     if (resp->csp_header && *resp->csp_header) {
         ns_csp *csp = ns_csp_parse(resp->csp_header);
-        gboolean allowed = ns_csp_allows(csp, NS_CSP_FRAME_ANCESTORS,
-                                         embedder_url, framed_url);
+        gboolean allowed = TRUE;
+        for (guint i = 0; allowed && i < ancestors->len; i++)
+            allowed = ns_csp_allows(csp, NS_CSP_FRAME_ANCESTORS,
+                                    g_ptr_array_index(ancestors, i),
+                                    framed_url);
         ns_csp_free(csp);
         if (!allowed) return TRUE;
     }
@@ -73327,7 +73359,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
                     resp = NULL;
                 }
             }
-            if (resp && ns_iframe_framing_blocked(origin, abs_url, resp)) {
+            if (resp && ns_iframe_framing_blocked(js, iframe, abs_url, resp)) {
                 if (js->log_cb) {
                     char *line = g_strdup_printf(
                         "Blocked framing of %s (X-Frame-Options / "
