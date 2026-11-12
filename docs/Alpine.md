@@ -5,7 +5,7 @@
 `nordstjernen-renderer` and `nordstjernen-audio`
 binaries plus icons, the desktop file, the
 i18n catalogues and the license texts — **nothing is bundled**. Every runtime
-library (GTK 4, libcurl, OpenSSL, libwebp, libavif, FFmpeg, poppler-glib, …)
+library (GTK 4, libcurl, OpenSSL, libwebp, libavif, FFmpeg, …)
 is resolved from Alpine system packages, and `abuild`'s `tracedeps` derives
 the `depends=` automatically from the linked shared objects, so the
 dependency list is always exactly what the binary needs.

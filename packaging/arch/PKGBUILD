@@ -36,7 +36,6 @@ depends=(
   libwebp
   openssl
   opusfile
-  poppler-glib
   sdl2
   sqlite
   uchardet

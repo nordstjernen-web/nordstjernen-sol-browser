@@ -6,7 +6,7 @@ pkgrel=0
 pkgdesc="Small, hand-written web browser written in C with GTK 4 and libcurl"
 url="https://nordstjernen.org"
 # quickjs and lexbor are vendored C and build in-tree; the engine also links
-# a little C++ (poppler, libavif). Restrict to arches the deps + WAMR asm cover.
+# a little C++ (glslang, libavif). Restrict to arches the deps + WAMR asm cover.
 arch="x86_64 aarch64"
 license="LicenseRef-NSL-1.0 OR GPL-3.0-or-later"
 makedepends="
@@ -23,7 +23,6 @@ makedepends="
 	libwebp-dev
 	libavif-dev
 	ffmpeg-dev
-	poppler-dev
 	fontconfig-dev
 	freetype-dev
 	pango-dev

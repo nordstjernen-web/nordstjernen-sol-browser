@@ -78,7 +78,6 @@ module.exports = {
       apt: 'libgstreamer-plugins-base1.0-dev', pacman: 'gst-plugins-base-libs' },
     { module: 'gstreamer-video-1.0', minimum: '1.20', unix: true, feature: 'H.264 video and AAC audio', mesonOption: 'gstreamer',
       apt: 'libgstreamer-plugins-base1.0-dev', pacman: 'gst-plugins-base-libs' },
-    { module: 'poppler-glib', feature: 'viewing PDF files', apt: 'libpoppler-glib-dev', pacman: 'poppler-glib', brew: 'poppler', msys: 'poppler' },
     { module: 'libbrotlidec', feature: 'WOFF2 web fonts', apt: 'libbrotli-dev', pacman: 'brotli', brew: 'brotli', msys: 'brotli' },
     { module: 'enchant-2', feature: 'spell-checking', apt: 'libenchant-2-dev', pacman: 'enchant', brew: 'enchant', msys: 'enchant' },
     { module: 'libavif', feature: 'AVIF images', apt: 'libavif-dev', pacman: 'libavif', brew: 'libavif', msys: 'libavif' },

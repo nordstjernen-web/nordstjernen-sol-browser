@@ -34,7 +34,6 @@ pkgbase = nordstjernen-browser
 	depends = libwebp
 	depends = openssl
 	depends = opusfile
-	depends = poppler-glib
 	depends = sdl2
 	depends = sqlite
 	depends = uchardet

@@ -435,7 +435,8 @@ don't add `meson test` targets.
   code; it runs as ordinary sandboxed script on the page that shows a PDF
   (`src/pdf.c`, `data/js/pdf-viewer.js`). It is fetched at build time
   through `subprojects/pdfjs-dist.wrap` and embedded, never committed;
-  `-Dpdfjs=disabled` drops it and poppler, when built, takes over.
+  `-Dpdfjs=disabled` drops it, and PDFs then show a notice with a link to
+  the file. There is no native PDF library in the build.
 - **Don't add site-specific hacks.** No per-site rendering shims, no
   hardcoded hostnames, no grepping a site's private JSON (e.g.
   `ytInitialPlayerResponse`, `mediaDefinitions`, `ytimg`, `movie_player`).

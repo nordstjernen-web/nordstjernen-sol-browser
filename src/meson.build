@@ -307,10 +307,6 @@ else
     nordstjernen_deps += [libseccomp]
   endif
 
-  if have_poppler
-    nordstjernen_deps += [libpoppler]
-  endif
-
   if have_avif
     nordstjernen_deps += [libavif]
   endif

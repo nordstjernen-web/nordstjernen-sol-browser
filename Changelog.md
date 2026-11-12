@@ -8,7 +8,9 @@ Changelog:
   work, and pages render as they scroll into view. The viewer runs as
   sandboxed script with no network access and no access to the site's
   cookies or storage. The PDF.js release is fetched at build time
-  (`-Dpdfjs`); poppler remains the fallback when it is not built.
+  (`-Dpdfjs`). poppler is no longer used: the `poppler` build option
+  and the poppler-glib dependency are gone, and a build without PDF.js
+  shows a notice with a link to the file.
 * Security: a `Content-Security-Policy: sandbox` header on a top-level
   document now gives the document an opaque origin for cookies,
   storage, IndexedDB and fetch, as it already did for framed documents.

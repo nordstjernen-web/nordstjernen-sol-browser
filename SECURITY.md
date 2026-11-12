@@ -22,7 +22,7 @@ bypasses; HSTS, mixed-content, CSP and iframe-sandbox bypasses; URL-bar
 spoofing.
 
 **Out of scope:** bugs in third-party libraries (libcurl, GTK, GLib,
-lexbor, QuickJS, Wuffs, libwebp, libavif, libjxl, poppler, FFmpeg,
+lexbor, QuickJS, Wuffs, libwebp, libavif, libjxl, PDF.js, FFmpeg,
 SQLite, glslang, wgpu-native, OS media decoders, …) — report upstream;
 features we do not implement (WebRTC, EME/DRM, JIT, AI web APIs, COOP/COEP
 cross-origin isolation); Spectre-class side channels; attacks that already
@@ -195,7 +195,7 @@ warning page.
 
 HTML and URLs are parsed by lexbor, charsets detected by uchardet. Images
 are decoded by Wuffs, libwebp and (optionally) libavif and libjxl; SVG is
-in-engine; PDFs are rendered by poppler. Video is decoded in the
+in-engine; PDFs are rendered by PDF.js, as sandboxed script. Video is decoded in the
 renderer by pl_mpeg, FFmpeg (WebM, MP4, VP9/VP8, AV1 and others) or the
 operating system's decoders (H.264, AAC, hardware VP9/AV1/HEVC). Audio is
 decoded in the `nordstjernen-audio` helper, which runs under the same

@@ -34,7 +34,6 @@ Build-Depends:
  libfreetype-dev,
  libbrotli-dev,
  libzstd-dev,
- libpoppler-glib-dev,
  zlib1g-dev,
 Standards-Version: 4.7.4
 Homepage: https://nordstjernen.org
