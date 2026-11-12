@@ -135,7 +135,7 @@ void ns_net_fetch_async(const char        *url,
                         GAsyncReadyCallback callback,
                         gpointer            user_data);
 
-void ns_net_preconnect_async(const char *url);
+void ns_net_preconnect_async(const char *url, const char *document_url);
 
 void ns_net_request_async(const char         *url,
                           const char         *top_url,
