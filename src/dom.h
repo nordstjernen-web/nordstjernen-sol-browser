@@ -154,6 +154,7 @@ void        ns_element_remove_attr(ns_node *el, const char *name);
 void        ns_element_remove_attr_ns(ns_node *el, const char *namespace_uri,
                                       const char *local_name);
 gboolean    ns_attr_name_is_internal(const char *name);
+gboolean    ns_node_is_pdf_embed(const ns_node *n);
 
 ns_node    *ns_node_clone(const ns_node *src, gboolean deep);
 ns_node    *ns_template_content_get(ns_node *tpl);
