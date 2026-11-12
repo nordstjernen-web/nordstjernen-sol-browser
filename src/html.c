@@ -1,4 +1,4 @@
-/* Nordstjernen — HTML helper utilities shared across the lexbor frontend.
+/* Nordstjernen — HTML helper utilities shared across the HTML frontend.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
@@ -9,7 +9,6 @@
 #include <string.h>
 #include <uchardet.h>
 
-#include <lexbor/core/base.h>
 
 static void
 ns_html_append_digits(GString *num, const char **p)

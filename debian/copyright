@@ -12,7 +12,7 @@ Comment:
  in Debian's main component. The NSL-1.0 alternative is documented below for
  completeness; it is not DFSG-free on its own.
  .
- The in-tree third-party engines (lexbor, QuickJS, WAMR), vendored
+ The in-tree third-party engines (QuickJS, WAMR), vendored
  single-file libraries (Wuffs, pl_mpeg, minimp3), the wgpu-native headers and
  the Unicode-derived data tables carry their own free licenses, reproduced
  from THIRD-PARTY-LICENSES.md below.
@@ -27,10 +27,6 @@ License: GPL-3+ or NSL-1.0
 Files: data/org.nordstjernen.WebBrowser.metainfo.xml
 Copyright: 2026 Andreas Røsdal
 License: CC0-1.0
-
-Files: src/lexbor/*
-Copyright: 2018-2025 Alexander Borisov
-License: Apache-2.0
 
 Files: subprojects/wuffs/*
 Copyright: 2017 The Wuffs Authors

@@ -74,7 +74,7 @@ ns_buildtype = get_option('buildtype')
 ns_is_release = (ns_buildtype == 'release' or ns_buildtype == 'minsize')
 # Every build profile gets -O3 (via default_options optimization=3) plus
 # dead-section pruning. Nordstjernen leans on the optimizer to inline the
-# lexbor parser walks, QuickJS interpreter dispatch, and our box-layout
+# HTML parser walks, QuickJS interpreter dispatch, and our box-layout
 # loops; -O2 left ~30% on the table for JS-heavy pages. The -O level is
 # left to meson's optimization option so it isn't passed twice (which
 # warns); we only add the section-GC flags here. Dev/non-release builds
@@ -173,7 +173,7 @@ cairo      = dependency('cairo')
 # renamed, because GTK loads the system Pango into the same process. Android
 # links the system Pango instead -- the fork requires fontconfig -- and
 # src/ns_pango_names.h maps the renamed API back for it. Its targets are
-# declared next to lexbor's, after the last project argument.
+# declared after the last project argument.
 if use_web_text_lib
   add_project_arguments('-DNS_USE_WEB_TEXT_LIB=1', language: 'c')
 else
@@ -502,8 +502,12 @@ endif
 if media_os_backend == 'none'
   add_project_arguments('-DNS_MEDIA_OS_NONE=1', language: 'c')
 endif
-ns_ipc_rust = add_languages('rust', native: false,
-                            required: get_option('ipc_rust'))
+add_languages('rust', native: false)
+if meson.get_compiler('rust').version().version_compare('<1.91')
+  error('Nordstjernen needs rustc 1.91 or newer for its HTML and URL parsers (found @0@).'.format(
+        meson.get_compiler('rust').version()))
+endif
+ns_ipc_rust = get_option('ipc_rust').enabled()
 if ns_ipc_rust
   add_project_arguments('-DNS_IPC_RUST=1', language: 'c')
 endif
@@ -562,14 +566,6 @@ libplmpeg = dependency('plmpeg', fallback: ['plmpeg', 'plmpeg_dep'])
 zlib = dependency('zlib')
 
 fs = import('fs')
-lexbor_version = '0.0.0'
-if fs.is_file('src/lexbor/version')
-  lexbor_version_raw = fs.read('src/lexbor/version').strip()
-  lexbor_version = lexbor_version_raw.split('=')[1]
-endif
-add_project_arguments('-DNS_LEXBOR_VERSION="' + lexbor_version + '"',
-                      language: 'c')
-
 build_date = get_option('build_date')
 if build_date == ''
   date_cmd = run_command('date', '-u', '+%Y-%m-%d', check: false)
@@ -586,7 +582,6 @@ if use_web_text_lib
   pangocairo  = web_text_cairo_dep
   libpangoft2 = web_text_fc_dep
 endif
-subdir('src/lexbor')
 
 if get_option('quickjs') == 'quickjs'
   subdir('src/quickjs-bellard')
@@ -734,6 +729,31 @@ summary({'H.264/AAC OS decoders': media_os_backend}, section: 'Features')
 summary({'JPEG XL images (libjxl)': have_jxl}, section: 'Features')
 summary({'GTK 4 shell': have_gtk}, section: 'Shells')
 
+ns_rust_localize = find_program('scripts/rust-staticlib-localize.sh')
+ns_rust_localize_tools = [find_program('ld'), find_program('objcopy'),
+                          find_program('ar')]
+ns_parsers_rust_args = ['--edition=2024', '-C', 'panic=abort']
+ns_url_rs = static_library('ns_url', 'src/url_rs/lib.rs',
+  rust_abi: 'rust',
+  rust_args: ns_parsers_rust_args,
+)
+ns_html5_rs = static_library('ns_html5', 'src/html5_rs/lib.rs',
+  rust_abi: 'rust',
+  rust_args: ns_parsers_rust_args,
+)
+ns_parsers_rs_raw = static_library('ns_parsers_rs_raw', 'src/parsers_rs/lib.rs',
+  rust_abi: 'c',
+  rust_args: ns_parsers_rust_args,
+  link_with: [ns_url_rs, ns_html5_rs],
+)
+ns_parsers_rs_lib = custom_target('ns_parsers_rs',
+  input: ns_parsers_rs_raw,
+  output: 'libns_parsers_rs.a',
+  command: [ns_rust_localize, '@INPUT@', '@OUTPUT@', ns_rust_localize_tools,
+            'ns_rs_*'],
+)
+ns_parsers_rs_dep = declare_dependency(link_with: ns_parsers_rs_lib)
+
 ns_ipc_rust_dep = []
 if ns_ipc_rust
   ns_ipc_rust_raw = static_library('ns_ipc_http_rs_raw',
@@ -745,9 +765,7 @@ if ns_ipc_rust
   ns_ipc_rust_lib = custom_target('ns_ipc_http_rs',
     input: ns_ipc_rust_raw,
     output: 'libns_ipc_http_rs.a',
-    command: [find_program('scripts/rust-staticlib-localize.sh'),
-              '@INPUT@', '@OUTPUT@',
-              find_program('ld'), find_program('objcopy'), find_program('ar'),
+    command: [ns_rust_localize, '@INPUT@', '@OUTPUT@', ns_rust_localize_tools,
               'ns_ipc_rs_*', 'http_write_*', 'json_*'],
   )
   ns_ipc_rust_dep = declare_dependency(link_with: ns_ipc_rust_lib)
