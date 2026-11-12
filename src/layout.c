@@ -10056,6 +10056,29 @@ inline_run_first_word_width(ns_box *run, const ns_style *style)
     return ceil((double)m.logical.width / NS_PANGO_SCALE);
 }
 
+static double
+inline_run_narrow_for_float(ns_box *run, const GArray *floats, double inner_x,
+                            double cw, double avail,
+                            const ns_style *inherited)
+{
+    double left_off = 0, right_off = 0;
+    floats_offsets_at(floats, run->y, &left_off, &right_off);
+    double narrowed = MAX(cw - left_off - right_off, 0);
+    double height = run->content_height;
+    double x = run->x;
+    if (narrowed >= avail) return avail;
+    g_inline_atomic_cb_w = run->kind == NS_BOX_INLINE ? cw : 0;
+    run->x = inner_x + left_off;
+    layout_box(run, narrowed, inherited);
+    if (run->content_height > height + 0.5) {
+        run->x = x;
+        layout_box(run, avail, inherited);
+        narrowed = avail;
+    }
+    g_inline_atomic_cb_w = 0;
+    return narrowed;
+}
+
 static gboolean
 floats_advance_to_fit(const GArray *floats, double cw, double need,
                       double *y, double *left_out, double *right_out)
@@ -17835,6 +17858,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     if (g_inherited_floats.box == box)
         floats_inherit(floats, &g_inherited_floats, inner_x, cw, inner_y);
     double inline_line_top = -1;
+    ns_box *line_run = NULL;
+    double line_run_avail = 0;
     const ns_box *top_collapse_child = NULL;
 
     for (ns_box *c = box->first_child; c; c = c->next_sibling) {
@@ -17958,6 +17983,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 .outer_w = actual_outer,
             };
             g_array_append_val(floats, fr);
+            if (line_run && c->y == line_run->y)
+                line_run_avail = inline_run_narrow_for_float(
+                    line_run, floats, inner_x, cw, line_run_avail,
+                    child_inherited);
             continue;
         }
         if (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE ||
@@ -18053,6 +18082,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 prev_margin_bottom = c->margin.bottom;
             }
             inline_line_top = -1;
+            line_run = NULL;
         } else {
             double line_y = cursor_y + prev_margin_bottom;
             double left_off = 0, right_off = 0;
@@ -18104,6 +18134,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             double line_height = inline_line_height(child_inherited);
             inline_line_top = inline_text_ends_with_break(c->text)
                 ? -1 : c->y + MAX(0, c->content_height - line_height);
+            line_run = inline_line_top == c->y && c->text ? c : NULL;
+            line_run_avail = cw_avail;
             cursor_y += c->content_height;
         }
         if ((c->kind == NS_BOX_IMAGE || c->kind == NS_BOX_VIDEO ||
