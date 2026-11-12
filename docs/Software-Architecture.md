@@ -396,7 +396,7 @@ budget.
 (driving the C networking layer), **WebCrypto** (`crypto.subtle` over
 OpenSSL libcrypto, `src/webcrypto.c`), **IndexedDB** (a low-level
 SQLite-backed native backend with the W3C object model built in
-`polyfills.js`), **WebSocket** (over libcurl's native WS API, `src/ws.c`),
+`polyfills.js`), **WebSocket** (over libcurl's native WS API, or in-tree framing when libcurl lacks it, `src/ws.c`),
 **EventSource**, **Web Workers** (each a separate `GThread` with its own
 runtime, cross-thread messaging by structured clone), `localStorage`/
 `sessionStorage`, Canvas 2D (Cairo, `src/js_canvas.c`), an ICU-free
