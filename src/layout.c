@@ -6510,10 +6510,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
 
     if (n->name && strcmp(n->name, "img") == 0) {
         ns_box *ib = build_image_box(n);
-        if (ib) {
-            ib->style = s;
-            collect_box_bg_image(ib, s);
-        }
+        if (ib) ib->style = s;
         return ib;
     }
 

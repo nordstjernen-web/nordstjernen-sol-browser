@@ -7,8 +7,8 @@ Changelog:
   is painted; only the block's own shadow was. Shadows of right-aligned
   and centred text are no longer cut off, and a shadow list may hold 16
   shadows instead of 8.
-* A CSS `background-image` on a `<canvas>` or `<img>` element is loaded
-  and painted.
+* A CSS `background-image` on a `<canvas>` element is loaded and
+  painted.
 * Layout: an empty block with `clear` set, but no float to clear, lets
   its margins collapse through like any other empty block.
 * CSS: the legacy `-webkit-gradient(linear|radial, ...)` image syntax is
