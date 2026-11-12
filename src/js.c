@@ -7,6 +7,7 @@
 #include "js_cage.h"
 #include "js_classid.h"
 #include "capability.h"
+#include "permissions_policy.h"
 
 JSClassID ns_new_class_id(JSClassID *pclass_id)
 {
@@ -1797,6 +1798,195 @@ static const ns_csp *
 ns_js_node_csp(const ns_js *js, const ns_node *node)
 {
     return ns_js_frame_csp(js, node ? ns_js_node_frame(node->parent) : NULL);
+}
+
+static char *
+ns_pp_frame_origin(ns_js *js, const ns_node *frame)
+{
+    if (!frame) {
+        if (ns_js_document_origin_is_opaque(js)) return NULL;
+        const char *top = ns_js_top_url(js);
+        char *origin = top ? ns_url_origin_from(top) : NULL;
+        if (origin && strcmp(origin, "null") == 0)
+            g_clear_pointer(&origin, g_free);
+        return origin;
+    }
+    unsigned sandbox = ns_iframe_effective_sandbox(frame);
+    if ((sandbox & NS_SANDBOX_ACTIVE) &&
+        !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
+        return NULL;
+    const char *url = ns_element_get_attr(frame, "data-nd-frame-url");
+    if (url && g_ascii_strncasecmp(url, "data:", 5) == 0) return NULL;
+    if (!url || !*url || g_ascii_strncasecmp(url, "about:", 6) == 0 ||
+        g_ascii_strncasecmp(url, "blob:", 5) == 0)
+        return ns_pp_frame_origin(js, ns_js_node_frame(frame->parent));
+    char *origin = ns_url_origin_from(url);
+    if (origin && strcmp(origin, "null") == 0)
+        g_clear_pointer(&origin, g_free);
+    return origin;
+}
+
+static const char *
+ns_pp_frame_header(ns_js *js, const ns_node *frame)
+{
+    return frame ? ns_element_get_attr(frame, "data-nd-frame-pp")
+                 : js->permissions_policy;
+}
+
+static ns_pp_verdict
+ns_pp_container_verdict(const ns_node *frame, const char *feature,
+                        const char *parent_origin, const char *origin)
+{
+    const char *src = ns_element_get_attr(frame, "src");
+    g_autofree char *src_origin = src && strstr(src, "://")
+        ? ns_url_origin_from(src)
+        : g_strdup(src && g_str_has_prefix(src, "//") ? origin : parent_origin);
+    ns_pp_verdict verdict = ns_pp_allow_attr_verdict(
+        ns_element_get_attr(frame, "allow"), feature, parent_origin,
+        src_origin, origin);
+    if (verdict == NS_PP_UNDECLARED && strcmp(feature, "fullscreen") == 0 &&
+        ns_element_get_attr(frame, "allowfullscreen"))
+        return NS_PP_ALLOWED;
+    return verdict;
+}
+
+static gboolean
+ns_js_frame_feature_allowed(ns_js *js, const ns_node *frame,
+                            const char *feature)
+{
+    g_autofree char *origin = ns_pp_frame_origin(js, frame);
+    if (!frame)
+        return ns_pp_header_verdict(js->permissions_policy, feature, origin,
+                                    origin) != NS_PP_DENIED;
+    const ns_node *parent = ns_js_node_frame(frame->parent);
+    if (!ns_js_frame_feature_allowed(js, parent, feature)) return FALSE;
+    g_autofree char *parent_origin = ns_pp_frame_origin(js, parent);
+    if (ns_pp_header_verdict(ns_pp_frame_header(js, parent), feature,
+                             parent_origin, origin) == NS_PP_DENIED)
+        return FALSE;
+    ns_pp_verdict container = ns_pp_container_verdict(frame, feature,
+                                                      parent_origin, origin);
+    if (container == NS_PP_DENIED) return FALSE;
+    if (container == NS_PP_UNDECLARED && !ns_pp_feature_default_all(feature) &&
+        !(origin && parent_origin &&
+          g_ascii_strcasecmp(origin, parent_origin) == 0))
+        return FALSE;
+    return ns_pp_header_verdict(ns_pp_frame_header(js, frame), feature, origin,
+                                origin) != NS_PP_DENIED;
+}
+
+gboolean
+ns_js_feature_allowed(ns_js *js, JSContext *realm, const char *feature)
+{
+    if (!js || js->worker_host || !feature) return TRUE;
+    return ns_js_frame_feature_allowed(js, ns_js_frame_of_realm(js, realm),
+                                       feature);
+}
+
+void
+ns_js_set_permissions_policy(ns_js *js, const char *header_value)
+{
+    if (!js) return;
+    g_free(js->permissions_policy);
+    js->permissions_policy = header_value && *header_value
+        ? g_strdup(header_value) : NULL;
+}
+
+static JSValue
+ns_feature_policy_allows(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    const char *feature = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
+    if (!feature) return argc > 0 ? JS_EXCEPTION : JS_FALSE;
+    gboolean ok = ns_pp_feature_known(feature) &&
+                  ns_js_feature_allowed(js, ctx, feature);
+    if (ok && argc > 1 && !JS_IsUndefined(argv[1])) {
+        const char *other = JS_ToCString(ctx, argv[1]);
+        if (!other) {
+            JS_FreeCString(ctx, feature);
+            return JS_EXCEPTION;
+        }
+        const ns_node *frame = ns_js_frame_of_realm(js, ctx);
+        g_autofree char *self = ns_pp_frame_origin(js, frame);
+        g_autofree char *asked = ns_url_origin_from(other);
+        ns_pp_verdict declared = ns_pp_header_verdict(
+            ns_pp_frame_header(js, frame), feature, self, asked);
+        gboolean same = self && asked && g_ascii_strcasecmp(self, asked) == 0;
+        ok = declared == NS_PP_ALLOWED ||
+             (declared == NS_PP_UNDECLARED &&
+              (same || ns_pp_feature_default_all(feature)));
+        JS_FreeCString(ctx, other);
+    }
+    JS_FreeCString(ctx, feature);
+    return JS_NewBool(ctx, ok);
+}
+
+static JSValue
+ns_feature_policy_features(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv, int only_allowed)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    JSValue out = JS_NewArray(ctx);
+    uint32_t n = 0;
+    for (gsize i = 0; i < ns_pp_feature_count(); i++) {
+        const char *name = ns_pp_feature_name(i);
+        if (only_allowed && !ns_js_feature_allowed(js, ctx, name)) continue;
+        JS_SetPropertyUint32(ctx, out, n++, JS_NewString(ctx, name));
+    }
+    return out;
+}
+
+static JSValue
+ns_feature_policy_allowlist(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    const char *feature = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
+    if (!feature) return argc > 0 ? JS_EXCEPTION : JS_NewArray(ctx);
+    JSValue out = JS_NewArray(ctx);
+    if (ns_pp_feature_known(feature) &&
+        ns_js_feature_allowed(js, ctx, feature)) {
+        const ns_node *frame = ns_js_frame_of_realm(js, ctx);
+        g_autofree char *self = ns_pp_frame_origin(js, frame);
+        g_auto(GStrv) declared = ns_pp_header_allowlist(
+            ns_pp_frame_header(js, frame), feature, self);
+        uint32_t n = 0;
+        if (declared) {
+            for (char **o = declared; *o; o++)
+                JS_SetPropertyUint32(ctx, out, n++, JS_NewString(ctx, *o));
+        } else if (ns_pp_feature_default_all(feature)) {
+            JS_SetPropertyUint32(ctx, out, n++, JS_NewString(ctx, "*"));
+        } else if (self) {
+            JS_SetPropertyUint32(ctx, out, n++, JS_NewString(ctx, self));
+        }
+    }
+    JS_FreeCString(ctx, feature);
+    return out;
+}
+
+static JSValue
+ns_document_get_feature_policy(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue cached = JS_GetPropertyStr(ctx, this_val, "_nd_feature_policy");
+    if (JS_IsObject(cached)) return cached;
+    JS_FreeValue(ctx, cached);
+    JSValue policy = JS_NewObject(ctx);
+    ns_bind_fn(ctx, policy, "allowsFeature", ns_feature_policy_allows, 1);
+    JS_SetPropertyStr(ctx, policy, "features",
+        JS_NewCFunctionMagic(ctx, ns_feature_policy_features, "features", 0,
+                             JS_CFUNC_generic_magic, 0));
+    JS_SetPropertyStr(ctx, policy, "allowedFeatures",
+        JS_NewCFunctionMagic(ctx, ns_feature_policy_features,
+                             "allowedFeatures", 0, JS_CFUNC_generic_magic, 1));
+    ns_bind_fn(ctx, policy, "getAllowlistForFeature",
+               ns_feature_policy_allowlist, 1);
+    JS_DefinePropertyValueStr(ctx, this_val, "_nd_feature_policy",
+                              JS_DupValue(ctx, policy), JS_PROP_CONFIGURABLE);
+    return policy;
 }
 
 static const char *
@@ -13695,6 +13885,12 @@ ns_clipboard_writeText(JSContext *ctx, JSValueConst this_val,
             "NotAllowedError: clipboard write not available");
         return promise;
     }
+    if (!ns_js_feature_allowed(js, ctx, "clipboard-write")) {
+        ns_js_promise_reject(ctx, resolvers,
+            "NotAllowedError: clipboard write is disallowed by permissions "
+            "policy");
+        return promise;
+    }
     if (!ns_js_has_transient_activation(js)) {
         ns_js_promise_reject(ctx, resolvers,
             "NotAllowedError: clipboard write requires user activation");
@@ -13866,6 +14062,8 @@ ns_permissions_query(JSContext *ctx, JSValueConst this_val,
             }
         }
     }
+    gboolean policy_denies = known && ns_pp_feature_known(name) &&
+        !ns_js_feature_allowed(js_from_ctx(ctx), ctx, name);
     if (name) JS_FreeCString(ctx, name);
     JS_FreeValue(ctx, name_value);
     if (!known)
@@ -13873,7 +14071,8 @@ ns_permissions_query(JSContext *ctx, JSValueConst this_val,
                                      "Permission name is not supported");
 
     JSValue status = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, status, "state", JS_NewString(ctx, "prompt"));
+    JS_SetPropertyStr(ctx, status, "state",
+                      JS_NewString(ctx, policy_denies ? "denied" : "prompt"));
     JS_SetPropertyStr(ctx, status, "onchange", JS_NULL);
     JS_SetPropertyStr(ctx, status, "_listeners", JS_NewArray(ctx));
     ns_bind_event_target_listeners(ctx, status);
@@ -22962,6 +23161,13 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     if (ready_state != 1 || send_flag)
         return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
                                       "XMLHttpRequest is not open");
+    JSValue sync_v = JS_GetPropertyStr(ctx, this_val, "_sync");
+    gboolean sync_request = JS_ToBool(ctx, sync_v) > 0;
+    JS_FreeValue(ctx, sync_v);
+    if (sync_request &&
+        !ns_js_feature_allowed(js_from_ctx(ctx), ctx, "sync-xhr"))
+        return ns_throw_dom_exception(ctx, "NetworkError", 19,
+            "Synchronous XMLHttpRequest is disallowed by permissions policy");
     JSValue url_v = JS_GetPropertyStr(ctx, this_val, "_url");
     const char *url = JS_ToCString(ctx, url_v);
     JS_FreeValue(ctx, url_v);
@@ -48056,6 +48262,9 @@ ns_element_focus(JSContext *ctx, JSValueConst this_val,
     if (!ns_node_is_focusable(el)) return JS_UNDEFINED;
     if (!ns_node_ancestor_or_self(el, ns_js_top_document(js->current_doc)))
         return JS_UNDEFINED;
+    if (!ns_js_has_transient_activation(js) &&
+        !ns_js_feature_allowed(js, ctx, "focus-without-user-activation"))
+        return JS_UNDEFINED;
     ns_js_set_focus(js, el);
     return JS_UNDEFINED;
 }
@@ -53395,9 +53604,9 @@ ns_document_get_fullscreen_element(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_document_get_fullscreen_enabled(JSContext *ctx, JSValueConst this_val)
 {
-    (void)ctx;
     (void)this_val;
-    return JS_TRUE;
+    return JS_NewBool(ctx, ns_js_feature_allowed(js_from_ctx(ctx), ctx,
+                                                 "fullscreen"));
 }
 
 static JSValue
@@ -53607,6 +53816,10 @@ ns_element_request_fullscreen(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     if (!ns_js_has_transient_activation(js))
         return ns_fullscreen_rejected_without_activation(ctx, this_val);
+    if (!ns_js_feature_allowed(js, ctx, "fullscreen"))
+        return ns_fullscreen_rejected(ctx, this_val,
+            "Blocked requestFullscreen(): disallowed by permissions policy",
+            "Fullscreen is disallowed by the document's permissions policy");
     char *origin = NULL;
     int state = js ? ns_js_capability_state(js, ctx, NS_CAP_FULLSCREEN, &origin)
                    : (int)NS_CAP_ALLOW;
@@ -53933,6 +54146,10 @@ ns_window_focus(JSContext *ctx, JSValueConst this_val,
                 int argc, JSValueConst *argv)
 {
     (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (!ns_js_has_transient_activation(js) &&
+        !ns_js_feature_allowed(js, ctx, "focus-without-user-activation"))
+        return JS_UNDEFINED;
     return ns_window_invoke_action(ctx, "focus");
 }
 
@@ -66952,6 +67169,7 @@ static const JSCFunctionListEntry ns_document_funcs[] = {
     JS_CGETSET_DEF("webkitIsFullScreen", ns_document_get_is_fullscreen, NULL),
     JS_CGETSET_DEF("pointerLockElement", ns_document_get_pointerLockElement, NULL),
     JS_CGETSET_DEF("fullscreenEnabled",  ns_document_get_fullscreen_enabled, NULL),
+    JS_CGETSET_DEF("featurePolicy",      ns_document_get_feature_policy, NULL),
     JS_CGETSET_DEF("webkitFullscreenEnabled", ns_document_get_fullscreen_enabled, NULL),
     JS_CGETSET_DEF("scrollingElement",   ns_document_get_scrollingElement, NULL),
     JS_CFUNC_DEF("addEventListener",    2, ns_document_addEventListener),
@@ -68156,6 +68374,7 @@ ns_js_free(ns_js *js)
     g_clear_pointer(&js->popup_ports, g_hash_table_destroy);
     g_clear_pointer(&js->opener_token, g_free);
     g_clear_pointer(&js->opener_origin, g_free);
+    g_clear_pointer(&js->permissions_policy, g_free);
     if (js->workers) {
         for (guint i = 0; i < js->workers->len; i++) {
             ns_worker_host *host = g_ptr_array_index(js->workers, i);
@@ -73658,6 +73877,13 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
             ns_element_set_attr(iframe, "data-nd-frame-csp", resp->csp_header);
         else
             ns_element_remove_attr(iframe, "data-nd-frame-csp");
+        g_autofree char *frame_policy = resp
+            ? ns_net_raw_header_values(resp->raw_headers, "Permissions-Policy")
+            : NULL;
+        if (frame_policy && *frame_policy)
+            ns_element_set_attr(iframe, "data-nd-frame-pp", frame_policy);
+        else
+            ns_element_remove_attr(iframe, "data-nd-frame-pp");
         if (xhtml_suppress_scripts)
             ns_js_mark_scripts_already_started(content_root);
         if (!scripts_ok) {

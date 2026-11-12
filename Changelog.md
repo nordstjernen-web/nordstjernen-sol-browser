@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: Permissions Policy is supported. The `Permissions-Policy`
+  response header and the `<iframe allow>` attribute (with
+  `allowfullscreen`) decide which features a document and its frames may
+  use, inherited down the frame tree with the standard default
+  allowlists. It is enforced for `fullscreen`, `clipboard-write`,
+  `sync-xhr`, `focus-without-user-activation` and the WebAuthn features,
+  `navigator.permissions.query()` reports a disallowed feature as
+  `denied`, and `document.featurePolicy` exposes the result.
 * HTTPS-First now asks before it falls back to plain HTTP. When a site
   does not answer over HTTPS, a warning page explains the risk and offers
   to continue; the choice lasts for the tab. Loopback, private-network

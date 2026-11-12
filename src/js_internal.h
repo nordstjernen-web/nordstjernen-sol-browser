@@ -330,6 +330,7 @@ struct ns_js {
     JSValue       iframe_doc;
     int           iframe_doc_set;
     ns_csp *csp;
+    char         *permissions_policy;
     GPtrArray    *csp_headers;
     unsigned      document_sandbox;
     char         *selection_text;
@@ -892,5 +893,7 @@ JSValue ns_window_performance_getEntriesByType(JSContext *ctx, JSValueConst this
                                                int argc, JSValueConst *argv);
 JSValue ns_window_performance_memory_get(JSContext *ctx, JSValueConst this_val,
                                          int argc, JSValueConst *argv);
+
+gboolean ns_js_feature_allowed(ns_js *js, JSContext *realm, const char *feature);
 
 #endif

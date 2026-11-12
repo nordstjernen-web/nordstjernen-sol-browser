@@ -1490,6 +1490,8 @@ headers_have_no_store(const char *raw)
 static void browser_js_form_submit(const ns_node *form, const ns_node *submitter,
                                    gpointer user_data);
 
+static char *g_pending_permissions_policy;
+
 static ns_browser *
 browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
                        double viewport_height, int settle_ms,
@@ -1574,6 +1576,8 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         if (g_opener_token)
             ns_js_set_opener(b->js, g_opener_token, g_opener_origin);
         ns_js_add_csp_header(b->js, csp_header);
+        ns_js_set_permissions_policy(b->js, g_pending_permissions_policy);
+        g_clear_pointer(&g_pending_permissions_policy, g_free);
         ns_js_set_document_sandbox(b->js, doc, csp_header);
         browser_apply_meta_csp(b->js, doc, 0);
         const ns_config *run_cfg = ns_config_get();
@@ -2040,6 +2044,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     g_free(https_url);
     browser_prepare_document_response(resp);
     char *csp_header = g_strdup(resp->csp_header);
+    g_free(g_pending_permissions_policy);
+    g_pending_permissions_policy =
+        ns_net_raw_header_values(resp->raw_headers, "Permissions-Policy");
 
     char *doc_charset = NULL;
     char *decoded = ns_html_decode_body_full((const char *)resp->body->data,

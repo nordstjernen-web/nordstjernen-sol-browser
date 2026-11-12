@@ -138,6 +138,11 @@ ns_window_webauthn_request(JSContext *ctx, JSValueConst this_val,
     if (!ns_webauthn_top_level_realm(js, ctx)) {
         promise = ns_webauthn_rejected(ctx, "NotAllowedError",
             "Web Authentication is not available in frames.");
+    } else if (!ns_js_feature_allowed(js, ctx,
+                   strcmp(kind, "create") == 0 ? "publickey-credentials-create"
+                                               : "publickey-credentials-get")) {
+        promise = ns_webauthn_rejected(ctx, "NotAllowedError",
+            "Web Authentication is disallowed by permissions policy.");
     } else if (!origin || !*origin || strcmp(origin, "null") == 0) {
         promise = ns_webauthn_rejected(ctx, "NotAllowedError",
             "The document's origin is opaque.");
