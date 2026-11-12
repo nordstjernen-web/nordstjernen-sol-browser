@@ -3,6 +3,15 @@ Changelog:
 
 1.0.47-dev:
 ======
+* JS: text modules. `import text from "./file.txt" with { type: "text"
+  }` and the dynamic `import(url, { with: { type: "text" } })` load a
+  resource as a string, for `http(s):`, `data:` and `blob:` URLs.
+* JS: `Response`, `Request` and `Blob` have `textStream()`, a
+  `ReadableStream` of decoded text. A response returned by `fetch()` is
+  now an instance of `Response`, so it inherits prototype methods.
+* SVG: the Path Data API. `SVGPathElement` has `getPathData()` (with
+  `{ normalize: true }` reducing a path to absolute `M`, `L`, `C` and
+  `Z`), `setPathData()` and `getPathSegmentAtLength()`.
 * JS: the Media Session API is available: `navigator.mediaSession` with
   `metadata` (`MediaMetadata`), `playbackState`, `setActionHandler()`,
   `setPositionState()` and the promise-returning

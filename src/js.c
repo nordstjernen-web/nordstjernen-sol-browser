@@ -304,6 +304,7 @@ static gboolean ns_popup_blocked_for(ns_js *js, JSContext *realm);
 static void ns_fullscreen_request_clear(ns_js *js);
 static void ns_fullscreen_request_resume(ns_js *js, gboolean allow);
 static void ns_js_capability_request(ns_capability capability, const char *origin);
+static void ns_set_instance_proto(JSContext *ctx, JSValueConst object, const char *constructor_name);
 static int ns_js_capability_state(ns_js *js, JSContext *realm, ns_capability capability, char **origin_out);
 static gboolean ns_js_doc_contains(const ns_js *js, const ns_node *node);
 static JSValue ns_popup_open(JSContext *ctx, ns_js *js, const char *url,
@@ -10483,6 +10484,7 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
             return;
         }
         JSValue r = JS_NewObject(st->ctx);
+        ns_set_instance_proto(st->ctx, r, "Response");
         JS_SetPropertyStr(st->ctx, r, "ok",
             JS_NewBool(st->ctx, allow && resp->status >= 200 && resp->status < 300));
         long status = allow ? resp->status : 0;
@@ -70071,21 +70073,53 @@ ns_js_json_module_init(JSContext *ctx, JSModuleDef *m)
                               JS_GetModulePrivateValue(ctx, m));
 }
 
-static JSModuleDef *
-ns_js_make_json_module(JSContext *ctx, const char *module_name,
-                       const char *body, gsize body_len)
+typedef enum {
+    NS_MODULE_JAVASCRIPT,
+    NS_MODULE_JSON,
+    NS_MODULE_TEXT
+} ns_module_kind;
+
+static ns_module_kind
+ns_js_module_kind_of(JSContext *ctx, JSValueConst attributes)
 {
-    char *json_text = g_strndup(body, body_len);
-    JSValue json = JS_ParseJSON(ctx, json_text, body_len, module_name);
-    g_free(json_text);
-    if (JS_IsException(json)) return NULL;
+    if (ns_js_attrs_type_is(ctx, attributes, "json")) return NS_MODULE_JSON;
+    if (ns_js_attrs_type_is(ctx, attributes, "text")) return NS_MODULE_TEXT;
+    return NS_MODULE_JAVASCRIPT;
+}
+
+static JSValue
+ns_js_text_module_value(JSContext *ctx, const char *body, gsize body_len)
+{
+    if (body_len >= 3 && memcmp(body, "\xef\xbb\xbf", 3) == 0) {
+        body += 3;
+        body_len -= 3;
+    }
+    g_autofree char *valid = g_utf8_validate_len(body, body_len, NULL)
+        ? NULL : g_utf8_make_valid(body, (gssize)body_len);
+    return valid ? JS_NewString(ctx, valid)
+                 : JS_NewStringLen(ctx, body, body_len);
+}
+
+static JSModuleDef *
+ns_js_make_data_module(JSContext *ctx, const char *module_name,
+                       const char *body, gsize body_len, ns_module_kind kind)
+{
+    JSValue value;
+    if (kind == NS_MODULE_TEXT) {
+        value = ns_js_text_module_value(ctx, body, body_len);
+    } else {
+        char *json_text = g_strndup(body, body_len);
+        value = JS_ParseJSON(ctx, json_text, body_len, module_name);
+        g_free(json_text);
+    }
+    if (JS_IsException(value)) return NULL;
     JSModuleDef *m = JS_NewCModule(ctx, module_name, ns_js_json_module_init);
     if (!m) {
-        JS_FreeValue(ctx, json);
+        JS_FreeValue(ctx, value);
         return NULL;
     }
     JS_AddModuleExport(ctx, m, "default");
-    JS_SetModulePrivateValue(ctx, m, json);
+    JS_SetModulePrivateValue(ctx, m, value);
     return m;
 }
 
@@ -70493,12 +70527,13 @@ mime_essence(const char *ct)
 }
 
 static gboolean
-module_mime_acceptable(const char *content_type, gboolean json_module)
+module_mime_acceptable(const char *content_type, ns_module_kind kind)
 {
+    if (kind == NS_MODULE_TEXT) return TRUE;
     char *essence = mime_essence(content_type);
     if (!essence) return FALSE;
     gboolean ok;
-    if (json_module) {
+    if (kind == NS_MODULE_JSON) {
         ok = strcmp(essence, "application/json") == 0 ||
              strcmp(essence, "text/json") == 0 ||
              g_str_has_suffix(essence, "+json");
@@ -70514,7 +70549,7 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
                     JSValueConst attributes)
 {
     ns_js *js = opaque;
-    gboolean json_module = ns_js_attrs_type_is(ctx, attributes, "json");
+    ns_module_kind kind = ns_js_module_kind_of(ctx, attributes);
     if (!module_name) return NULL;
     if (js && (js->module_load_count > NS_MODULE_LOAD_MAX_COUNT ||
                js->module_load_bytes > NS_MODULE_LOAD_MAX_BYTES)) {
@@ -70538,9 +70573,9 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
             return NULL;
         }
         if (js) js->module_load_bytes += body_len;
-        if (json_module) {
-            JSModuleDef *m = ns_js_make_json_module(ctx, module_name,
-                                                    body, body_len);
+        if (kind != NS_MODULE_JAVASCRIPT) {
+            JSModuleDef *m = ns_js_make_data_module(ctx, module_name,
+                                                    body, body_len, kind);
             g_free(body);
             if (!m) ns_js_log_module_compile_error(js, ctx, module_name);
             return m;
@@ -70573,8 +70608,9 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
             js->module_load_count++;
             js->module_load_bytes += body_len;
         }
-        if (json_module)
-            return ns_js_make_json_module(ctx, module_name, body, body_len);
+        if (kind != NS_MODULE_JAVASCRIPT)
+            return ns_js_make_data_module(ctx, module_name, body, body_len,
+                                          kind);
         JSValue func_val =
             ns_js_compile_module_cached(ctx, body, body_len, module_name);
         if (JS_IsException(func_val)) {
@@ -70610,7 +70646,7 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
         .document_url = ns_js_realm_document_url(js, ctx),
         .cors_mode = TRUE,
     };
-    const char *const *accept = json_module
+    const char *const *accept = kind != NS_MODULE_JAVASCRIPT
         ? NULL : ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT);
     GPtrArray *headers = g_ptr_array_new();
     for (int i = 0; accept && accept[i]; i++)
@@ -70645,9 +70681,10 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
         ns_response_free(resp);
         return NULL;
     }
-    if (!module_mime_acceptable(resp->content_type, json_module)) {
+    if (!module_mime_acceptable(resp->content_type, kind)) {
         JS_ThrowTypeError(ctx, "%s module %s has disallowed MIME type %s",
-                          json_module ? "JSON" : "JavaScript", module_name,
+                          kind == NS_MODULE_JSON ? "JSON" : "JavaScript",
+                          module_name,
                           resp->content_type ? resp->content_type : "(none)");
         ns_response_free(resp);
         return NULL;
@@ -70656,9 +70693,9 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
     char *copy = g_strndup((const char *)resp->body->data, resp->body->len);
     gsize copy_len = resp->body->len;
     ns_response_free(resp);
-    if (json_module) {
-        JSModuleDef *m = ns_js_make_json_module(ctx, module_name,
-                                                copy, copy_len);
+    if (kind != NS_MODULE_JAVASCRIPT) {
+        JSModuleDef *m = ns_js_make_data_module(ctx, module_name,
+                                                copy, copy_len, kind);
         g_free(copy);
         if (!m) ns_js_log_module_compile_error(js, ctx, module_name);
         return m;
