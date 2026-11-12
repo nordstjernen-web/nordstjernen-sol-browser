@@ -6177,7 +6177,7 @@ static const char *const kwr_kind[]     = {
 static const char *const kwr_as[]       = {
     "fetch", "audio", "document", "embed", "font", "image", "manifest",
     "object", "report", "script", "sharedworker", "style", "track", "video",
-    "worker", "xslt",
+    "worker",
 };
 static const char *const kwr_preload[]  = { "none", "metadata", "auto" };
 static const char *const kwr_popovertargetaction[] = { "toggle", "show", "hide" };
@@ -67870,7 +67870,7 @@ static void
 ns_js_setup_document_interfaces(ns_js *js, JSContext *ctx, JSValueConst global)
 {
     static const ns_fn_def shim_ctors[] = {
-        { "XMLDocument", 0 }, { "XSLTProcessor", 0 },
+        { "XMLDocument", 0 },
         { "Range", 0 }, { "NodeFilter", 0 },
         { "DOMTokenList", 0 }, { "NodeList", 0 }, { "HTMLCollection", 0 },
         { "CSSStyleSheet", 0 }, { "CSSStyleDeclaration", 0 },

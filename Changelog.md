@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Removed the last XSLT surface: the empty `XSLTProcessor` constructor
+  and the `xslt` value of `<link as>`. The engine never ran XSLT, so
+  feature detection now reports that truthfully, in line with its
+  removal from other browsers.
 * JS: the performance timeline reports long tasks. A task that keeps
   the main thread for 50 ms or more adds a `longtask` entry and a
   `long-animation-frame` entry (with `blockingDuration`), delivered to
