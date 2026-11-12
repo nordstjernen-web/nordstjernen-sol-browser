@@ -3,6 +3,12 @@ Changelog:
 
 1.0.47-dev:
 ======
+* JS: the Media Session API is available: `navigator.mediaSession` with
+  `metadata` (`MediaMetadata`), `playbackState`, `setActionHandler()`,
+  `setPositionState()` and the promise-returning
+  `setMicrophoneActive()` / `setCameraActive()` /
+  `setScreenshareActive()`. The media keys delivered to a page (play,
+  pause, stop, next, previous, seek) run the page's action handlers.
 * Compression dictionary transport (RFC 9842) is supported. A response
   with `Use-As-Dictionary` is kept as a dictionary for the URLs its
   `match` pattern covers; later requests to them send

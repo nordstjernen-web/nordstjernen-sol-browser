@@ -7791,6 +7791,178 @@
         });
     }
 
+    (function () {
+        var nav = global.navigator;
+        if (!nav || nav.mediaSession || ndWorkerScope) return;
+        var actions = ['play', 'pause', 'seekbackward', 'seekforward',
+            'previoustrack', 'nexttrack', 'skipad', 'stop', 'seekto',
+            'togglemicrophone', 'togglecamera', 'togglescreenshare',
+            'hangup', 'previousslide', 'nextslide', 'enterpictureinpicture'];
+        var keyActions = {
+            MediaPlay: 'play', MediaPause: 'pause', MediaStop: 'stop',
+            MediaTrackNext: 'nexttrack', MediaTrackPrevious: 'previoustrack',
+            MediaFastForward: 'seekforward', MediaRewind: 'seekbackward'
+        };
+        var metadataState = new WeakMap();
+
+        function resolveArtwork(list) {
+            var out = [];
+            if (list === undefined || list === null) return out;
+            for (var i = 0; i < list.length; i++) {
+                var image = list[i] || {};
+                var src;
+                try {
+                    src = new URL(String(image.src), global.document
+                        ? global.document.baseURI : undefined).href;
+                } catch (e) {
+                    throw new TypeError("Failed to construct 'MediaMetadata': " +
+                        "invalid artwork src");
+                }
+                out.push(Object.freeze({
+                    src: src,
+                    sizes: image.sizes === undefined ? '' : String(image.sizes),
+                    type: image.type === undefined ? '' : String(image.type)
+                }));
+            }
+            return out;
+        }
+
+        function MediaMetadata(init) {
+            if (!(this instanceof MediaMetadata))
+                throw new TypeError("Failed to construct 'MediaMetadata': " +
+                    "Please use the 'new' operator");
+            init = init === undefined || init === null ? {} : init;
+            metadataState.set(this, {
+                title: init.title === undefined ? '' : String(init.title),
+                artist: init.artist === undefined ? '' : String(init.artist),
+                album: init.album === undefined ? '' : String(init.album),
+                artwork: resolveArtwork(init.artwork)
+            });
+        }
+        function metadataField(name) {
+            Object.defineProperty(MediaMetadata.prototype, name, {
+                configurable: true, enumerable: true,
+                get: function () { return metadataState.get(this)[name]; },
+                set: function (v) { metadataState.get(this)[name] = String(v); }
+            });
+        }
+        metadataField('title');
+        metadataField('artist');
+        metadataField('album');
+        Object.defineProperty(MediaMetadata.prototype, 'artwork', {
+            configurable: true, enumerable: true,
+            get: function () {
+                return Object.freeze(metadataState.get(this).artwork.slice());
+            },
+            set: function (v) {
+                metadataState.get(this).artwork = resolveArtwork(v);
+            }
+        });
+        defineCtor('MediaMetadata', nativeize(MediaMetadata));
+
+        var handlers = {};
+        var metadata = null;
+        var playbackState = 'none';
+        var session = {};
+
+        function MediaSession() {
+            throw new TypeError('Illegal constructor');
+        }
+        MediaSession.prototype = session;
+        Object.defineProperty(session, 'constructor', {
+            value: MediaSession, writable: true, configurable: true
+        });
+        Object.defineProperty(session, 'metadata', {
+            configurable: true, enumerable: true,
+            get: function () { return metadata; },
+            set: function (v) {
+                if (v !== null && !(v instanceof MediaMetadata))
+                    throw new TypeError("Failed to set the 'metadata' property " +
+                        "on 'MediaSession': not a MediaMetadata");
+                metadata = v;
+            }
+        });
+        Object.defineProperty(session, 'playbackState', {
+            configurable: true, enumerable: true,
+            get: function () { return playbackState; },
+            set: function (v) {
+                v = String(v);
+                if (v === 'none' || v === 'paused' || v === 'playing')
+                    playbackState = v;
+            }
+        });
+        session.setActionHandler = nativeize(function setActionHandler(action, handler) {
+            action = String(action);
+            if (actions.indexOf(action) < 0)
+                throw new TypeError("Failed to execute 'setActionHandler' on " +
+                    "'MediaSession': '" + action + "' is not a valid action");
+            if (handler === null || handler === undefined) delete handlers[action];
+            else if (typeof handler === 'function') handlers[action] = handler;
+            else throw new TypeError("Failed to execute 'setActionHandler' on " +
+                "'MediaSession': the handler is not a function");
+        });
+        session.setPositionState = nativeize(function setPositionState(state) {
+            if (state === undefined || state === null ||
+                Object.keys(state).length === 0)
+                return;
+            var duration = Number(state.duration);
+            if (state.duration === undefined || isNaN(duration) || duration < 0)
+                throw new TypeError("Failed to execute 'setPositionState' on " +
+                    "'MediaSession': invalid duration");
+            if (state.position !== undefined) {
+                var position = Number(state.position);
+                if (isNaN(position) || position < 0 || position > duration)
+                    throw new TypeError("Failed to execute 'setPositionState' " +
+                        "on 'MediaSession': invalid position");
+            }
+            if (state.playbackRate !== undefined) {
+                var rate = Number(state.playbackRate);
+                if (isNaN(rate) || rate === 0)
+                    throw new TypeError("Failed to execute 'setPositionState' " +
+                        "on 'MediaSession': invalid playbackRate");
+            }
+        });
+        ['setMicrophoneActive', 'setCameraActive', 'setScreenshareActive']
+            .forEach(function (name) {
+                session[name] = nativeize(function () {
+                    return Promise.resolve(undefined);
+                });
+            });
+        defineCtor('MediaSession', nativeize(MediaSession));
+        var instance = Object.create(session);
+        try {
+            Object.defineProperty(nav, 'mediaSession', {
+                configurable: true, enumerable: true,
+                get: function () { return instance; }
+            });
+        } catch (e) {}
+
+        function runAction(action) {
+            var handler = handlers[action];
+            if (!handler) return false;
+            try { handler({ action: action }); } catch (e) {
+                if (global.reportError) global.reportError(e);
+            }
+            return true;
+        }
+        function playPauseAction() {
+            if (playbackState === 'playing') return 'pause';
+            if (playbackState === 'paused') return 'play';
+            var media = global.document
+                ? global.document.querySelectorAll('video,audio') : [];
+            for (var i = 0; i < media.length; i++)
+                if (!media[i].paused) return 'pause';
+            return 'play';
+        }
+        if (global.document && global.document.addEventListener) {
+            global.document.addEventListener('keydown', function (e) {
+                var action = e.key === 'MediaPlayPause'
+                    ? playPauseAction() : keyActions[e.key];
+                if (action && runAction(action)) e.preventDefault();
+            }, true);
+        }
+    })();
+
     var navigator = global.navigator;
     if (navigator && !navigator.locks) {
         try {
