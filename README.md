@@ -271,7 +271,7 @@ network.
 | GLib / GModule, Pango, cairo, HarfBuzz, FriBidi, fontconfig | (ship with GTK; web-text-lib needs GLib ≥ 2.80, cairo ≥ 1.18, HarfBuzz ≥ 8.3, FriBidi ≥ 1.0.6, fontconfig ≥ 2.15) | core types, dynamic module loading, text shaping, 2D drawing |
 | libepoxy | — (with EGL on Linux) | OpenGL/ES function dispatch for WebGL |
 | glslang | — (desktop; `-Dglslang=disabled` drops WebGL) | validates every WebGL shader before it reaches the GPU driver |
-| libcurl | ≥ 8.5 (≥ 8.11 for WebSocket) | HTTP/2 networking, HSTS, native WebSocket (cookies are handled by the browser, see `docs/cookies.md`) |
+| libcurl | ≥ 8.5 | HTTP/2 networking, HSTS, WebSocket (native where libcurl has it, framed in-tree otherwise; cookies are handled by the browser, see `docs/cookies.md`) |
 | OpenSSL (libcrypto) | — | WebCrypto (`crypto.subtle`) |
 | uchardet | — | charset detection |
 | libpsl | — | public-suffix list for cookie scoping |
