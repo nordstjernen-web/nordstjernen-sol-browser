@@ -61,7 +61,12 @@ VP9/WebM, which would otherwise not play inline.
         ffmpeg-9-libswresample-devel                            # openSUSE Tumbleweed (OSS)
     sudo apk add ffmpeg-dev                                     # Alpine
 
-Optional, auto-detected: `libpoppler-glib-dev` (PDF rendering),
+PDFs are shown by PDF.js, which meson fetches through
+`subprojects/pdfjs-dist.wrap` and embeds (`-Dpdfjs=disabled`, or a build
+with `--wrap-mode=nodownload` and no cached copy, leaves it out).
+
+Optional, auto-detected: `libpoppler-glib-dev` (PDF fallback when PDF.js
+is not built, and for files over 64 MiB),
 `libenchant-2-dev` plus a dictionary such as `hunspell-en-us`
 (spell-checking), `libavif-dev` (AVIF; `-Davif=disabled` drops it) and
 `libjxl-dev` (JPEG XL; `-Djxl=disabled` drops it).

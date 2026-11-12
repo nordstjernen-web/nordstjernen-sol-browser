@@ -3,6 +3,15 @@ Changelog:
 
 1.0.47-dev:
 ======
+* PDF documents open in a built-in viewer based on PDF.js instead of
+  page images from poppler: text can be selected, links
+  work, and pages render as they scroll into view. The viewer runs as
+  sandboxed script with no network access and no access to the site's
+  cookies or storage. The PDF.js release is fetched at build time
+  (`-Dpdfjs`); poppler remains the fallback when it is not built.
+* Security: a `Content-Security-Policy: sandbox` header on a top-level
+  document now gives the document an opaque origin for cookies,
+  storage, IndexedDB and fetch, as it already did for framed documents.
 * XML parsing (`DOMParser`, XHR, XHTML documents and frames) now checks
   well-formedness properly: content after the root element, duplicate
   attributes, `<` in attribute values, undefined entities, bad character

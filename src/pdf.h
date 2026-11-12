@@ -11,6 +11,7 @@
 G_BEGIN_DECLS
 
 char *ns_pdf_document_html(const guint8 *data, gsize len, const char *url);
+const char *ns_pdf_document_csp(void);
 
 G_END_DECLS
 

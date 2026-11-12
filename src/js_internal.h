@@ -331,6 +331,7 @@ struct ns_js {
     int           iframe_doc_set;
     ns_csp *csp;
     GPtrArray    *csp_headers;
+    unsigned      document_sandbox;
     char         *selection_text;
     gboolean      selection_has_range;
     double        selection_x, selection_y, selection_w, selection_h;

@@ -22,6 +22,8 @@ option('libav', type: 'feature', value: 'auto',
        description: 'Inline WebM (VP9/VP8 video, Opus/Vorbis audio) and MP4 demuxing over FFmpeg\'s libav* libraries. Auto: required on Linux and Windows, used on macOS when present. Disable for a headless or embedding runtime that renders pages and plays no video; such a build carries no FFmpeg dependency.')
 option('poppler', type: 'feature', value: 'auto',
        description: 'Show PDF documents through poppler-glib. Auto: used when present. Disable to leave PDF viewing out of the build.')
+option('pdfjs', type: 'feature', value: 'auto',
+       description: 'Show PDF documents with PDF.js, run as sandboxed script inside the engine. The pinned pdfjs-dist release is fetched through subprojects/pdfjs-dist.wrap and embedded at build time, never committed. Auto: used when the wrap can be fetched or is already in subprojects/; poppler, when built, is then the fallback for oversized files.')
 option('enchant', type: 'feature', value: 'auto',
        description: 'Spell-check editable text through Enchant. Auto: used when present. Disable to leave spell-checking out of the build.')
 option('webgpu', type: 'feature', value: 'auto',

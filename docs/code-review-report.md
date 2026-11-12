@@ -663,6 +663,37 @@ time and memory before deciding to switch the default. A side benefit is
 already visible: PDF.js is a demanding conformance test for the engine, and
 found a real bug in its first run.
 
+### Outcome
+
+The viewer is built (`-Dpdfjs`, on by default when the wrap can be
+fetched) and PDFs opened in the browser now use it.
+
+- `subprojects/pdfjs-dist.wrap` pins `pdfjs-dist` 6.5.438 by SHA-256;
+  nothing from it is committed. The library, the worker and the three
+  WebAssembly decoders are embedded in the engine at build time.
+- `src/pdf.c` builds one self-contained page per document: the PDF bytes,
+  PDF.js and the in-tree viewer script `data/js/pdf-viewer.js` (about 150
+  lines: lazy page rendering, text layer, link annotations). Files over
+  64 MiB fall back to poppler when it is built.
+- The page is served with `sandbox allow-scripts …; default-src 'none'`
+  and script, worker, style, image and font sources limited to inline,
+  `blob:` and `data:`. Checked in the built browser: the viewer cannot
+  fetch, reads an empty `document.cookie` and an empty `localStorage`,
+  while an ordinary page on the same site still sees both.
+- That needed an engine change: the CSP `sandbox` directive was honoured
+  for frames only. A top-level document now gets an opaque origin for
+  cookies, storage partitioning, IndexedDB and fetch. `self.origin` still
+  reports the URL's origin, and the other sandbox flags (scripts, forms,
+  popups) are not yet applied at top level.
+- A second engine gap was worked around in the viewer rather than fixed:
+  Workers cannot transfer an `ImageBitmap`, so the viewer turns off
+  PDF.js's use of `OffscreenCanvas`.
+
+Not bundled: character maps for CJK fonts that are not embedded, and the
+standard 14 fonts (PDF.js substitutes system fonts). Not yet done: zoom
+controls, find-in-document UI of its own, password prompts, printing a PDF
+from the viewer, and a run over a larger corpus.
+
 Sources: [PDF.js releases](https://github.com/mozilla/pdf.js/releases),
 [PDF.js FAQ](https://github.com/mozilla/pdf.js/wiki/Frequently-Asked-Questions).
 

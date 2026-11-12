@@ -317,7 +317,12 @@ don't add `meson test` targets.
 
 - Don't introduce Mozilla/Gecko code, WebKit code, or any other
   upstream browser engine source. Nordstjernen is an independent
-  implementation, not a fork.
+  implementation, not a fork. The one
+  exception is the PDF viewer: PDF.js (Mozilla, Apache-2.0) is not engine
+  code; it runs as ordinary sandboxed script on the page that shows a PDF
+  (`src/pdf.c`, `data/js/pdf-viewer.js`). It is fetched at build time
+  through `subprojects/pdfjs-dist.wrap` and embedded, never committed;
+  `-Dpdfjs=disabled` drops it and poppler, when built, takes over.
 - Don't add AI-style web-API surface area, even as stubs. (WebGL
   already exists as a deliberate exception — extend
   `src/webgl.c`, don't re-architect it. WebGPU is an experimental
