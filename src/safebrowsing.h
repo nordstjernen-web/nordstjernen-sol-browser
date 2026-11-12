@@ -15,6 +15,7 @@ typedef enum {
     NS_SB_MALWARE,
     NS_SB_SOCIAL_ENGINEERING,
     NS_SB_UNWANTED_SOFTWARE,
+    NS_SB_INSECURE_HTTP,
 } ns_sb_verdict;
 
 #define NS_SB_GOOGLE_LISTS 3

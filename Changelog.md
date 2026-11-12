@@ -3,6 +3,23 @@ Changelog:
 
 1.0.47-dev:
 ======
+* WebCrypto: `crypto.subtle` supports ChaCha20-Poly1305 (generate,
+  import, export, encrypt, decrypt, wrap and unwrap; 256-bit keys, 96-bit
+  nonces, additional data), and the `raw-secret` key format for every
+  symmetric algorithm.
+* Security: Permissions Policy is supported. The `Permissions-Policy`
+  response header and the `<iframe allow>` attribute (with
+  `allowfullscreen`) decide which features a document and its frames may
+  use, inherited down the frame tree with the standard default
+  allowlists. It is enforced for `fullscreen`, `clipboard-write`,
+  `sync-xhr`, `focus-without-user-activation` and the WebAuthn features,
+  `navigator.permissions.query()` reports a disallowed feature as
+  `denied`, and `document.featurePolicy` exposes the result.
+* HTTPS-First now asks before it falls back to plain HTTP. When a site
+  does not answer over HTTPS, a warning page explains the risk and offers
+  to continue; the choice lasts for the tab. Loopback, private-network
+  and single-label hosts, and addresses that fail to resolve, are not
+  asked about.
 * Build: libcurl 8.11 or newer, built with the `ws`/`wss` protocols, is
   now required (`meson setup` fails otherwise), so WebSocket is always
   available. Ubuntu 24.04's libcurl 8.5 is too old; Ubuntu 25.04 and

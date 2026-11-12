@@ -218,6 +218,8 @@ interstitial_heading(ns_sb_verdict verdict)
         return "Deceptive site ahead";
     case NS_SB_UNWANTED_SOFTWARE:
         return "Site ahead offers harmful programs";
+    case NS_SB_INSECURE_HTTP:
+        return "This site does not support a secure connection";
     default:
         return "Dangerous site ahead";
     }
@@ -238,6 +240,10 @@ interstitial_summary(ns_sb_verdict verdict)
         return "This site is known to push unwanted software. It may try to "
                "get you to install programs that change your browser or slow "
                "down your device.";
+    case NS_SB_INSECURE_HTTP:
+        return "Nordstjernen tried HTTPS first and the site did not answer. "
+               "Over plain HTTP, anyone on the network between you and the "
+               "site can read or change what you send and receive.";
     default:
         return "This site is on Nordstjernen\xe2\x80\x99s list of known "
                "phishing and malware sites. It may try to steal passwords or "
@@ -248,6 +254,11 @@ interstitial_summary(ns_sb_verdict verdict)
 static const char *
 interstitial_details(ns_sb_verdict verdict)
 {
+    if (verdict == NS_SB_INSECURE_HTTP)
+        return "<p>Continue only if you do not enter passwords, payment "
+               "details or other private information on this site. The "
+               "choice lasts until this tab is closed. The warning belongs "
+               "to the HTTPS-First setting.</p>";
     if (verdict == NS_SB_LOCAL_LIST)
         return "<p>This check runs on your device against a local list. "
                "Nothing about this page was sent anywhere.</p>";
@@ -258,6 +269,26 @@ interstitial_details(ns_sb_verdict verdict)
            "<p>Advisory provided by Google. <a href=\""
            "https://developers.google.com/safe-browsing/v4/advisory\">"
            "About Safe Browsing advisories</a></p>";
+}
+
+static const char *
+interstitial_title(ns_sb_verdict verdict)
+{
+    return verdict == NS_SB_INSECURE_HTTP ? "Connection not secure"
+                                          : "Dangerous site";
+}
+
+static const char *
+interstitial_continue_label(ns_sb_verdict verdict)
+{
+    return verdict == NS_SB_INSECURE_HTTP ? "Continue to the HTTP site"
+                                          : "Visit this unsafe site";
+}
+
+static const char *
+interstitial_back_label(ns_sb_verdict verdict)
+{
+    return verdict == NS_SB_INSECURE_HTTP ? "Go back" : "Back to safety";
 }
 
 char *
@@ -273,7 +304,7 @@ ns_safebrowsing_interstitial(const char *url, const char *host,
     char *html = g_strconcat(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"color-scheme\" content=\"light dark\">"
-        "<title>Dangerous site</title>" NS_ABOUT_ICON_DANGER
+        "<title>", interstitial_title(verdict), "</title>" NS_ABOUT_ICON_DANGER
         "<style>" NS_ABOUT_BASE_CSS
         "html,body{background:#a3201a}"
         "body{display:flex;align-items:center;justify-content:center;"
@@ -311,12 +342,13 @@ ns_safebrowsing_interstitial(const char *url, const char *host,
         "<p class=\"summary\">", interstitial_summary(verdict), "</p>"
         "<p class=\"host\">", esc_host, "</p>"
         "<div class=\"actions\">"
-        "<a class=\"btn primary\" href=\"about:start\">Back to safety</a>"
+        "<a class=\"btn primary\" href=\"about:start\">",
+        interstitial_back_label(verdict), "</a>"
         "</div>"
         "<details><summary>Details</summary>",
         interstitial_details(verdict),
         "<a class=\"btn danger\" href=\"", esc_continue,
-        "\">Visit this unsafe site</a>"
+        "\">", interstitial_continue_label(verdict), "</a>"
         "</details>"
         "</main></body></html>", NULL);
 
