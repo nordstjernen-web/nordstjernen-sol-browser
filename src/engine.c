@@ -587,7 +587,7 @@ ns_engine_early_hints(const char *document_url, GPtrArray *hints)
             rel_has_token(hint->rel, "dns-prefetch")) {
             g_autofree char *origin = ns_url_origin_from(hint->url);
             if (origin && ns_url_is_http_or_https(origin))
-                ns_net_preconnect_async(origin);
+                ns_net_preconnect_async(origin, document_url);
             continue;
         }
         if (!rel_has_token(hint->rel, "preload") &&
@@ -714,7 +714,7 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
     g_hash_table_destroy(seen);
     g_hash_table_destroy(connect_seen);
     for (guint i = 0; i < connects->len; i++)
-        ns_net_preconnect_async(g_ptr_array_index(connects, i));
+        ns_net_preconnect_async(g_ptr_array_index(connects, i), base_url);
     for (guint i = 0; i < urls->len; i++) {
         const preload_target *target = g_ptr_array_index(urls, i);
         if (!ns_net_csp_allows(base_url, preload_csp_kind(target->dest),

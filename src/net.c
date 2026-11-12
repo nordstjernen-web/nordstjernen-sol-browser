@@ -2392,8 +2392,12 @@ ns_net_record_address_space(const char *url, const char *remote_ip)
     if (!g_address_space_by_origin)
         g_address_space_by_origin =
             g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-    g_hash_table_replace(g_address_space_by_origin, origin,
-                         GINT_TO_POINTER((int)space + 1));
+    gpointer seen = g_hash_table_lookup(g_address_space_by_origin, origin);
+    if (seen && (int)space >= GPOINTER_TO_INT(seen) - 1)
+        g_free(origin);
+    else
+        g_hash_table_replace(g_address_space_by_origin, origin,
+                             GINT_TO_POINTER((int)space + 1));
     g_mutex_unlock(&g_address_space_lock);
 }
 
@@ -2569,27 +2573,49 @@ ns_net_address_guard_init(ns_net_address_guard *guard,
     guard->document_space = ns_address_space_of_document(document_url);
 }
 
+static gboolean
+ns_net_address_guard_refuses(ns_net_address_guard *guard,
+                             ns_address_space target)
+{
+    if (guard->proxied) return FALSE;
+    if (guard->document_space != NS_ADDRESS_SPACE_UNKNOWN &&
+        target > guard->document_space) {
+        guard->blocked = TRUE;
+        return TRUE;
+    }
+    if (target > NS_ADDRESS_SPACE_PUBLIC && ns_net_policy_blocks_private()) {
+        guard->blocked = TRUE;
+        guard->by_policy = TRUE;
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static curl_socket_t
 ns_net_guarded_open_socket(void *clientp, curlsocktype purpose,
                            struct curl_sockaddr *address)
 {
     ns_net_address_guard *guard = clientp;
-    if (purpose == CURLSOCKTYPE_IPCXN && !guard->proxied) {
-        ns_address_space target =
-            ns_address_space_of_sockaddr(&address->addr, address->addrlen);
-        if (guard->document_space != NS_ADDRESS_SPACE_UNKNOWN &&
-            target > guard->document_space) {
-            guard->blocked = TRUE;
-            return CURL_SOCKET_BAD;
-        }
-        if (target > NS_ADDRESS_SPACE_PUBLIC &&
-            ns_net_policy_blocks_private()) {
-            guard->blocked = TRUE;
-            guard->by_policy = TRUE;
-            return CURL_SOCKET_BAD;
-        }
-    }
+    if (purpose == CURLSOCKTYPE_IPCXN &&
+        ns_net_address_guard_refuses(
+            guard,
+            ns_address_space_of_sockaddr(&address->addr, address->addrlen)))
+        return CURL_SOCKET_BAD;
     return socket(address->family, address->socktype, address->protocol);
+}
+
+static int
+ns_net_guarded_prereq(void *clientp, char *conn_primary_ip,
+                      char *conn_local_ip, int conn_primary_port,
+                      int conn_local_port)
+{
+    (void)conn_local_ip;
+    (void)conn_primary_port;
+    (void)conn_local_port;
+    ns_net_address_guard *guard = clientp;
+    return ns_net_address_guard_refuses(
+               guard, ns_address_space_of_ip_string(conn_primary_ip))
+        ? CURL_PREREQFUNC_ABORT : CURL_PREREQFUNC_OK;
 }
 
 void
@@ -2599,6 +2625,8 @@ ns_net_apply_curl_address_guard(void *curl_handle, ns_net_address_guard *guard)
     curl_easy_setopt(curl, CURLOPT_OPENSOCKETFUNCTION,
                      ns_net_guarded_open_socket);
     curl_easy_setopt(curl, CURLOPT_OPENSOCKETDATA, guard);
+    curl_easy_setopt(curl, CURLOPT_PREREQFUNCTION, ns_net_guarded_prereq);
+    curl_easy_setopt(curl, CURLOPT_PREREQDATA, guard);
 }
 
 const char *
@@ -8583,7 +8611,9 @@ ns_preconnect_thread(GTask *task, gpointer source_object, gpointer task_data,
 {
     (void)source_object;
     (void)cancellable;
-    const char *url = task_data;
+    char **target = task_data;
+    const char *url = target[0];
+    const char *document_url = target[1];
     g_mutex_lock(&g_fetch_throttle_mutex);
     g_preconnect_active++;
     g_mutex_unlock(&g_fetch_throttle_mutex);
@@ -8592,7 +8622,7 @@ ns_preconnect_thread(GTask *task, gpointer source_object, gpointer task_data,
     CURL *curl = refused ? NULL : curl_easy_init();
     if (curl) {
         ns_net_address_guard address_guard;
-        ns_net_address_guard_init(&address_guard, NULL, url);
+        ns_net_address_guard_init(&address_guard, document_url, url);
         ns_net_apply_curl_address_guard(curl, &address_guard);
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 1L);
@@ -8615,11 +8645,14 @@ ns_preconnect_thread(GTask *task, gpointer source_object, gpointer task_data,
 }
 
 void
-ns_net_preconnect_async(const char *url)
+ns_net_preconnect_async(const char *url, const char *document_url)
 {
     if (!url || !ns_url_is_http_or_https(url)) return;
     GTask *task = g_task_new(NULL, NULL, NULL, NULL);
-    g_task_set_task_data(task, g_strdup(url), g_free);
+    char **target = g_new0(char *, 3);
+    target[0] = g_strdup(url);
+    target[1] = g_strdup(document_url ? document_url : "");
+    g_task_set_task_data(task, target, (GDestroyNotify)g_strfreev);
     g_task_run_in_thread(task, ns_preconnect_thread);
     g_object_unref(task);
 }
