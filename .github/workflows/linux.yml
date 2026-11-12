@@ -39,14 +39,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The runner's Azure Ubuntu mirror sometimes serves at a few KB/s and
       # the install outran its time limit. Downloaded packages are cached
       # between runs, the download is bounded on its own, and a stalled
       # download is retried against archive.ubuntu.com.
       - name: Restore apt package cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/apt-archives
           key: apt-linux-${{ matrix.ubuntu }}-${{ hashFiles('.github/workflows/linux.yml') }}
@@ -82,7 +84,7 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ccache
           key: ccache-linux-${{ matrix.compiler }}-${{ github.sha }}
@@ -167,7 +169,7 @@ jobs:
       - name: Upload build log
         if: always() && hashFiles('build.log') != ''
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-log-${{ matrix.ubuntu }}-${{ matrix.compiler }}
           path: build.log
@@ -176,7 +178,7 @@ jobs:
 
       - name: Upload nordstjernen binary
         if: hashFiles('builddir/src/gtk/nordstjernen') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nordstjernen-linux-${{ matrix.ubuntu }}-${{ matrix.compiler }}
           path: builddir/src/gtk/nordstjernen

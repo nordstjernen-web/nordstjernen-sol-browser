@@ -73,8 +73,9 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ env.TAG }}
 
       # Installs the build dependencies, builds, packs the zip and the native
@@ -101,7 +102,7 @@ jobs:
           done
 
       - name: Upload package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-${{ matrix.package }}-${{ matrix.slug }}
           path: dist/*.${{ matrix.package }}
@@ -110,7 +111,7 @@ jobs:
 
       - name: Upload portable zip
         if: matrix.portable_zip
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-zip
           path: dist/*.zip
@@ -142,8 +143,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ env.TAG }}
           sparse-checkout: |
             Changelog.md
@@ -151,7 +153,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Download packages
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: linux-*
           merge-multiple: true
@@ -159,7 +161,7 @@ jobs:
 
       - name: Download the macOS .dmg
         if: needs.macos.result == 'success'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: nordstjernen-macos-*-dmg
           merge-multiple: true
