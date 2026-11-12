@@ -22,7 +22,7 @@ if [ "$system" = darwin ]; then
         aarch64) arch=arm64 ;;
         *)       arch=$cpu ;;
     esac
-    "$ld" -r -arch "$arch" -all_load "$in" -exported_symbols_list "$exports" -o "$merged"
+    cc -r -nostdlib -arch "$arch" -Wl,-all_load "$in" -Wl,-exported_symbols_list,"$exports" -o "$merged"
     rm -f "$exports"
 else
     "$ld" -r --whole-archive "$in" -o "$merged"
