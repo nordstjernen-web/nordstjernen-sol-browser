@@ -729,10 +729,31 @@ wg_make_queue(JSContext *ctx, WGPUQueue queue, ns_wg_error_sink *sink)
     return obj;
 }
 
+static GHashTable *g_wg_destroyed_devices;
+
+static void
+wg_device_note_destroyed(WGPUDevice device, gboolean destroyed)
+{
+    if (!g_wg_destroyed_devices)
+        g_wg_destroyed_devices = g_hash_table_new(g_direct_hash, g_direct_equal);
+    if (destroyed)
+        g_hash_table_add(g_wg_destroyed_devices, device);
+    else
+        g_hash_table_remove(g_wg_destroyed_devices, device);
+}
+
+static gboolean
+wg_device_was_destroyed(WGPUDevice device)
+{
+    return g_wg_destroyed_devices &&
+           g_hash_table_contains(g_wg_destroyed_devices, device);
+}
+
 static gboolean
 wg_buffer_detach_ranges(JSContext *ctx, ns_wg_buffer *b)
 {
     if (!b) return FALSE;
+    gboolean memory_live = !wg_device_was_destroyed(b->device);
     if (b->mapped_ranges) {
         for (guint i = 0; i < b->mapped_ranges->len; i++) {
             ns_wg_mapped_range *r = &g_array_index(b->mapped_ranges, ns_wg_mapped_range, i);
@@ -740,7 +761,8 @@ wg_buffer_detach_ranges(JSContext *ctx, ns_wg_buffer *b)
             uint8_t *data = JS_GetArrayBuffer(ctx, &len, r->ab);
             if (!data)
                 JS_FreeValue(ctx, JS_GetException(ctx));
-            else if (b->map_mode == WGPUMapMode_Write && len == r->size)
+            else if (memory_live && b->map_mode == WGPUMapMode_Write &&
+                     len == r->size)
                 memcpy(r->mapped, data, len);
             JS_DetachArrayBuffer(ctx, r->ab);
             JS_FreeValue(ctx, r->ab);
@@ -980,6 +1002,7 @@ wg_device_destroy(JSContext *ctx, JSValueConst this_val,
     ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
     if (!d || d->destroyed) return JS_UNDEFINED;
     d->destroyed = TRUE;
+    wg_device_note_destroyed(d->device, TRUE);
     wgpuDeviceDestroy(d->device);
     wg_device_resolve_lost(ctx, d, "destroyed", "Device was destroyed.");
     return JS_UNDEFINED;
@@ -1027,6 +1050,7 @@ wg_make_device(JSContext *ctx, WGPUDevice device, ns_wg_error_sink *sink,
     if (JS_IsException(obj)) return obj;
     ns_wg_device *d = g_new0(ns_wg_device, 1);
     d->device = device;
+    wg_device_note_destroyed(device, FALSE);
     d->queue = wgpuDeviceGetQueue(device);
     d->sink = sink;
     d->lost_resolve = JS_UNDEFINED;

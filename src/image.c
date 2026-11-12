@@ -515,9 +515,28 @@ ns_image_decode_body(const guchar *data, gsize len)
 }
 
 static void
+ns_image_drop_decoded(ns_image *img)
+{
+    if (img->anim_frames) {
+        g_array_free(img->anim_frames, TRUE);
+        img->anim_frames = NULL;
+        img->texture = NULL;
+    } else {
+        ns_texture_clear(&img->texture);
+    }
+    if (img->render_surface) {
+        cairo_surface_destroy(img->render_surface);
+        img->render_surface = NULL;
+    }
+    g_clear_pointer(&img->svg_source, g_bytes_unref);
+    img->anim_current = 0;
+}
+
+static void
 ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
                              const char *content_type, gsize body_len)
 {
+    if (d->frames || d->tex) ns_image_drop_decoded(img);
     if (d->frames) {
         g_array_set_clear_func(d->frames, ns_image_anim_frame_clear);
         img->anim_frames = d->frames;

@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: detached DOM nodes are no longer freed while the last
+  layout may still point at them; they are released after the next
+  layout instead. Fixes a possible use-after-free when a page removed
+  elements and loaded a frame in the same turn.
+* Security: unmapping a WebGPU buffer after its device was destroyed no
+  longer copies into the released mapping; an MP4 file's tracks share
+  one sample budget; a re-fetched image releases its previous decoded
+  pixels.
 * Security: Private Network Access now also checks requests that reuse
   an open connection, and `rel=preconnect` is checked against the page
   that asked for it. A site's address space, once seen, can only be
