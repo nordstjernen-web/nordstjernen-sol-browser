@@ -544,6 +544,32 @@ through expat's external-entity handler.
    treat it as a correctness dependency that needs the sandbox, not as
    hardening.
 
+### Outcome
+
+Items 1 and 2 are done in `src/xml.c`. The parser is now the single
+authority: `ns_xml_well_formed` is a thin wrapper over it and the separate
+scanner in `src/html_lexbor.c` is gone. Rerun on 54 documents (the 29 above
+plus 25 more on entities, namespaces, the prolog and the epilog), it gives
+the expected answer for 53. The exception is an entity whose replacement
+text contains markup, which is reported as an error rather than expanded.
+
+- Internal general entities expand, nested up to 16 deep, with recursion
+  detected and an expansion budget of 8 MiB or 100 times the input,
+  whichever is larger. A billion-laughs document is rejected in 10 ms.
+- External entities are never fetched: a reference in content expands to
+  nothing and one in an attribute value is an error.
+- Named HTML entities are recognised in XML only when the DOCTYPE carries
+  one of the XHTML or MathML public identifiers the HTML standard lists.
+  XHTML documents loaded as pages keep the old leniency.
+- 400,000 ampersands are rejected in 1 ms (was 966 ms).
+- Elements nest to `NS_DOM_MAX_DEPTH` (512) without recursion.
+
+Not done: attribute defaults from `<!ATTLIST>`. Found on the way and left
+alone: setting attributes is quadratic in the DOM itself
+(`ns_element_set_attr_ns` walks a linked list), so an element with 20,000
+attributes takes 1.1 s through the XML parser and 2.0 s through the HTML
+parser.
+
 Sources: [Expat 2.8.2 released](https://blog.hartwork.org/posts/expat-2-8-2-released/),
 [Expat 2.7.4 released](https://blog.hartwork.org/posts/expat-2-7-4-released/),
 [oss-security, expat 2.9.0](https://www.openwall.com/lists/oss-security/2026/10/05/16),

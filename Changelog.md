@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* XML parsing (`DOMParser`, XHR, XHTML documents and frames) now checks
+  well-formedness properly: content after the root element, duplicate
+  attributes, `<` in attribute values, undefined entities, bad character
+  references, unbound namespace prefixes and similar errors are reported
+  instead of accepted. Internal DTD entities are expanded, within a
+  size budget. Elements may nest 512 deep instead of 256.
+* Security: an XML text run of `&` characters no longer takes quadratic
+  time to parse.
 * `CompressionStream` and `DecompressionStream` now compress and
   decompress inside Workers. They passed bytes through unchanged there,
   which broke PDF.js and any other script that inflates data in a
