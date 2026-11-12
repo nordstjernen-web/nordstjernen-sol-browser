@@ -16,6 +16,13 @@ Changelog:
 * PDF viewer: a toolbar shows the page position and offers zoom, fit to
   width and download; password-protected files ask for the password;
   small pages are no longer stretched to the window width.
+* WebSockets work when the system libcurl is built without WebSocket
+  support (Ubuntu 24.04): the handshake and RFC 6455 framing are then
+  done in-tree over the libcurl connection, where `new WebSocket()`
+  used to throw. `WebSocket.protocol` reports the subprotocol the
+  server selected.
+* Audio: a page may hold 128 loaded `<audio>` elements instead of 16,
+  so games that preload a pool of sound channels get all of them.
 * Security: frames inside a document sandboxed by its
   `Content-Security-Policy` header inherit its opaque origin; they could
   read the site's cookies. The PDF viewer relies on this, and its own

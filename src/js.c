@@ -26029,6 +26029,8 @@ ns_js_ws_on_open(gpointer user_data)
     ns_budget_guard bg = {0};
     ns_js_budget_push(s->js, &bg);
     JS_SetPropertyStr(ctx, s->wrapper, "readyState", JS_NewInt32(ctx, 1));
+    JS_SetPropertyStr(ctx, s->wrapper, "protocol",
+                      JS_NewString(ctx, ns_ws_protocol(s->ws)));
     ns_js_ws_dispatch(ctx, s->wrapper, "onopen", ns_js_ws_event(ctx, "open"));
     ns_js_budget_pop(s->js, &bg);
 }
@@ -26294,12 +26296,6 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
         g_free(target);
         return JS_ThrowTypeError(ctx,
             "WebSocket: blocked by Content-Security-Policy connect-src");
-    }
-
-    if (!ns_ws_available()) {
-        g_free(target);
-        return JS_ThrowTypeError(ctx,
-            "WebSocket unsupported: libcurl built without websocket protocol");
     }
 
     GPtrArray *protos_terminated = NULL;
