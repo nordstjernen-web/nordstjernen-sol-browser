@@ -91,8 +91,6 @@ OPTIONAL = [
          minimum="1.20", unix=True, feature="H.264 video and AAC audio", meson_option="gstreamer"),
     _lib("gstreamer-video-1.0", "libgstreamer-plugins-base1.0-dev", "gst-plugins-base-libs",
          minimum="1.20", unix=True, feature="H.264 video and AAC audio", meson_option="gstreamer"),
-    _lib("poppler-glib", "libpoppler-glib-dev", "poppler-glib", "poppler", "poppler",
-         feature="viewing PDF files"),
     _lib("libbrotlidec", "libbrotli-dev", "brotli", "brotli", "brotli", feature="WOFF2 web fonts"),
     _lib("enchant-2", "libenchant-2-dev", "enchant", "enchant", "enchant", feature="spell-checking"),
     _lib("libavif", "libavif-dev", "libavif", "libavif", "libavif", feature="AVIF images"),

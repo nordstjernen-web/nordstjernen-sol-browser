@@ -65,8 +65,7 @@ PDFs are shown by PDF.js, which meson fetches through
 `subprojects/pdfjs-dist.wrap` and embeds (`-Dpdfjs=disabled`, or a build
 with `--wrap-mode=nodownload` and no cached copy, leaves it out).
 
-Optional, auto-detected: `libpoppler-glib-dev` (PDF fallback when PDF.js
-is not built, and for files over 64 MiB),
+Optional, auto-detected:
 `libenchant-2-dev` plus a dictionary such as `hunspell-en-us`
 (spell-checking), `libavif-dev` (AVIF; `-Davif=disabled` drops it) and
 `libjxl-dev` (JPEG XL; `-Djxl=disabled` drops it).
@@ -150,7 +149,7 @@ host at runtime; fully-static GTK isn't practical. Runtime requirements:
   (where the distribution ships it as a shared library)
 - FFmpeg 6.0+ runtime libraries (libavformat, libavcodec, libavutil,
   libswscale, libswresample)
-- libpoppler-glib and libavif, when the build found them
+- libavif, when the build found it
 - fontconfig + a font set, harfbuzz, freetype, libstdc++
 - ca-certificates (TLS trust store)
 - An X11 or Wayland session

@@ -139,7 +139,7 @@ system.
 - **Images and fonts** — Wuffs decodes PNG/APNG, GIF, BMP, JPEG and simple
   WebP; libwebp handles extended (alpha and animated) WebP; ICO and SVG are
   rendered in-engine; AVIF and JPEG XL are optional. PDFs open in a
-  sandboxed PDF.js viewer (poppler is the fallback).
+  sandboxed PDF.js viewer.
   Web fonts load as TTF/OTF, WOFF and WOFF2.
 - **Media** — `<video>` plays inline: MPEG-1 decoded in-tree by
   [pl_mpeg](https://github.com/phoboslab/pl_mpeg), WebM and Ogg (VP9, VP8,
@@ -288,7 +288,7 @@ on macOS and the BSDs, GStreamer on the BSDs (`-Dgstreamer`), rustc (the
 memory-safe IPC parser, `-Dipc_rust`), vorbisfile/opusfile (Ogg audio without
 FFmpeg), brotli (`br` content encoding and WOFF2 fonts), zstd (`zstd` content
 encoding), pdfjs-dist (the PDF viewer, fetched by a meson wrap; `-Dpdfjs`),
-poppler-glib (PDF fallback), libavif (`-Davif`), libjxl (`-Djxl`),
+libavif (`-Davif`), libjxl (`-Djxl`),
 Enchant (spell checking), FreeType (WOFF/WOFF2 unpacking), wgpu-native where
 it publishes no release (the BSDs, musl, Windows on Arm; WebGPU is not built
 for Android).

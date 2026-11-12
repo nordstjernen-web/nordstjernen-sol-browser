@@ -17,7 +17,7 @@ apt-get install -y --no-install-recommends \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libuchardet-dev libpsl-dev \
     libsqlite3-dev libseccomp-dev
 apt-get install -y --no-install-recommends \
-    libpoppler-glib-dev libfontconfig-dev libpango1.0-dev libavif-dev || true
+    libfontconfig-dev libpango1.0-dev libavif-dev || true
 # FFmpeg libav* enables inline WebM (VP9/VP8 + Opus/Vorbis); optional, like
 # libavif. The native lib then expects the FFmpeg runtime on the host.
 apt-get install -y --no-install-recommends \

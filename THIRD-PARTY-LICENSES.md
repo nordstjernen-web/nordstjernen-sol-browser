@@ -387,9 +387,6 @@ These are linked only when present on the build host (meson
 
 - **libavif** — BSD 2-Clause, © the AOMedia / libavif authors. AVIF
   image decoding.
-- **Poppler** (`poppler-glib`) — GNU GPL 2.0 or later, © the Poppler
-  developers. PDF rendering. Note: Poppler is GPL; a build that links it
-  is subject to the GPL for that combined binary.
 - **Fontconfig** — MIT-style license, © Keith Packard and contributors.
 - **FreeType** — FreeType License (BSD-style with credit clause) or GNU
   GPL 2.0, at your option, © The FreeType Project.

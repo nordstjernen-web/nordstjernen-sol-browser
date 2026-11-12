@@ -116,8 +116,7 @@ the oldest releases the package builds on.
 The FFmpeg `libav*` packages are **not** optional here: `meson setup` fails
 without them on Linux (inline WebM — VP9/VP8 video, Opus/Vorbis audio).
 GStreamer decodes H.264/AAC, `libbrotli-dev` enables WOFF2 web fonts,
-`libjxl-dev`/`libavif-dev` add JPEG XL and AVIF images and
-`libpoppler-glib-dev` the built-in PDF viewer. `libfontconfig-dev` and
+`libjxl-dev`/`libavif-dev` add JPEG XL and AVIF images. `libfontconfig-dev` and
 `libfreetype-dev`, with GTK's cairo, HarfBuzz and FriBiDi development
 packages, are what the in-tree web-text-lib text stack builds against.
 
