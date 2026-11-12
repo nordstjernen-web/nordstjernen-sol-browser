@@ -2478,6 +2478,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             changed = TRUE;
             other_changed = TRUE;
         }
+        ns_js_hold_animation_frames(browser->js, TRUE);
 
         gboolean did_iter = FALSE;
         int it = 0;
@@ -2491,6 +2492,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         if (++guard >= 4096) break;
         if (g_get_monotonic_time() >= deadline) break;
     }
+    ns_js_hold_animation_frames(browser->js, FALSE);
     if (browser->svg_external_seen != ns_svg_external_generation()) {
         browser->svg_external_seen = ns_svg_external_generation();
         changed = TRUE;
@@ -5295,7 +5297,7 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
             gboolean press_prevented = FALSE;
             ns_js_dispatch_key_event_full(browser->js, target, "keypress",
                                           key ? key : "", code ? code : "",
-                                          keycode, char_code,
+                                          char_code, char_code,
                                           (mods & 1) != 0, FALSE, FALSE, FALSE,
                                           &press_prevented);
             if (press_prevented) {
