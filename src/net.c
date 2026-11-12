@@ -2325,6 +2325,27 @@ ns_address_space_of_ip_string(const char *ip)
     return addr ? ns_address_space_of_inet(addr) : NS_ADDRESS_SPACE_UNKNOWN;
 }
 
+static gboolean
+ns_net_error_is_name_resolution(const char *error)
+{
+    if (!error) return FALSE;
+    g_autofree char *low = g_ascii_strdown(error, -1);
+    return strstr(low, "resolve") != NULL;
+}
+
+gboolean
+ns_net_http_fallback_needs_consent(const char *url, const char *https_error)
+{
+    if (!url || !g_str_has_prefix(url, "http://")) return FALSE;
+    if (ns_net_error_is_name_resolution(https_error)) return FALSE;
+    g_autofree char *host = ns_url_host_from(url);
+    if (!host || !strchr(host, '.')) return FALSE;
+    if (g_str_has_suffix(host, ".local") || g_str_has_suffix(host, ".internal"))
+        return FALSE;
+    ns_address_space space = ns_address_space_of_ip_string(host);
+    return space == NS_ADDRESS_SPACE_UNKNOWN || space == NS_ADDRESS_SPACE_PUBLIC;
+}
+
 static ns_address_space
 ns_address_space_of_sockaddr(const struct sockaddr *sa, gsize len)
 {
@@ -5614,7 +5635,7 @@ SETTINGS_SWITCH("safe_browsing",
     "Warn before opening known phishing and malware sites, using Google Safe Browsing and a local list.")
 SETTINGS_SWITCH("https_first",
     "HTTPS-First",
-    "Try a secure connection before plain HTTP on every site.")
+    "Try a secure connection before plain HTTP on every site, and ask before falling back to HTTP.")
 SETTINGS_SWITCH("remote_control",
     "Allow remote control",
     "Let automation tools on this computer control the browser. "

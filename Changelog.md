@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* HTTPS-First now asks before it falls back to plain HTTP. When a site
+  does not answer over HTTPS, a warning page explains the risk and offers
+  to continue; the choice lasts for the tab. Loopback, private-network
+  and single-label hosts, and addresses that fail to resolve, are not
+  asked about.
 * Security: frames inside a document sandboxed by its
   `Content-Security-Policy` header inherit its opaque origin; they could
   read the site's cookies. The PDF viewer relies on this, and its own

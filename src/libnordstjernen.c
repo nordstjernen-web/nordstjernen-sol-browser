@@ -162,6 +162,7 @@ struct ns_browser {
     double          resize_from_w, resize_from_h;
     double          resize_extra_w, resize_extra_h;
     int             security;
+    gboolean        interstitial;
     char           *remote_ip;
 };
 
@@ -981,7 +982,7 @@ static gboolean
 browser_allows_navigation_url(ns_browser *b, const char *url)
 {
     return browser_allows_navigation_from(
-        b ? b->base_url : NULL, url, b && b->security == NS_SEC_DANGEROUS);
+        b ? b->base_url : NULL, url, b && b->interstitial);
 }
 
 static gboolean
@@ -1806,9 +1807,58 @@ browser_open_blocked(const char *url, const char *host, ns_sb_verdict verdict,
                                            viewport_height, settle_ms, FALSE,
                                            NULL, NULL, NULL, g_strdup("UTF-8"),
                                            url, NULL);
-    if (b)
-        b->security = NS_SEC_DANGEROUS;
+    if (b) {
+        b->interstitial = TRUE;
+        b->security = verdict == NS_SB_INSECURE_HTTP ? NS_SEC_PLAIN
+                                                     : NS_SEC_DANGEROUS;
+    }
     return b;
+}
+
+static GMutex g_http_consent_lock;
+static GHashTable *g_http_consent_asked;
+static GHashTable *g_http_consent_given;
+
+static GHashTable *
+http_consent_set(GHashTable **set)
+{
+    if (!*set)
+        *set = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    return *set;
+}
+
+static gboolean
+http_consent_was_given(const char *host)
+{
+    g_autofree char *low = g_ascii_strdown(host, -1);
+    g_mutex_lock(&g_http_consent_lock);
+    gboolean given = g_hash_table_contains(
+        http_consent_set(&g_http_consent_given), low);
+    g_mutex_unlock(&g_http_consent_lock);
+    return given;
+}
+
+static void
+http_consent_ask(const char *host)
+{
+    g_mutex_lock(&g_http_consent_lock);
+    g_hash_table_add(http_consent_set(&g_http_consent_asked),
+                     g_ascii_strdown(host, -1));
+    g_mutex_unlock(&g_http_consent_lock);
+}
+
+static gboolean
+http_consent_take_answer(const char *host)
+{
+    g_autofree char *low = g_ascii_strdown(host, -1);
+    g_mutex_lock(&g_http_consent_lock);
+    gboolean asked = g_hash_table_remove(
+        http_consent_set(&g_http_consent_asked), low);
+    if (asked)
+        g_hash_table_add(http_consent_set(&g_http_consent_given),
+                         g_steal_pointer(&low));
+    g_mutex_unlock(&g_http_consent_lock);
+    return asked;
 }
 
 static ns_browser *
@@ -1835,7 +1885,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         char *real = g_strdup(rest);
         char *host = ns_url_host_from(real);
         if (host) {
-            ns_safebrowsing_allow_host(host);
+            if (!g_str_has_prefix(real, "http://") ||
+                !http_consent_take_answer(host))
+                ns_safebrowsing_allow_host(host);
             g_free(host);
         }
         g_pending_referrer = g_steal_pointer(&referrer);
@@ -1884,9 +1936,25 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         if (resp && !resp->error && resp->body) {
             fetch_url = https_url;
         } else {
+            g_autofree char *host = ns_url_host_from(fetch_url);
+            gboolean ask = host && !http_consent_was_given(host) &&
+                ns_net_http_fallback_needs_consent(
+                    fetch_url, resp ? resp->error : NULL);
             if (resp) ns_response_free(resp);
             resp = NULL;
             g_clear_error(&err);
+            if (ask) {
+                http_consent_ask(host);
+                ns_browser *b = browser_open_blocked(fetch_url, host,
+                                                     NS_SB_INSECURE_HTTP,
+                                                     viewport_width,
+                                                     viewport_height,
+                                                     settle_ms);
+                g_free(file_url);
+                g_free(stripped_url);
+                g_free(https_url);
+                return b;
+            }
         }
     }
     if (!resp && body)

@@ -461,7 +461,8 @@ Networking is built on **libcurl** (`src/net.c`, ~7,000 lines):
   `Upgrade-Insecure-Requests`, and a compat-mode-selectable User-Agent
   (Chrome/Firefox/Ladybird presets).
 - **HSTS** and an **HTTPS-first** upgrade path (on by default, the
-  `https_first` config key).
+  `https_first` config key). When the HTTPS attempt fails, a warning page
+  asks before the plain-HTTP fallback (`ns_net_http_fallback_needs_consent`).
 - **HTTP cache**: a **SQLite-indexed** cache with on-disk bodies
   (`src/cache.c`), honouring ETag/Last-Modified.
 - **Cookies** partitioned per top-level site in one SQLite database
