@@ -3,6 +3,23 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: Private Network Access now also checks requests that reuse
+  an open connection, and `rel=preconnect` is checked against the page
+  that asked for it. A site's address space, once seen, can only be
+  re-recorded as more public, so a later navigation cannot relabel a
+  public page as private (DNS rebinding).
+* Security: `X-Frame-Options` and CSP `frame-ancestors` are checked
+  against every ancestor frame up to the top page, not only the
+  immediate parent, and a multi-valued `X-Frame-Options` is denied when
+  any value says `DENY`.
+* Security: a settings change requested by a page is limited to the
+  settings the settings page offers, values longer than the
+  confirmation dialog shows are refused, and clearing the history from
+  a page needs the settings page to be open and a confirmation.
+* Security: printed pages reach the browser shell as raw, size-checked
+  pixels instead of PNG files; an external SVG `<use>` target that
+  redirects to another origin is dropped; more program file types ask
+  before a download is saved.
 * Security: every GitHub Action the CI and release workflows run is
   pinned to a commit instead of a movable version tag, Dependabot waits
   seven days before proposing a new action release, and checkouts no

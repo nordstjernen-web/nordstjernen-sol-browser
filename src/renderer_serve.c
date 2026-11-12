@@ -366,6 +366,24 @@ ns_renderer_session_free(ns_renderer_session *s)
 }
 
 static int
+serve_write_raw_sheet(cairo_surface_t *img, const char *path)
+{
+    cairo_surface_flush(img);
+    if (cairo_surface_status(img) != CAIRO_STATUS_SUCCESS) return 0;
+    const unsigned char *data = cairo_image_surface_get_data(img);
+    size_t row = (size_t)cairo_image_surface_get_width(img) * 4u;
+    int rows = cairo_image_surface_get_height(img);
+    int stride = cairo_image_surface_get_stride(img);
+    FILE *f = fopen(path, "wb");
+    if (!f) return 0;
+    int ok = 1;
+    for (int y = 0; ok && y < rows; y++)
+        ok = fwrite(data + (size_t)y * (size_t)stride, 1, row, f) == row;
+    if (fclose(f) != 0) ok = 0;
+    return ok;
+}
+
+static int
 serve_append_hdr(char *buf, int pos, size_t cap, const char *name,
                  const char *value, int maxval)
 {
@@ -1756,9 +1774,8 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                     cairo_paint(cr);
                     cairo_destroy(cr);
                     char *path = NULL;
-                    if (asprintf(&path, "%s-%u.png", prefix, i) >= 0 && path) {
-                        if (cairo_surface_write_to_png(img, path) ==
-                            CAIRO_STATUS_SUCCESS)
+                    if (asprintf(&path, "%s-%u.raw", prefix, i) >= 0 && path) {
+                        if (serve_write_raw_sheet(img, path))
                             written = i + 1;
                         free(path);
                     }
