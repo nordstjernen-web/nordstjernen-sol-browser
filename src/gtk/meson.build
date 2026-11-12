@@ -10,6 +10,7 @@ nordstjernen_gtk_sources = files(
   'remotectl.c',
   'rjson.c',
   'titlerow.c',
+  'uiscale.c',
   'ns_webauthn.c',
   'webdriver.c',
   '../rproc_http.c',

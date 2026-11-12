@@ -4,6 +4,7 @@
 #include <glib/gstdio.h>
 #include "icons.h"
 #include "procview.h"
+#include "uiscale.h"
 #include "permissions.h"
 #include "sessionstore.h"
 #include "remotectl.h"
@@ -227,8 +228,7 @@ install_chrome_css(void)
     if (!display)
         return;
     GtkCssProvider *p = gtk_css_provider_new();
-    gtk_css_provider_load_from_string(
-        p,
+    char *css = ns_ui_scale_css(
         "@define-color ns_strip_base mix(@theme_bg_color, @theme_fg_color, .07);"
         "@define-color ns_strip mix(@ns_strip_base, #3a5a9a, 0.12);"
         "@define-color ns_surface mix(@theme_base_color, #3a5a9a, 0.03);"
@@ -584,6 +584,15 @@ install_chrome_css(void)
         "  border-color: #6ea0ff;"
         "  box-shadow: 0 0 0 2px alpha(#6ea0ff, 0.45);"
         "}");
+    if (ns_ui_scale() > 1.0) {
+        char *scaled = g_strdup_printf(
+            "%s headerbar windowcontrols > button > image {"
+            " -gtk-icon-size: %dpx; }", css, ns_ui_px(16));
+        g_free(css);
+        css = scaled;
+    }
+    gtk_css_provider_load_from_string(p, css);
+    g_free(css);
     gtk_style_context_add_provider_for_display(
         display, GTK_STYLE_PROVIDER(p),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -1543,7 +1552,7 @@ show_downloads_window(ProcWindow *pw)
     }
     GtkWidget *win = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(win), ns_i18n("Downloads"));
-    gtk_window_set_default_size(GTK_WINDOW(win), 460, 420);
+    gtk_window_set_default_size(GTK_WINDOW(win), ns_ui_px(460), ns_ui_px(420));
     gtk_window_set_transient_for(GTK_WINDOW(win), GTK_WINDOW(pw->window));
     g_signal_connect(win, "close-request",
                      G_CALLBACK(downloads_win_close), NULL);
@@ -1827,7 +1836,7 @@ refresh_tab_icon(GtkWidget *page, NsProcView *v)
         ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen-badge");
     else
         ns_icon_image_set(GTK_IMAGE(icon), "nordstjernen-page-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), ns_ui_px(16));
 }
 
 static void
@@ -2172,9 +2181,9 @@ proc_window_add_tab_core(ProcWindow *pw, const char *url,
     GtkWidget *icon = ns_icon_image_new(
         private_mode ? "nordstjernen-private-symbolic"
                      : "nordstjernen-page-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), ns_ui_px(16));
     GtkWidget *spinner = gtk_spinner_new();
-    gtk_widget_set_size_request(spinner, 16, 16);
+    gtk_widget_set_size_request(spinner, ns_ui_px(16), ns_ui_px(16));
     gtk_widget_set_visible(spinner, FALSE);
     if (private_mode)
         gtk_widget_set_tooltip_text(tabbtn, ns_i18n("Private tab"));
@@ -3302,7 +3311,7 @@ task_mgr_show_dump(NsTaskMgr *tm, const char *text)
         gtk_window_set_title(GTK_WINDOW(win), ns_i18n("Thread dump"));
         gtk_window_set_transient_for(GTK_WINDOW(win),
                                      GTK_WINDOW(tm->pw->window));
-        gtk_window_set_default_size(GTK_WINDOW(win), 680, 480);
+        gtk_window_set_default_size(GTK_WINDOW(win), ns_ui_px(680), ns_ui_px(480));
 
         GtkWidget *scroll = gtk_scrolled_window_new();
         gtk_widget_set_vexpand(scroll, TRUE);
@@ -3394,7 +3403,7 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     g_free(tm_title);
     gtk_window_set_transient_for(GTK_WINDOW(win), GTK_WINDOW(pw->window));
     gtk_window_set_destroy_with_parent(GTK_WINDOW(win), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(win), 720, 380);
+    gtk_window_set_default_size(GTK_WINDOW(win), ns_ui_px(720), ns_ui_px(380));
 
     NsTaskMgr *tm = g_new0(NsTaskMgr, 1);
     tm->pw = pw;
@@ -3625,7 +3634,8 @@ proc_window_new(GtkApplication *app)
         gtk_window_set_default_size(GTK_WINDOW(pw->window),
                                     g_initial_win_w, g_initial_win_h);
     } else {
-        gtk_window_set_default_size(GTK_WINDOW(pw->window), 1024, 768);
+        gtk_window_set_default_size(GTK_WINDOW(pw->window),
+                                    ns_ui_px(1024), ns_ui_px(768));
         gtk_window_maximize(GTK_WINDOW(pw->window));
     }
 
@@ -3705,7 +3715,7 @@ proc_window_new(GtkApplication *app)
     gtk_widget_set_valign(pw->security_chip, GTK_ALIGN_CENTER);
     GtkWidget *chip_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     pw->security_chip_icon = ns_icon_image_new("nordstjernen-warning-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(pw->security_chip_icon), 14);
+    gtk_image_set_pixel_size(GTK_IMAGE(pw->security_chip_icon), ns_ui_px(14));
     pw->security_chip_label = gtk_label_new(NULL);
     gtk_box_append(GTK_BOX(chip_box), pw->security_chip_icon);
     gtk_box_append(GTK_BOX(chip_box), pw->security_chip_label);
@@ -4006,7 +4016,7 @@ build_bookmarks_popover(ProcWindow *pw)
     gtk_widget_set_margin_bottom(box, 6);
     gtk_widget_set_margin_start(box, 6);
     gtk_widget_set_margin_end(box, 6);
-    gtk_widget_set_size_request(box, 320, -1);
+    gtk_widget_set_size_request(box, ns_ui_px(320), -1);
 
     GtkWidget *add = gtk_button_new_with_label(
         current_page_bookmarked(pw) ? ns_i18n("Remove this bookmark")
