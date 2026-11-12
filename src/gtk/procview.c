@@ -2986,6 +2986,13 @@ pv_url_is_history(const char *url)
 }
 
 static gboolean
+pv_url_is_settings(const char *url)
+{
+    return url && (g_str_has_prefix(url, "about:settings") ||
+                   g_str_has_prefix(url, "about:config"));
+}
+
+static gboolean
 pv_url_gets_capture(NsProcView *v, const char *url)
 {
 #ifdef __linux__
@@ -3721,7 +3728,7 @@ on_result(gpointer data)
     Res *res = data;
     NsProcView *v = res->view;
 
-    if (res->history_clear && !v->closed)
+    if (res->history_clear && !v->closed && pv_url_is_settings(v->current_url))
         post_emit(v, NS_PROC_EVT_HISTORY_CLEAR, NULL);
 
     if (res->type == RES_EVAL && res->remote_cb) {

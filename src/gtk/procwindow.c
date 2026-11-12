@@ -1433,7 +1433,8 @@ download_name_is_executable(const char *name)
         ".settingcontent-ms", ".website", ".diagcab", ".appx", ".appxbundle",
         ".msixbundle", ".service", ".csh", ".ksh", ".fish", ".terminal",
         ".workflow", ".action", ".scpt", ".mobileconfig", ".snap",
-        ".flatpak",
+        ".flatpak", ".xll", ".wsc", ".sct", ".cab", ".msu", ".pyw", ".pyz",
+        ".iqy", ".slk", ".inetloc", ".fileloc", ".webloc", ".so", ".dylib",
     };
     const char *dot = strrchr(name, '.');
     if (!dot) return FALSE;
@@ -1842,6 +1843,31 @@ set_tab_loading(GtkWidget *page, gboolean loading)
 }
 
 static void
+pw_history_clear_confirmed(GObject *src, GAsyncResult *res, gpointer data)
+{
+    (void)data;
+    if (gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res, NULL) == 1)
+        ns_history_clear();
+}
+
+static void
+pw_confirm_history_clear(ProcWindow *pw)
+{
+    GtkAlertDialog *dialog = gtk_alert_dialog_new(
+        "%s", ns_i18n("Clear the browsing history?"));
+    gtk_alert_dialog_set_detail(
+        dialog, ns_i18n("The list of pages you have visited will be erased."));
+    const char *buttons[] = { ns_i18n("Cancel"), ns_i18n("Clear"), NULL };
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_cancel_button(dialog, 0);
+    gtk_alert_dialog_set_default_button(dialog, 0);
+    gtk_alert_dialog_set_modal(dialog, TRUE);
+    gtk_alert_dialog_choose(dialog, GTK_WINDOW(pw->window), NULL,
+                            pw_history_clear_confirmed, NULL);
+    g_object_unref(dialog);
+}
+
+static void
 pw_config_confirmed(GObject *src, GAsyncResult *res, gpointer data)
 {
     char *text = data;
@@ -1857,8 +1883,10 @@ pw_handle_renderer_config(ProcWindow *pw, const char *encoded)
     gsize len = 0;
     guchar *raw = g_base64_decode(encoded, &len);
     if (!raw) return;
-    char *text = g_strndup((const char *)raw, len);
+    char *requested = g_strndup((const char *)raw, len);
     g_free(raw);
+    char *text = ns_config_renderer_text(requested);
+    g_free(requested);
     char *changes = ns_config_sensitive_changes(text);
     if (!changes) {
         ns_config_apply_text(text, NULL);
@@ -1939,7 +1967,7 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         }
         break;
     case NS_PROC_EVT_HISTORY_CLEAR:
-        ns_history_clear();
+        pw_confirm_history_clear(pw);
         break;
     case NS_PROC_EVT_NEWTAB:
         if (text && *text)

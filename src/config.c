@@ -519,10 +519,12 @@ config_char_is_display_safe(gunichar c)
     return TRUE;
 }
 
+#define NS_CONFIG_RENDERER_VALUE_MAX 300
+
 static char *
 config_display_value(const char *raw)
 {
-    enum { MAX_CHARS = 60 };
+    enum { MAX_CHARS = NS_CONFIG_RENDERER_VALUE_MAX };
     g_autofree char *valid = g_utf8_make_valid(raw, -1);
     GString *out = g_string_new(NULL);
     gsize n = 0;
@@ -574,6 +576,50 @@ ns_config_sensitive_changes(const char *text)
         g_string_free(out, TRUE);
         return NULL;
     }
+    return g_string_free(out, FALSE);
+}
+
+static const char *const renderer_keys[] = {
+    "home_url", "search_engine", "cookie_policy", "do_not_track",
+    "safe_browsing", "global_privacy_control", "strip_tracking_params",
+    "https_first", "images_enabled", "javascript_enabled", "webgl_enabled",
+    "webgpu", "local_storage_enabled", "cache_enabled", "remote_control",
+};
+
+static gboolean
+config_key_open_to_renderer(const char *key)
+{
+    for (gsize k = 0; k < G_N_ELEMENTS(renderer_keys); k++)
+        if (strcmp(key, renderer_keys[k]) == 0) return TRUE;
+    return FALSE;
+}
+
+char *
+ns_config_renderer_text(const char *text)
+{
+    if (!text) return NULL;
+    ns_config proposed;
+    memset(&proposed, 0, sizeof proposed);
+    apply_default(&proposed);
+    for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++) {
+        g_autofree char *current = field_string(&g_cfg, &cfg_fields[i]);
+        apply_pair(&proposed, cfg_fields[i].key, current);
+    }
+    char **lines = g_strsplit(text, "\n", -1);
+    for (int i = 0; lines[i]; i++) {
+        char *line = g_strstrip(lines[i]);
+        char *eq = *line == '#' ? NULL : strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        char *key = g_strstrip(line);
+        char *value = g_strstrip(eq + 1);
+        if (config_key_open_to_renderer(key) &&
+            strlen(value) <= NS_CONFIG_RENDERER_VALUE_MAX)
+            apply_pair(&proposed, key, value);
+    }
+    g_strfreev(lines);
+    GString *out = config_serialize(&proposed);
+    config_free_strings(&proposed);
     return g_string_free(out, FALSE);
 }
 
