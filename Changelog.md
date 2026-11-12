@@ -3,6 +3,16 @@ Changelog:
 
 1.0.47-dev:
 ======
+* CSS: `random()` is supported in style sheet declarations, with the
+  optional step and the sharing options (`auto`, a dashed identifier,
+  `element-shared`, `fixed <number>`). A value stays the same for an
+  element across restyles and differs between elements.
+* CSS: `sibling-index()` and `sibling-count()` now resolve to each
+  element's own position in ordinary declarations; they evaluated as 1
+  outside container queries.
+* CSS: `text-decoration-inset` with `auto` or one length shortens (or,
+  when negative, extends) underlines, overlines and line-throughs at
+  both ends. The two-value form is not supported yet.
 * JS: text modules. `import text from "./file.txt" with { type: "text"
   }` and the dynamic `import(url, { with: { type: "text" } })` load a
   resource as a string, for `http(s):`, `data:` and `blob:` URLs.
