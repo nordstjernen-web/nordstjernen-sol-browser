@@ -5079,6 +5079,7 @@ ns_invalidate_wrapper(ns_node *n)
     ns_canvas_state_forget_node(js, n);
     if (js && js->focus_nav_start == n) js->focus_nav_start = NULL;
     if (js && js->focused_node == n) js->focused_node = NULL;
+    if (js && js->hover_node == n) js->hover_node = NULL;
     if (js && js->change_pending == n) ns_js_forget_pending_change(js);
     if (js && js->focused_doc == n) js->focused_doc = NULL;
     if (js) ns_focus_guard_forget(js, n);
@@ -41131,8 +41132,15 @@ ns_css_filter_nulls(const char *s, size_t len)
 typedef struct {
     const ns_node *prev_scope;
     const ns_node *prev_focus;
+    const ns_node *prev_hover;
     char          *fragment;
 } ns_selector_match_ctx;
+
+void
+ns_js_set_hover_node(ns_js *js, const ns_node *node)
+{
+    if (js) js->hover_node = node;
+}
 
 static void
 ns_selector_match_begin(JSContext *ctx, const ns_node *scope,
@@ -41143,12 +41151,14 @@ ns_selector_match_begin(JSContext *ctx, const ns_node *scope,
     mc->fragment = ns_element_target_fragment(ctx, scope);
     ns_css_set_target_fragment(mc->fragment);
     mc->prev_focus = ns_css_set_focus_node(js ? js->focused_node : NULL);
+    mc->prev_hover = ns_css_set_hover_node(js ? js->hover_node : NULL);
 }
 
 static void
 ns_selector_match_end(ns_selector_match_ctx *mc)
 {
     ns_css_set_focus_node(mc->prev_focus);
+    ns_css_set_hover_node(mc->prev_hover);
     ns_css_set_match_scope(mc->prev_scope);
     ns_css_set_target_fragment(NULL);
     g_free(mc->fragment);
@@ -53027,6 +53037,22 @@ ns_node_is_media_element(const ns_node *n)
     return n && n->kind == NS_NODE_ELEMENT && n->name &&
            (g_ascii_strcasecmp(n->name, "video") == 0 ||
             g_ascii_strcasecmp(n->name, "audio") == 0);
+}
+
+static void
+ns_media_set_error(JSContext *ctx, JSValueConst el, int code, const char *message)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "MediaError");
+    JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+    JSValue error = JS_IsObject(proto) ? JS_NewObjectProto(ctx, proto)
+                                       : JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, error, "code", JS_NewInt32(ctx, code));
+    JS_SetPropertyStr(ctx, error, "message", JS_NewString(ctx, message));
+    JS_SetPropertyStr(ctx, el, "_nd_error", error);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
 }
 
 static JSValue
@@ -74459,6 +74485,7 @@ ns_js_audio_feedback(ns_js *js, const char *line)
         JS_SetPropertyStr(ctx, *held, "_nd_audio_url", JS_UNDEFINED);
         JS_SetPropertyStr(ctx, *held, "_nd_playing", JS_FALSE);
         JS_SetPropertyStr(ctx, *held, "_nd_networkState", JS_NewInt32(ctx, 3));
+        ns_media_set_error(ctx, *held, 4, "MEDIA_ELEMENT_ERROR: Format error");
         ns_js_dispatch_event(js, el, "error", NULL);
     }
 }

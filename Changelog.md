@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* `:hover` matches in `matches()`, `closest()` and `querySelector*()`,
+  not only in style sheets, so script checks such as jQuery's
+  `.is(':hover')` see the element under the pointer.
+* `HTMLMediaElement.error` holds a `MediaError` after an audio source
+  fails to load or decode; it stayed `null`.
 * Canvas games run much lighter: drawing to a 2D canvas repaints the
   page instead of laying the whole document out again, and
   `requestAnimationFrame` callbacks run once per frame instead of once
