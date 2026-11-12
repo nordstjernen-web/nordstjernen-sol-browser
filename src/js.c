@@ -69861,8 +69861,16 @@ ns_speculation_where_matches(JSContext *ctx, JSValueConst where,
 }
 
 static void
+ns_speculation_prefetch(ns_js *js, const char *url, gboolean same_origin_only)
+{
+    if (same_origin_only && !ns_url_same_origin(js->current_url, url)) return;
+    ns_engine_prefetch_document(url, js->current_url);
+}
+
+static void
 ns_speculation_prefetch_links(ns_js *js, const ns_node *n, JSValueConst where,
-                              const char *base, int depth)
+                              const char *base, gboolean same_origin_only,
+                              int depth)
 {
     if (!n || depth >= 512) return;
     const char *raw = n->kind == NS_NODE_ELEMENT && n->name &&
@@ -69873,11 +69881,12 @@ ns_speculation_prefetch_links(ns_js *js, const ns_node *n, JSValueConst where,
         JSValue link = href ? ns_make_element(js->ctx, n) : JS_UNDEFINED;
         if (href && ns_speculation_where_matches(js->ctx, where, link, href,
                                                  base, 0))
-            ns_engine_prefetch_document(href, js->current_url);
+            ns_speculation_prefetch(js, href, same_origin_only);
         JS_FreeValue(js->ctx, link);
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_speculation_prefetch_links(js, c, where, base, depth + 1);
+        ns_speculation_prefetch_links(js, c, where, base, same_origin_only,
+                                      depth + 1);
 }
 
 static gboolean
@@ -69890,17 +69899,12 @@ ns_speculation_rule_is_eager(JSContext *ctx, JSValueConst rule,
 }
 
 static void
-ns_js_apply_speculation_rules(ns_js *js, const char *text, gsize len,
-                              const char *base)
+ns_js_apply_speculation_rule_list(ns_js *js, JSValueConst root,
+                                  const char *action, const char *base,
+                                  gboolean same_origin_only)
 {
-    if (!js || !text || !base || !js->current_url || !js->current_doc) return;
     JSContext *ctx = js->ctx;
-    JSValue root = JS_ParseJSON(ctx, text, len, "speculationrules");
-    if (JS_IsException(root)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        return;
-    }
-    JSValue rules = JS_IsObject(root) ? JS_GetPropertyStr(ctx, root, "prefetch")
+    JSValue rules = JS_IsObject(root) ? JS_GetPropertyStr(ctx, root, action)
                                       : JS_UNDEFINED;
     uint32_t n = 0;
     if (JS_IsArray(rules)) n = ns_js_array_length(ctx, rules);
@@ -69915,17 +69919,35 @@ ns_js_apply_speculation_rules(ns_js *js, const char *text, gsize len,
             JSValue item = JS_GetPropertyUint32(ctx, urls, u);
             const char *raw = JS_IsString(item) ? JS_ToCString(ctx, item) : NULL;
             g_autofree char *abs = raw ? ns_url_resolve(base, raw) : NULL;
-            if (abs) ns_engine_prefetch_document(abs, js->current_url);
+            if (abs) ns_speculation_prefetch(js, abs, same_origin_only);
             if (raw) JS_FreeCString(ctx, raw);
             JS_FreeValue(ctx, item);
         }
         if (JS_IsObject(where) && ns_speculation_rule_is_eager(ctx, rule, FALSE))
-            ns_speculation_prefetch_links(js, js->current_doc, where, base, 0);
+            ns_speculation_prefetch_links(js, js->current_doc, where, base,
+                                          same_origin_only, 0);
         JS_FreeValue(ctx, where);
         JS_FreeValue(ctx, urls);
         JS_FreeValue(ctx, rule);
     }
     JS_FreeValue(ctx, rules);
+}
+
+static void
+ns_js_apply_speculation_rules(ns_js *js, const char *text, gsize len,
+                              const char *base)
+{
+    if (!js || !text || !base || !js->current_url || !js->current_doc) return;
+    JSContext *ctx = js->ctx;
+    JSValue root = JS_ParseJSON(ctx, text, len, "speculationrules");
+    if (JS_IsException(root)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return;
+    }
+    ns_js_apply_speculation_rule_list(js, root, "prefetch", base, FALSE);
+    ns_js_apply_speculation_rule_list(js, root, "prerender", base, TRUE);
+    ns_js_apply_speculation_rule_list(js, root, "prerender_until_script", base,
+                                      TRUE);
     JS_FreeValue(ctx, root);
 }
 

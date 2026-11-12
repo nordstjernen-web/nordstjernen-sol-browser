@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* HTML: `prerender` and `prerender_until_script` speculation rules are
+  honoured as a prefetch of the target document, for same-origin URLs
+  and matching links. The page is fetched ahead of the navigation, not
+  rendered ahead of it, so `document.prerendering` stays false.
 * CSS: `random()` is supported in style sheet declarations, with the
   optional step and the sharing options (`auto`, a dashed identifier,
   `element-shared`, `fixed <number>`). A value stays the same for an
