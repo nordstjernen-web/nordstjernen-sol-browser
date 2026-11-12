@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: frames inside a document sandboxed by its
+  `Content-Security-Policy` header inherit its opaque origin; they could
+  read the site's cookies. The PDF viewer relies on this, and its own
+  policy now allows only its nonce-marked script.
+* PDF viewer: selectable text lines up with the page, pages far from
+  view are released, oversized pages are scaled to a safe canvas size,
+  `#page=N` opens at that page, the layout follows the window width,
+  and the "cannot show" notice offers the file as a download.
 * PDF documents open in a built-in viewer based on PDF.js instead of
   page images from poppler: text can be selected, links
   work, and pages render as they scroll into view. The viewer runs as

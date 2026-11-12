@@ -657,18 +657,21 @@ ns_sandbox_from_policy_lines(const char *lines)
 static unsigned
 ns_iframe_effective_sandbox(const ns_node *node)
 {
-    unsigned flags = 0;
+    unsigned flags = ~0u;
     gboolean any = FALSE;
     for (const ns_node *p = node; p; p = p->parent) {
+        if (p->kind == NS_NODE_DOCUMENT && (p->flags & NS_NODE_SANDBOX_OPAQUE)) {
+            flags &= ~NS_SANDBOX_ALLOW_SAME_ORIGIN;
+            any = TRUE;
+            continue;
+        }
         if (!ns_node_is_element_named(p, "iframe")) continue;
         const char *val = ns_element_get_attr(p, "sandbox");
         const char *csp_val = ns_element_get_attr(p, "data-nd-csp-sandbox");
         if (!val && !csp_val) continue;
-        unsigned f = ~0u;
-        if (val) f &= ns_sandbox_parse_tokens(val);
-        if (csp_val) f &= ns_sandbox_from_policy_lines(csp_val);
-        if (!any) { flags = f; any = TRUE; }
-        else flags &= f;
+        if (val) flags &= ns_sandbox_parse_tokens(val);
+        if (csp_val) flags &= ns_sandbox_from_policy_lines(csp_val);
+        any = TRUE;
     }
     return any ? (flags | NS_SANDBOX_ACTIVE) : 0;
 }
@@ -74598,13 +74601,14 @@ ns_js_add_csp_header(ns_js *js, const char *header_value)
 }
 
 void
-ns_js_set_document_sandbox(ns_js *js, const char *csp_header)
+ns_js_set_document_sandbox(ns_js *js, ns_node *doc, const char *csp_header)
 {
     if (!js) return;
     g_autofree char *tokens = ns_csp_header_sandbox_tokens(csp_header);
     js->document_sandbox = tokens ? ns_sandbox_from_policy_lines(tokens) : 0;
-    if (ns_js_document_origin_is_opaque(js))
-        ns_storage_load_for(js, js->current_url);
+    if (!ns_js_document_origin_is_opaque(js)) return;
+    if (doc) doc->flags |= NS_NODE_SANDBOX_OPAQUE;
+    ns_storage_load_for(js, js->current_url);
 }
 
 const char *

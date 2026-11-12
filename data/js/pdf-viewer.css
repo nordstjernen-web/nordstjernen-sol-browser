@@ -4,10 +4,23 @@ html, body { margin: 0; background: #1c1d1e; }
         box-shadow: 0 4px 12px rgba(0, 0, 0, .45); }
 .page canvas { display: block; width: 100%; height: 100%; }
 .textLayer, .linkLayer { position: absolute; inset: 0; overflow: hidden; }
-.textLayer { line-height: 1; text-size-adjust: none; forced-color-adjust: none; }
+.textLayer { line-height: 1; letter-spacing: normal; word-spacing: normal;
+        text-align: initial; text-size-adjust: none; forced-color-adjust: none;
+        --min-font-size: 1;
+        --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+        --min-font-size-inv: calc(1 / var(--min-font-size)); }
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+        --font-height: 0; --scale-x: 1; --rotate: 0deg;
+        font-size: calc(var(--text-scale-factor) * var(--font-height));
+        transform: rotate(var(--rotate)) scaleX(var(--scale-x))
+                   scale(var(--min-font-size-inv)); }
+.textLayer .markedContent { display: contents; }
 .textLayer span, .textLayer br { position: absolute; color: transparent;
         white-space: pre; cursor: text; transform-origin: 0% 0%; }
 .textLayer ::selection { background: rgba(0, 100, 255, .3); color: transparent; }
 .linkLayer a { position: absolute; display: block; }
+.pageError { color: #666; font: 14px/1.6 system-ui, sans-serif; text-align: center;
+             padding: 48px 16px; margin: 0; }
 #status { color: #bbb; font: 14px/1.6 system-ui, sans-serif; text-align: center;
           padding: 48px 16px; margin: 0; }

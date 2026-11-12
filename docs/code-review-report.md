@@ -674,7 +674,7 @@ fetched) and PDFs opened in the browser now use it.
 - `src/pdf.c` builds one self-contained page per document: the PDF bytes,
   PDF.js and the in-tree viewer script `data/js/pdf-viewer.js` (about 150
   lines: lazy page rendering, text layer, link annotations). Files over
-  64 MiB fall back to poppler when it is built.
+  64 MiB show a notice with a download link.
 - The page is served with `sandbox allow-scripts …; default-src 'none'`
   and script, worker, style, image and font sources limited to inline,
   `blob:` and `data:`. Checked in the built browser: the viewer cannot
@@ -693,6 +693,60 @@ Not bundled: character maps for CJK fonts that are not embedded, and the
 standard 14 fonts (PDF.js substitutes system fonts). Not yet done: zoom
 controls, find-in-document UI of its own, password prompts, printing a PDF
 from the viewer, and a run over a larger corpus.
+
+### Review of the viewer after it landed
+
+poppler has since been removed; PDF.js is the only PDF path. A review of
+the merged viewer, with each suspicion tested in the built browser, found
+these and fixed them:
+
+- **Sandbox escape through a child frame.** The top-level sandbox was
+  not inherited by frames. Script on the viewer page could create an
+  `<iframe>` and read the hosting site's cookie from its document. The
+  top document node now carries `NS_NODE_SANDBOX_OPAQUE`, which
+  `ns_iframe_effective_sandbox` folds into every descendant frame, so a
+  frame cannot regain the origin even with `allow-same-origin`.
+- **Text layer misaligned.** The stylesheet lacked the rules PDF.js sizes
+  its spans with, so every span was 16 px and unscaled: selection did not
+  match the drawn text. The title's span is now 727 px wide at 29 px,
+  matching the canvas.
+- **Unbounded canvas.** A page 3 pt wide and 14,400 pt tall produced a
+  992 × 4,761,600 px canvas. Scale is now limited to 16,384 px a side and
+  32 megapixels.
+- **Rendered pages were never released.** Each page kept its canvas, so
+  scrolling a long document grew without bound. Pages more than 4,000 px
+  from the viewport are released and render again on return.
+- **Inline script was allowed.** `script-src 'unsafe-inline'` meant
+  markup injected through a PDF.js bug could run. The policy now uses a
+  per-document nonce; an injected `<script>` is refused. `form-action`
+  and `base-uri` are closed too.
+- **Notice page was a dead end.** Its link pointed at the same URL and
+  reloaded the notice. It now carries `download`.
+- **Latent build hazard.** PDF.js is inlined in `<script>` elements; a
+  future release containing `</script` would be cut short silently. The
+  wrap's `meson.build` now fails the build in that case.
+- Smaller: `#page=N` is honoured, the window re-lays out on resize, a
+  failed page says so, and the title is the decoded file name without
+  query or fragment.
+
+Still open:
+
+- A PDF in an `<iframe>` shows its raw bytes as text, and `<embed>` and
+  `<object>` show nothing. Only top-level navigations reach the viewer.
+  This predates PDF.js.
+- There is no way to save the PDF from the viewer, no zoom control and no
+  password prompt. Printing prints the viewer page, so only the pages
+  rendered at that moment appear; the poppler path printed all of them.
+- Find-in-page only sees pages that are currently rendered.
+- Each PDF document carries about 2.3 MB of inlined library, and the PDF
+  itself is held as base64 until PDF.js has loaded it. A 40 MiB file
+  opened in 5 s.
+- Pages are always fitted to the window width, so a small page is
+  enlarged.
+- The resize path could not be driven from the headless probe and is
+  untested end to end.
+- Offline package builds (Debian, RPM, Arch, Alpine) have no PDF viewer
+  until their sources ship the `pdfjs-dist` tarball.
 
 Sources: [PDF.js releases](https://github.com/mozilla/pdf.js/releases),
 [PDF.js FAQ](https://github.com/mozilla/pdf.js/wiki/Frequently-Asked-Questions).
