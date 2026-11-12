@@ -3,6 +3,9 @@ Changelog:
 
 1.0.47-dev:
 ======
+* PDFs inside `<iframe>`, `<object>` and `<embed>` open in the PDF
+  viewer. An iframe used to show the file's raw bytes and the other two
+  showed nothing.
 * PDF viewer: a toolbar shows the page position and offers zoom, fit to
   width and download; password-protected files ask for the password;
   small pages are no longer stretched to the window width.
