@@ -49,10 +49,21 @@ optdepends=(
   'hunspell: spell checking'
   'hunspell-en_us: English dictionary for spell checking'
 )
-source=("$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/$pkgver.tar.gz")
-sha256sums=('3b6f6c87ff2fe40fed905c0b88422d4f2d3e65d7cf9cd89a907b5038d3c5bf6a')
+_pdfjs=pdfjs-dist-6.5.438.tgz
+source=("$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/$pkgver.tar.gz"
+        "$_pdfjs::https://registry.npmjs.org/pdfjs-dist/-/$_pdfjs")
+noextract=("$_pdfjs")
+sha256sums=('3b6f6c87ff2fe40fed905c0b88422d4f2d3e65d7cf9cd89a907b5038d3c5bf6a'
+            '7461aefcd27c4ef0dd76f9ca5760f09466eb6b3f934432670c12132e7b3d6faa')
 
 _srcdir=nordstjernen-sol-browser-$pkgver
+
+prepare() {
+  # The PDF viewer is PDF.js, which meson takes from this pinned tarball
+  # (subprojects/pdfjs-dist.wrap) instead of downloading it during the build.
+  install -Dm644 "$srcdir/$_pdfjs" \
+    "$_srcdir/subprojects/packagecache/$_pdfjs"
+}
 
 build() {
   # wgpu-native is not in the Arch repositories and meson would otherwise

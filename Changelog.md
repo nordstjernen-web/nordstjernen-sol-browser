@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Packaging: the Arch, Alpine and RPM recipes carry the pinned PDF.js
+  tarball as a second source, and `scripts/fetch-pdfjs.sh` fetches it
+  for a Debian source package, so offline package builds include the
+  PDF viewer.
 * PDF viewer: a Find field searches the whole document, including
   pages not yet shown, and a Print button prints every page, one per
   sheet. Printing from the menu prints the pages currently shown.

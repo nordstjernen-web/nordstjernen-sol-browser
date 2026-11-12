@@ -36,11 +36,22 @@ makedepends="
 	sdl2-dev
 	glslang-dev
 	"
-source="$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/$pkgver.tar.gz"
+_pdfjs=pdfjs-dist-6.5.438.tgz
+source="$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/$pkgver.tar.gz
+	$_pdfjs::https://registry.npmjs.org/pdfjs-dist/-/$_pdfjs
+	"
 # GitHub names the archive root after the repository, not after $pkgname.
 builddir="$srcdir/nordstjernen-sol-browser-$pkgver"
 # No test suite upstream — behaviour is verified by running the browser.
 options="!check"
+
+# The PDF viewer is PDF.js; meson takes it from this pinned tarball
+# (subprojects/pdfjs-dist.wrap) instead of downloading it during the build.
+prepare() {
+	default_prepare
+	mkdir -p subprojects/packagecache
+	cp "$srcdir"/$_pdfjs subprojects/packagecache/
+}
 
 build() {
 	abuild-meson -Dwebgpu=disabled . output
@@ -58,4 +69,5 @@ package() {
 # Regenerate with `abuild checksum` whenever pkgver moves.
 sha512sums="
 1a332d71763009d7dacb758c0e4bf0288f5ed39e1d2252804fcc6f5258a20596507bd8503019920eb06a770fa55e5f31da81d899ce109be5ddedd40f25f2951d  nordstjernen-1.0.33.tar.gz
+be0f0fc35c7e0052b2e00303be1b9697970e615f1debdf14a0400da0516173bf61a970e7650aa7397a31c371c6f74ed61ce8352583af2e13fbe7a6e875d171a4  pdfjs-dist-6.5.438.tgz
 "

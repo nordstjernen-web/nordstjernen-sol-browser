@@ -58,6 +58,9 @@ feature in `meson.options` must have its dependency declared in
 unavailable in OBS:
 
 - `-Dwebgpu=disabled` — needs external wgpu-native.
+- PDF.js, the PDF viewer, is `Source1` (`pdfjs-dist-6.5.438.tgz` from the npm
+  registry). Upload it beside the spec; `%prep` copies it into
+  `subprojects/packagecache/` so meson does not need the network.
 
 The package is built for 64-bit targets only (`ExcludeArch: %ix86
 %arm`): the Temporal code in the in-tree QuickJS uses `__int128`.
