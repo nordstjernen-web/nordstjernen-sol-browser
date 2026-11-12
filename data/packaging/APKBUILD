@@ -5,12 +5,13 @@ pkgver=1.0.33
 pkgrel=0
 pkgdesc="Small, hand-written web browser written in C with GTK 4 and libcurl"
 url="https://nordstjernen.org"
-# quickjs and lexbor are vendored C and build in-tree; the engine also links
+# quickjs is vendored C and the HTML/URL parsers are in-tree Rust; the engine also links
 # a little C++ (glslang, libavif). Restrict to arches the deps + WAMR asm cover.
 arch="x86_64 aarch64"
 license="LicenseRef-NSL-1.0 OR GPL-3.0-or-later"
 makedepends="
 	meson
+	rust
 	ninja
 	gtk4.0-dev
 	libepoxy-dev

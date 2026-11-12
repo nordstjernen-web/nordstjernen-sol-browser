@@ -15,13 +15,13 @@ On Debian / Ubuntu, install the full build dependency list from
 
 On Fedora / RHEL:
 
-    sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
+    sudo dnf install gcc rust pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
         openssl-devel uchardet-devel libpsl-devel sqlite-devel libseccomp-devel \
         libwebp-devel SDL2-devel glslang-devel
 
 On openSUSE:
 
-    sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
+    sudo zypper install gcc rust pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
         libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel libseccomp-devel \
         libwebp-devel sdl2-compat-devel glslang-devel
 
@@ -32,14 +32,19 @@ GStreamer is required on Linux too (H.264/AAC, and VP9/AV1/HEVC in hardware):
 `gstreamer-plugins-bad` and the GPU's VA-API driver (`intel-media-driver` on
 Intel) for hardware decoding. Without SDL2 the build has no audio; meson warns.
 
+Rust is a required build toolchain (`rustc` 1.91 or newer): meson compiles
+the in-tree HTML and URL parsers (`src/html5_rs/`, `src/url_rs/`) with plain
+`rustc`, with no Cargo and no crates. The package is `rustc` on
+Debian/Ubuntu and `rust` on Fedora, openSUSE, Arch, Alpine and FreeBSD.
+
 On Arch Linux (packaging and the AUR: `Arch.md`):
 
-    sudo pacman -S --needed base-devel meson gtk4 libepoxy curl uchardet \
+    sudo pacman -S --needed base-devel rust meson gtk4 libepoxy curl uchardet \
         libpsl sqlite libseccomp libwebp sdl2 glslang ffmpeg
 
 On Alpine (musl libc):
 
-    sudo apk add build-base linux-headers pkgconf meson ninja gtk4.0-dev \
+    sudo apk add build-base linux-headers pkgconf rust meson ninja gtk4.0-dev \
         libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev \
         libseccomp-dev libwebp-dev sdl2-dev glslang-dev
 
@@ -98,7 +103,7 @@ The browser shell parses every message the sandboxed renderer sends it
 compromised renderer controls those bytes, so that parser is the sandbox's
 attack surface. `-Dipc_rust=enabled` replaces it with a memory-safe Rust port
 (`src/ipc_http_rs/lib.rs`, standard library only, no crates) behind the same
-C ABI; the default build keeps the C parser. It needs `rustc` and GNU
+C ABI; the default build keeps the C parser. Besides `rustc` it needs GNU
 binutils (`ld`, `objcopy`, `ar`), which `scripts/rust-staticlib-localize.sh`
 uses to hide the Rust standard library inside the archive so it cannot clash
 with wgpu-native's. The C shims pass the size of the shared structs, and the
@@ -136,8 +141,8 @@ found), the application icons, the desktop entry, `README.md`,
 `libwgpu_native.so` ships beside the binaries, found through an `$ORIGIN`
 rpath (`NS_WEBGPU=0` packages without it).
 
-The in-tree browser engine — lexbor, quickjs, wuffs and wamr — is
-statically linked. The GTK desktop stack stays dynamic because it
+The in-tree browser engine — the Rust HTML and URL parsers, quickjs, wuffs
+and wamr — is statically linked. The GTK desktop stack stays dynamic because it
 expects to find pixbuf loaders, IM modules, and font/theme data on the
 host at runtime; fully-static GTK isn't practical. Runtime requirements:
 

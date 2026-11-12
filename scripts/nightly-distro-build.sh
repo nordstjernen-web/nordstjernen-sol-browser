@@ -17,7 +17,7 @@ trap 'rc=$?; echo "nightly-distro-build($DISTRO): FAILED (exit $rc) at line $LIN
 install_apt() {
     apt-get update -qq
     apt-get install -y --no-install-recommends \
-        build-essential clang pkg-config ninja-build git zip unzip curl \
+        build-essential clang rustc pkg-config ninja-build git zip unzip curl \
         python3-pip dpkg-dev patchelf ca-certificates \
         libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev libpsl-dev \
         libsqlite3-dev libseccomp-dev libwebp-dev libavif-dev libsdl2-dev glslang-dev
@@ -49,7 +49,7 @@ install_zypper() {
         sleep $((i * 15))
     done
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
-        gcc clang pkgconf-pkg-config meson ninja git zip unzip curl \
+        gcc clang rust pkgconf-pkg-config meson ninja git zip unzip curl \
         rpm-build patchelf ca-certificates \
         gtk4-devel libepoxy-devel libcurl-devel libopenssl-devel libuchardet-devel libpsl-devel \
         sqlite3-devel libseccomp-devel libwebp-devel libavif-devel glslang-devel
@@ -72,7 +72,7 @@ install_zypper() {
 install_dnf() {
     # curl replaces the image's curl-minimal, hence --allowerasing.
     dnf install -y --setopt=install_weak_deps=False --allowerasing \
-        gcc clang pkgconf-pkg-config meson ninja-build git zip unzip curl \
+        gcc clang rust pkgconf-pkg-config meson ninja-build git zip unzip curl \
         gawk findutils diffutils which rpm-build patchelf ca-certificates \
         gtk4-devel libepoxy-devel libcurl-devel openssl-devel uchardet-devel libpsl-devel \
         sqlite-devel libseccomp-devel libwebp-devel libavif-devel SDL2-devel glslang-devel
@@ -93,7 +93,7 @@ install_dnf() {
 install_apk() {
     apk update -q
     apk add --no-cache \
-        build-base clang pkgconf meson ninja git zip alpine-sdk \
+        build-base clang rust curl pkgconf meson ninja git zip alpine-sdk \
         linux-headers gtk4.0-dev libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev \
         libseccomp-dev libwebp-dev sdl2-dev glslang-dev
     apk add --no-cache \
@@ -112,6 +112,25 @@ case "$DISTRO" in
     alpine)        install_apk ;;
     *) echo "unknown distro: $DISTRO" >&2; exit 2 ;;
 esac
+
+rust_new_enough() {
+    command -v rustc >/dev/null 2>&1 || return 1
+    local have
+    have=$(rustc --version | awk '{print $2}')
+    [ "$(printf '%s\n' 1.91.0 "$have" | sort -V | head -1)" = 1.91.0 ]
+}
+
+ensure_rust() {
+    rust_new_enough && return 0
+    echo "distro rustc is missing or older than 1.91; installing stable with rustup" >&2
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+        RUSTUP_INIT_SKIP_PATH_CHECK=yes sh -s -- -y --profile minimal --default-toolchain stable
+    export PATH="$HOME/.cargo/bin:$PATH"
+    rust_new_enough
+}
+
+ensure_rust
+rustc --version
 
 git config --global --add safe.directory "$(pwd)" || true
 

@@ -105,7 +105,7 @@ a missing one fails `meson setup` with `Dependency "…" not found`.
 
 Everything else builds from the declared `BuildRequires`:
 
-    gcc meson ninja pkgconfig hicolor-icon-theme glslang-devel
+    gcc rust meson ninja pkgconfig hicolor-icon-theme glslang-devel
     pkgconfig(gtk4) pkgconfig(epoxy) pkgconfig(libcurl) pkgconfig(libcrypto)
     pkgconfig(uchardet) pkgconfig(libpsl) pkgconfig(sqlite3)
     pkgconfig(libwebp) pkgconfig(libavif) pkgconfig(libjxl) pkgconfig(sdl2)
@@ -122,9 +122,10 @@ them on Linux, and they carry inline WebM (VP9/VP8 + Opus/Vorbis). The Pango
 packages are what GTK builds against; web-text-lib itself needs the cairo,
 HarfBuzz, FriBiDi and fontconfig development files.
 
-The in-tree engines (lexbor, QuickJS, WAMR, web-text-lib) and vendored single-file
+The in-tree engines (QuickJS, WAMR, web-text-lib) and vendored single-file
 libraries (Wuffs, pl_mpeg) build via meson `subdir()` / wraps — no `cmake`,
-no system copies. `mpv` and `myspell-en_US` are `Recommends` (external
+no system copies. The in-tree Rust HTML and URL parsers are compiled with
+plain `rustc` (1.91 or newer) — no Cargo, no crates. `mpv` and `myspell-en_US` are `Recommends` (external
 media playback and a spell-check dictionary).
 
 The package is tagged `License: LicenseRef-NSL-1.0 OR GPL-3.0-or-later`;

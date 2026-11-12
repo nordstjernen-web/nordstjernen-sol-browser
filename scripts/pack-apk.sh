@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a portable Nordstjernen Alpine package (.apk) by repackaging the
 # bundle that pack-linux.sh produces. The binary is statically linked
-# against the in-tree engine (lexbor, quickjs). tracedeps is disabled
+# against the in-tree engine (Rust HTML and URL parsers, quickjs). tracedeps is disabled
 # (the APKBUILD has no source=), so depends= is derived below by mapping
 # every library the staged binaries load to its owning Alpine package.
 set -euo pipefail

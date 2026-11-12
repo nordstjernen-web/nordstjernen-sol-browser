@@ -93,6 +93,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq meson ninja-build pkg-config
+          rustup target add aarch64-linux-android x86_64-linux-android
           android/scripts/build-deps.sh arm64-v8a "${ANDROID_API}"
           android/scripts/build-deps.sh x86_64 "${ANDROID_API}"
 

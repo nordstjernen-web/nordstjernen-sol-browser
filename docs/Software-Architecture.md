@@ -30,15 +30,16 @@ and the version from the tree).
 Nordstjernen is a web browser **written from scratch in C**, using GTK 4
 for its desktop shell and libcurl for networking. It is an **independent
 engine**: there is no Gecko, WebKit, or Blink lineage, no forked layout
-or CSS code, nothing imported from another browser. The HTML→DOM parser
-(lexbor), the JavaScript engine (QuickJS-ng), the image decoders
-(Wuffs, libwebp), and the WebAssembly runtime (WAMR) are proven
-third-party libraries vendored and integrated in-tree; the DOM, the CSS
+or CSS code, nothing imported from another browser. The JavaScript engine
+(QuickJS-ng), the image decoders (Wuffs, libwebp), and the WebAssembly
+runtime (WAMR) are proven third-party libraries vendored and integrated
+in-tree; the HTML and URL parsers (safe Rust, `src/html5_rs/` and
+`src/url_rs/`), the DOM, the CSS
 cascade and selector engine, layout, paint, the media pipeline, and all
 of the Web-platform bindings are original code.
 
 The whole engine is roughly **230,000 lines of C** (`src/`, excluding the
-vendored lexbor, QuickJS, and WAMR trees), small enough for a single person to
+vendored QuickJS and WAMR trees), small enough for a single person to
 read and audit end to end. That constraint drives most of the
 architecture below.
 
@@ -179,7 +180,7 @@ browser share.
 ```
 network bytes
   → charset decode        (src/html.c — uchardet, WHATWG label table)
-  → HTML parse            (src/html_lexbor.c — lexbor tokeniser + tree builder)
+  → HTML parse            (src/html_parser.c — Rust HTML5 tokeniser + tree builder)
   → DOM tree              (ns_node, src/dom.c)
   → CSS cascade + style   (src/css.c — ns_node* → ns_style*)
   → layout                (src/layout.c — the ns_box tree)
@@ -203,12 +204,14 @@ BOM sniffing, then the declared charset, then UTF-8 validation, then
 **uchardet** detection, then a Windows-1252 fallback. Dangerous
 encodings (UTF-7, HZ, ISO-2022) are rejected.
 
-**HTML parse.** `ns_html_parse` (`src/html_lexbor.c:761`) drives the
-in-tree **lexbor** tokeniser and tree constructor (scripting flag on),
-then converts the lexbor tree into the native DOM
-(`lxb_to_nd_root`, `:197`), preserving quirks mode, declarative shadow
-DOM, and standards media-metadata extraction. The lexbor document is
-kept alive as backing store on the DOM root.
+**HTML parse.** `ns_html_parse` (`src/html_parser.c`) drives the
+in-tree **Rust HTML5 parser** (`src/html5_rs/`, a WHATWG tokeniser and
+tree constructor; scripting flag on) through the C ABI in
+`src/parsers_rs/lib.rs`. Its tree sink calls the `ns_h5_*` functions in
+`src/html_parser.c`, which create the native DOM directly — there is no
+intermediate tree — preserving quirks mode, declarative shadow
+DOM, and standards media-metadata extraction. Node strings live in one
+arena per document, kept alive as backing store on the DOM root.
 
 **Style + layout core.** `ns_render_relayout_profile` (`src/render.c:681`)
 sets the viewport, runs `ns_css_compute` to produce the `ns_node* →
@@ -246,7 +249,7 @@ Cairo surface. See [§7](#7-paint-text-and-fonts).
 ## 5. The DOM
 
 The DOM is a hand-rolled tree of `ns_node` (`src/dom.h:70`), not a
-wrapper over lexbor's tree. Each node carries its `kind`
+wrapper over a parser library's tree. Each node carries its `kind`
 (document/doctype/element/text/comment), tag name, text, a
 singly-linked attribute list, and parent/child/sibling pointers. Per
 document, `ns_node` maintains **id, class, and tag indexes** (hash
@@ -254,9 +257,9 @@ tables built in bulk in document order, `src/dom.c:1604`) plus an
 attribute Bloom filter for fast selector rejection, so `getElementById`
 and selector matching don't rescan the tree.
 
-The bridge from lexbor to `ns_node` is `lxb_node_convert`
-(`src/html_lexbor.c:61`), which copies attributes (including namespaced
-ones), tags SVG/MathML nodes with their namespace, and follows
+The bridge from the HTML parser to `ns_node` is the `ns_h5_*` sink
+(`src/html_parser.c`), which sets attributes (including namespaced
+ones), tags SVG/MathML nodes with their namespace, and routes
 `<template>` content. Node→JS wrapper identity is cached on the node
 itself (see [§8](#8-the-javascript-engine)).
 
@@ -451,8 +454,8 @@ Networking is built on **libcurl** (`src/net.c`, ~7,000 lines):
   Redirects, HSTS, referer, cache, and cookie partitioning stay above the
   hop in `src/net.c`.
 - **WHATWG URL** parsing, resolution, origin/host/site extraction all
-  route through lexbor's URL module (`ns_url_*`), so there is no separate
-  URL library.
+  route through the in-tree Rust URL parser (`src/url_rs/`, behind
+  `ns_url_*`), so there is no separate URL library.
 - **Same-origin / same-site** are computed with `ns_url_same_origin` and
   `ns_url_is_same_site` (the latter using the **Public Suffix List** via
   libpsl for the registrable domain).
@@ -607,9 +610,11 @@ See [webgl.md](webgl.md), [webgpu.md](webgpu.md).
 - **Build system:** meson + ninja. Optional features (`gtk`, `wasm`,
   `audio`, `webgpu`, `avif`, `jxl`, `web-text-lib`) are meson feature flags,
   and `quickjs` is a combo option; ccache is picked up
-  automatically. The vendored lexbor, QuickJS, WAMR, and web-text-lib trees are loaded
+  automatically. The vendored QuickJS, WAMR, and web-text-lib trees are loaded
   via `subdir()` and expose declared dependencies directly, not as
-  subprojects.
+  subprojects. The Rust parser crates (`src/html5_rs/`, `src/url_rs/`)
+  are compiled by meson with plain `rustc` (1.91 or newer, required);
+  no Cargo, no crates.
 - **Embedding:** the engine is exposed as a shared library
   `libnordstjernen` with a plain-C API (`src/libnordstjernen.h`,
   `ns_browser_*`) that carries no GLib or GTK types — the same
@@ -632,14 +637,14 @@ codebase. The table summarises; the notes explain.
 
 | Dimension | Nordstjernen | Firefox (Gecko) | Chrome (Blink) | Ladybird (LibWeb) |
 |-----------|--------------|-----------------|----------------|-------------------|
-| Language | C | C++ and Rust | C++ (some Rust) | C++ (moving to Swift) |
+| Language | C (HTML and URL parsers in Rust) | C++ and Rust | C++ (some Rust) | C++ (moving to Swift) |
 | Engine lineage | Independent, from scratch | Independent (Gecko) | Blink, forked from WebKit ← KHTML | Independent, from scratch |
 | CSS engine | Own (`src/css.c`) | Stylo (Rust, from Servo) | Blink style + LayoutNG | Own (LibWeb CSS) |
 | Layout | Own (`src/layout.c`) | Reflow frame tree | LayoutNG | Own (LibWeb) |
 | JS engine | QuickJS-ng (fork) | SpiderMonkey (own) | V8 (own) | LibJS (own) |
 | JIT | **None** (interpreter) | Multi-tier JIT | Multi-tier JIT | Interpreter (bytecode) |
 | WebAssembly | WAMR interpreter | SpiderMonkey (JIT) | V8 (JIT) | LibWasm |
-| HTML parser | lexbor (vendored) | Own | Own | Own (LibWeb) |
+| HTML parser | Own (Rust, `src/html5_rs/`) | Own | Own | Own (LibWeb) |
 | Page compositing | Cairo software; GPU only for WebGL/WebGPU | WebRender (GPU) | Viz/cc (GPU) | CPU paint (LibGfx/Skia) |
 | Networking | libcurl | Necko (own) | Chromium net service (own) | RequestServer (libcurl) |
 | Process model | Process-per-tab | Process-per-site (Fission) | Process-per-site (site isolation) | Process-per-tab + service processes |
@@ -661,7 +666,7 @@ GPU-composited, JIT-driven browser optimised for full web performance at
 the cost of an enormous, multi-language codebase.
 
 Nordstjernen shares the *independent-engine* stance but inverts almost
-every implementation choice: one language (C), no JIT, no Rust
+every implementation choice: almost entirely one language (C), no JIT, no Rust
 concurrency machinery, software page compositing, and a codebase two
 orders of magnitude smaller. Nordstjernen's per-tab renderer with a
 seccomp+Landlock sandbox is conceptually similar to a Firefox content
@@ -705,9 +710,9 @@ HarfBuzz).
 The differences are language and reuse philosophy. Ladybird is **C++**
 (with new work moving to Swift) and writes its **JS engine, CSS engine,
 and layout all from scratch**, including LibJS. Nordstjernen is **C** and
-takes a more pragmatic middle line: it writes its own DOM, CSS, layout,
-and paint, but **vendors** a proven JS interpreter (QuickJS-ng), HTML
-parser (lexbor), image decoders (Wuffs/libwebp), and wasm runtime (WAMR)
+takes a more pragmatic middle line: it writes its own HTML parser, DOM, CSS, layout,
+and paint, but **vendors** a proven JS interpreter (QuickJS-ng),
+image decoders (Wuffs/libwebp), and wasm runtime (WAMR)
 rather than reimplementing them. The result is a much smaller codebase
 (~230 K lines of C versus Ladybird's 1M+), a deliberate non-goal of a
 from-scratch JS engine, and the distinctive HTTP/JSON+shared-memory IPC
@@ -719,15 +724,16 @@ engines in
 
 ### Where Nordstjernen is deliberately different
 
-- **C, not C++/Rust/Swift.** Unusual among modern browsers; keeps the
-  toolchain and the mental model small.
+- **C, not C++/Swift.** Unusual among modern browsers; keeps the
+  toolchain and the mental model small. Rust is used only for the HTML
+  and URL parsers.
 - **No JIT anywhere.** A security-first choice (no runtime codegen, no
   W^X surface) accepted at the cost of peak JS/wasm throughput. Ladybird
   shares the no-JIT-JS property; Chrome and Firefox do not.
 - **Software page compositing.** The whole page paints in Cairo; the GPU
   is confined to WebGL/WebGPU. No retained-mode GPU compositor.
-- **Reuse over reimplementation.** Vendored lexbor/QuickJS/Wuffs/WAMR
-  instead of in-house parsers and a from-scratch JS engine — the opposite
+- **Reuse over reimplementation.** Vendored QuickJS/Wuffs/WAMR
+  instead of in-house image decoders and a from-scratch JS engine — the opposite
   of Ladybird's write-everything approach, and unlike Chrome/Firefox's
   fully in-house engines.
 - **Inspectable IPC.** A readable HTTP/JSON control channel plus a

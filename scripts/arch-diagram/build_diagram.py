@@ -264,8 +264,8 @@ LAYERS = [
              "mixed-content upgrade, private-network guard, partitioned cookies",
              step=1),
         Chip("html.c", "charset decode: BOM, declared charset, uchardet", step=2),
-        Chip("html_lexbor.c + xml.c", "lexbor tokeniser and tree builder, XML and "
-             "XHTML parser; lexbor tree → native DOM", step=3),
+        Chip("html_parser.c + xml.c", "Rust HTML5 tokeniser and tree builder, XML and "
+             "XHTML parser; tree sink → native DOM", step=3),
         Chip("dom.c" + kloc("src/dom.c"), "ns_node tree with id, class and tag "
              "indexes and an attribute Bloom filter", step=4)]),
     ("Style, layout and paint", "one main thread, software rendering through "
@@ -322,7 +322,7 @@ LAYERS = [
 DEPENDENCIES = [
     ("In-tree libraries", "forked or vendored, built from the tree and "
      "modified freely; no system fallback", 6, "vendored", [
-        Chip("lexbor (fork)", "HTML tokeniser and tree builder; WHATWG URL parser"),
+        Chip("html5_rs + url_rs (own, Rust)", "HTML tokeniser and tree builder; WHATWG URL parser"),
         Chip("QuickJS-ng (fork)", "JavaScript engine: bytecode interpreter, no JIT"),
         Chip("WAMR", "WebAssembly Micro Runtime, classic interpreter"),
         Chip("web-text-lib (Pango fork)", "text shaping with a process-wide glyph "

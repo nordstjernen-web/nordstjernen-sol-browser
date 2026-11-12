@@ -12,7 +12,7 @@ the CI workflow installs. No Visual Studio, no MSVC, no vcpkg.
 The rationale is identical to the macOS Homebrew path: one
 package source, audited DLLs, and the resulting binary is a
 single PE32+ executable that links the same GTK 4 / libcurl /
-Cairo / Pango / lexbor libraries shipped to Linux users.
+Cairo / Pango libraries shipped to Linux users.
 
 ## One-time setup
 
@@ -31,6 +31,7 @@ pacman -Sy --noconfirm --needed \
     base-devel \
     git \
     mingw-w64-ucrt-x86_64-clang \
+    mingw-w64-ucrt-x86_64-rust \
     mingw-w64-ucrt-x86_64-pkgconf \
     mingw-w64-ucrt-x86_64-meson \
     mingw-w64-ucrt-x86_64-ninja \
@@ -96,9 +97,10 @@ meson compile -C builddir
 ```
 
 The QuickJS JS engine (forked from
-[quickjs-ng](https://github.com/quickjs-ng/quickjs)) and the lexbor
-HTML / WHATWG-URL parser are both vendored in-tree at
-`src/quickjs/` and `src/lexbor/` respectively, and Wuffs and pl_mpeg
+[quickjs-ng](https://github.com/quickjs-ng/quickjs)) is vendored in-tree at
+`src/quickjs/`; the HTML and WHATWG URL parsers are the project's own
+Rust crates at `src/html5_rs/` and `src/url_rs/`, compiled by meson with
+plain `rustc` (1.91 or newer, no Cargo); and Wuffs and pl_mpeg
 ship as single-file sources under `subprojects/`; web-text-lib (the
 text-shaping Pango fork) is vendored in-tree at `src/web-text-lib/`. The
 first `meson setup` still needs the network for one subproject: it
@@ -118,7 +120,6 @@ Build artifacts:
   that `scripts/pack-windows.sh` installs as the bundle's
   `nordstjernen.exe`.
 - `builddir/src/quickjs/libqjs.a`
-- `builddir/src/lexbor/liblexbor_static.a`
 
 Running the exe directly out of `builddir` works as long as the
 MSYS2 ucrt64 `bin` directory is on `PATH` (it is inside the

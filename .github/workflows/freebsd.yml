@@ -35,7 +35,7 @@ jobs:
           copyback: true
           prepare: |
             pkg install -y \
-              meson ninja pkgconf bash zip ccache bzip2 git-lite \
+              meson ninja pkgconf rust bash zip ccache bzip2 git-lite \
               gtk4 libepoxy curl uchardet webp libavif sdl2 glslang \
               sqlite3 libpsl
             # FreeBSD's freetype2.pc lists 'bzip2' in Requires.private, but

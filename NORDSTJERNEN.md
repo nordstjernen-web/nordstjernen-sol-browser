@@ -12,9 +12,9 @@ See `README.md` for the product vision and `CLAUDE.md` for working rules.
 - **One competent human's worth of code** — when work balloons, cut
   scope, not corners. A working subset beats an unfinished superset.
 - **Vertical slices that ship** — every task ends in something runnable.
-- **Few small auditable deps**, vendored in-tree: lexbor (HTML + WHATWG
-  URL), QuickJS (JS interpreter), Wuffs (image decode), WAMR
-  (WebAssembly interpreter).
+- **Few small auditable deps**, vendored in-tree: QuickJS (JS interpreter), Wuffs (image decode), WAMR
+  (WebAssembly interpreter). The HTML and WHATWG URL parsers are our own,
+  in safe Rust (`src/html5_rs/`, `src/url_rs/`).
 - **No automated test suite** — verify by running the browser.
 - No JIT, therefore more secure. However, this means the rest of the browser
   engine needs to be super-fast. 
@@ -47,7 +47,7 @@ the engine is built around, so it is never made a hard or default dependency.
 
 ## Current state
 
-A usable HTML5 + modern-CSS + ~ES2020 browser. lexbor parses to a DOM;
+A usable HTML5 + modern-CSS + ~ES2020 browser. The in-tree Rust HTML5 parser builds the DOM;
 the engine does the CSS cascade and selectors, block/inline/flex/grid/
 table/multicol/float/positioned layout, and Cairo + Pango paint
 (gradients incl. `repeating-*` and gradient masks, filters, transforms,
@@ -79,7 +79,7 @@ surfaced through `src/version.h`.
 The codebase is layered so the GUI stays thin and the engine stays
 toolkit-agnostic:
 
-- **`src/` — common C core.** The engine (lexbor parse, CSS cascade,
+- **`src/` — common C core.** The engine (HTML parse, CSS cascade,
   layout, Cairo/Pango paint, QuickJS, WAMR, image decode, networking)
   plus frontend-agnostic `ns_` helpers shared by alternative GUIs
   (the `ns_net_fetch_*` networking calls, the `ns_url_*` URL helpers,

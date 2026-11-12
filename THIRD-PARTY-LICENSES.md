@@ -67,6 +67,18 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+### Rust standard library — MIT OR Apache-2.0
+
+> Runtime and core library linked into the in-tree Rust HTML5 and URL
+> parsers (`src/html5_rs/`, `src/url_rs/`).
+> <https://www.rust-lang.org>
+>
+> Copyright (c) The Rust Project Developers
+
+Licensed under either the MIT License or the Apache License, Version
+2.0, at your option. See the quickjs-ng section above for the MIT license
+text and the Wuffs section above for the Apache License notice.
+
 ### pl_mpeg — MIT License
 
 > Single-file MPEG-1 video and MP2 audio decoder and MPEG-PS demuxer.
@@ -401,25 +413,6 @@ These are linked only when present on the build host (meson
 
 Apache 2.0 section 4(d) requires propagating any `NOTICE` files
 shipped with the upstream sources. As of this release:
-
-- lexbor ships a `NOTICE` file, carried in the fork at
-  `src/lexbor/NOTICE` and reproduced verbatim here:
-
->     Lexbor.
->
->     Copyright 2018-2020 Alexander Borisov
->
->     Licensed under the Apache License, Version 2.0 (the "License");
->     you may not use this file except in compliance with the License.
->     You may obtain a copy of the License at
->
->         http://www.apache.org/licenses/LICENSE-2.0
->
->     Unless required by applicable law or agreed to in writing, software
->     distributed under the License is distributed on an "AS IS" BASIS,
->     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
->     See the License for the specific language governing permissions and
->     limitations under the License.
 
 - Wuffs ships no `NOTICE` file.
 - WAMR ships no `NOTICE` file.

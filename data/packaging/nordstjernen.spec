@@ -8,6 +8,7 @@ URL:            https://github.com/nordstjernen-web/nordstjernen-sol-browser
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  gcc
+BuildRequires:  rust >= 1.91
 BuildRequires:  meson >= 1.0
 %if 0%{?fedora} || 0%{?rhel}
 BuildRequires:  ninja-build
@@ -45,8 +46,8 @@ ExclusiveOS:    linux
 Nordstjernen is an independent, lightweight web browser built entirely
 from scratch in C, using GTK 4 for the UI and libcurl for networking.
 It is a clean-room implementation with no upstream browser engine: the
-HTML parser (lexbor), the JavaScript interpreter (QuickJS), and the
-image decoder (Wuffs) are all integrated in-tree. The engine is a
+HTML parser (its own, in safe Rust), the JavaScript interpreter (QuickJS),
+and the image decoder (Wuffs) are all integrated in-tree. The engine is a
 hardened, zero-JIT HTML/CSS renderer aimed at secure general web
 browsing, document reading, embedded systems, and embedding in other
 applications. It does not phone home and does not telemeter the user.

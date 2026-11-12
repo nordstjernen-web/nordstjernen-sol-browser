@@ -1,6 +1,6 @@
 # Nordstjernen — Android JNI bridge build.
 #
-# The full browser engine (engine + lexbor + quickjs + wuffs) is cross-compiled
+# The full browser engine (engine + Rust parsers + quickjs + wuffs) is cross-compiled
 # separately via meson into a per-ABI libnordstjernen.so dropped in
 # app/src/main/jniLibs/<abi>/ (see android/scripts/build-deps.sh). This file
 # only builds the thin JNI bridge.

@@ -2,7 +2,7 @@
 
 Nordstjernen runs natively on macOS through GTK 4's Quartz backend — no
 X11, no XQuartz, no WebKit. The same C engine shipped to Linux
-and Windows links the same GTK 4 / libcurl / Cairo / Pango / lexbor
+and Windows links the same GTK 4 / libcurl / Cairo / Pango
 libraries here; there is no Xcode project and no CocoaPods. This page
 covers both **installing the prebuilt app** and **building from source**.
 
@@ -97,7 +97,7 @@ bundle and `.dmg`.
 Install [Homebrew](https://brew.sh) if you do not already have it, then:
 
 ```sh
-brew install meson ninja pkg-config gtk4 libepoxy curl \
+brew install meson ninja pkg-config rust gtk4 libepoxy curl \
     uchardet libpsl sqlite webp sdl2 glslang
 brew install ccache          # optional, speeds up rebuilds
 brew install dylibbundler    # needed only to package the .app / .dmg
@@ -128,9 +128,10 @@ meson setup builddir
 meson compile -C builddir
 ```
 
-QuickJS, lexbor, WAMR, Wuffs, pl_mpeg, minimp3 and the web-text-lib
+QuickJS, WAMR, Wuffs, pl_mpeg, minimp3 and the web-text-lib
 text-layout fork (`src/web-text-lib/`) are vendored in-tree, so there are no
-submodules. The first `meson setup` does download one pinned subproject
+submodules. The HTML and URL parsers (`src/html5_rs/`, `src/url_rs/`) are
+in-tree Rust, compiled by meson with plain `rustc` (1.91 or newer); no Cargo. The first `meson setup` does download one pinned subproject
 through its wrap: the wgpu-native release behind WebGPU
 (`subprojects/wgpu-native-macos-<arch>.wrap`, skipped when wgpu-native is
 found through pkg-config or `-Dwgpu_native_root`; see

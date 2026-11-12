@@ -91,7 +91,7 @@ Key choices:
   `License: GPL-3+ or NSL-1.0`, with a `GPL-3+` stanza pointing at
   `/usr/share/common-licenses/GPL-3` and an `NSL-1.0` stanza for the
   alternative. It also spells out the free licenses of the in-tree
-  engines (lexbor — Apache-2.0; QuickJS — Expat; WAMR — Apache-2.0 with
+  engines (QuickJS — Expat; WAMR — Apache-2.0 with
   LLVM exception), the vendored single-file libraries (Wuffs —
   Apache-2.0; pl_mpeg — Expat; minimp3 — CC0-1.0), the wgpu-native
   headers (BSD-3-Clause; Expat or Apache-2.0) and the CLDR/ICU4X data
@@ -122,8 +122,11 @@ packages, are what the in-tree web-text-lib text stack builds against.
 
 `libseccomp-dev` is marked `[linux-any]` in `debian/control`; all Debian
 release architectures are Linux, so it always applies. `cmake` is **not**
-a build dependency: lexbor, QuickJS, WAMR, and web-text-lib build in-tree
-via meson `subdir()` and there are no CMake subprojects.
+a build dependency: QuickJS, WAMR, and web-text-lib build in-tree
+via meson `subdir()` and there are no CMake subprojects. `rustc` (1.91 or
+newer) **is** one: meson compiles the in-tree Rust HTML and URL parsers
+(`src/html5_rs/`, `src/url_rs/`) with plain `rustc`, without Cargo or any
+crates.
 
 Runtime dependencies are computed automatically by `dh_shlibdeps`
 (`${shlibs:Depends}`) from the linked shared libraries — nothing is
@@ -242,7 +245,7 @@ feedback are tracked in `Debian-inclusion.md`):
    bundled-engine licenses must all be listed.
 
 3. **Note the embedded code copies.** Debian discourages bundled library
-   copies (Debian Policy §4.13). Nordstjernen *forks* lexbor, QuickJS,
+   copies (Debian Policy §4.13). Nordstjernen *forks* QuickJS
    and WAMR in-tree and modifies them for tight integration, so they
    cannot simply be swapped for system packages. Expect the sponsor and
    FTP-masters to ask about this: explain the reasoning, keep the

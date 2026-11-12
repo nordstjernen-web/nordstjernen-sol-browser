@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a portable Nordstjernen RPM by repackaging the bundle that
 # pack-linux.sh produces. The binary is already statically linked
-# against the in-tree engine (lexbor, quickjs, wuffs); the RPM only
+# against the in-tree engine (Rust HTML and URL parsers, quickjs, wuffs); the RPM only
 # needs to declare the dynamic GTK / curl / rsvg system deps, and rpm's
 # auto-Requires picks those up from the binary's SONAMEs.
 set -euo pipefail

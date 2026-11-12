@@ -729,9 +729,6 @@ summary({'H.264/AAC OS decoders': media_os_backend}, section: 'Features')
 summary({'JPEG XL images (libjxl)': have_jxl}, section: 'Features')
 summary({'GTK 4 shell': have_gtk}, section: 'Shells')
 
-ns_rust_localize = find_program('scripts/rust-staticlib-localize.sh')
-ns_rust_localize_tools = [find_program('ld'), find_program('objcopy'),
-                          find_program('ar')]
 ns_parsers_rust_args = ['--edition=2024', '-C', 'panic=abort']
 ns_url_rs = static_library('ns_url', 'src/url_rs/lib.rs',
   rust_abi: 'rust',
@@ -746,13 +743,38 @@ ns_parsers_rs_raw = static_library('ns_parsers_rs_raw', 'src/parsers_rs/lib.rs',
   rust_args: ns_parsers_rust_args,
   link_with: [ns_url_rs, ns_html5_rs],
 )
-ns_parsers_rs_lib = custom_target('ns_parsers_rs',
-  input: ns_parsers_rs_raw,
-  output: 'libns_parsers_rs.a',
-  command: [ns_rust_localize, '@INPUT@', '@OUTPUT@', ns_rust_localize_tools,
-            'ns_rs_*'],
-)
-ns_parsers_rs_dep = declare_dependency(link_with: ns_parsers_rs_lib)
+
+ns_rust_isolate_std = (have_webgpu or ns_ipc_rust) and host_machine.system() != 'windows'
+ns_rust_system_libs = []
+ns_rust_system_lib_names = []
+if host_machine.system() == 'windows'
+  ns_rust_system_lib_names = ['kernel32', 'advapi32', 'ntdll', 'userenv',
+                              'ws2_32', 'dbghelp', 'bcrypt', 'synchronization']
+elif host_machine.system() == 'darwin'
+  ns_rust_system_lib_names = ['iconv']
+endif
+foreach name : ns_rust_system_lib_names
+  ns_rust_system_libs += cc.find_library(name, required: false)
+endforeach
+if ns_rust_isolate_std
+  ns_rust_localize = find_program('scripts/rust-staticlib-localize.sh')
+  ns_rust_ld = find_program('ld')
+  ns_rust_ar = find_program('ar')
+  ns_rust_objcopy = host_machine.system() == 'darwin' ? ns_rust_ar : find_program('objcopy')
+  ns_rust_localize_command = [ns_rust_localize, '@INPUT@', '@OUTPUT@',
+                              host_machine.system(), host_machine.cpu_family(),
+                              ns_rust_ld, ns_rust_objcopy, ns_rust_ar]
+  ns_parsers_rs_lib = custom_target('ns_parsers_rs',
+    input: ns_parsers_rs_raw,
+    output: 'libns_parsers_rs.a',
+    command: ns_rust_localize_command + ['ns_rs_*'],
+  )
+  ns_parsers_rs_dep = declare_dependency(link_with: ns_parsers_rs_lib,
+                                         dependencies: ns_rust_system_libs)
+else
+  ns_parsers_rs_dep = declare_dependency(link_with: ns_parsers_rs_raw,
+                                         dependencies: ns_rust_system_libs)
+endif
 
 ns_ipc_rust_dep = []
 if ns_ipc_rust
@@ -762,13 +784,17 @@ if ns_ipc_rust
     rust_args: ['-C', 'panic=abort'],
     override_options: ['rust_std=2021'],
   )
-  ns_ipc_rust_lib = custom_target('ns_ipc_http_rs',
-    input: ns_ipc_rust_raw,
-    output: 'libns_ipc_http_rs.a',
-    command: [ns_rust_localize, '@INPUT@', '@OUTPUT@', ns_rust_localize_tools,
-              'ns_ipc_rs_*', 'http_write_*', 'json_*'],
-  )
-  ns_ipc_rust_dep = declare_dependency(link_with: ns_ipc_rust_lib)
+  if ns_rust_isolate_std
+    ns_ipc_rust_lib = custom_target('ns_ipc_http_rs',
+      input: ns_ipc_rust_raw,
+      output: 'libns_ipc_http_rs.a',
+      command: ns_rust_localize_command + ['ns_ipc_rs_*', 'http_write_*', 'json_*'],
+    )
+  else
+    ns_ipc_rust_lib = ns_ipc_rust_raw
+  endif
+  ns_ipc_rust_dep = declare_dependency(link_with: ns_ipc_rust_lib,
+                                       dependencies: ns_rust_system_libs)
 endif
 
 subdir('src')

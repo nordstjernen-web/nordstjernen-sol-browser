@@ -93,7 +93,7 @@ re-running CI and the `concurrency`-group cancellation that a redundant
 dispatch would cause. The Linux
 packages are built locally in distro containers so each binary links
 against that distro's own glibc / GTK, and the source tarball is a
-plain `git archive` (the engine — lexbor, quickjs, wuffs — is vendored
+plain `git archive` (the engine — the Rust HTML and URL parsers, quickjs, wuffs — is
 in-tree, as is the web-text-lib Pango fork; wgpu-native is not, so a fully
 offline build of the tarball needs `-Dwebgpu=disabled`).
 
@@ -144,7 +144,7 @@ sudo apt update
 sudo apt install -y openjdk-21-jdk
 
 # Engine build toolchain + libraries (so build-native.sh can cross the JNI bridge)
-sudo apt install -y build-essential clang pkg-config meson ninja-build \
+sudo apt install -y build-essential clang pkg-config meson ninja-build rustc \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev glslang-dev \
     libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev

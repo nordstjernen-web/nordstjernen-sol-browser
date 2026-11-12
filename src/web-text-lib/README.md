@@ -4,8 +4,8 @@ web-text-lib
 Nordstjernen's text layout library: a specialized library to render text for a web browser.
 
 The top-level `meson.build` loads this directory with
-`subdir('src/web-text-lib')` (the same pattern as `src/lexbor` and
-`src/quickjs`). It builds static libraries and exposes three dependencies:
+`subdir('src/web-text-lib')` (the same pattern as `src/quickjs` and
+`src/wamr`). It builds static libraries and exposes three dependencies:
 `web_text_dep` (the core layout library), `web_text_cairo_dep` (cairo
 rendering) and `web_text_fc_dep` (fontconfig/FreeType fonts). No clone or
 network access is needed, so offline and distro builds get it straight from
