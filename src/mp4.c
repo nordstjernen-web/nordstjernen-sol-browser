@@ -250,13 +250,14 @@ table_count(ns_span b, size_t entry)
 }
 
 static void
-build_samples(ns_mp4_track *t, const ns_stbl *tab)
+build_samples(ns_mp4_track *t, const ns_stbl *tab, uint32_t budget)
 {
     if (tab->stsz.len < 12) return;
     uint32_t fixed = rd32(tab->stsz.p + 4);
     uint32_t n = rd32(tab->stsz.p + 8);
     if (!fixed && n > (tab->stsz.len - 12) / 4) n = (uint32_t)((tab->stsz.len - 12) / 4);
-    if (n == 0 || n > NS_MP4_MAX_SAMPLES) return;
+    if (n > budget) n = budget;
+    if (n == 0) return;
     int wide = tab->co64.len > 0;
     uint32_t nchunks = wide ? table_count(tab->co64, 8) : table_count(tab->stco, 4);
     uint32_t nstsc = table_count(tab->stsc, 12);
@@ -371,7 +372,11 @@ parse_trak(ns_mp4 *m, ns_span trak)
         free(t.config);
         return;
     }
-    build_samples(&t, &tab);
+    uint32_t budget = NS_MP4_MAX_SAMPLES;
+    for (int i = 0; i < m->ntracks; i++)
+        budget -= m->tracks[i].count < budget
+            ? (uint32_t)m->tracks[i].count : budget;
+    build_samples(&t, &tab, budget);
     ns_mp4_track *grown = realloc(m->tracks, (size_t)(m->ntracks + 1) * sizeof *grown);
     if (!grown) {
         free(t.config);
