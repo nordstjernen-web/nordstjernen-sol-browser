@@ -199,8 +199,8 @@ fi
 cat > "$STAGE/INSTALL.md" <<EOF
 # Nordstjernen ${VERSION} — Linux ${ARCH} binary
 
-Stripped, LTO-optimised build. The browser engine itself (lexbor for
-HTML, quickjs for JavaScript, wuffs for image decoding, wamr for
+Stripped, LTO-optimised build. The browser engine itself (its own HTML
+parser, quickjs for JavaScript, wuffs for image decoding, wamr for
 WebAssembly) is statically linked into the binary. The GTK 4 desktop
 stack stays dynamic because it expects to find pixbuf loaders, IM
 modules and font/theme data on the host at runtime — fully-static GTK

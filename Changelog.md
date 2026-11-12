@@ -69,7 +69,9 @@ Changelog:
   more closely. `src/lexbor/` (about 289,000 lines of C) is gone.
 * Build: Rust (`rustc` 1.91 or newer) is now a required toolchain. meson
   compiles the parser crates with plain `rustc`; no Cargo and no crates
-  are used.
+  are used. The Android build needs the matching `rustup` target, and the
+  release containers fall back to `rustup` where the distribution's
+  `rustc` is older.
 * WebCrypto: `crypto.subtle` supports ChaCha20-Poly1305 (generate,
   import, export, encrypt, decrypt, wrap and unwrap; 256-bit keys, 96-bit
   nonces, additional data), and the `raw-secret` key format for every

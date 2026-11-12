@@ -233,7 +233,7 @@ above when libav is present.
 ## Poster / source metadata (standards, not site scraping)
 
 For pages whose player is JS-driven and has no server-side `<video src>`,
-`src/html_lexbor.c` reads **standard** video metadata during HTML parse and
+`src/html_parser.c` reads **standard** video metadata during HTML parse and
 annotates the target element (`data-nd-media-poster` / `data-nd-media-src` /
 `data-nd-media-stream`). It reads, in priority order, JSON-LD `VideoObject`
 (`contentUrl` / `thumbnailUrl` / `embedUrl`), OpenGraph (`og:video*` /

@@ -32,10 +32,10 @@ implemented · 31 🟡 partial · 0 ❌ absent · 7 🚫 absent by design**.
 
 | Concern | Source |
 |---------|--------|
-| HTML tokenizer + tree construction | in-tree lexbor, `src/html_lexbor.c` |
+| HTML tokenizer + tree construction | in-tree Rust HTML5 parser `src/html5_rs/`, sink in `src/html_parser.c` |
 | Parse dispatch, charset decode | `src/html.c` |
 | DOM tree + node APIs | `src/dom.c`, exposed in `src/js.c` |
-| WHATWG URL | lexbor URL module via `src/net.c` (`ns_url_*`) |
+| WHATWG URL | in-tree Rust URL parser `src/url_rs/` via `src/net.c` (`ns_url_*`) |
 | CSS cascade / selectors | `src/css.c`, `src/css.h` |
 | Layout (block/inline/flex/grid/table) | `src/layout.c`, `src/layout.h` |
 | Paint (Cairo) / text (Pango) | `src/paint.c`, `src/render.c`, `src/font.c` |
@@ -94,8 +94,8 @@ standards mode (see [§13](#13-the-html-syntax)).
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| WHATWG URL parsing & serialisation | ✅ | lexbor URL module via `ns_url_resolve`, `ns_url_parts_new`, `ns_url_host_from`, `ns_url_origin_from` in `src/net.c` |
-| IDN / Punycode | ✅ | handled inside the lexbor URL module |
+| WHATWG URL parsing & serialisation | ✅ | in-tree Rust URL parser (`src/url_rs/`) via `ns_url_resolve`, `ns_url_parts_new`, `ns_url_host_from`, `ns_url_origin_from` in `src/net.c` |
+| IDN / Punycode | ✅ | handled inside the URL parser (UTS #46 IDNA, Punycode, NFC in `src/url_rs/`) |
 | Origin & same-origin/same-site | ✅ | `ns_url_same_origin`, `ns_url_is_same_site` (`src/net.c`) |
 | Character encodings → UTF-8 | ✅ | uchardet detection in `ns_html_decode_body_full` (`src/html.c`), `g_convert` to UTF-8, Latin-1 last-resort |
 | Content-type sniffing | 🟡 | charset sniffing delegated to uchardet; no full MIME sniffing standard |
@@ -108,7 +108,7 @@ standards mode (see [§13](#13-the-html-syntax)).
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| DOM tree construction | ✅ | lexbor (`src/html_lexbor.c`); spec-faithful even for malformed input |
+| DOM tree construction | ✅ | in-tree Rust HTML5 parser (`src/html5_rs/`, sink in `src/html_parser.c`); spec-faithful even for malformed input |
 | `Document`, `documentElement`, `body`, `head` | ✅ | exposed in `src/js.c` |
 | `document.title` | ✅ | reflects `<title>` |
 | `HTMLElement.innerText` / `outerText` | ✅ | layout-aware getter (not a `textContent` alias): the rendered-text walk in `src/js.c` skips `display:none` subtrees and non-rendered elements (`script`/`style`/`head`/…), collapses runs of ASCII whitespace under normal `white-space` while preserving them under the `pre` family, turns `<br>` and block-box boundaries into newlines, and keeps `visibility:hidden` text per spec; when the element itself is not rendered the getter falls back to `textContent`. The setter splits on `\n` into text nodes and `<br>` elements |
@@ -116,7 +116,7 @@ standards mode (see [§13](#13-the-html-syntax)).
 | DOM tree accessors (`getElementsBy{Id,TagName,TagNameNS,ClassName,Name}`, `forms`/`images`/`links`/`scripts`) | ✅ | `getElementsByTagNameNS` applies the spec namespace filter against each element's **actual** namespace (`ns_collect_by_tag_ns` in `src/js.c`): empty string normalised to `null` (matches only null-namespace elements, of which there are none in an HTML document), `*` matches any namespace, and a concrete URI (`…/xhtml`, `…/svg`, `…/Math/MathML`) matches the elements in that namespace by local name — so a parsed inline `<svg>` is found by the SVG namespace and not by the XHTML one; exposed on both `Document` and `Element` |
 | `HTMLCollection` / `NodeList` exotic objects | ✅ | the live collections returned by `children`, `childNodes`, `getElementsByTagName`/`ClassName`/`Name`, `links`, `forms`/`images`, and `form.elements` are **WebIDL legacy platform objects** (`ns_live_*` in `src/js.c`), not decorated `Array`s: `Object.prototype.toString` reports `[object HTMLCollection]` / `[object NodeList]`, `length` is a non-own prototype getter (so `getOwnPropertyNames` lists only the indices, plus the supported named properties for an `HTMLCollection`), indexed and named entries are read-only and configurable, and the legacy `[[DefineOwnProperty]]`/`[[Delete]]` rules hold (assigning over or deleting an index / supported name fails — strict mode throws). An `HTMLCollection` is iterable via `Symbol.iterator` but, per spec, carries no `values`/`entries`/`keys`/`forEach`; a `NodeList` carries the full iterable surface. Array-index-shaped names beyond `2^32−2` resolve as named properties, not indices |
 | `document.currentScript` | ✅ | the running classic `<script>` element during execution; `null` for module scripts (`src/js.c`) |
-| `document.compatMode` | ✅ | reflects the parser's quirks state (`BackCompat` in quirks mode, else `CSS1Compat`); plumbed from lexbor's `compat_mode` via the document node flags |
+| `document.compatMode` | ✅ | reflects the parser's quirks state (`BackCompat` in quirks mode, else `CSS1Compat`); plumbed from the parser's quirks result via the document node flags |
 | Void / raw-text / escapable element classes | ✅ | void set in `src/html.c` (`area base br col embed hr img input link meta param source track wbr`) |
 | Quirks / limited-quirks / no-quirks | 🟡 | DOCTYPE consumed; `document.compatMode` now reflects the mode, but quirks-specific layout deltas are still not applied |
 | `dir` global attribute (`Element.dir`, `document.dir`) | ✅ | reflected as an enumerated IDL attribute (canonicalised to `ltr`/`rtl`/`auto`/`""`); drives Pango base direction and the start/end resolution of `text-align` (an unset `text-align` in an RTL context resolves to right). The CSS `direction` (inherited) and `unicode-bidi` properties are parsed and honoured, so author `direction: rtl` reaches base-direction parity with the `dir` attribute and `unicode-bidi: bidi-override`/`isolate`/`isolate-override`/`plaintext` use real Unicode bidi controls (see §4.5). `dir=auto` (and the `bdi` default) computes its directionality from the first strong character of the element's content — feeding both the laid-out base direction (a `dir=auto` block of Hebrew/Arabic lays out RTL) and the `:dir()` selector (`ns_css_node_dir` in `src/css.c`), ignoring digits/punctuation and descendant subtrees that carry their own `dir` |
@@ -455,9 +455,9 @@ workers are not implemented yet.
 ## §13 The HTML syntax
 
 The heart of spec conformance. Tokenisation and tree construction —
-the bulk of §13.2 — are delegated to in-tree **lexbor**, a
-from-scratch WHATWG-conformant C implementation
-(`src/html_lexbor.c`). Because the parser is a conformant engine, the
+the bulk of §13.2 — are done by the project's own **HTML5 parser**, a
+WHATWG tokenizer and tree builder in safe Rust
+(`src/html5_rs/`, building `ns_node`s through the sink in `src/html_parser.c`). Because the parser is a conformant engine, the
 DOM tree Nordstjernen builds for a given byte stream is spec-faithful
 **even for malformed input**; the compatibility gaps elsewhere in this
 document are in *rendering and behaviour*, not parsing.
@@ -466,7 +466,7 @@ document are in *rendering and behaviour*, not parsing.
 |-------|:--:|
 | Tokenizer state machine (§13.2.5) | ✅ |
 | Tree construction / insertion modes (§13.2.6) | ✅ |
-| Foreign content (SVG/MathML namespaces) | ✅ (SVG parsed to DOM; MathML parsed to DOM **and laid out** — see §4.8; per-element namespace now propagated from lexbor at parse time — `lxb_node_convert` in `src/html_lexbor.c` flags SVG elements `NS_NODE_SVG_NS` and MathML elements `NS_NODE_FOREIGN_NS` with the MathML URI, so a parsed inline `<svg>`/`<math>` reports the correct `namespaceURI`/`localName`/`tagName`, satisfies `instanceof SVGElement`-style namespace checks, and is matched by `getElementsByTagNameNS`; `<foreignObject>` content correctly reverts to the XHTML namespace) |
+| Foreign content (SVG/MathML namespaces) | ✅ (SVG parsed to DOM; MathML parsed to DOM **and laid out** — see §4.8; per-element namespace now propagated from the parser at parse time — `ns_h5_set_namespace` in `src/html_parser.c` flags SVG elements `NS_NODE_SVG_NS` and MathML elements `NS_NODE_FOREIGN_NS` with the MathML URI, so a parsed inline `<svg>`/`<math>` reports the correct `namespaceURI`/`localName`/`tagName`, satisfies `instanceof SVGElement`-style namespace checks, and is matched by `getElementsByTagNameNS`; `<foreignObject>` content correctly reverts to the XHTML namespace) |
 | Adoption agency / error recovery | ✅ |
 | Named & numeric character references | ✅ |
 | Fragment parsing (`innerHTML`) | ✅ |

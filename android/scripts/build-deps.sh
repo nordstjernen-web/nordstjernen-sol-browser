@@ -20,8 +20,10 @@
 #       cairo, pango, pangocairo (+ harfbuzz, freetype2, fontconfig,
 #       pixman, libffi, pcre2, expat, zlib, libpng),
 #       libcurl, sqlite3, uchardet, libpsl, libwebp.
-#     All are plain C and cross-build with meson against the NDK — no Rust
-#     toolchain is needed: the tree has no Rust dependency.
+#     All are plain C and cross-build with meson against the NDK.
+#   * rustc 1.91+ with the ABI's Android target installed
+#     (rustup target add aarch64-linux-android x86_64-linux-android), for the
+#     in-tree HTML and URL parsers.
 #
 # Building that dependency sysroot is the bulk of the porting work and is out
 # of scope for this script; see android/README.md for the current status.
@@ -55,10 +57,10 @@ LOGDIR="${REPO_ROOT}/android/.build/logs"
 : "${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME to your NDK path}"
 
 case "${ABI}" in
-    arm64-v8a)   TRIPLE=aarch64-linux-android;     CPU_FAMILY=aarch64; CPU=aarch64 ;;
-    armeabi-v7a) TRIPLE=armv7a-linux-androideabi;  CPU_FAMILY=arm;     CPU=armv7 ;;
-    x86_64)      TRIPLE=x86_64-linux-android;       CPU_FAMILY=x86_64;  CPU=x86_64 ;;
-    x86)         TRIPLE=i686-linux-android;         CPU_FAMILY=x86;     CPU=i686 ;;
+    arm64-v8a)   TRIPLE=aarch64-linux-android;     CPU_FAMILY=aarch64; CPU=aarch64; RUST_TARGET=aarch64-linux-android ;;
+    armeabi-v7a) TRIPLE=armv7a-linux-androideabi;  CPU_FAMILY=arm;     CPU=armv7;   RUST_TARGET=armv7-linux-androideabi ;;
+    x86_64)      TRIPLE=x86_64-linux-android;       CPU_FAMILY=x86_64;  CPU=x86_64;  RUST_TARGET=x86_64-linux-android ;;
+    x86)         TRIPLE=i686-linux-android;         CPU_FAMILY=x86;     CPU=i686;    RUST_TARGET=i686-linux-android ;;
     *) echo "unknown ABI: ${ABI}" >&2; exit 2 ;;
 esac
 
@@ -122,6 +124,7 @@ cat > "${CROSS}" <<EOF
 [binaries]
 c = '${CC_MESON}'
 cpp = '${CXX_MESON}'
+rust = ['rustc', '--target', '${RUST_TARGET}']
 ar = '${AR_MESON}'
 strip = '${STRIP_MESON}'
 pkg-config = 'pkg-config'

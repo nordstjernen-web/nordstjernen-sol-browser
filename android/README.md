@@ -4,7 +4,7 @@ Available on the [Google Play Store](https://play.google.com/store/apps/details?
 See [`docs/Android.md`](../docs/Android.md) for the build, signing, and release guide.
 
 An Android host app that drives the Nordstjernen browser engine through its C
-embedding API (`src/libnordstjernen.h`). The engine — HTML parsing (lexbor),
+embedding API (`src/libnordstjernen.h`). The engine — HTML parsing (the in-tree Rust HTML5 parser),
 CSS cascade + layout, JavaScript (QuickJS), image decoding (Wuffs), and cairo
 painting — is the same code used on the desktop. The Android UI is a
 thin Kotlin shell: a URL bar over a `PageView` that renders the engine's RGBA

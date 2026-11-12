@@ -1,15 +1,16 @@
-# Vendored engine updates — QuickJS & Lexbor
+# Vendored engine updates — QuickJS
 
-Nordstjernen carries in-tree forks of two upstream C libraries that we
+Nordstjernen carries in-tree forks of upstream C libraries that we
 modify freely for browser integration:
 
 - **QuickJS** (`src/quickjs/`) — forked from
   [quickjs-ng](https://github.com/quickjs-ng/quickjs).
-- **Lexbor** (`src/lexbor/`, sources under `src/lexbor/source/lexbor/`) —
-  forked from [lexbor](https://github.com/lexbor/lexbor), trimmed to the
-  modules we use (`core dom encoding html ns ports punycode tag unicode url
-  utils`); upstream's `css`, `engine`, `selectors` and `style` modules and
-  its test and `utils/` tooling are not carried.
+
+The HTML and URL parsers are no longer a vendored fork. They are the
+project's own safe-Rust crates, `src/html5_rs/` and `src/url_rs/`, kept in
+step with Southstar's `rust/html5` and `rust/url` rather than refreshed
+from an upstream. The Lexbor entries below are history: that fork
+(`src/lexbor/`) was removed when the Rust parsers replaced it.
 
 We track each upstream's development branch (`master`; some older entries
 below call it `main`). This document records each refresh:
@@ -27,8 +28,8 @@ is classified:
 - **merge** — both touched it → 3-way merge (`git merge-file ours BASE
   theirs`), reviewing every hunk.
 
-Sources are listed explicitly in each `meson.build` (`src/quickjs/meson.build`,
-`src/lexbor/meson.build`), so new upstream files in unused areas are simply
+Sources are listed explicitly in each `meson.build` (`src/quickjs/meson.build`),
+so new upstream files in unused areas are simply
 not compiled; the build is the final gate. After a refresh of either QuickJS,
 build both `-Dquickjs` configurations and fix the adapter if the binding
 changed (see [`quickjs.md`](quickjs.md)).

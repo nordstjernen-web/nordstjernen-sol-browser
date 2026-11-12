@@ -54,7 +54,7 @@ jobs:
             echo "PKG_PATH=$PKG_PATH"
             attempt=0
             until /usr/sbin/pkg_add -U \
-                meson ninja-build pkgconf bash zip ccache git-base \
+                meson ninja-build pkgconf rust bash zip ccache git-base \
                 gtk4 curl openssl uchardet sqlite3 libwebp libavif libpsl SDL2 glslang
             do
               attempt=$((attempt + 1))

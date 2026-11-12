@@ -103,7 +103,7 @@ system.
 
 ## Browser features
 
-- **HTML and CSS** — HTML is parsed by the in-tree lexbor engine; XHTML, SVG
+- **HTML and CSS** — HTML is parsed by the project's own HTML5 parser, written in safe Rust; XHTML, SVG
   and other XML documents go through an in-tree namespaced XML parser, and
   JSON and XML responses are shown pretty-printed. The CSS engine covers the
   modern cascade and CSSOM (`@layer`, `@scope`, nesting, `:has()`,
@@ -248,9 +248,13 @@ register it as a command alias. It replaces the old `internet-browser` name.
 
 Nordstjernen is an independent engine — no upstream browser code.
 
+The HTML5 parser (`src/html5_rs/`) and the WHATWG URL parser (`src/url_rs/`)
+are the project's own, in safe Rust with no crates, shared with Southstar.
+Building therefore needs `rustc` 1.91 or newer; meson compiles the crates
+with plain `rustc`, no Cargo.
+
 **Vendored in-tree**, with no submodules:
-[lexbor](https://github.com/lexbor/lexbor) (HTML parser, CSS and the WHATWG
-URL module), [QuickJS](https://github.com/quickjs-ng/quickjs) (quickjs-ng
+[QuickJS](https://github.com/quickjs-ng/quickjs) (quickjs-ng
 fork, no JIT), [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime)
 (WebAssembly interpreter), [Wuffs](https://github.com/google/wuffs)
 (memory-safe image decoding), [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
@@ -284,8 +288,8 @@ network.
 
 **Optional**, auto-detected or selected at build time: SDL2 (audio output and
 microphone capture, `-Daudio`; without it the build is silent), FFmpeg libav\*
-on macOS and the BSDs, GStreamer on the BSDs (`-Dgstreamer`), rustc (the
-memory-safe IPC parser, `-Dipc_rust`), vorbisfile/opusfile (Ogg audio without
+on macOS and the BSDs, GStreamer on the BSDs (`-Dgstreamer`), the
+memory-safe Rust IPC parser (`-Dipc_rust`), vorbisfile/opusfile (Ogg audio without
 FFmpeg), brotli (`br` content encoding and WOFF2 fonts), zstd (`zstd` content
 encoding), pdfjs-dist (the PDF viewer, fetched by a meson wrap; `-Dpdfjs`),
 libavif (`-Davif`), libjxl (`-Djxl`),
