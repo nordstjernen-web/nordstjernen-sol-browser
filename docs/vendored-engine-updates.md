@@ -59,6 +59,40 @@ Fork-local pieces a QuickJS refresh touches, by file:
 | `quickjs.c` | the two include lines; the trusted block path in the arena front end; `JS_NewRuntime`'s cage heap; `JS_SetOpaque` / `JS_GetOpaque` table paths and the Intl tag; the context-table indices in realm fields; the code-table indices in C function, closure, job and module records; the WeakRef sentinel; the hand conversions around compressed fields (`JSMapState.hash_buckets`, renamed from upstream's `hash_table` so the rewrite script can tell it from `JSObjectList`'s, its element-typed `sizeof`, the iterator-helper buffer resized through a local, `JS_WriteRegExp` taking a pointer, `js_resize_cptr_array` at the module-table resize sites, and the requested-module resolution in the bytecode reader storing through a local); the auto-init opaque encoding (`js_autoinit_encode_opaque` / `js_autoinit_get_opaque`, the function-list `JSInternTable`); and the `js_cload` / `js_cstore` / `js_abuf_data` / `js_ta_ptr` rewrites the script reproduces |
 | `meson.build` | `quickjs-cage.c` in the sources |
 
+## 2026-11-12 — Lexbor 145872a → e651d6b
+
+| | value |
+|---|---|
+| Fork base | `145872a` |
+| Updated to | `e651d6b` (master, "HTML: fixed crash, use-after-free and leaks on allocation failure in document create and parse (#448)") |
+| Version | `3.1.0` (unchanged) |
+
+One upstream commit, all of it in modules this fork carries.
+
+- **Memory safety** — when an allocation failed part-way through
+  `lxb_dom_document_init()`, the failure path destroyed the document's
+  arenas and hash tables but left the pointers in place, so the
+  `lxb_dom_document_destroy()` that follows freed them a second time, and
+  it read `owner_document` before that field had been set. The owner is now
+  set before the first allocation and each destroyed member is reset.
+  `lxb_html_parser_init()` destroys a tokenizer or tree that failed to
+  initialise instead of leaking it, and
+  `lxb_html_document_parser_prepare()` clears `doc->parser` after
+  destroying it, so a later call does not use the freed parser.
+
+The three files (`dom/interfaces/document.c`, `html/interfaces/document.c`,
+`html/parser.c`) carry no local modification, so upstream's versions are
+copied. The new test (`test/lexbor/html/allocation_failure.c`) is not
+carried.
+
+### Verification
+
+- Both `-Dquickjs` configurations build with no warnings (Linux, GCC).
+- Headless pages give the expected results: the 54-document XML set, an
+  XHTML page with an inline SVG, script and a frame, the adoption agency
+  case `<p>1<b>2<p>3<i>4</b>5<div>6`, a `p` under 400 nested `div`s, and
+  the PDF viewer page.
+
 ## 2026-11-10 — Bellard's QuickJS e5ac135 → e585640, vendored
 
 The engine moves from `subprojects/quickjs.wrap` into `src/quickjs-bellard/`

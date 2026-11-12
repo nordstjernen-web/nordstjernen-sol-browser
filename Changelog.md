@@ -3,6 +3,9 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: lexbor is updated to upstream `e651d6b`, which fixes a
+  double free and a read of an unset pointer when memory runs out while
+  a document or its parser is being created.
 * Packaging: the Arch, Alpine and RPM recipes carry the pinned PDF.js
   tarball as a second source, and `scripts/fetch-pdfjs.sh` fetches it
   for a Debian source package, so offline package builds include the
