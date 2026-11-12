@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* `docs/code-review-report.md` reviews the source for unused,
+  duplicate and insecure code, code a library could replace, hardening
+  libraries and Mozilla-project dependencies, with a ranked list of
+  proposed changes. No source file is changed by it.
 * Security: detached DOM nodes are no longer freed while the last
   layout may still point at them; they are released after the next
   layout instead. Fixes a possible use-after-free when a page removed
