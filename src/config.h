@@ -89,6 +89,7 @@ char            *ns_config_dump(void);
 gboolean         ns_config_save(GError **error);
 void             ns_config_defer_saves(gboolean defer);
 char            *ns_config_take_pending_save(void);
+char            *ns_config_renderer_text(const char *text);
 char            *ns_config_sensitive_changes(const char *text);
 gboolean         ns_config_apply_text(const char *text, GError **error);
 
