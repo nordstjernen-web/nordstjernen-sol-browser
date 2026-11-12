@@ -1509,7 +1509,7 @@ collect_name_may_matter(const ns_node *n)
 {
     if (n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
     switch (n->name[0]) {
-    case 'f': case 'i': case 'l': case 'n': case 'o': case 's':
+    case 'e': case 'f': case 'i': case 'l': case 'n': case 'o': case 's':
         return TRUE;
     default:
         return FALSE;
@@ -1543,7 +1543,8 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     if (named && ns_node_is_element_named(n, "noscript")) return;
     if (named && (ns_node_is_element_named(n, "iframe") ||
                   ns_node_is_element_named(n, "frame") ||
-                  ns_node_is_element_named(n, "object"))) {
+                  ns_node_is_element_named(n, "object") ||
+                  ns_node_is_pdf_embed(n))) {
         sheet_run_flush(cc);
         const char *furl = ns_element_get_attr(n, "data-nd-frame-url");
         if (furl && *furl) base_url = furl;
@@ -2083,7 +2084,8 @@ engine_node_frame_base(const ns_node *n, const char *dflt)
     for (const ns_node *p = n ? n->parent : NULL; p; p = p->parent) {
         if (ns_node_is_element_named(p, "iframe") ||
             ns_node_is_element_named(p, "frame") ||
-            ns_node_is_element_named(p, "object")) {
+            ns_node_is_element_named(p, "object") ||
+            ns_node_is_pdf_embed(p)) {
             const char *fu = ns_element_get_attr(p, "data-nd-frame-url");
             if (fu && *fu) return fu;
         }
@@ -2098,7 +2100,8 @@ ns_engine_frame_csp_allows(const ns_node *n, ns_csp_kind kind,
     for (const ns_node *p = n ? n->parent : NULL; p; p = p->parent) {
         if (!ns_node_is_element_named(p, "iframe") &&
             !ns_node_is_element_named(p, "frame") &&
-            !ns_node_is_element_named(p, "object"))
+            !ns_node_is_element_named(p, "object") &&
+            !ns_node_is_pdf_embed(p))
             continue;
         const char *header = ns_element_get_attr(p, "data-nd-frame-csp");
         if (!header || !*header) return TRUE;

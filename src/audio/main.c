@@ -51,7 +51,7 @@
 #include <opusfile.h>
 #endif
 
-#define NS_AUDIO_MAX_PLAYERS 16
+#define NS_AUDIO_MAX_PLAYERS 128
 #define NS_AUDIO_MAX_SECONDS (24 * 3600)
 #define NS_AUDIO_DEVICE_RATE 44100
 /* A streamed (container) player keeps only this much decoded audio behind

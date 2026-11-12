@@ -37,6 +37,7 @@ struct ns_ws {
     char             *origin;
     char             *top_url;
     GPtrArray        *protocols;
+    char             *protocol;
 
     ns_ws_callbacks   cbs;
     gpointer          user_data;
@@ -71,6 +72,7 @@ ns_ws_destroy(ns_ws *ws)
     g_free(ws->origin);
     g_free(ws->top_url);
     if (ws->protocols) g_ptr_array_free(ws->protocols, TRUE);
+    g_free(ws->protocol);
     while (!g_queue_is_empty(&ws->out_queue)) {
         ns_ws_out_msg *m = g_queue_pop_head(&ws->out_queue);
         g_free(m->data);
@@ -426,6 +428,30 @@ ns_ws_handshake_progress(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
     return g_atomic_int_get(&ws->exit_requested) ? 1 : 0;
 }
 
+static size_t
+ns_ws_response_header(char *line, size_t size, size_t nitems, void *userdata)
+{
+    static const char name[] = "sec-websocket-protocol:";
+    ns_ws *ws = userdata;
+    size_t len = size * nitems;
+    if (len >= sizeof name - 1 &&
+        g_ascii_strncasecmp(line, name, sizeof name - 1) == 0) {
+        g_free(ws->protocol);
+        ws->protocol = g_strstrip(g_strndup(line + sizeof name - 1,
+                                            len - (sizeof name - 1)));
+    }
+    return len;
+}
+
+static gboolean
+ns_ws_protocol_requested(const ns_ws *ws)
+{
+    for (guint i = 0; ws->protocols && i < ws->protocols->len; i++)
+        if (strcmp(g_ptr_array_index(ws->protocols, i), ws->protocol) == 0)
+            return TRUE;
+    return FALSE;
+}
+
 static gpointer
 ns_ws_worker_curl(gpointer data)
 {
@@ -446,6 +472,8 @@ ns_ws_worker_curl(gpointer data)
 
     curl_easy_setopt(curl, CURLOPT_URL, ws->url);
     curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 2L);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, ns_ws_response_header);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, ws);
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION,
                      (long)CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, NS_USER_AGENT);
@@ -505,9 +533,13 @@ ns_ws_worker_curl(gpointer data)
     {
         long code = 0;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
-        if (code != 0 && code != 101) {
-            char *msg = g_strdup_printf(
+        char *msg = NULL;
+        if (code != 0 && code != 101)
+            msg = g_strdup_printf(
                 "WebSocket handshake failed (HTTP %ld)", code);
+        else if (ws->protocol && !ns_ws_protocol_requested(ws))
+            msg = g_strdup("WebSocket handshake failed (unrequested subprotocol)");
+        if (msg) {
             ns_ws_dispatch_error(ws, msg);
             ns_ws_dispatch_close(ws, 1006, msg, FALSE);
             g_free(msg);
@@ -701,6 +733,14 @@ ns_ws_close(ns_ws *ws, int code, const char *reason)
     gsize rlen = reason ? strlen(reason) : 0;
     ns_ws_enqueue(ws, NS_WS_OUT_CLOSE, (const guint8 *)reason, rlen, code);
     g_atomic_int_set(&ws->state, NS_WS_STATE_CLOSING);
+}
+
+const char *
+ns_ws_protocol(ns_ws *ws)
+{
+    return ws && ws->protocol &&
+           g_atomic_int_get(&ws->state) != NS_WS_STATE_CONNECTING
+        ? ws->protocol : "";
 }
 
 int

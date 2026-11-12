@@ -195,8 +195,10 @@ browser_prune_cached_nodes(ns_browser *browser)
     if (!browser || !browser->doc) return;
     if (browser->press_node && !browser_node_alive(browser, browser->press_node))
         browser->press_node = NULL;
-    if (browser->hover_node && !browser_node_alive(browser, browser->hover_node))
+    if (browser->hover_node && !browser_node_alive(browser, browser->hover_node)) {
         browser->hover_node = NULL;
+        ns_js_set_hover_node(browser->js, NULL);
+    }
     if (browser->aux_press_node &&
         !browser_node_alive(browser, browser->aux_press_node))
         browser->aux_press_node = NULL;
@@ -2553,6 +2555,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             changed = TRUE;
             other_changed = TRUE;
         }
+        ns_js_hold_animation_frames(browser->js, TRUE);
 
         gboolean did_iter = FALSE;
         int it = 0;
@@ -2566,6 +2569,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         if (++guard >= 4096) break;
         if (g_get_monotonic_time() >= deadline) break;
     }
+    ns_js_hold_animation_frames(browser->js, FALSE);
     if (browser->svg_external_seen != ns_svg_external_generation()) {
         browser->svg_external_seen = ns_svg_external_generation();
         changed = TRUE;
@@ -3763,6 +3767,7 @@ ns_browser_hover_full(ns_browser *browser, int x, int y, int mods,
     const ns_node *prev = browser->hover_node;
     gboolean changed = node != prev;
     browser->hover_node = node;
+    ns_js_set_hover_node(browser->js, node);
 
     gboolean dirty = FALSE;
     if (browser->js) {
@@ -5370,7 +5375,7 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
             gboolean press_prevented = FALSE;
             ns_js_dispatch_key_event_full(browser->js, target, "keypress",
                                           key ? key : "", code ? code : "",
-                                          keycode, char_code,
+                                          char_code, char_code,
                                           (mods & 1) != 0, FALSE, FALSE, FALSE,
                                           &press_prevented);
             if (press_prevented) {

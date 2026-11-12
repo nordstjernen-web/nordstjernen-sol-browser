@@ -20,6 +20,65 @@ Changelog:
   to continue; the choice lasts for the tab. Loopback, private-network
   and single-label hosts, and addresses that fail to resolve, are not
   asked about.
+* Build: libcurl 8.11 or newer, built with the `ws`/`wss` protocols, is
+  now required (`meson setup` fails otherwise), so WebSocket is always
+  available. Ubuntu 24.04's libcurl 8.5 is too old; Ubuntu 25.04 and
+  Debian 13 qualify.
+* `localStorage`: a page that writes and then navigates straight away
+  no longer loses the write. Changes are still saved a second later,
+  but they are now flushed before the next document reads storage.
+* `:hover` matches in `matches()`, `closest()` and `querySelector*()`,
+  not only in style sheets, so script checks such as jQuery's
+  `.is(':hover')` see the element under the pointer.
+* `HTMLMediaElement.error` holds a `MediaError` after an audio source
+  fails to load or decode; it stayed `null`.
+* Canvas games run much lighter: drawing to a 2D canvas repaints the
+  page instead of laying the whole document out again, and
+  `requestAnimationFrame` callbacks run once per frame instead of once
+  per batch of pending events (a page with timers or a WebSocket ran
+  them at well over 60 Hz).
+* Fixed a memory leak: every URL the engine parsed or resolved stayed
+  allocated for the life of the thread, so a page that was laid out
+  repeatedly grew without bound.
+* `keypress` events report the character code in `keyCode`, as other
+  browsers do.
+* Remote control: `screenshot` no longer fails on a page that redraws
+  every frame.
+* `text-shadow` set on an inline element (a link or span inside a line)
+  is painted; only the block's own shadow was. Shadows of right-aligned
+  and centred text are no longer cut off, and a shadow list may hold 16
+  shadows instead of 8.
+* A CSS `background-image` on a `<canvas>` element is loaded and
+  painted.
+* Layout: an empty block with `clear` set, but no float to clear, lets
+  its margins collapse through like any other empty block.
+* Security: lexbor is updated to upstream `e651d6b`, which fixes a
+  double free and a read of an unset pointer when memory runs out while
+  a document or its parser is being created.
+* Packaging: the Arch, Alpine and RPM recipes carry the pinned PDF.js
+  tarball as a second source, and `scripts/fetch-pdfjs.sh` fetches it
+  for a Debian source package, so offline package builds include the
+  PDF viewer.
+* PDF viewer: a Find field searches the whole document, including
+  pages not yet shown, and a Print button prints every page, one per
+  sheet. Printing from the menu prints the pages currently shown.
+* PDFs inside `<iframe>`, `<object>` and `<embed>` open in the PDF
+  viewer. An iframe used to show the file's raw bytes and the other two
+  showed nothing.
+* PDF viewer: a toolbar shows the page position and offers zoom, fit to
+  width and download; password-protected files ask for the password;
+  small pages are no longer stretched to the window width.
+* CSS: the legacy `-webkit-gradient(linear|radial, ...)` image syntax is
+  supported, and `-webkit-`-prefixed aliases of standard properties
+  (`-webkit-animation*`, `-webkit-transition*`, `-webkit-transform*`,
+  `-webkit-box-shadow`, `-webkit-background-size`, the flexbox
+  properties and others) now apply instead of being dropped.
+* Layout: text on a line that a later float joins is aligned in the
+  space the float leaves, so centred text no longer overlaps a
+  right-floated sibling.
+* `WebSocket.protocol` reports the subprotocol the server selected.
+* Audio: a page may hold 128 loaded `<audio>` elements instead of 16,
+  so games that preload a pool of sound channels get all of them.
 * Security: frames inside a document sandboxed by its
   `Content-Security-Policy` header inherit its opaque origin; they could
   read the site's cookies. The PDF viewer relies on this, and its own

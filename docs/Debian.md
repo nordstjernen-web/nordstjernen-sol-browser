@@ -109,8 +109,8 @@ directly:
     sudo apt build-dep ./
 
 The version floors in `debian/control` mirror the ones `meson setup`
-enforces: GTK ≥ 4.14, libcurl ≥ 8.5, FFmpeg ≥ 6.0 (`7:6.0` with Debian's
-epoch) and GStreamer ≥ 1.20, so Debian 13 (trixie) and Ubuntu 24.04 are
+enforces: GTK ≥ 4.14, libcurl ≥ 8.11, FFmpeg ≥ 6.0 (`7:6.0` with Debian's
+epoch) and GStreamer ≥ 1.20, so Debian 13 (trixie) and Ubuntu 25.04 are
 the oldest releases the package builds on.
 
 The FFmpeg `libav*` packages are **not** optional here: `meson setup` fails
@@ -132,6 +132,25 @@ hand-listed or bundled. The GStreamer plugin packages
 `Recommends`: they hold the H.264/AAC parsers and decoders that
 `decodebin` picks at runtime. `ca-certificates` and a hunspell dictionary
 are `Recommends` too.
+
+## The PDF viewer in an offline build
+
+The PDF viewer is PDF.js, which meson downloads through
+`subprojects/pdfjs-dist.wrap`. sbuild and pbuilder have no network, so
+fetch the pinned tarball into `debian/vendor/` before making the source
+package:
+
+    scripts/fetch-pdfjs.sh
+
+The script checks the tarball against the SHA-256 in the wrap file.
+`debian/source/include-binaries` lets the source package carry it, and
+`debian/rules` copies it into `subprojects/packagecache/` before meson
+runs. Without it the package still builds, and a PDF then shows a notice
+with a download link instead of the viewer. `debian/vendor/` is not
+committed.
+
+For Debian `main` this is not enough: the tarball holds minified
+script, and Debian wants the corresponding source built in the archive.
 
 ## Build the package
 

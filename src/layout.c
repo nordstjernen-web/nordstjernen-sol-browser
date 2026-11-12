@@ -1111,7 +1111,7 @@ node_is_frame_element(const ns_node *n)
 {
     return n && n->kind == NS_NODE_ELEMENT && n->name &&
            (strcmp(n->name, "iframe") == 0 || strcmp(n->name, "frame") == 0 ||
-            strcmp(n->name, "object") == 0);
+            strcmp(n->name, "object") == 0 || ns_node_is_pdf_embed(n));
 }
 
 static const ns_node *
@@ -6458,7 +6458,8 @@ build_block_impl(const ns_node *n, GHashTable *styles)
             n->parent->name &&
             (strcmp(n->parent->name, "iframe") == 0 ||
              strcmp(n->parent->name, "frame") == 0 ||
-             strcmp(n->parent->name, "object") == 0)) {
+             strcmp(n->parent->name, "object") == 0 ||
+             ns_node_is_pdf_embed(n->parent))) {
             const char *fu = ns_element_get_attr(n->parent,
                                                  "data-nd-frame-url");
             if (fu && *fu) g_base_url_for_layout = fu;
@@ -6603,6 +6604,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         if (cb->content_width  <= 0) cb->content_width  = 300;
         if (cb->content_height <= 0) cb->content_height = 150;
         cm->declared_image_size = TRUE;
+        collect_box_bg_image(cb, s);
         return cb;
     }
 
@@ -10053,6 +10055,29 @@ inline_run_first_word_width(ns_box *run, const ns_style *style)
     text_measure(layout, &m);
     g_object_unref(layout);
     return ceil((double)m.logical.width / NS_PANGO_SCALE);
+}
+
+static double
+inline_run_narrow_for_float(ns_box *run, const GArray *floats, double inner_x,
+                            double cw, double avail,
+                            const ns_style *inherited)
+{
+    double left_off = 0, right_off = 0;
+    floats_offsets_at(floats, run->y, &left_off, &right_off);
+    double narrowed = MAX(cw - left_off - right_off, 0);
+    double height = run->content_height;
+    double x = run->x;
+    if (narrowed >= avail) return avail;
+    g_inline_atomic_cb_w = run->kind == NS_BOX_INLINE ? cw : 0;
+    run->x = inner_x + left_off;
+    layout_box(run, narrowed, inherited);
+    if (run->content_height > height + 0.5) {
+        run->x = x;
+        layout_box(run, avail, inherited);
+        narrowed = avail;
+    }
+    g_inline_atomic_cb_w = 0;
+    return narrowed;
 }
 
 static gboolean
@@ -17834,6 +17859,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     if (g_inherited_floats.box == box)
         floats_inherit(floats, &g_inherited_floats, inner_x, cw, inner_y);
     double inline_line_top = -1;
+    ns_box *line_run = NULL;
+    double line_run_avail = 0;
     const ns_box *top_collapse_child = NULL;
 
     for (ns_box *c = box->first_child; c; c = c->next_sibling) {
@@ -17957,6 +17984,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 .outer_w = actual_outer,
             };
             g_array_append_val(floats, fr);
+            if (line_run && c->y == line_run->y)
+                line_run_avail = inline_run_narrow_for_float(
+                    line_run, floats, inner_x, cw, line_run_avail,
+                    child_inherited);
             continue;
         }
         if (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE ||
@@ -17976,9 +18007,13 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 top_through = gap;
             }
             cursor_y += gap;
+            int clearance = 0;
             if (clr) {
                 double y_after_clear = floats_clear_y(floats, cursor_y, clr);
-                if (y_after_clear > cursor_y) cursor_y = y_after_clear;
+                if (y_after_clear > cursor_y) {
+                    cursor_y = y_after_clear;
+                    clearance = clr;
+                }
             }
             double left_off = 0, right_off = 0;
             gboolean lines_wrap_floats = c->kind == NS_BOX_BLOCK &&
@@ -18035,7 +18070,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 legacy_align_block_child(c, inner_x + left_off, cw_avail,
                                          child_inherited);
             collect_escaping_floats(c, floats, 0);
-            if (empty_block_collapses_through(c, clr)) {
+            if (empty_block_collapses_through(c, clearance)) {
                 cursor_y -= gap;
                 if (collapses_through_top) top_through = 0;
                 prev_margin_bottom = collapsed_margin(
@@ -18052,6 +18087,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 prev_margin_bottom = c->margin.bottom;
             }
             inline_line_top = -1;
+            line_run = NULL;
         } else {
             double line_y = cursor_y + prev_margin_bottom;
             double left_off = 0, right_off = 0;
@@ -18103,6 +18139,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             double line_height = inline_line_height(child_inherited);
             inline_line_top = inline_text_ends_with_break(c->text)
                 ? -1 : c->y + MAX(0, c->content_height - line_height);
+            line_run = inline_line_top == c->y && c->text ? c : NULL;
+            line_run_avail = cw_avail;
             cursor_y += c->content_height;
         }
         if ((c->kind == NS_BOX_IMAGE || c->kind == NS_BOX_VIDEO ||

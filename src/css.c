@@ -6744,6 +6744,225 @@ gradient_legacy_prelude(GPtrArray *parts, gboolean radial)
     parts->pdata[0] = prelude;
 }
 
+typedef struct {
+    double frac;
+    double px;
+} ns_webkit_gradient_coord;
+
+typedef struct {
+    double t;
+    char  *color;
+} ns_webkit_gradient_stop;
+
+static GPtrArray *
+webkit_gradient_split(const char *text, gsize len)
+{
+    GPtrArray *parts = g_ptr_array_new_with_free_func(g_free);
+    int depth = 0;
+    gsize seg = 0;
+    for (gsize i = 0; i <= len; i++) {
+        if (i < len && text[i] == '(') depth++;
+        else if (i < len && text[i] == ')' && depth > 0) depth--;
+        if (i == len || (text[i] == ',' && depth == 0)) {
+            g_ptr_array_add(parts, g_strstrip(g_strndup(text + seg, i - seg)));
+            seg = i + 1;
+        }
+    }
+    return parts;
+}
+
+static gboolean
+webkit_gradient_coord_parse(const char *tok, gboolean vertical,
+                            ns_webkit_gradient_coord *out)
+{
+    out->frac = out->px = 0;
+    if (token_eq(tok, "center")) { out->frac = 0.5; return TRUE; }
+    if (token_eq(tok, vertical ? "top" : "left")) return TRUE;
+    if (token_eq(tok, vertical ? "bottom" : "right")) { out->frac = 1; return TRUE; }
+    char *end = NULL;
+    double v = g_ascii_strtod(tok, &end);
+    if (end == tok) return FALSE;
+    if (*end == '%' && !end[1]) { out->frac = v / 100.0; return TRUE; }
+    if (*end && g_ascii_strcasecmp(end, "px") != 0) return FALSE;
+    out->px = v;
+    return TRUE;
+}
+
+static gboolean
+webkit_gradient_point_parse(const char *text, ns_webkit_gradient_coord *x,
+                            ns_webkit_gradient_coord *y)
+{
+    char *tok[3] = {0};
+    int n = split_ws_paren(text, tok, 3);
+    gboolean ok = n == 2 && webkit_gradient_coord_parse(tok[0], FALSE, x) &&
+                  webkit_gradient_coord_parse(tok[1], TRUE, y);
+    for (int k = 0; k < n; k++) g_free(tok[k]);
+    return ok;
+}
+
+static gboolean
+webkit_gradient_stop_parse(const char *text, ns_webkit_gradient_stop *out)
+{
+    const char *open = strchr(text, '(');
+    gsize len = strlen(text);
+    if (!open || len < 2 || text[len - 1] != ')') return FALSE;
+    gsize name_len = (gsize)(open - text);
+    GPtrArray *args = webkit_gradient_split(open + 1, len - name_len - 2);
+    gboolean ok = FALSE;
+    const char *color = NULL;
+    if (name_len == 4 && g_ascii_strncasecmp(text, "from", 4) == 0 && args->len == 1) {
+        out->t = 0;
+        color = args->pdata[0];
+        ok = TRUE;
+    } else if (name_len == 2 && g_ascii_strncasecmp(text, "to", 2) == 0 && args->len == 1) {
+        out->t = 1;
+        color = args->pdata[0];
+        ok = TRUE;
+    } else if (name_len == 10 && g_ascii_strncasecmp(text, "color-stop", 10) == 0 &&
+               args->len == 2) {
+        char *end = NULL;
+        const char *pos = args->pdata[0];
+        double v = g_ascii_strtod(pos, &end);
+        ok = end != pos && (!*end || (*end == '%' && !end[1]));
+        out->t = CLAMP(*end == '%' ? v / 100.0 : v, 0.0, 1.0);
+        color = args->pdata[1];
+    }
+    guint8 r, g, b, a;
+    ok = ok && parse_color(color, &r, &g, &b, &a);
+    if (ok) out->color = g_strdup(color);
+    g_ptr_array_free(args, TRUE);
+    return ok;
+}
+
+static int
+webkit_gradient_stop_cmp(gconstpointer a, gconstpointer b)
+{
+    const ns_webkit_gradient_stop *sa = a, *sb = b;
+    return sa->t < sb->t ? -1 : sa->t > sb->t;
+}
+
+static void
+webkit_gradient_append_stops(GString *out, GArray *stops,
+                             ns_webkit_gradient_coord from,
+                             ns_webkit_gradient_coord to)
+{
+    for (guint i = 0; i < stops->len; i++) {
+        const ns_webkit_gradient_stop *st =
+            &g_array_index(stops, ns_webkit_gradient_stop, i);
+        char pct[G_ASCII_DTOSTR_BUF_SIZE], px[G_ASCII_DTOSTR_BUF_SIZE];
+        g_ascii_formatd(pct, sizeof pct, "%.4f",
+                        (from.frac + st->t * (to.frac - from.frac)) * 100.0);
+        g_ascii_formatd(px, sizeof px, "%.4f",
+                        from.px + st->t * (to.px - from.px));
+        g_string_append_printf(out, ", %s calc(%s%% + %spx)", st->color, pct, px);
+    }
+}
+
+static int
+webkit_gradient_axis_sign(ns_webkit_gradient_coord a, ns_webkit_gradient_coord b)
+{
+    if (a.frac != b.frac) return a.frac < b.frac ? 1 : -1;
+    if (a.px != b.px) return a.px < b.px ? 1 : -1;
+    return 0;
+}
+
+static ns_webkit_gradient_coord
+webkit_gradient_from_far_edge(ns_webkit_gradient_coord c)
+{
+    return (ns_webkit_gradient_coord){ 1.0 - c.frac, -c.px };
+}
+
+static char *
+webkit_gradient_modern(const char *body, gsize len)
+{
+    GPtrArray *parts = webkit_gradient_split(body, len);
+    GArray *stops = g_array_new(FALSE, TRUE, sizeof(ns_webkit_gradient_stop));
+    GString *out = NULL;
+    gboolean radial = parts->len > 0 && token_eq(parts->pdata[0], "radial");
+    guint first_stop = radial ? 5 : 3;
+    ns_webkit_gradient_coord x0, y0, x1, y1;
+    double r0 = 0, r1 = 0;
+    gboolean ok = parts->len > first_stop &&
+                  (radial || token_eq(parts->pdata[0], "linear")) &&
+                  webkit_gradient_point_parse(parts->pdata[1], &x0, &y0) &&
+                  webkit_gradient_point_parse(parts->pdata[radial ? 3 : 2], &x1, &y1);
+    if (ok && radial) {
+        char *e0 = NULL, *e1 = NULL;
+        r0 = g_ascii_strtod(parts->pdata[2], &e0);
+        r1 = g_ascii_strtod(parts->pdata[4], &e1);
+        ok = e0 != (char *)parts->pdata[2] && e1 != (char *)parts->pdata[4] &&
+             r0 >= 0 && r1 >= 0;
+    }
+    for (guint i = first_stop; ok && i < parts->len; i++) {
+        ns_webkit_gradient_stop st = {0};
+        ok = webkit_gradient_stop_parse(parts->pdata[i], &st);
+        if (ok) g_array_append_val(stops, st);
+    }
+    if (ok) {
+        g_array_sort(stops, webkit_gradient_stop_cmp);
+        if (radial) {
+            char radius[G_ASCII_DTOSTR_BUF_SIZE], cx[G_ASCII_DTOSTR_BUF_SIZE],
+                 cxp[G_ASCII_DTOSTR_BUF_SIZE], cy[G_ASCII_DTOSTR_BUF_SIZE],
+                 cyp[G_ASCII_DTOSTR_BUF_SIZE];
+            g_ascii_formatd(radius, sizeof radius, "%.4f", MAX(MAX(r0, r1), 0.01));
+            g_ascii_formatd(cx, sizeof cx, "%.4f", x1.frac * 100.0);
+            g_ascii_formatd(cxp, sizeof cxp, "%.4f", x1.px);
+            g_ascii_formatd(cy, sizeof cy, "%.4f", y1.frac * 100.0);
+            g_ascii_formatd(cyp, sizeof cyp, "%.4f", y1.px);
+            out = g_string_new(NULL);
+            g_string_append_printf(out,
+                "radial-gradient(circle %spx at calc(%s%% + %spx) calc(%s%% + %spx)",
+                radius, cx, cxp, cy, cyp);
+            webkit_gradient_append_stops(out, stops,
+                (ns_webkit_gradient_coord){ 0, r0 },
+                (ns_webkit_gradient_coord){ 0, r1 });
+        } else {
+            int sx = webkit_gradient_axis_sign(x0, x1);
+            int sy = webkit_gradient_axis_sign(y0, y1);
+            ns_webkit_gradient_coord from = { 0, 0 }, to = { 1, 0 };
+            if (sx && !sy) {
+                from = sx > 0 ? x0 : webkit_gradient_from_far_edge(x0);
+                to = sx > 0 ? x1 : webkit_gradient_from_far_edge(x1);
+            } else if (sy && !sx) {
+                from = sy > 0 ? y0 : webkit_gradient_from_far_edge(y0);
+                to = sy > 0 ? y1 : webkit_gradient_from_far_edge(y1);
+            }
+            out = g_string_new("linear-gradient(to");
+            if (sx) g_string_append(out, sx > 0 ? " right" : " left");
+            if (sy || !sx) g_string_append(out, sy < 0 ? " top" : " bottom");
+            webkit_gradient_append_stops(out, stops, from, to);
+        }
+        g_string_append_c(out, ')');
+    }
+    for (guint i = 0; i < stops->len; i++)
+        g_free(g_array_index(stops, ns_webkit_gradient_stop, i).color);
+    g_array_free(stops, TRUE);
+    g_ptr_array_free(parts, TRUE);
+    return out ? g_string_free(out, FALSE) : NULL;
+}
+
+static gboolean
+gradient_parse(const char *text, ns_gradient_parse *gp, const char **out_end,
+               gboolean keep_texts);
+
+static gboolean
+webkit_gradient_parse(const char *open, ns_gradient_parse *gp,
+                      const char **out_end, gboolean keep_texts)
+{
+    int depth = 0;
+    const char *end = NULL;
+    for (const char *q = open + 1; *q && !end; q++) {
+        if (*q == '(') depth++;
+        else if (*q == ')' && depth-- == 0) end = q;
+    }
+    if (!end) return FALSE;
+    char *modern = webkit_gradient_modern(open + 1, (gsize)(end - open - 1));
+    gboolean ok = modern && gradient_parse(modern, gp, NULL, keep_texts);
+    g_free(modern);
+    if (ok && out_end) *out_end = end + 1;
+    return ok;
+}
+
 static gboolean
 gradient_parse(const char *text, ns_gradient_parse *gp, const char **out_end,
                gboolean keep_texts)
@@ -6753,6 +6972,8 @@ gradient_parse(const char *text, ns_gradient_parse *gp, const char **out_end,
     while (*p && is_ws(*p)) p++;
     gboolean legacy = FALSE;
     p = gradient_skip_vendor_prefix(p, &legacy);
+    if (legacy && g_ascii_strncasecmp(p, "gradient(", 9) == 0)
+        return webkit_gradient_parse(p + 8, gp, out_end, keep_texts);
     if (g_ascii_strncasecmp(p, "repeating-", 10) == 0) {
         gp->gr.repeating = TRUE;
         p += 10;
@@ -7037,7 +7258,9 @@ static gboolean
 text_starts_gradient(const char *p)
 {
     while (*p && is_ws(*p)) p++;
-    p = gradient_skip_vendor_prefix(p, NULL);
+    gboolean legacy = FALSE;
+    p = gradient_skip_vendor_prefix(p, &legacy);
+    if (legacy && g_ascii_strncasecmp(p, "gradient(", 9) == 0) return TRUE;
     if (g_ascii_strncasecmp(p, "repeating-", 10) == 0) p += 10;
     return g_ascii_strncasecmp(p, "linear-gradient", 15) == 0 ||
            g_ascii_strncasecmp(p, "radial-gradient", 15) == 0 ||
@@ -18846,6 +19069,34 @@ expand_keyword_shorthand(GArray *decls_out, const char *pname, const char *vtext
     return TRUE;
 }
 
+static gboolean
+webkit_prefixed_alias(const char *name)
+{
+    static const char *const unprefixed[] = {
+        "align-content", "align-items", "align-self", "animation",
+        "animation-delay", "animation-direction", "animation-duration",
+        "animation-fill-mode", "animation-iteration-count", "animation-name",
+        "animation-play-state", "animation-timing-function",
+        "backface-visibility", "background-origin", "background-size",
+        "border-radius",
+        "border-bottom-left-radius", "border-bottom-right-radius",
+        "border-top-left-radius", "border-top-right-radius", "box-shadow",
+        "box-sizing", "clip-path", "column-count", "column-gap", "column-rule",
+        "column-span", "column-width", "columns", "filter", "flex",
+        "flex-basis", "flex-direction", "flex-flow", "flex-grow", "flex-shrink",
+        "flex-wrap", "font-feature-settings", "justify-content", "mask-origin",
+        "opacity", "order", "perspective", "perspective-origin",
+        "shape-outside", "text-emphasis", "transform", "transform-origin",
+        "transform-style", "transition", "transition-delay",
+        "transition-duration", "transition-property",
+        "transition-timing-function",
+    };
+    if (!g_str_has_prefix(name, "-webkit-")) return FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(unprefixed); i++)
+        if (strcmp(name + 8, unprefixed[i]) == 0) return TRUE;
+    return FALSE;
+}
+
 static void
 parse_declaration_block(const char **pp, const char *end,
                         GArray *decls_out, ns_css_rule *capture)
@@ -18879,8 +19130,7 @@ parse_declaration_block(const char **pp, const char *end,
         } else {
             pname = ascii_lower(name, strlen(name));
             g_free(name);
-            if (g_str_has_prefix(pname, "-webkit-border-") &&
-                g_str_has_suffix(pname, "-radius")) {
+            if (webkit_prefixed_alias(pname)) {
                 char *plain = g_strdup(pname + 8);
                 g_free(pname);
                 pname = plain;
@@ -32307,9 +32557,10 @@ static const char *kUa =
     "iframe { border: 2px inset; }\n"
     "canvas { display: inline; }\n"
     "iframe, frame, frameset, embed { display: none; }\n"
-    "iframe[data-nd-frame-loaded], object[data-nd-frame-loaded] "
-    "{ display: block; overflow: hidden; }\n"
-    "iframe[data-nd-frame-loaded] { width: 300px; height: 150px; }\n"
+    "iframe[data-nd-frame-loaded], object[data-nd-frame-loaded], "
+    "embed[data-nd-frame-loaded] { display: block; overflow: hidden; }\n"
+    "iframe[data-nd-frame-loaded], embed[data-nd-frame-loaded] "
+    "{ width: 300px; height: 150px; }\n"
     "object[data-nd-frame-loaded] > * { display: none; }\n"
     "audio, param { display: none; }\n"
     "audio[controls] { display: inline-block; }\n"

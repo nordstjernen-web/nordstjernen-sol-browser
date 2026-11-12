@@ -14,9 +14,12 @@ Name:           nordstjernen
 Version:        1.0.46
 Release:        0
 Summary:        Small, hand-written GTK web browser
-License:        LicenseRef-NSL-1.0 OR GPL-3.0-or-later
+License:        (LicenseRef-NSL-1.0 OR GPL-3.0-or-later) AND Apache-2.0
 URL:            https://nordstjernen.org
 Source0:        https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/%{version}.tar.gz#/%{name}-%{version}.tar.gz
+# PDF.js (Apache-2.0), the PDF viewer. meson takes it from this pinned
+# tarball (subprojects/pdfjs-dist.wrap) instead of downloading it.
+Source1:        https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.5.438.tgz
 ExcludeArch:    %ix86 %arm
 
 BuildRequires:  gcc
@@ -31,7 +34,7 @@ BuildRequires:  pkgconfig(gstreamer-app-1.0) >= 1.20
 BuildRequires:  pkgconfig(gstreamer-video-1.0) >= 1.20
 BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(libcrypto)
-BuildRequires:  pkgconfig(libcurl) >= 7.85
+BuildRequires:  pkgconfig(libcurl) >= 8.11
 BuildRequires:  pkgconfig(libpsl)
 BuildRequires:  pkgconfig(libseccomp)
 BuildRequires:  pkgconfig(libavif)
@@ -70,6 +73,8 @@ secure, and readable by a single person end to end.
 
 %prep
 %autosetup -n nordstjernen-sol-browser-%{version}
+mkdir -p subprojects/packagecache
+cp %{SOURCE1} subprojects/packagecache/
 
 %build
 %meson \

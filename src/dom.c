@@ -1336,6 +1336,20 @@ ns_node_next_in_subtree(const ns_node *node, const ns_node *root,
 }
 
 gboolean
+ns_node_is_pdf_embed(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name ||
+        strcmp(n->name, "embed") != 0)
+        return FALSE;
+    const char *type = ns_element_get_attr(n, "type");
+    if (type && *type)
+        return g_ascii_strncasecmp(type, "application/pdf", 15) == 0;
+    const char *src = ns_element_get_attr(n, "src");
+    gsize path = src ? strcspn(src, "?#") : 0;
+    return path >= 4 && g_ascii_strncasecmp(src + path - 4, ".pdf", 4) == 0;
+}
+
+gboolean
 ns_attr_name_is_internal(const char *name)
 {
     return name && g_ascii_strncasecmp(name, "data-nd-", 8) == 0;

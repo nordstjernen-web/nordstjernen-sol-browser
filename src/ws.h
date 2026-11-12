@@ -44,6 +44,8 @@ void     ns_ws_close(ns_ws *ws, int code, const char *reason);
 
 int      ns_ws_state_get(ns_ws *ws);
 
+const char *ns_ws_protocol(ns_ws *ws);
+
 void     ns_ws_free(ns_ws *ws);
 
 G_END_DECLS

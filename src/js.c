@@ -69,6 +69,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "layout.h"
 #include "net.h"
 #include "paint.h"
+#include "pdf.h"
 #include "eventsource.h"
 #include "security.h"
 #include "svg.h"
@@ -675,6 +676,25 @@ ns_iframe_effective_sandbox(const ns_node *node)
         any = TRUE;
     }
     return any ? (flags | NS_SANDBOX_ACTIVE) : 0;
+}
+
+static unsigned
+ns_iframe_adopt_csp_sandbox(ns_node *iframe, const ns_response *resp)
+{
+    g_autofree char *tokens = resp
+        ? ns_csp_header_sandbox_tokens(resp->csp_header) : NULL;
+    if (tokens)
+        ns_element_set_attr(iframe, "data-nd-csp-sandbox", tokens);
+    else
+        ns_element_remove_attr(iframe, "data-nd-csp-sandbox");
+    return ns_iframe_effective_sandbox(iframe);
+}
+
+static gboolean
+ns_content_type_is_pdf(const char *content_type)
+{
+    return content_type &&
+           g_ascii_strncasecmp(content_type, "application/pdf", 15) == 0;
 }
 
 static gboolean
@@ -4115,10 +4135,13 @@ ns_storage_file_value(const char *value)
     return g_uri_escape_string(value, NS_STORAGE_VALUE_PLAIN, TRUE);
 }
 
+static __thread GSList *g_storage_unflushed;
+
 static void
 ns_storage_flush(ns_js *js)
 {
     if (!js) return;
+    g_storage_unflushed = g_slist_remove(g_storage_unflushed, js);
     if (js->local_storage_flush_source) {
         g_source_remove(js->local_storage_flush_source);
         js->local_storage_flush_source = 0;
@@ -4167,8 +4190,16 @@ ns_storage_schedule_flush(ns_js *js)
 {
     if (!js || !js->local_storage_dirty || js->local_storage_disabled) return;
     if (js->local_storage_flush_source) return;
+    g_storage_unflushed = g_slist_prepend(g_storage_unflushed, js);
     js->local_storage_flush_source =
         g_timeout_add(1000, ns_storage_flush_timer, js);
+}
+
+static void
+ns_storage_flush_unflushed(void)
+{
+    while (g_storage_unflushed)
+        ns_storage_flush(g_storage_unflushed->data);
 }
 
 static GHashTable *
@@ -4297,6 +4328,7 @@ ns_storage_load_for(ns_js *js, const char *new_url)
     js->local_storage_origin = new_origin;
     js->local_storage_path = ns_storage_path_for_origin(new_origin);
     if (!js->local_storage_path) return;
+    ns_storage_flush_unflushed();
     GKeyFile *kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, js->local_storage_path, G_KEY_FILE_NONE, NULL)) {
         gsize n = 0;
@@ -5249,6 +5281,7 @@ ns_invalidate_wrapper(ns_node *n)
     ns_canvas_state_forget_node(js, n);
     if (js && js->focus_nav_start == n) js->focus_nav_start = NULL;
     if (js && js->focused_node == n) js->focused_node = NULL;
+    if (js && js->hover_node == n) js->hover_node = NULL;
     if (js && js->change_pending == n) ns_js_forget_pending_change(js);
     if (js && js->focused_doc == n) js->focused_doc = NULL;
     if (js) ns_focus_guard_forget(js, n);
@@ -26220,6 +26253,8 @@ ns_js_ws_on_open(gpointer user_data)
     ns_budget_guard bg = {0};
     ns_js_budget_push(s->js, &bg);
     JS_SetPropertyStr(ctx, s->wrapper, "readyState", JS_NewInt32(ctx, 1));
+    JS_SetPropertyStr(ctx, s->wrapper, "protocol",
+                      JS_NewString(ctx, ns_ws_protocol(s->ws)));
     ns_js_ws_dispatch(ctx, s->wrapper, "onopen", ns_js_ws_event(ctx, "open"));
     ns_js_budget_pop(s->js, &bg);
 }
@@ -35968,7 +36003,8 @@ ns_event_window_for_document(ns_js *js, const ns_node *doc)
     if (js && doc && doc != js->current_doc && doc->parent &&
         (ns_node_is_element_named(doc->parent, "iframe") ||
          ns_node_is_element_named(doc->parent, "frame") ||
-         ns_node_is_element_named(doc->parent, "object"))) {
+         (ns_node_is_element_named(doc->parent, "object") ||
+          ns_node_is_pdf_embed(doc->parent)))) {
         JSValue realm = ns_iframe_lookup_realm_window(js, doc->parent);
         if (JS_IsObject(realm)) return realm;
         JS_FreeValue(js->ctx, realm);
@@ -36511,6 +36547,12 @@ ns_js_run_animation_frame(ns_js *js)
     return ns_js_run_animation_frame_internal(js);
 }
 
+void
+ns_js_hold_animation_frames(ns_js *js, gboolean hold)
+{
+    if (js) js->raf_held = hold;
+}
+
 static int32_t
 ns_media_int_prop(JSContext *ctx, JSValueConst el, const char *name)
 {
@@ -36562,7 +36604,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
     ns_js_promote_deferred_iframes(js);
     ns_js_process_pending_iframes(js);
     ns_drain_microtasks(js);
-    if (!ns_raf_has_runnable(js))
+    if (js->raf_held || !ns_raf_has_runnable(js))
         return js->mutated ? TRUE : FALSE;
     gint64 now_us = g_get_monotonic_time();
     js->raf_last_us = now_us;
@@ -41319,8 +41361,15 @@ ns_css_filter_nulls(const char *s, size_t len)
 typedef struct {
     const ns_node *prev_scope;
     const ns_node *prev_focus;
+    const ns_node *prev_hover;
     char          *fragment;
 } ns_selector_match_ctx;
+
+void
+ns_js_set_hover_node(ns_js *js, const ns_node *node)
+{
+    if (js) js->hover_node = node;
+}
 
 static void
 ns_selector_match_begin(JSContext *ctx, const ns_node *scope,
@@ -41331,12 +41380,14 @@ ns_selector_match_begin(JSContext *ctx, const ns_node *scope,
     mc->fragment = ns_element_target_fragment(ctx, scope);
     ns_css_set_target_fragment(mc->fragment);
     mc->prev_focus = ns_css_set_focus_node(js ? js->focused_node : NULL);
+    mc->prev_hover = ns_css_set_hover_node(js ? js->hover_node : NULL);
 }
 
 static void
 ns_selector_match_end(ns_selector_match_ctx *mc)
 {
     ns_css_set_focus_node(mc->prev_focus);
+    ns_css_set_hover_node(mc->prev_hover);
     ns_css_set_match_scope(mc->prev_scope);
     ns_css_set_target_fragment(NULL);
     g_free(mc->fragment);
@@ -44288,7 +44339,8 @@ ns_element_get_ownerDocument(JSContext *ctx, JSValueConst this_val)
                 const ns_node *host = doc_anc->parent;
                 if (host && host->js_wrapper &&
                     (ns_node_is_element_named(host, "iframe") ||
-                     ns_node_is_element_named(host, "object"))) {
+                     (ns_node_is_element_named(host, "object") ||
+                      ns_node_is_pdf_embed(host)))) {
                     JSValue hw = JS_MKPTR(JS_TAG_OBJECT, host->js_wrapper);
                     JSValue realm = JS_GetPropertyStr(ctx, hw, "__ndRealmDoc");
                     if (JS_IsObject(realm)) return realm;
@@ -50746,7 +50798,7 @@ ns_node_is_interactive_content(const ns_node *el)
         ns_node_is_element_named(el, "video"))
         return ns_element_get_attr(el, "controls") != NULL;
     if (ns_node_is_element_named(el, "img") ||
-        ns_node_is_element_named(el, "object"))
+        (ns_node_is_element_named(el, "object") || ns_node_is_pdf_embed(el)))
         return ns_element_get_attr(el, "usemap") != NULL;
     return ns_node_is_element_named(el, "button") ||
            ns_node_is_element_named(el, "details") ||
@@ -51301,7 +51353,7 @@ ns_js_is_frame_document_edge(const ns_node *child, const ns_node *parent)
            !(child->flags & NS_NODE_FRAGMENT) &&
            (ns_node_is_element_named(parent, "iframe") ||
             ns_node_is_element_named(parent, "frame") ||
-            ns_node_is_element_named(parent, "object"));
+            (ns_node_is_element_named(parent, "object") || ns_node_is_pdf_embed(parent)));
 }
 
 static const char *
@@ -51378,7 +51430,7 @@ ns_js_node_frame(const ns_node *node)
     if (!node) return NULL;
     if (ns_node_is_element_named(node, "iframe") ||
         ns_node_is_element_named(node, "frame") ||
-        ns_node_is_element_named(node, "object"))
+        (ns_node_is_element_named(node, "object") || ns_node_is_pdf_embed(node)))
         return (ns_node *)node;
     for (const ns_node *child = node, *p = node->parent; p;
          child = p, p = p->parent)
@@ -51416,7 +51468,7 @@ ns_js_node_content_frame(const ns_node *node)
     ns_node *frame = p ? p->parent : NULL;
     return frame && (ns_node_is_element_named(frame, "iframe") ||
                      ns_node_is_element_named(frame, "frame") ||
-                     ns_node_is_element_named(frame, "object"))
+                     (ns_node_is_element_named(frame, "object") || ns_node_is_pdf_embed(frame)))
         ? frame : NULL;
 }
 
@@ -53219,6 +53271,22 @@ ns_node_is_media_element(const ns_node *n)
             g_ascii_strcasecmp(n->name, "audio") == 0);
 }
 
+static void
+ns_media_set_error(JSContext *ctx, JSValueConst el, int code, const char *message)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "MediaError");
+    JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+    JSValue error = JS_IsObject(proto) ? JS_NewObjectProto(ctx, proto)
+                                       : JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, error, "code", JS_NewInt32(ctx, code));
+    JS_SetPropertyStr(ctx, error, "message", JS_NewString(ctx, message));
+    JS_SetPropertyStr(ctx, el, "_nd_error", error);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+}
+
 static JSValue
 ns_media_get_error(JSContext *ctx, JSValueConst this_val)
 {
@@ -54448,7 +54516,8 @@ ns_frame_scope_navigate(JSContext *ctx, JSValueConst this_val, int argc,
     if (ns_location_target_allowed(url)) {
         if (js->iframe_load_depth > 0 && js->raf_frame_ctx == frame)
             ns_element_set_attr(frame, "data-nd-frame-nav-pending", "1");
-        gboolean is_object = ns_node_is_element_named(frame, "object");
+        gboolean is_object = (ns_node_is_element_named(frame, "object") ||
+                              ns_node_is_pdf_embed(frame));
         ns_js_set_attr_recorded(js, frame, is_object ? "data" : "src", url);
         ns_js_schedule_iframe_load_full(js, frame, TRUE);
     }
@@ -56276,12 +56345,12 @@ ns_element_get_contentDocument(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || (!ns_node_is_element_named(n, "iframe") &&
-               !ns_node_is_element_named(n, "object") &&
+               !(ns_node_is_element_named(n, "object") || ns_node_is_pdf_embed(n)) &&
                !ns_node_is_element_named(n, "frame") &&
                !ns_node_is_element_named(n, "embed")))
         return JS_ThrowTypeError(ctx, "Illegal invocation");
     if (!ns_node_is_navigable_frame(n) &&
-        !ns_node_is_element_named(n, "object")) return JS_NULL;
+        !(ns_node_is_element_named(n, "object") || ns_node_is_pdf_embed(n))) return JS_NULL;
     if (!ns_frame_owner_has_browsing_context(js_from_ctx(ctx), n))
         return JS_NULL;
     if (ns_iframe_is_cross_origin(js_from_ctx(ctx), n)) return JS_NULL;
@@ -56446,7 +56515,7 @@ static gboolean
 ns_node_is_frame_owner(const ns_node *n)
 {
     return n && (ns_node_is_element_named(n, "iframe") ||
-                 ns_node_is_element_named(n, "object") ||
+                 (ns_node_is_element_named(n, "object") || ns_node_is_pdf_embed(n)) ||
                  ns_node_is_element_named(n, "frame") ||
                  ns_node_is_element_named(n, "embed"));
 }
@@ -56606,7 +56675,7 @@ ns_element_getSVGDocument(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || (!ns_node_is_element_named(n, "iframe") &&
-               !ns_node_is_element_named(n, "object") &&
+               !(ns_node_is_element_named(n, "object") || ns_node_is_pdf_embed(n)) &&
                !ns_node_is_element_named(n, "embed")))
         return JS_NULL;
     JSValue doc = ns_element_get_contentDocument(ctx, this_val);
@@ -66400,7 +66469,8 @@ ns_node_is_frame_element(const ns_node *n)
     return n && n->kind == NS_NODE_ELEMENT &&
            (ns_node_is_element_named(n, "iframe") ||
             ns_node_is_element_named(n, "frame") ||
-            ns_node_is_element_named(n, "object"));
+            ns_node_is_element_named(n, "object") ||
+            ns_node_is_pdf_embed(n));
 }
 
 static JSValue
@@ -72235,7 +72305,7 @@ ns_js_mark_iframe_source(ns_js *js, ns_node *iframe, const char *origin,
 static const char *
 ns_frame_src_attr(const ns_node *n)
 {
-    if (ns_node_is_navigable_frame(n)) return "src";
+    if (ns_node_is_navigable_frame(n) || ns_node_is_pdf_embed(n)) return "src";
     if (ns_node_is_element_named(n, "object")) return "data";
     return NULL;
 }
@@ -73436,7 +73506,7 @@ ns_js_collect_frame_images(ns_node *n, GPtrArray *out, int depth)
     for (ns_node *c = n ? n->first_child : NULL; c; c = c->next_sibling) {
         if (ns_node_is_element_named(c, "iframe") ||
             ns_node_is_element_named(c, "frame") ||
-            ns_node_is_element_named(c, "object"))
+            (ns_node_is_element_named(c, "object") || ns_node_is_pdf_embed(c)))
             continue;
         if (ns_node_is_element_named(c, "img")) {
             const char *loading = ns_element_get_attr(c, "loading");
@@ -73524,7 +73594,8 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         abs_url = g_strdup(origin);
     } else if (src && *src && !g_str_has_prefix(src, "about:")) {
         abs_url = ns_url_resolve(origin, src);
-        gboolean is_object = ns_node_is_element_named(iframe, "object");
+        gboolean is_object = ns_node_is_element_named(iframe, "object") ||
+                             ns_node_is_pdf_embed(iframe);
         ns_csp_kind frame_kind = is_object ? NS_CSP_OBJECT : NS_CSP_FRAME;
         if (abs_url && ns_js_node_csp(js, iframe) &&
             !ns_csp_allows(ns_js_node_csp(js, iframe), frame_kind, abs_url,
@@ -73546,7 +73617,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
                 if (p->kind != NS_NODE_ELEMENT) continue;
                 if (!ns_node_is_element_named(p, "iframe") &&
                     !ns_node_is_element_named(p, "frame") &&
-                    !ns_node_is_element_named(p, "object"))
+                    !(ns_node_is_element_named(p, "object") || ns_node_is_pdf_embed(p)))
                     continue;
                 frame_depth++;
                 const char *au = ns_element_get_attr(p, "data-nd-frame-url");
@@ -73588,13 +73659,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
             else
                 resp = ns_js_fetch_resource(js, abs_url, origin, dest_headers, &err);
             if (post) g_hash_table_remove(js->frame_posts, iframe);
-            g_autofree char *csp_sandbox = resp
-                ? ns_csp_header_sandbox_tokens(resp->csp_header) : NULL;
-            if (csp_sandbox)
-                ns_element_set_attr(iframe, "data-nd-csp-sandbox", csp_sandbox);
-            else
-                ns_element_remove_attr(iframe, "data-nd-csp-sandbox");
-            sandbox = ns_iframe_effective_sandbox(iframe);
+            sandbox = ns_iframe_adopt_csp_sandbox(iframe, resp);
             scripts_ok = !(sandbox & NS_SANDBOX_ACTIVE) ||
                          (sandbox & NS_SANDBOX_ALLOW_SCRIPTS);
             if (!ns_frame_response_is_download(resp)) {
@@ -73635,7 +73700,18 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
                 }
             } else if (resp && resp->body &&
                 (resp->status == 200 || resp->status == 0) && !resp->error) {
-                if (resp->body->len > 0 && resp->content_type &&
+                if (resp->body->len > 0 &&
+                    ns_content_type_is_pdf(resp->content_type)) {
+                    g_free(resp->csp_header);
+                    decoded = ns_pdf_document_html(
+                        resp->body->data, resp->body->len,
+                        resp->final_url ? resp->final_url : abs_url,
+                        &resp->csp_header);
+                    sandbox = ns_iframe_adopt_csp_sandbox(iframe, resp);
+                    scripts_ok = !(sandbox & NS_SANDBOX_ACTIVE) ||
+                                 (sandbox & NS_SANDBOX_ALLOW_SCRIPTS);
+                    ns_element_set_attr(iframe, "data-nd-frame-charset", "UTF-8");
+                } else if (resp->body->len > 0 && resp->content_type &&
                     g_ascii_strncasecmp(resp->content_type, "image/", 6) == 0 &&
                     strstr(resp->content_type, "xml") == NULL) {
                     decoded = ns_html_image_document(
@@ -73668,10 +73744,12 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         }
     }
 
-    if (ns_node_is_element_named(iframe, "object")) {
+    if (ns_node_is_pdf_embed(iframe) || ns_node_is_element_named(iframe, "object")) {
         gboolean doc_type = resp && resp->content_type &&
-            (strstr(resp->content_type, "html") != NULL ||
-             strstr(resp->content_type, "xml") != NULL);
+            (ns_content_type_is_pdf(resp->content_type) ||
+             (!ns_node_is_pdf_embed(iframe) &&
+              (strstr(resp->content_type, "html") != NULL ||
+               strstr(resp->content_type, "xml") != NULL)));
         if (!doc_type) {
             if (resp) ns_response_free(resp);
             g_free(decoded);
@@ -74656,6 +74734,7 @@ ns_js_audio_feedback(ns_js *js, const char *line)
         JS_SetPropertyStr(ctx, *held, "_nd_audio_url", JS_UNDEFINED);
         JS_SetPropertyStr(ctx, *held, "_nd_playing", JS_FALSE);
         JS_SetPropertyStr(ctx, *held, "_nd_networkState", JS_NewInt32(ctx, 3));
+        ns_media_set_error(ctx, *held, 4, "MEDIA_ELEMENT_ERROR: Format error");
         ns_js_dispatch_event(js, el, "error", NULL);
     }
 }
@@ -74910,7 +74989,8 @@ gboolean
 ns_js_navigate_frame(ns_js *js, ns_node *frame, const char *url)
 {
     if (!js || !frame || !url || !*url) return FALSE;
-    gboolean is_object = ns_node_is_element_named(frame, "object");
+    gboolean is_object = (ns_node_is_element_named(frame, "object") ||
+                          ns_node_is_pdf_embed(frame));
     ns_js_set_attr_recorded(js, frame, is_object ? "data" : "src", url);
     ns_js_schedule_iframe_load_full(js, frame, TRUE);
     return TRUE;

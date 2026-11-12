@@ -94,7 +94,8 @@ static char *
 ns_pdf_viewer_csp(const char *nonce)
 {
     return g_strdup_printf(
-        "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; "
+        "sandbox allow-scripts allow-modals allow-popups "
+        "allow-popups-to-escape-sandbox; "
         "default-src 'none'; script-src 'nonce-%s' 'wasm-unsafe-eval' blob:; "
         "worker-src blob:; style-src 'unsafe-inline'; "
         "img-src data: blob:; font-src data: blob:; "
@@ -106,14 +107,31 @@ ns_pdf_viewer_html(const guint8 *data, gsize len, const char *url,
                    const char *nonce)
 {
     char *title = ns_pdf_title_html(url);
+    char *href = ns_html_escape_text(url ? url : "");
     GString *out = g_string_sized_new(len / 3 * 4 + sizeof(ns_pdfjs_lib) +
                                       sizeof(ns_pdfjs_worker) + 1024 * 1024);
     g_string_append_printf(out,
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<title>%s</title><style>%s</style></head><body>"
-        "<p id=\"status\" hidden></p><div id=\"pages\"></div>",
-        title, ns_pdf_viewer_css);
+        "<div id=\"toolbar\" hidden>"
+        "<span id=\"page-number\"></span>"
+        "<button id=\"zoom-out\" title=\"Zoom out\">&minus;</button>"
+        "<span id=\"zoom-level\"></span>"
+        "<button id=\"zoom-in\" title=\"Zoom in\">+</button>"
+        "<button id=\"zoom-fit\" title=\"Fit to width\">Fit</button>"
+        "<input id=\"find\" type=\"search\" placeholder=\"Find\" "
+        "autocomplete=\"off\"><button id=\"find-next\" "
+        "title=\"Find next\">&darr;</button><span id=\"find-status\"></span>"
+        "<button id=\"print\" title=\"Print every page\">Print</button>"
+        "<a id=\"save\" href=\"%s\" download>Download</a></div>"
+        "<p id=\"status\" hidden></p>"
+        "<div id=\"password\" hidden>"
+        "<input id=\"password-input\" type=\"password\" "
+        "autocomplete=\"off\"><button id=\"password-ok\">Open</button></div>"
+        "<div id=\"pages\"></div><div id=\"print-pages\"></div>",
+        title, ns_pdf_viewer_css, href);
     g_free(title);
+    g_free(href);
     ns_pdf_append_base64_block(out, "pdf-data", data, len);
     ns_pdf_append_base64_block(out, "wasm:openjpeg.wasm", ns_pdfjs_openjpeg,
                                sizeof(ns_pdfjs_openjpeg) - 1);

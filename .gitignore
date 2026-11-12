@@ -51,6 +51,7 @@ compile_commands.json
 /subprojects/wgpu-native-*/
 /subprojects/simde-*/
 /subprojects/pdfjs-dist-*/
+/debian/vendor/
 
 # CMake (in case)
 CMakeCache.txt
