@@ -3,6 +3,9 @@ Changelog:
 
 1.0.47-dev:
 ======
+* PDF viewer: a Find field searches the whole document, including
+  pages not yet shown, and a Print button prints every page, one per
+  sheet. Printing from the menu prints the pages currently shown.
 * PDFs inside `<iframe>`, `<object>` and `<embed>` open in the PDF
   viewer. An iframe used to show the file's raw bytes and the other two
   showed nothing.

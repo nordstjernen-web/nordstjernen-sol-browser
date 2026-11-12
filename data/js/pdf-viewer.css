@@ -39,3 +39,25 @@ html, body { margin: 0; background: #1c1d1e; }
              padding: 48px 16px; margin: 0; }
 #status { color: #bbb; font: 14px/1.6 system-ui, sans-serif; text-align: center;
           padding: 72px 16px 16px; margin: 0; }
+.textLayer { z-index: 1; }
+.textLayer .found { background: rgba(255, 200, 0, .45); border-radius: 2px; }
+#find { width: 140px; height: 22px; padding: 0 6px; border: 1px solid #555;
+        border-radius: 4px; background: #1f2021; color: #ddd; font: inherit; }
+#find-status { min-width: 64px; }
+.linkLayer { z-index: 2; }
+#print-pages { display: none; }
+@page { margin: 0; }
+@media print {
+        html, body { background: #fff; }
+        #toolbar, #status, #password { display: none !important; }
+        #pages { padding: 0; min-width: 0; }
+        .page { width: 100% !important; height: auto !important; margin: 0;
+                box-shadow: none; break-after: page; }
+        .page:not([data-state="done"]) { display: none; }
+        .page canvas { height: auto; }
+        .textLayer, .linkLayer { display: none; }
+        body.printing #pages { display: none; }
+        body.printing #print-pages { display: block; }
+        .printPage { break-after: page; }
+        .printPage img { display: block; max-width: 100%; height: auto; }
+}

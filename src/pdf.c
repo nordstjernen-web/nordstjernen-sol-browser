@@ -94,7 +94,8 @@ static char *
 ns_pdf_viewer_csp(const char *nonce)
 {
     return g_strdup_printf(
-        "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; "
+        "sandbox allow-scripts allow-modals allow-popups "
+        "allow-popups-to-escape-sandbox; "
         "default-src 'none'; script-src 'nonce-%s' 'wasm-unsafe-eval' blob:; "
         "worker-src blob:; style-src 'unsafe-inline'; "
         "img-src data: blob:; font-src data: blob:; "
@@ -118,12 +119,16 @@ ns_pdf_viewer_html(const guint8 *data, gsize len, const char *url,
         "<span id=\"zoom-level\"></span>"
         "<button id=\"zoom-in\" title=\"Zoom in\">+</button>"
         "<button id=\"zoom-fit\" title=\"Fit to width\">Fit</button>"
+        "<input id=\"find\" type=\"search\" placeholder=\"Find\" "
+        "autocomplete=\"off\"><button id=\"find-next\" "
+        "title=\"Find next\">&darr;</button><span id=\"find-status\"></span>"
+        "<button id=\"print\" title=\"Print every page\">Print</button>"
         "<a id=\"save\" href=\"%s\" download>Download</a></div>"
         "<p id=\"status\" hidden></p>"
         "<div id=\"password\" hidden>"
         "<input id=\"password-input\" type=\"password\" "
         "autocomplete=\"off\"><button id=\"password-ok\">Open</button></div>"
-        "<div id=\"pages\"></div>",
+        "<div id=\"pages\"></div><div id=\"print-pages\"></div>",
         title, ns_pdf_viewer_css, href);
     g_free(title);
     g_free(href);
