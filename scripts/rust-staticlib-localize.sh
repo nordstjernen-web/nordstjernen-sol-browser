@@ -12,6 +12,10 @@ ar=$7
 shift 7
 merged="$out.merged.o"
 rm -f "$out" "$merged"
+if [ "$system" = windows ]; then
+    "$objcopy" --redefine-sym rust_eh_personality=ns_private_rust_eh_personality "$in" "$out"
+    exit 0
+fi
 if [ "$system" = darwin ]; then
     exports="$out.exports"
     : > "$exports"
