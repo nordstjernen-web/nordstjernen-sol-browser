@@ -44,6 +44,9 @@ pkgbase = nordstjernen-browser
 	optdepends = hunspell: spell checking
 	optdepends = hunspell-en_us: English dictionary for spell checking
 	source = nordstjernen-browser-1.0.36.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/1.0.36.tar.gz
+	source = pdfjs-dist-6.5.438.tgz::https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.5.438.tgz
+	noextract = pdfjs-dist-6.5.438.tgz
 	sha256sums = 3b6f6c87ff2fe40fed905c0b88422d4f2d3e65d7cf9cd89a907b5038d3c5bf6a
+	sha256sums = 7461aefcd27c4ef0dd76f9ca5760f09466eb6b3f934432670c12132e7b3d6faa
 
 pkgname = nordstjernen-browser

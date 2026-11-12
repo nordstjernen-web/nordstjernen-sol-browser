@@ -729,24 +729,29 @@ these and fixed them:
   failed page says so, and the title is the decoded file name without
   query or fragment.
 
-Still open:
+The open items were then worked through:
 
-- A PDF in an `<iframe>` shows its raw bytes as text, and `<embed>` and
-  `<object>` show nothing. Only top-level navigations reach the viewer.
-  This predates PDF.js.
-- There is no way to save the PDF from the viewer, no zoom control and no
-  password prompt. Printing prints the viewer page, so only the pages
-  rendered at that moment appear; the poppler path printed all of them.
-- Find-in-page only sees pages that are currently rendered.
-- Each PDF document carries about 2.3 MB of inlined library, and the PDF
-  itself is held as base64 until PDF.js has loaded it. A 40 MiB file
-  opened in 5 s.
-- Pages are always fitted to the window width, so a small page is
-  enlarged.
-- The resize path could not be driven from the headless probe and is
-  untested end to end.
-- Offline package builds (Debian, RPM, Arch, Alpine) have no PDF viewer
-  until their sources ship the `pdfjs-dist` tarball.
+- **Frames.** A PDF in an `<iframe>`, `<object>` or `<embed>` opens in
+  the viewer, sandboxed from the embedding page.
+- **Toolbar.** Page position, zoom, fit to width, find, print and
+  download; password-protected files ask for the password; the default
+  scale no longer enlarges small pages.
+- **Find.** A text layer for every page was tried and dropped: the
+  engine lays out about 3,000 positioned spans in 0.4 s and scales worse
+  than linearly, so a 300-page file stalled for over 30 s on zoom. The
+  viewer has its own Find field over PDF.js's extracted text instead.
+  The browser's own find-in-page still sees only rendered pages.
+- **Print.** A Print button renders every page into a print-only
+  container; verified as 14 sheets for 14 pages through `POST /pdf`.
+  Printing from the menu prints the pages currently rendered.
+- **Resize.** Verified through WebDriver.
+- **Packaging.** Arch, Alpine and RPM recipes carry the tarball; Debian
+  has `scripts/fetch-pdfjs.sh`. The recipes are for older tags and were
+  not run.
+
+Still open: each PDF page carries about 2.3 MB of inlined library; CJK
+character maps and the standard 14 fonts are not bundled; the layout
+cost of many positioned spans is an engine problem worth its own work.
 
 Sources: [PDF.js releases](https://github.com/mozilla/pdf.js/releases),
 [PDF.js FAQ](https://github.com/mozilla/pdf.js/wiki/Frequently-Asked-Questions).

@@ -1111,7 +1111,7 @@ node_is_frame_element(const ns_node *n)
 {
     return n && n->kind == NS_NODE_ELEMENT && n->name &&
            (strcmp(n->name, "iframe") == 0 || strcmp(n->name, "frame") == 0 ||
-            strcmp(n->name, "object") == 0);
+            strcmp(n->name, "object") == 0 || ns_node_is_pdf_embed(n));
 }
 
 static const ns_node *
@@ -6458,7 +6458,8 @@ build_block_impl(const ns_node *n, GHashTable *styles)
             n->parent->name &&
             (strcmp(n->parent->name, "iframe") == 0 ||
              strcmp(n->parent->name, "frame") == 0 ||
-             strcmp(n->parent->name, "object") == 0)) {
+             strcmp(n->parent->name, "object") == 0 ||
+             ns_node_is_pdf_embed(n->parent))) {
             const char *fu = ns_element_get_attr(n->parent,
                                                  "data-nd-frame-url");
             if (fu && *fu) g_base_url_for_layout = fu;

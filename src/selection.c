@@ -149,7 +149,8 @@ box_frame_host(const ns_box *b)
     for (const ns_box *p = b; p; p = p->parent)
         if (ns_node_is_element_named(p->dom, "iframe") ||
             ns_node_is_element_named(p->dom, "frame") ||
-            ns_node_is_element_named(p->dom, "object"))
+            ns_node_is_element_named(p->dom, "object") ||
+            ns_node_is_pdf_embed(p->dom))
             return p;
     return NULL;
 }

@@ -3,6 +3,19 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Packaging: the Arch, Alpine and RPM recipes carry the pinned PDF.js
+  tarball as a second source, and `scripts/fetch-pdfjs.sh` fetches it
+  for a Debian source package, so offline package builds include the
+  PDF viewer.
+* PDF viewer: a Find field searches the whole document, including
+  pages not yet shown, and a Print button prints every page, one per
+  sheet. Printing from the menu prints the pages currently shown.
+* PDFs inside `<iframe>`, `<object>` and `<embed>` open in the PDF
+  viewer. An iframe used to show the file's raw bytes and the other two
+  showed nothing.
+* PDF viewer: a toolbar shows the page position and offers zoom, fit to
+  width and download; password-protected files ask for the password;
+  small pages are no longer stretched to the window width.
 * CSS: the legacy `-webkit-gradient(linear|radial, ...)` image syntax is
   supported, and `-webkit-`-prefixed aliases of standard properties
   (`-webkit-animation*`, `-webkit-transition*`, `-webkit-transform*`,

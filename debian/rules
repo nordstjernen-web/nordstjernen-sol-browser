@@ -17,6 +17,16 @@ BUILD_DATE := $(shell date -u -d "@$(SOURCE_DATE_EPOCH)" +%Y-%m-%d)
 # wgpu-native is not packaged, so WebGPU is left out. The optional codecs are
 # required explicitly so a missing build dependency fails the build instead of
 # silently dropping a feature.
+# The PDF viewer is PDF.js, which meson normally downloads. An offline build
+# gets it from debian/vendor/, filled by scripts/fetch-pdfjs.sh before the
+# source package is made (see docs/Debian.md); without it the package builds
+# with no PDF viewer.
+execute_before_dh_auto_configure:
+	if ls debian/vendor/pdfjs-dist-*.tgz >/dev/null 2>&1; then \
+		mkdir -p subprojects/packagecache; \
+		cp debian/vendor/pdfjs-dist-*.tgz subprojects/packagecache/; \
+	fi
+
 override_dh_auto_configure:
 	dh_auto_configure -- \
 		-Dwebgpu=disabled \
