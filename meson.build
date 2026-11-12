@@ -744,7 +744,7 @@ ns_parsers_rs_raw = static_library('ns_parsers_rs_raw', 'src/parsers_rs/lib.rs',
   link_with: [ns_url_rs, ns_html5_rs],
 )
 
-ns_rust_isolate_std = (have_webgpu or ns_ipc_rust) and host_machine.system() != 'windows'
+ns_rust_isolate_std = have_webgpu or ns_ipc_rust
 ns_rust_system_libs = []
 ns_rust_system_lib_names = []
 if host_machine.system() == 'windows'
