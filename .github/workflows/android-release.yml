@@ -29,13 +29,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Configure sysroot path
         run: echo "NORDSTJERNEN_ANDROID_SYSROOT=${RUNNER_TEMP}/nordstjernen-android-sysroot" >> "$GITHUB_ENV"
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '17'
@@ -110,7 +112,7 @@ jobs:
         run: rm -f android/upload.jks android/keystore.properties
 
       - name: Upload AAB
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nordstjernen-android-release-aab
           path: android/app/build/outputs/bundle/release/*.aab

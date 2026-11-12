@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: every GitHub Action the CI and release workflows run is
+  pinned to a commit instead of a movable version tag, Dependabot waits
+  seven days before proposing a new action release, and checkouts no
+  longer leave the workflow token in the clone's git configuration.
 * Security: the browser shell checks the popup messages it relays
   between tabs instead of trusting the sending renderer. A message is
   dropped unless its claimed origin is the sending tab's own, the one
