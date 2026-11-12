@@ -19,11 +19,28 @@
         }
     }
 
+    const askPassword = (retry, submit) => {
+        const box = byId('password');
+        const input = byId('password-input');
+        const accept = () => {
+            box.hidden = true;
+            statusEl.hidden = true;
+            submit(input.value);
+        };
+        fail(retry ? 'Incorrect password. Try again.'
+                   : 'This PDF is password-protected.');
+        box.hidden = false;
+        input.value = '';
+        input.focus();
+        byId('password-ok').onclick = accept;
+        input.onkeydown = ev => { if (ev.key === 'Enter') accept(); };
+    };
+
     let pdfjs, pdf;
     try {
         pdfjs = await import(moduleUrl('pdfjs-lib'));
         pdfjs.GlobalWorkerOptions.workerSrc = moduleUrl('pdfjs-worker');
-        pdf = await pdfjs.getDocument({
+        const loading = pdfjs.getDocument({
             data: embeddedBytes('pdf-data'),
             BinaryDataFactory: EmbeddedDataFactory,
             useWorkerFetch: false,
@@ -32,11 +49,13 @@
             isImageDecoderSupported: false,
             enableXfa: false,
             stopAtErrors: false,
-        }).promise;
+        });
+        loading.onPassword = (submit, reason) =>
+            askPassword(reason === pdfjs.PasswordResponses.INCORRECT_PASSWORD,
+                        submit);
+        pdf = await loading.promise;
     } catch (e) {
-        fail(e && e.name === 'PasswordException'
-            ? 'This PDF is password-protected and cannot be shown.'
-            : 'This PDF could not be displayed.');
+        fail('This PDF could not be displayed.');
         return;
     }
     byId('pdf-data').remove();
@@ -44,14 +63,24 @@
     const MAX_CANVAS_SIDE = 16384;
     const MAX_CANVAS_AREA = 32 * 1024 * 1024;
     const outputScale = () => Math.min(window.devicePixelRatio || 1, 2);
-    const availableWidth = () =>
-        Math.max(320, Math.min(pagesEl.clientWidth - 32, 1100));
+    const ACTUAL_SIZE = 96 / 72;
+    const AUTO_SCALE_LIMIT = 1.25 * ACTUAL_SIZE;
+    const ZOOM_STEP = 1.25;
+    const ZOOM_MIN = 0.25;
+    const ZOOM_MAX = 5;
+    let zoom = 1;
+    let fitWidth = false;
+    let layoutGeneration = 0;
+    const availableWidth = () => Math.max(320, document.body.clientWidth - 32);
     const fitScale = page => {
         const natural = page.getViewport({ scale: 1 });
         const ratio = outputScale();
         const side = MAX_CANVAS_SIDE / ratio;
         const area = MAX_CANVAS_AREA / (ratio * ratio);
-        return Math.min(availableWidth() / natural.width,
+        const widthScale = availableWidth() / natural.width;
+        const base = fitWidth ? widthScale
+                              : Math.min(widthScale, AUTO_SCALE_LIMIT);
+        return Math.min(base * zoom,
                         side / natural.width, side / natural.height,
                         Math.sqrt(area / (natural.width * natural.height)));
     };
@@ -118,7 +147,7 @@
     const render = async slot => {
         if (slot.dataset.state) return;
         slot.dataset.state = 'rendering';
-        const layoutWidth = availableWidth();
+        const generation = layoutGeneration;
         try {
             const page = await pdf.getPage(Number(slot.dataset.page));
             const viewport = page.getViewport({ scale: fitScale(page) });
@@ -146,8 +175,7 @@
             }).render();
             await addLinks(page, viewport, slot);
             page.cleanup();
-            if (slot.dataset.state !== 'rendering' ||
-                layoutWidth !== availableWidth()) {
+            if (generation !== layoutGeneration) {
                 release(slot);
                 watch(slot);
                 return;
@@ -182,6 +210,37 @@
         retained.observe(slot);
     }
 
+    const currentPage = () => {
+        for (let i = 0; i < slots.length; i++)
+            if (slots[i].getBoundingClientRect().bottom > 48) return i;
+        return slots.length - 1;
+    };
+    const showPosition = () => {
+        byId('page-number').textContent =
+            (currentPage() + 1) + ' / ' + slots.length;
+    };
+    const relayout = () => {
+        const anchor = currentPage();
+        layoutGeneration++;
+        for (const slot of slots)
+            if (slot.dataset.state !== 'rendering') release(slot);
+        sizeUnrenderedSlots();
+        for (const slot of slots) watch(slot);
+        slots[anchor].scrollIntoView();
+        const percent = Math.round(first.getViewport({ scale: fitScale(first) })
+                                        .scale / ACTUAL_SIZE * 100);
+        byId('zoom-level').textContent = percent + '%';
+        showPosition();
+    };
+    const setZoom = (next, fit) => {
+        zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+        fitWidth = fit;
+        relayout();
+    };
+    byId('zoom-in').onclick = () => setZoom(zoom * ZOOM_STEP, fitWidth);
+    byId('zoom-out').onclick = () => setZoom(zoom / ZOOM_STEP, fitWidth);
+    byId('zoom-fit').onclick = () => setZoom(1, !fitWidth);
+
     let laidOutWidth = availableWidth();
     let resizeTimer = 0;
     window.addEventListener('resize', () => {
@@ -189,12 +248,22 @@
         resizeTimer = setTimeout(() => {
             if (availableWidth() === laidOutWidth) return;
             laidOutWidth = availableWidth();
-            for (const slot of slots)
-                if (slot.dataset.state !== 'rendering') release(slot);
-            sizeUnrenderedSlots();
-            for (const slot of slots) watch(slot);
+            relayout();
         }, 150);
     });
+    let positionQueued = false;
+    window.addEventListener('scroll', () => {
+        if (positionQueued) return;
+        positionQueued = true;
+        requestAnimationFrame(() => {
+            positionQueued = false;
+            showPosition();
+        });
+    }, { passive: true });
+    byId('zoom-level').textContent = Math.round(
+        first.getViewport({ scale: fitScale(first) }).scale / ACTUAL_SIZE * 100) + '%';
+    showPosition();
+    byId('toolbar').hidden = false;
 
     const requested = /(?:^|[#&])page=(\d+)/.exec(location.hash);
     const start = requested ? slots[Number(requested[1]) - 1] : null;

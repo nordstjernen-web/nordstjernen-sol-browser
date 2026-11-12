@@ -3,6 +3,9 @@ Changelog:
 
 1.0.47-dev:
 ======
+* PDF viewer: a toolbar shows the page position and offers zoom, fit to
+  width and download; password-protected files ask for the password;
+  small pages are no longer stretched to the window width.
 * Security: frames inside a document sandboxed by its
   `Content-Security-Policy` header inherit its opaque origin; they could
   read the site's cookies. The PDF viewer relies on this, and its own
