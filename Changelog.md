@@ -3,6 +3,10 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Build: libcurl 8.11 or newer, built with the `ws`/`wss` protocols, is
+  now required (`meson setup` fails otherwise), so WebSocket is always
+  available. Ubuntu 24.04's libcurl 8.5 is too old; Ubuntu 25.04 and
+  Debian 13 qualify.
 * `localStorage`: a page that writes and then navigates straight away
   no longer loses the write. Changes are still saved a second later,
   but they are now flushed before the next document reads storage.
@@ -55,11 +59,7 @@ Changelog:
 * Layout: text on a line that a later float joins is aligned in the
   space the float leaves, so centred text no longer overlaps a
   right-floated sibling.
-* WebSockets work when the system libcurl is built without WebSocket
-  support (Ubuntu 24.04): the handshake and RFC 6455 framing are then
-  done in-tree over the libcurl connection, where `new WebSocket()`
-  used to throw. `WebSocket.protocol` reports the subprotocol the
-  server selected.
+* `WebSocket.protocol` reports the subprotocol the server selected.
 * Audio: a page may hold 128 loaded `<audio>` elements instead of 16,
   so games that preload a pool of sound channels get all of them.
 * Security: frames inside a document sandboxed by its

@@ -26311,6 +26311,12 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
             "WebSocket: blocked by Content-Security-Policy connect-src");
     }
 
+    if (!ns_ws_available()) {
+        g_free(target);
+        return JS_ThrowTypeError(ctx,
+            "WebSocket unsupported: libcurl built without websocket protocol");
+    }
+
     GPtrArray *protos_terminated = NULL;
     if (argc >= 2 && !JS_IsUndefined(argv[1])) {
         protos_terminated = g_ptr_array_new_with_free_func(g_free);

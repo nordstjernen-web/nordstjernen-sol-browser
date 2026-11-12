@@ -1739,9 +1739,11 @@ ns_net_cookie_set_for_webdriver(const char *url, const char *set_cookie)
     return ns_cookie_store_set(site, url, set_cookie, TRUE);
 }
 
-char *
-ns_net_cookie_header(const char *url, const char *origin, const char *top_url)
+void
+ns_net_curl_apply_cookies(void *curl_handle, const char *url,
+                          const char *origin, const char *top_url)
 {
+    CURL *curl = curl_handle;
     g_autofree char *http_url = NULL;
     if (url && g_str_has_prefix(url, "wss://"))
         url = http_url = g_strconcat("https://", url + 6, NULL);
@@ -1749,30 +1751,24 @@ ns_net_cookie_header(const char *url, const char *origin, const char *top_url)
         url = http_url = g_strconcat("http://", url + 5, NULL);
     const ns_config *cfg = ns_config_get();
     ns_cookie_policy policy = cfg ? cfg->cookie_policy : NS_COOKIE_FIRST_PARTY;
-    if (!url || !origin || !*origin || policy == NS_COOKIE_NEVER ||
+    if (!curl || !url || !origin || !*origin || policy == NS_COOKIE_NEVER ||
         !ns_url_is_http_or_https(origin))
-        return NULL;
+        return;
     const char *top = top_url && ns_url_is_http_or_https(top_url) ? top_url
                                                                  : origin;
     if (policy == NS_COOKIE_FIRST_PARTY && !ns_url_is_same_site(url, top))
-        return NULL;
+        return;
     g_autofree char *site = ns_url_site_from(top);
     g_autofree char *top_origin = ns_url_origin_from(top);
     const char *partition_key = (site && *site) ? site
                               : (top_origin ? top_origin : "");
-    if (!*partition_key) return NULL;
+    if (!*partition_key) return;
     int samesite_cross = ns_url_is_same_site(url, origin) &&
                          ns_url_is_same_site(url, top) ? 0 : 2;
-    return ns_cookie_store_header(partition_key, url, samesite_cross, TRUE);
-}
-
-void
-ns_net_curl_apply_cookies(void *curl_handle, const char *url,
-                          const char *origin, const char *top_url)
-{
-    g_autofree char *cookie = ns_net_cookie_header(url, origin, top_url);
-    if (curl_handle && cookie && *cookie)
-        curl_easy_setopt((CURL *)curl_handle, CURLOPT_COOKIE, cookie);
+    g_autofree char *cookie = ns_cookie_store_header(partition_key, url,
+                                                     samesite_cross, TRUE);
+    if (cookie && *cookie)
+        curl_easy_setopt(curl, CURLOPT_COOKIE, cookie);
 }
 
 void

@@ -34,7 +34,7 @@ BuildRequires:  pkgconfig(gstreamer-app-1.0) >= 1.20
 BuildRequires:  pkgconfig(gstreamer-video-1.0) >= 1.20
 BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(libcrypto)
-BuildRequires:  pkgconfig(libcurl) >= 7.85
+BuildRequires:  pkgconfig(libcurl) >= 8.11
 BuildRequires:  pkgconfig(libpsl)
 BuildRequires:  pkgconfig(libseccomp)
 BuildRequires:  pkgconfig(libavif)

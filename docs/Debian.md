@@ -109,8 +109,8 @@ directly:
     sudo apt build-dep ./
 
 The version floors in `debian/control` mirror the ones `meson setup`
-enforces: GTK ≥ 4.14, libcurl ≥ 8.5, FFmpeg ≥ 6.0 (`7:6.0` with Debian's
-epoch) and GStreamer ≥ 1.20, so Debian 13 (trixie) and Ubuntu 24.04 are
+enforces: GTK ≥ 4.14, libcurl ≥ 8.11, FFmpeg ≥ 6.0 (`7:6.0` with Debian's
+epoch) and GStreamer ≥ 1.20, so Debian 13 (trixie) and Ubuntu 25.04 are
 the oldest releases the package builds on.
 
 The FFmpeg `libav*` packages are **not** optional here: `meson setup` fails
