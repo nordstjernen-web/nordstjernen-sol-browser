@@ -6510,7 +6510,10 @@ build_block_impl(const ns_node *n, GHashTable *styles)
 
     if (n->name && strcmp(n->name, "img") == 0) {
         ns_box *ib = build_image_box(n);
-        if (ib) ib->style = s;
+        if (ib) {
+            ib->style = s;
+            collect_box_bg_image(ib, s);
+        }
         return ib;
     }
 
@@ -6603,6 +6606,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         if (cb->content_width  <= 0) cb->content_width  = 300;
         if (cb->content_height <= 0) cb->content_height = 150;
         cm->declared_image_size = TRUE;
+        collect_box_bg_image(cb, s);
         return cb;
     }
 
@@ -18005,9 +18009,13 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 top_through = gap;
             }
             cursor_y += gap;
+            int clearance = 0;
             if (clr) {
                 double y_after_clear = floats_clear_y(floats, cursor_y, clr);
-                if (y_after_clear > cursor_y) cursor_y = y_after_clear;
+                if (y_after_clear > cursor_y) {
+                    cursor_y = y_after_clear;
+                    clearance = clr;
+                }
             }
             double left_off = 0, right_off = 0;
             gboolean lines_wrap_floats = c->kind == NS_BOX_BLOCK &&
@@ -18064,7 +18072,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 legacy_align_block_child(c, inner_x + left_off, cw_avail,
                                          child_inherited);
             collect_escaping_floats(c, floats, 0);
-            if (empty_block_collapses_through(c, clr)) {
+            if (empty_block_collapses_through(c, clearance)) {
                 cursor_y -= gap;
                 if (collapses_through_top) top_through = 0;
                 prev_margin_bottom = collapsed_margin(

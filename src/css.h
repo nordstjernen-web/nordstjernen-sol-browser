@@ -624,7 +624,7 @@ typedef struct ns_css_shadow {
     gboolean currentcolor;
 } ns_css_shadow;
 
-#define NS_CSS_SHADOWS_MAX 8
+#define NS_CSS_SHADOWS_MAX 16
 
 typedef struct ns_css_shadow_list {
     int n;
