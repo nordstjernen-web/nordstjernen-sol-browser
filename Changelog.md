@@ -3,6 +3,9 @@ Changelog:
 
 1.0.47-dev:
 ======
+* `localStorage`: a page that writes and then navigates straight away
+  no longer loses the write. Changes are still saved a second later,
+  but they are now flushed before the next document reads storage.
 * `:hover` matches in `matches()`, `closest()` and `querySelector*()`,
   not only in style sheets, so script checks such as jQuery's
   `.is(':hover')` see the element under the pointer.
