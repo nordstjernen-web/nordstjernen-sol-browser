@@ -3,6 +3,14 @@ Changelog:
 
 1.0.47-dev:
 ======
+* CSS: the legacy `-webkit-gradient(linear|radial, ...)` image syntax is
+  supported, and `-webkit-`-prefixed aliases of standard properties
+  (`-webkit-animation*`, `-webkit-transition*`, `-webkit-transform*`,
+  `-webkit-box-shadow`, `-webkit-background-size`, the flexbox
+  properties and others) now apply instead of being dropped.
+* Layout: text on a line that a later float joins is aligned in the
+  space the float leaves, so centred text no longer overlaps a
+  right-floated sibling.
 * WebSockets work when the system libcurl is built without WebSocket
   support (Ubuntu 24.04): the handshake and RFC 6455 framing are then
   done in-tree over the libcurl connection, where `new WebSocket()`
