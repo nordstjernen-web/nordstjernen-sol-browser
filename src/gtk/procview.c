@@ -1,6 +1,7 @@
 /* Nordstjernen — GTK thin client over the out-of-process renderer (rproc). */
 
 #include "procview.h"
+#include "uiscale.h"
 #include "i18n.h"
 #include "pagelayers.h"
 #include "pointerlock.h"
@@ -1740,9 +1741,15 @@ viewport_h(NsProcView *v)
 }
 
 static double
-cur_scale(NsProcView *v)
+cur_zoom(NsProcView *v)
 {
     return v->scale > 0.0 ? v->scale : 1.0;
+}
+
+static double
+cur_scale(NsProcView *v)
+{
+    return cur_zoom(v) * ns_ui_scale();
 }
 
 static double
@@ -3360,7 +3367,7 @@ set_zoom(NsProcView *v, double scale)
     if (permille > NS_PV_ZOOM_MAX_PERMILLE)
         permille = NS_PV_ZOOM_MAX_PERMILLE;
     double clamped = permille / 1000.0;
-    if (clamped == cur_scale(v))
+    if (clamped == cur_zoom(v))
         return;
     v->scale = clamped;
     char percent[16];
@@ -3380,7 +3387,7 @@ static const int k_zoom_ladder_percent[] = {
 static void
 zoom_step(NsProcView *v, int direction)
 {
-    int now = (int)(cur_scale(v) * 100.0 + 0.5);
+    int now = (int)(cur_zoom(v) * 100.0 + 0.5);
     gsize n = G_N_ELEMENTS(k_zoom_ladder_percent);
     if (direction > 0) {
         for (gsize i = 0; i < n; i++)
@@ -3406,7 +3413,7 @@ void ns_proc_view_zoom_reset(NsProcView *v) { set_zoom(v, 1.0); }
 int
 ns_proc_view_zoom_percent(NsProcView *v)
 {
-    return v ? (int)(cur_scale(v) * 100.0 + 0.5) : 100;
+    return v ? (int)(cur_zoom(v) * 100.0 + 0.5) : 100;
 }
 
 static void
@@ -5588,7 +5595,8 @@ build_console_window(NsProcView *v)
     v->console_window = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(v->console_window),
                          ns_i18n("Developer Tools"));
-    gtk_window_set_default_size(GTK_WINDOW(v->console_window), 720, 420);
+    gtk_window_set_default_size(GTK_WINDOW(v->console_window),
+                                ns_ui_px(720), ns_ui_px(420));
     gtk_window_set_destroy_with_parent(GTK_WINDOW(v->console_window), TRUE);
     gtk_window_set_child(GTK_WINDOW(v->console_window), box);
     g_signal_connect(v->console_window, "close-request",
@@ -5602,7 +5610,7 @@ build_search_bar(NsProcView *v)
     gtk_widget_add_css_class(box, "toolbar");
 
     v->search_entry = gtk_search_entry_new();
-    gtk_widget_set_size_request(v->search_entry, 220, -1);
+    gtk_widget_set_size_request(v->search_entry, ns_ui_px(220), -1);
     set_accessible_label(v->search_entry, ns_i18n("Find in page"));
     g_signal_connect(v->search_entry, "search-changed",
                      G_CALLBACK(on_search_changed), v);
@@ -5616,7 +5624,7 @@ build_search_bar(NsProcView *v)
                      G_CALLBACK(on_search_stop), v);
 
     v->search_label = gtk_label_new("");
-    gtk_widget_set_size_request(v->search_label, 56, -1);
+    gtk_widget_set_size_request(v->search_label, ns_ui_px(56), -1);
 
     GtkWidget *prev = gtk_button_new_from_icon_name("go-up-symbolic");
     GtkWidget *next = gtk_button_new_from_icon_name("go-down-symbolic");

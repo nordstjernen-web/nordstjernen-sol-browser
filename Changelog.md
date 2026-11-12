@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Windows: the browser follows the display scale setting at 125%, 150%
+  and 175%. GTK on Windows scales widgets by whole factors only, so at
+  those settings only the interface text grew; the tab strip, toolbar
+  icons, buttons and web pages stayed at 100% size. Pages are now laid
+  out and painted at the display scale (`devicePixelRatio` 1.5 at 150%)
+  and the browser's own interface scales with it. Page zoom still reads
+  100%. `NS_UI_SCALE` overrides the factor. Ported from Northstar #240.
 * Removed the last XSLT surface: the empty `XSLTProcessor` constructor
   and the `xslt` value of `<link as>`. The engine never ran XSLT, so
   feature detection now reports that truthfully, in line with its
