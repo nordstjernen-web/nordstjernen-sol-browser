@@ -3,6 +3,18 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Canvas games run much lighter: drawing to a 2D canvas repaints the
+  page instead of laying the whole document out again, and
+  `requestAnimationFrame` callbacks run once per frame instead of once
+  per batch of pending events (a page with timers or a WebSocket ran
+  them at well over 60 Hz).
+* Fixed a memory leak: every URL the engine parsed or resolved stayed
+  allocated for the life of the thread, so a page that was laid out
+  repeatedly grew without bound.
+* `keypress` events report the character code in `keyCode`, as other
+  browsers do.
+* Remote control: `screenshot` no longer fails on a page that redraws
+  every frame.
 * `text-shadow` set on an inline element (a link or span inside a line)
   is painted; only the block's own shadow was. Shadows of right-aligned
   and centred text are no longer cut off, and a shadow list may hold 16

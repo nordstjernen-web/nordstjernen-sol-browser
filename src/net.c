@@ -964,12 +964,15 @@ ns_url_parser_destroy_tls(gpointer p)
 
 static GPrivate g_url_parser_tls = G_PRIVATE_INIT(ns_url_parser_destroy_tls);
 
+static __thread int g_url_parser_depth;
+
 static lxb_url_parser_t *
 ns_url_parser_open(void)
 {
     lxb_url_parser_t *parser = g_private_get(&g_url_parser_tls);
     if (parser) {
         lxb_url_parser_clean(parser);
+        g_url_parser_depth++;
         return parser;
     }
     parser = lxb_url_parser_create();
@@ -979,6 +982,7 @@ ns_url_parser_open(void)
         return NULL;
     }
     g_private_set(&g_url_parser_tls, parser);
+    g_url_parser_depth++;
     return parser;
 }
 
@@ -987,6 +991,10 @@ ns_url_parser_close(lxb_url_parser_t *parser)
 {
     if (!parser) return;
     lxb_url_parser_clean(parser);
+    if (--g_url_parser_depth <= 0) {
+        g_url_parser_depth = 0;
+        lexbor_mraw_clean(parser->mraw);
+    }
 }
 
 char *

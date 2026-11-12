@@ -36317,6 +36317,12 @@ ns_js_run_animation_frame(ns_js *js)
     return ns_js_run_animation_frame_internal(js);
 }
 
+void
+ns_js_hold_animation_frames(ns_js *js, gboolean hold)
+{
+    if (js) js->raf_held = hold;
+}
+
 static int32_t
 ns_media_int_prop(JSContext *ctx, JSValueConst el, const char *name)
 {
@@ -36368,7 +36374,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
     ns_js_promote_deferred_iframes(js);
     ns_js_process_pending_iframes(js);
     ns_drain_microtasks(js);
-    if (!ns_raf_has_runnable(js))
+    if (js->raf_held || !ns_raf_has_runnable(js))
         return js->mutated ? TRUE : FALSE;
     gint64 now_us = g_get_monotonic_time();
     js->raf_last_us = now_us;

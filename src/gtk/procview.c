@@ -6130,12 +6130,10 @@ ns_proc_view_remote_screenshot(NsProcView *v, int *out_w, int *out_h)
     double s = cur_scale(v);
     int cw = MAX(1, (int)(w / s + 0.5));
     int ch = MAX(1, (int)(h / s + 0.5));
-    GdkPaintable *paintable = gtk_widget_paintable_new(v->area);
     GtkSnapshot *snap = gtk_snapshot_new();
     gtk_snapshot_scale(snap, (float)cw / (float)w, (float)ch / (float)h);
-    gdk_paintable_snapshot(paintable, GDK_SNAPSHOT(snap), w, h);
+    ns_proc_view_area_snapshot(v->area, snap);
     GskRenderNode *node = gtk_snapshot_free_to_node(snap);
-    g_object_unref(paintable);
     if (!node)
         return NULL;
     graphene_rect_t bounds = GRAPHENE_RECT_INIT(0, 0, (float)cw, (float)ch);
