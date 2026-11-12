@@ -5,6 +5,7 @@
 
 #include "pdf.h"
 #include "html.h"
+#include "security.h"
 
 #include <string.h>
 
@@ -37,7 +38,7 @@ ns_pdf_notice_html(const char *url, const char *message)
     char *html = g_strdup_printf(
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<title>PDF</title>%s</head><body><div class=\"doc\">"
-        "<p class=\"note\">%s<br><a href=\"%s\">%s</a></p>"
+        "<p class=\"note\">%s<br><a href=\"%s\" download>%s</a></p>"
         "</div></body></html>",
         ns_pdf_style, esc_msg, esc_url, esc_url);
     g_free(esc_url);
@@ -49,13 +50,16 @@ ns_pdf_notice_html(const char *url, const char *message)
 static char *
 ns_pdf_title_html(const char *url)
 {
-    char *name = url ? g_path_get_basename(url) : NULL;
-    if (name) {
-        char *query = strchr(name, '?');
-        if (query) *query = '\0';
-    }
-    char *escaped = ns_html_escape_text(name && *name ? name : "PDF");
+    char *path = g_strndup(url ? url : "", strcspn(url ? url : "", "?#"));
+    char *name = g_path_get_basename(path);
+    char *readable = g_uri_unescape_string(name, NULL);
+    const char *title = readable && g_utf8_validate(readable, -1, NULL)
+        ? readable : name;
+    char *escaped = ns_html_escape_text(*title && strcmp(title, ".") != 0
+                                            ? title : "PDF");
+    g_free(readable);
     g_free(name);
+    g_free(path);
     return escaped;
 }
 
@@ -79,7 +83,27 @@ ns_pdf_append_text_block(GString *out, const char *id, const char *text)
 }
 
 static char *
-ns_pdf_viewer_html(const guint8 *data, gsize len, const char *url)
+ns_pdf_script_nonce(void)
+{
+    guint8 raw[16];
+    if (!ns_security_csprng_fill(raw, sizeof raw)) return NULL;
+    return g_base64_encode(raw, sizeof raw);
+}
+
+static char *
+ns_pdf_viewer_csp(const char *nonce)
+{
+    return g_strdup_printf(
+        "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; "
+        "default-src 'none'; script-src 'nonce-%s' 'wasm-unsafe-eval' blob:; "
+        "worker-src blob:; style-src 'unsafe-inline'; "
+        "img-src data: blob:; font-src data: blob:; "
+        "form-action 'none'; base-uri 'none'", nonce);
+}
+
+static char *
+ns_pdf_viewer_html(const guint8 *data, gsize len, const char *url,
+                   const char *nonce)
 {
     char *title = ns_pdf_title_html(url);
     GString *out = g_string_sized_new(len / 3 * 4 + sizeof(ns_pdfjs_lib) +
@@ -99,34 +123,31 @@ ns_pdf_viewer_html(const guint8 *data, gsize len, const char *url)
                                sizeof(ns_pdfjs_qcms) - 1);
     ns_pdf_append_text_block(out, "pdfjs-lib", ns_pdfjs_lib);
     ns_pdf_append_text_block(out, "pdfjs-worker", ns_pdfjs_worker);
-    g_string_append_printf(out, "<script>%s</script></body></html>",
-                           ns_pdf_viewer_js);
+    g_string_append_printf(out, "<script nonce=\"%s\">", nonce);
+    g_string_append(out, ns_pdf_viewer_js);
+    g_string_append(out, "</script></body></html>");
     return g_string_free(out, FALSE);
 }
 #endif
 
-const char *
-ns_pdf_document_csp(void)
-{
-#ifdef NS_HAVE_PDFJS
-    return "sandbox allow-scripts allow-popups "
-           "allow-top-navigation-by-user-activation; default-src 'none'; "
-           "script-src 'unsafe-inline' 'wasm-unsafe-eval' blob:; "
-           "worker-src blob:; style-src 'unsafe-inline'; "
-           "img-src data: blob:; font-src data: blob:";
-#else
-    return NULL;
-#endif
-}
-
 char *
-ns_pdf_document_html(const guint8 *data, gsize len, const char *url)
+ns_pdf_document_html(const guint8 *data, gsize len, const char *url,
+                     char **csp_out)
 {
+    *csp_out = g_strdup("sandbox allow-downloads; default-src 'none'; "
+                        "style-src 'unsafe-inline'");
 #ifdef NS_HAVE_PDFJS
-    if (data && len > 0 && len <= NS_PDF_VIEWER_MAX_BYTES)
-        return ns_pdf_viewer_html(data, len, url);
+    char *nonce = data && len > 0 && len <= NS_PDF_VIEWER_MAX_BYTES
+        ? ns_pdf_script_nonce() : NULL;
+    if (nonce) {
+        g_free(*csp_out);
+        *csp_out = ns_pdf_viewer_csp(nonce);
+        char *html = ns_pdf_viewer_html(data, len, url, nonce);
+        g_free(nonce);
+        return html;
+    }
     return ns_pdf_notice_html(
-        url, data && len > 0
+        url, data && len > NS_PDF_VIEWER_MAX_BYTES
             ? "This PDF is too large to show in the built-in viewer."
             : "This document could not be opened.");
 #else

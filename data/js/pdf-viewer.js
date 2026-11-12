@@ -41,25 +41,40 @@
     }
     byId('pdf-data').remove();
 
+    const MAX_CANVAS_SIDE = 16384;
+    const MAX_CANVAS_AREA = 32 * 1024 * 1024;
     const outputScale = () => Math.min(window.devicePixelRatio || 1, 2);
+    const availableWidth = () =>
+        Math.max(320, Math.min(pagesEl.clientWidth - 32, 1100));
     const fitScale = page => {
         const natural = page.getViewport({ scale: 1 });
-        const room = Math.max(320, Math.min(pagesEl.clientWidth - 32, 1100));
-        return room / natural.width;
+        const ratio = outputScale();
+        const side = MAX_CANVAS_SIDE / ratio;
+        const area = MAX_CANVAS_AREA / (ratio * ratio);
+        return Math.min(availableWidth() / natural.width,
+                        side / natural.width, side / natural.height,
+                        Math.sqrt(area / (natural.width * natural.height)));
+    };
+    const sizeSlot = (slot, viewport) => {
+        slot.style.width = Math.floor(viewport.width) + 'px';
+        slot.style.height = Math.floor(viewport.height) + 'px';
     };
 
     const first = await pdf.getPage(1);
-    const firstView = first.getViewport({ scale: fitScale(first) });
     const slots = [];
     for (let n = 1; n <= pdf.numPages; n++) {
         const slot = document.createElement('div');
         slot.className = 'page';
-        slot.style.width = Math.floor(firstView.width) + 'px';
-        slot.style.height = Math.floor(firstView.height) + 'px';
         slot.dataset.page = String(n);
         pagesEl.appendChild(slot);
         slots.push(slot);
     }
+    const sizeUnrenderedSlots = () => {
+        const estimate = first.getViewport({ scale: fitScale(first) });
+        for (const slot of slots)
+            if (!slot.dataset.state) sizeSlot(slot, estimate);
+    };
+    sizeUnrenderedSlots();
 
     const addLinks = async (page, viewport, slot) => {
         const layer = document.createElement('div');
@@ -95,15 +110,20 @@
         slot.appendChild(layer);
     };
 
+    const release = slot => {
+        slot.replaceChildren();
+        delete slot.dataset.state;
+    };
+
     const render = async slot => {
         if (slot.dataset.state) return;
         slot.dataset.state = 'rendering';
+        const layoutWidth = availableWidth();
         try {
             const page = await pdf.getPage(Number(slot.dataset.page));
             const viewport = page.getViewport({ scale: fitScale(page) });
             const ratio = outputScale();
-            slot.style.width = Math.floor(viewport.width) + 'px';
-            slot.style.height = Math.floor(viewport.height) + 'px';
+            sizeSlot(slot, viewport);
             slot.style.setProperty('--scale-factor', String(viewport.scale));
             slot.style.setProperty('--total-scale-factor', String(viewport.scale));
             const canvas = document.createElement('canvas');
@@ -125,20 +145,60 @@
                 viewport,
             }).render();
             await addLinks(page, viewport, slot);
-            slot.dataset.state = 'done';
             page.cleanup();
+            if (slot.dataset.state !== 'rendering' ||
+                layoutWidth !== availableWidth()) {
+                release(slot);
+                watch(slot);
+                return;
+            }
+            slot.dataset.state = 'done';
         } catch (e) {
+            slot.replaceChildren();
             slot.dataset.state = 'failed';
             slot.dataset.error = String(e && e.message || e);
+            const note = document.createElement('p');
+            note.className = 'pageError';
+            note.textContent = 'This page could not be displayed.';
+            slot.appendChild(note);
         }
     };
 
-    const observer = new IntersectionObserver(entries => {
+    const nearby = new IntersectionObserver(entries => {
         for (const entry of entries)
             if (entry.isIntersecting) render(entry.target);
     }, { rootMargin: '600px 0px' });
-    for (const slot of slots) observer.observe(slot);
-    render(slots[0]);
+    const retained = new IntersectionObserver(entries => {
+        for (const entry of entries)
+            if (!entry.isIntersecting && entry.target.dataset.state === 'done')
+                release(entry.target);
+    }, { rootMargin: '4000px 0px' });
+    const watch = slot => {
+        nearby.unobserve(slot);
+        nearby.observe(slot);
+    };
+    for (const slot of slots) {
+        nearby.observe(slot);
+        retained.observe(slot);
+    }
+
+    let laidOutWidth = availableWidth();
+    let resizeTimer = 0;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            if (availableWidth() === laidOutWidth) return;
+            laidOutWidth = availableWidth();
+            for (const slot of slots)
+                if (slot.dataset.state !== 'rendering') release(slot);
+            sizeUnrenderedSlots();
+            for (const slot of slots) watch(slot);
+        }, 150);
+    });
+
+    const requested = /(?:^|[#&])page=(\d+)/.exec(location.hash);
+    const start = requested ? slots[Number(requested[1]) - 1] : null;
+    if (start) start.scrollIntoView();
 
     const info = await pdf.getMetadata().catch(() => null);
     const title = info && info.info && info.info.Title;
