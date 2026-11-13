@@ -58,7 +58,7 @@ ASan's allocator interception). The GTK shell was not built or run.
 | WebAssembly pages | `Memory.grow` with live views, buffer transfer and resize, module validation | no ASan report; F6 |
 | Random HTML/CSS/SVG/MathML generator with DOM mutation scripts, layout and PNG paint | about 25 minutes on 4 cores | no ASan report; F7 |
 | JavaScript API-surface fuzzer (random method calls on every reachable interface object, with hostile arguments) | about 20 minutes on 3 cores | no ASan report; hangs were script-level infinite loops |
-| Two-origin HTTP server (`127.0.0.1:8001` / `:8002`) with policy probe pages | section 4 | F1–F5, F9 |
+| Two-origin HTTP server (`127.0.0.1:8001` / `:8002`) with policy probe pages | section 4 | F1–F5 |
 
 WebAssembly code could not be *executed* under ASan (WAMR's native stack
 guard trips on ASan's larger frames), so instances, tables, globals and the
