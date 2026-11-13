@@ -365,6 +365,8 @@ struct ns_js {
     int           throw_on_dynamic_markup;
     int           ignore_destructive_writes;
     int           in_error_report;
+    GHashTable   *muted_error_scripts;
+    int           cssom_style_write;
     JSValue       nodelist_decorator;
     int           nodelist_decorator_set;
     JSValue       live_html_proto;

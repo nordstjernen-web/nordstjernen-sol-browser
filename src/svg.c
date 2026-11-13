@@ -438,7 +438,7 @@ svg_style_decl(const ns_node *n, const char *prop, gboolean *important)
 {
     static __thread char buf[256];
     *important = FALSE;
-    const char *style = ns_element_get_attr(n, "style");
+    const char *style = ns_element_inline_style(n);
     if (!style) return NULL;
     gsize plen = strlen(prop);
     const char *p = style;
@@ -3757,7 +3757,7 @@ svg_cascade_element(svg_sheets *sh, const ns_node *el)
     if (sh->matches->len == 0) return;
     g_array_sort(sh->matches, svg_match_cmp);
     const svg_cascaded *c = svg_shared_style(sh);
-    ns_style *style = ns_element_get_attr(el, "style")
+    ns_style *style = ns_element_inline_style(el)
         ? svg_unshadowed_style(sh, el, c) : c->style;
     g_hash_table_insert(sh->styles, (gpointer)el, style);
 }

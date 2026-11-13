@@ -9721,6 +9721,8 @@
                 var s = sheets[i];
                 if (!s || !(s instanceof CSSStyleSheet) || s.disabled) continue;
                 var el = target.createElement('style');
+                if (typeof global.__ndAdoptStyleElement === 'function')
+                    global.__ndAdoptStyleElement(el);
                 el.setAttribute('data-adopted', '');
                 el.textContent = sheetText(s);
                 container.appendChild(el);

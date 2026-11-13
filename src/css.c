@@ -25571,6 +25571,31 @@ ns_css_set_doc_language(const char *lang)
     g_css_doc_language = (lang && *lang) ? g_strdup(lang) : NULL;
 }
 
+static const char *
+css_node_document_url(const ns_node *el)
+{
+    for (const ns_node *child = el, *p = el->parent; p;
+         child = p, p = p->parent) {
+        if (child->kind != NS_NODE_DOCUMENT || (child->flags & NS_NODE_FRAGMENT))
+            continue;
+        const char *frame_url = ns_element_get_attr(p, "data-nd-frame-url");
+        if (frame_url && *frame_url) return frame_url;
+    }
+    return g_css_doc_url;
+}
+
+const char *
+ns_element_inline_style(const ns_node *el)
+{
+    const char *style = el ? ns_element_get_attr(el, "style") : NULL;
+    if (!style || !*style || (el->flags & NS_NODE_STYLE_ATTR_TRUSTED) ||
+        !ns_net_csp_registered())
+        return style;
+    return ns_net_csp_inline_style_allows(css_node_document_url(el), style,
+                                          strlen(style), NULL, TRUE)
+        ? style : NULL;
+}
+
 static gboolean
 ns_el_is_visited_link(const ns_node *el)
 {
@@ -38346,7 +38371,7 @@ cascade_walk(ns_node *node,
             }
         }
 
-        const char *inline_css = ns_element_get_attr(node, "style");
+        const char *inline_css = ns_element_inline_style(node);
         const ns_css_stylesheet *inline_sheet = NULL;
         if (inline_css && *inline_css)
             inline_sheet = ns_css_cached_decl_sheet(inline_css);

@@ -961,7 +961,7 @@ static double
 frame_dimension_from_style_attr(const ns_node *frame, const char *prop,
                                 double *out)
 {
-    const char *style = ns_element_get_attr(frame, "style");
+    const char *style = ns_element_inline_style(frame);
     if (!style) return FALSE;
     gsize plen = strlen(prop);
     for (const char *p = style; (p = strstr(p, prop)) != NULL; p += plen) {
@@ -1286,6 +1286,31 @@ adopted_sheets_trim(void)
 }
 
 static void
+style_text_append(const ns_node *n, GString *out, int depth)
+{
+    if (depth >= 512) return;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_TEXT && c->text)
+            g_string_append_len(out, c->text, (gssize)c->text_len);
+        else if (c->kind == NS_NODE_ELEMENT)
+            style_text_append(c, out, depth + 1);
+    }
+}
+
+static gboolean
+style_element_csp_allowed(const ns_node *n, const char *csp_url)
+{
+    if (!csp_url || (n->flags & NS_NODE_STYLE_ATTR_TRUSTED) ||
+        !ns_net_csp_registered())
+        return TRUE;
+    g_autoptr(GString) text = g_string_new(NULL);
+    style_text_append(n, text, 0);
+    return ns_net_csp_inline_style_allows(csp_url, text->str, text->len,
+                                          ns_element_get_attr(n, "nonce"),
+                                          FALSE);
+}
+
+static void
 style_text_fingerprint(const ns_node *n, guint64 *hash, gsize *len, int depth)
 {
     if (depth >= 512) return;
@@ -1575,7 +1600,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     GPtrArray *out = cc->out;
     GHashTable *cache = cc->cache;
     if (named && ns_node_is_element_named(n, "style") &&
-        style_sheet_enabled(n)) {
+        style_sheet_enabled(n) && style_element_csp_allowed(n, cc->csp_url)) {
         guint64 text_hash = 1469598103934665603ULL;
         gsize text_len = 0;
         style_text_fingerprint(n, &text_hash, &text_len, 0);

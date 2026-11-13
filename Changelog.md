@@ -3,6 +3,29 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: an error raised by a script loaded from another origin
+  without CORS now reaches `window.onerror` as "Script error." with no
+  file, position or error object, as HTML requires. Before, the page
+  that embedded the script received the full message, which exposed
+  fragments of cross-origin responses loaded as a script. The same
+  applies to scripts on `file:` pages, to redirects that end on another
+  origin, and to `importScripts()` in workers. A script with the
+  `crossorigin` attribute whose response passes the CORS check keeps
+  its full error details.
+* Security: Content-Security-Policy `style-src` now applies to inline
+  styles. A `<style>` element needs `'unsafe-inline'`, a matching nonce
+  or a matching hash; a `style` attribute needs `'unsafe-inline'`, or
+  `'unsafe-hashes'` with a matching hash. `style-src-attr` is honoured
+  on its own instead of being folded into `style-src`. Styles set from
+  script through `element.style`, `cssText` and constructable style
+  sheets are not affected.
+* `docs/security-review-report.md` reviews the source for security
+  vulnerabilities at commit `21339ac`, with a sanitizer build, two
+  fuzzers and about 200 web-policy probes run against the renderer. No
+  memory-corruption bug was found. Confirmed: script errors from
+  cross-origin scripts are not muted, CSP `style-src` is not applied to
+  inline styles, and `import()` of `data:`/`blob:` modules skips
+  `script-src`. The review changed no source file.
 * Windows: the browser follows the display scale setting at 125%, 150%
   and 175%. GTK on Windows scales widgets by whole factors only, so at
   those settings only the interface text grew; the tab strip, toolbar

@@ -13,6 +13,8 @@ typedef struct {
     GPtrArray *sources[NS_CSP_KIND_COUNT];
     gboolean   set[NS_CSP_KIND_COUNT];
     int        rank[NS_CSP_KIND_COUNT];
+    GPtrArray *style_base;
+    GPtrArray *style_attr;
     gboolean   upgrade_insecure_requests;
 } ns_csp_policy;
 
@@ -84,6 +86,17 @@ csp_normalize_source(const char *t)
     return out;
 }
 
+static GPtrArray *
+policy_source_list(char **toks)
+{
+    GPtrArray *list = g_ptr_array_new_with_free_func(g_free);
+    for (int j = 1; toks[j]; j++) {
+        char *t = g_strstrip(toks[j]);
+        if (*t) g_ptr_array_add(list, csp_normalize_source(t));
+    }
+    return list;
+}
+
 static ns_csp_policy *
 policy_parse(const char *policy_text)
 {
@@ -101,6 +114,15 @@ policy_parse(const char *policy_text)
         }
         int rank = 0;
         ns_csp_kind k = directive_kind(toks[0], &rank);
+        if (k == NS_CSP_STYLE && rank != NS_CSP_RANK_ELEM) {
+            GPtrArray **refined = rank == NS_CSP_RANK_ATTR ? &p->style_attr
+                                                           : &p->style_base;
+            if (!*refined) *refined = policy_source_list(toks);
+            if (rank == NS_CSP_RANK_ATTR) {
+                g_strfreev(toks);
+                continue;
+            }
+        }
         if (k == NS_CSP_KIND_COUNT || (p->set[k] && rank <= p->rank[k])) {
             g_strfreev(toks);
             continue;
@@ -126,6 +148,8 @@ policy_free(ns_csp_policy *p)
     if (!p) return;
     for (int i = 0; i < NS_CSP_KIND_COUNT; i++)
         if (p->sources[i]) g_ptr_array_free(p->sources[i], TRUE);
+    if (p->style_base) g_ptr_array_free(p->style_base, TRUE);
+    if (p->style_attr) g_ptr_array_free(p->style_attr, TRUE);
     g_free(p);
 }
 
@@ -518,6 +542,64 @@ policy_inline_event_handler_allowed(const ns_csp_policy *p)
     if (list_has_token(list, "'strict-dynamic'")) return FALSE;
     if (list_has_nonce_or_hash(list)) return FALSE;
     return list_has_token(list, "'unsafe-inline'");
+}
+
+static const GPtrArray *
+policy_inline_style_list(const ns_csp_policy *p, gboolean is_attribute,
+                         gboolean *restricted)
+{
+    *restricted = TRUE;
+    if (is_attribute && p->style_attr) return p->style_attr;
+    if (is_attribute && p->style_base) return p->style_base;
+    if (p->set[NS_CSP_STYLE]) return p->sources[NS_CSP_STYLE];
+    if (p->set[NS_CSP_DEFAULT]) return p->sources[NS_CSP_DEFAULT];
+    *restricted = FALSE;
+    return NULL;
+}
+
+static gboolean
+list_hash_matches(const GPtrArray *list, const char *body, gsize body_len)
+{
+    for (guint i = 0; body && i < list->len; i++)
+        if (hash_token_matches(g_ptr_array_index(list, i), body, body_len))
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+policy_inline_style_allowed(const ns_csp_policy *p, const char *body,
+                            gsize body_len, const char *nonce,
+                            gboolean is_attribute)
+{
+    gboolean restricted = FALSE;
+    const GPtrArray *list = policy_inline_style_list(p, is_attribute,
+                                                     &restricted);
+    if (!restricted) return TRUE;
+    if (!list) return FALSE;
+    if (!is_attribute && nonce && *nonce) {
+        g_autofree char *want = g_strdup_printf("'nonce-%s'", nonce);
+        if (list_has_token(list, want)) return TRUE;
+    }
+    if ((!is_attribute || list_has_token(list, "'unsafe-hashes'")) &&
+        list_hash_matches(list, body, body_len))
+        return TRUE;
+    if (list_has_nonce_or_hash(list)) return FALSE;
+    return list_has_token(list, "'unsafe-inline'");
+}
+
+gboolean
+ns_csp_inline_style_allowed(const ns_csp *csp, const char *body,
+                            gsize body_len, const char *nonce,
+                            gboolean is_attribute)
+{
+    if (!csp) return TRUE;
+    for (guint i = 0; i < csp->policies->len; i++) {
+        const ns_csp_policy *p = g_ptr_array_index(csp->policies, i);
+        if (!policy_inline_style_allowed(p, body, body_len, nonce,
+                                         is_attribute))
+            return FALSE;
+    }
+    return TRUE;
 }
 
 gboolean

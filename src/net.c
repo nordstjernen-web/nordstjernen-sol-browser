@@ -6709,6 +6709,34 @@ ns_net_csp_allows(const char *doc_url, ns_csp_kind kind, const char *url,
     return ok;
 }
 
+gboolean
+ns_net_csp_registered(void)
+{
+    g_mutex_lock(&g_csp_lock);
+    gboolean any = g_csp_by_origin && g_hash_table_size(g_csp_by_origin) > 0;
+    g_mutex_unlock(&g_csp_lock);
+    return any;
+}
+
+gboolean
+ns_net_csp_inline_style_allows(const char *doc_url, const char *body,
+                               gsize body_len, const char *nonce,
+                               gboolean is_attribute)
+{
+    if (!doc_url) return TRUE;
+    g_autofree char *origin = ns_url_origin_from(doc_url);
+    if (!origin || !*origin) return TRUE;
+    gboolean ok = TRUE;
+    g_mutex_lock(&g_csp_lock);
+    ns_net_csp_entry *e = g_csp_by_origin
+        ? g_hash_table_lookup(g_csp_by_origin, origin) : NULL;
+    if (e)
+        ok = ns_csp_inline_style_allowed(e->csp, body, body_len, nonce,
+                                         is_attribute);
+    g_mutex_unlock(&g_csp_lock);
+    return ok;
+}
+
 typedef struct {
     gconstpointer      owner;
     ns_conn_allowlist *list;
