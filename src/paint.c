@@ -85,7 +85,9 @@ static cairo_surface_t *svg_raster_cached(ns_texture *tex, GBytes *svg,
                                           double vw, double vh, int pw, int ph,
                                           const char *filter_kw);
 static gboolean svg_raster_size(cairo_t *cr, double vw, double vh, int iw,
-                                int ih, int *out_pw, int *out_ph);
+                                int ih, gboolean always, int *out_pw,
+                                int *out_ph);
+static gboolean svg_source_animated(ns_texture *tex, GBytes *svg);
 
 static void ns_paint_font_metrics(const char *family, double size_px,
                                   int weight, gboolean italic,
@@ -1348,7 +1350,10 @@ paint_bg_image_core(cairo_t *cr, ns_image *img,
     }
     int pw = 0, ph = 0;
     cairo_surface_t *surf =
-        img->svg_source && svg_raster_size(cr, draw_w, draw_h, iw, ih, &pw, &ph)
+        img->svg_source &&
+        svg_raster_size(cr, draw_w, draw_h, iw, ih,
+                        svg_source_animated(img->texture, img->svg_source),
+                        &pw, &ph)
         ? svg_raster_cached(img->texture, img->svg_source, draw_w, draw_h,
                             pw, ph, NULL)
         : NULL;
@@ -7709,6 +7714,8 @@ typedef struct {
     guint            svg_clock;
     ns_svg_doc      *svg_doc;
     gboolean         svg_doc_failed;
+    gboolean         svg_scanned;
+    gboolean         svg_animated;
 } texture_surfaces;
 
 static gint64 g_svg_image_clock_us;
@@ -7980,8 +7987,22 @@ svg_raster_cached(ns_texture *tex, GBytes *svg, double vw, double vh,
 }
 
 static gboolean
+svg_source_animated(ns_texture *tex, GBytes *svg)
+{
+    texture_surfaces *ts = texture_surfaces_for(tex);
+    if (!ts->svg_scanned) {
+        gsize len = 0;
+        const char *data = g_bytes_get_data(svg, &len);
+        ts->svg_scanned = TRUE;
+        ts->svg_animated = data && (g_strstr_len(data, (gssize)len, "<animate") ||
+                                    g_strstr_len(data, (gssize)len, "<set"));
+    }
+    return ts->svg_animated;
+}
+
+static gboolean
 svg_raster_size(cairo_t *cr, double vw, double vh, int iw, int ih,
-                int *out_pw, int *out_ph)
+                gboolean always, int *out_pw, int *out_ph)
 {
     double ax = vw, ay = 0, bx = 0, by = vh;
     cairo_user_to_device_distance(cr, &ax, &ay);
@@ -7990,7 +8011,7 @@ svg_raster_size(cairo_t *cr, double vw, double vh, int iw, int ih,
     if (!(pw >= 1) || !(ph >= 1)) return FALSE;
     gboolean upscaled = ceil(pw - 0.01) > iw || ceil(ph - 0.01) > ih;
     gboolean reshaped = fabs(vw * ih - vh * iw) > 0.01 * vw * ih;
-    if (!upscaled && !reshaped) return FALSE;
+    if (!upscaled && !reshaped && !always) return FALSE;
     double scale = MAX(pw / vw, ph / vh);
     double step = pow(2.0, ceil(log2(scale) * SVG_RASTER_STEPS - 1e-6) /
                            SVG_RASTER_STEPS);
@@ -8036,7 +8057,8 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex, GBytes *svg)
     double vw = iw * sx, vh = ih * sy;
     int pw = 0, ph = 0;
     cairo_surface_t *vector =
-        svg && svg_raster_size(cr, vw, vh, iw, ih, &pw, &ph)
+        svg && svg_raster_size(cr, vw, vh, iw, ih,
+                               svg_source_animated(tex, svg), &pw, &ph)
         ? svg_raster_cached(tex, svg, vw, vh, pw, ph, surface_filter) : NULL;
     cairo_translate(cr, cx + ox, cy + oy);
     if (vector) {
