@@ -127,6 +127,14 @@ void     ns_proc_view_download_start(NsProcView *view, const char *url,
 void     ns_proc_view_hold_event(NsProcView *view, ns_capability kind,
                                  NsProcEvent event, const char *text,
                                  const char *origin);
+
+typedef enum {
+    NS_PROC_DOWNLOAD_PASS,
+    NS_PROC_DOWNLOAD_ASK,
+    NS_PROC_DOWNLOAD_DROP,
+} NsProcDownloadGate;
+
+NsProcDownloadGate ns_proc_view_download_gate(NsProcView *view);
 void     ns_proc_view_download_poll(NsProcView *view, long id,
                                     NsProcViewTextFn cb, gpointer user_data);
 void     ns_proc_view_remote_console(NsProcView *view, NsProcViewTextFn cb,

@@ -301,6 +301,9 @@ struct NsProcView {
     char       *held_text;
     NsProcEvent held_event;
     ns_perm_kind held_kind;
+    gboolean    download_credit;
+    gboolean    download_granted;
+    gboolean    download_declined;
     guint       perm_listener;
     char       *capability_deferred[NS_CAP_COUNT];
 
@@ -2951,6 +2954,13 @@ pv_follow_same_document_state(NsProcView *v, const char *url, gboolean pushed,
 }
 
 static void pv_perm_resolve(NsProcView *v, gboolean allow);
+
+static void
+pv_note_user_action(NsProcView *v)
+{
+    v->download_credit = TRUE;
+    v->download_declined = FALSE;
+}
 static void pv_perm_bar_show(NsProcView *v, ns_perm_kind kind, const char *origin);
 
 static gboolean
@@ -3024,6 +3034,7 @@ do_load_full(NsProcView *v, const char *url, gboolean record,
         v->restore_scroll_x = v->restore_scroll_y = 0;
     }
     pv_perm_resolve(v, FALSE);
+    if (user_activated) pv_note_user_action(v);
     pv_audio_shutdown(v);
     drop_stale_requests(v);
     v->pending_record = record;
@@ -3517,6 +3528,10 @@ pv_perm_resolve(NsProcView *v, gboolean allow)
     if (v->perm_revealer)
         gtk_revealer_set_reveal_child(GTK_REVEALER(v->perm_revealer), FALSE);
     if (v->area) gtk_widget_grab_focus(v->area);
+    if (kind == NS_CAP_DOWNLOADS) {
+        v->download_granted = allow;
+        v->download_declined = !allow;
+    }
     if (allow) {
         ns_perm_set(origin, kind, NS_PERM_ALLOW);
         pv_capture_upgrade(v, kind, NS_PERM_ALLOW, origin);
@@ -3525,6 +3540,19 @@ pv_perm_resolve(NsProcView *v, gboolean allow)
     }
     pv_release_held(v, kind, allow);
     g_free(origin);
+}
+
+NsProcDownloadGate
+ns_proc_view_download_gate(NsProcView *v)
+{
+    if (!v || v->closed) return NS_PROC_DOWNLOAD_DROP;
+    if (v->download_granted) return NS_PROC_DOWNLOAD_PASS;
+    if (v->download_credit) {
+        v->download_credit = FALSE;
+        return NS_PROC_DOWNLOAD_PASS;
+    }
+    return v->download_declined ? NS_PROC_DOWNLOAD_DROP
+                                : NS_PROC_DOWNLOAD_ASK;
 }
 
 void
@@ -3805,6 +3833,8 @@ on_result(gpointer data)
         }
         v->js_redirects = 0;
         ns_webauthn_cancel_all(v->webauthn);
+        if (!ns_proc_url_same_origin(v->current_url, res->url))
+            v->download_granted = FALSE;
         g_free(v->current_url);
         v->current_url = g_strdup(res->url);
         g_clear_pointer(&v->pending_url, g_free);
@@ -4906,6 +4936,7 @@ on_secondary_pressed(GtkGestureClick *gesture, int n_press, double x, double y,
     NsProcView *v = data;
     if (!v->opened)
         return;
+    pv_note_user_action(v);
     gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
     if (ns_pointer_lock_active(v->plock)) {
         int lx = 0, ly = 0;
@@ -5010,6 +5041,7 @@ on_pressed(GtkGestureClick *gesture, int n_press, double x, double y,
     NsProcView *v = data;
     if (!v->opened)
         return;
+    pv_note_user_action(v);
     GdkModifierType mods =
         gtk_event_controller_get_current_event_state(
             GTK_EVENT_CONTROLLER(gesture));
@@ -5173,6 +5205,7 @@ on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
     NsProcView *v = data;
     if (!v->opened)
         return FALSE;
+    pv_note_user_action(v);
     if (keyval == GDK_KEY_Escape)
         pv_release_pointer_lock(v);
     if (keyval == GDK_KEY_F12) {
@@ -6006,6 +6039,7 @@ ns_proc_view_remote_click(NsProcView *v, double x, double y,
 {
     if (!v || v->closed || !v->opened)
         return FALSE;
+    pv_note_user_action(v);
     int px, py;
     remote_to_page(v, x, y, page_coords, &px, &py);
     double s = cur_scale(v);

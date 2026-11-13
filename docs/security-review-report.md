@@ -343,8 +343,8 @@ rendering paths, and everything specific to macOS and Windows.
 
 | # | Finding | Attacker | Severity | Status |
 |---|---------|----------|----------|--------|
-| G1 | Downloads start with no user gesture and no prompt, without limit | any web page | medium | confirmed |
-| G2 | Download names may start with a dot | any web page | medium where the download folder is `$HOME`, else low | confirmed |
+| G1 | Downloads start with no user gesture and no prompt, without limit | any web page | medium | fixed after this review |
+| G2 | Download names may start with a dot | any web page | medium where the download folder is `$HOME`, else low | fixed after this review |
 | G3 | Two downloads of the same name in flight overwrite each other | any web page | low | by reading |
 | G4 | The program-file warning does not cover local active content (`.html`, `.svg`) | any web page | low | by reading |
 | G5 | Renderer-supplied numbers converted without range checks; request JSON built with unchecked `snprintf` chaining | compromised renderer | low (hardening) | by reading |
@@ -459,9 +459,7 @@ By reading:
 ## 6. Suggested order of work
 
 1. F1 and F2 — done.
-2. G1 and G2 — a gesture and rate limit for downloads, and no leading dots
-   in download names. Small, and the only findings a plain web page can
-   use against the user's files.
+2. G1 and G2 — done.
 3. F3 and F4 — two one-line policy checks.
 4. F5 — one more scheme in the navigation deny-list.
 5. F6 — refuse wasm buffers in the transfer list.

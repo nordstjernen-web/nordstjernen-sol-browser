@@ -1411,6 +1411,7 @@ download_sanitize_name(const char *raw)
     gsize lead = 0;
     while (out->str[lead] == ' ') lead++;
     if (lead) g_string_erase(out, 0, (gssize)lead);
+    for (gsize i = 0; out->str[i] == '.'; i++) out->str[i] = '_';
     if (out->len > 200) {
         const char *end = out->str + 200;
         while (end > out->str && (*end & 0xc0) == 0x80) end--;
@@ -2016,7 +2017,12 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
             ns_perm_state allowed = origin && *origin
                 ? ns_perm_get(origin, NS_CAP_DOWNLOADS) : NS_PERM_ALLOW;
             if (allowed == NS_PERM_DENY) break;
-            if (allowed == NS_PERM_ASK) {
+            NsProcDownloadGate gate = allowed == NS_PERM_ASK
+                ? NS_PROC_DOWNLOAD_ASK : ns_proc_view_download_gate(v);
+            if (gate == NS_PROC_DOWNLOAD_DROP ||
+                (gate == NS_PROC_DOWNLOAD_ASK && !(origin && *origin)))
+                break;
+            if (gate == NS_PROC_DOWNLOAD_ASK) {
                 ns_proc_view_hold_event(v, NS_CAP_DOWNLOADS,
                                         NS_PROC_EVT_DOWNLOAD, text, origin);
                 break;
