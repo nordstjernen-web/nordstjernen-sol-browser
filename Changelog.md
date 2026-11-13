@@ -3,6 +3,13 @@ Changelog:
 
 1.0.47-dev:
 ======
+* `docs/security-review-report.md` reviews the source for security
+  vulnerabilities at commit `21339ac`, with a sanitizer build, two
+  fuzzers and about 200 web-policy probes run against the renderer. No
+  memory-corruption bug was found. Confirmed: script errors from
+  cross-origin scripts are not muted, CSP `style-src` is not applied to
+  inline styles, and `import()` of `data:`/`blob:` modules skips
+  `script-src`. The review changed no source file.
 * Windows: the browser follows the display scale setting at 125%, 150%
   and 175%. GTK on Windows scales widgets by whole factors only, so at
   those settings only the interface text grew; the tab strip, toolbar
