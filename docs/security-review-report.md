@@ -317,12 +317,151 @@ Each line was exercised against the built renderer unless marked *(read)*.
   shell forwards only `open`/`reload` audio commands whose path is inside
   the audio cache, with the same tokenisation the helper uses.
 
-## 5. Suggested order of work
+## 5. GTK shell review
 
-1. F1 — mute cross-origin script errors. Small, and the only finding that
-   reads another site's data.
-2. F2 — inline `style-src`. Medium; needs nonce and hash plumbing for
-   styles.
+A second pass looked at the GTK shell alone: what a web page can make it
+do, and how it treats what a renderer tells it.
+
+### Method
+
+The shell was built with ASan + UBSan in the same scratch tree and run on a
+virtual X display (Xvfb, Cairo renderer, isolated `$HOME`), driven with
+synthetic mouse and keyboard input and inspected through screenshots. It ran
+as root with `NS_NO_SANDBOX=1`, so Landlock and seccomp were not in force.
+No ASan report was produced in any shell run. Read by hand: the result
+handler and side-channel consumers in `src/gtk/procview.c`, downloads,
+popups, the settings relay and event handlers in `src/gtk/procwindow.c`, the
+reply parsers in `src/rproc_http.c`, `src/gtk/rjson.c`, texture creation in
+`src/gtk/pagelayers.c`, the remote-control start path, and the generated
+history page.
+
+Not covered: WebAuthn, printing, drag and drop, context-menu actions, the
+MCP and remote-control servers at runtime, session-restore parsing, GPU
+rendering paths, and everything specific to macOS and Windows.
+
+### Findings
+
+| # | Finding | Attacker | Severity | Status |
+|---|---------|----------|----------|--------|
+| G1 | Downloads start with no user gesture and no prompt, without limit | any web page | medium | confirmed |
+| G2 | Download names may start with a dot | any web page | medium where the download folder is `$HOME`, else low | confirmed |
+| G3 | Two downloads of the same name in flight overwrite each other | any web page | low | by reading |
+| G4 | The program-file warning does not cover local active content (`.html`, `.svg`) | any web page | low | by reading |
+| G5 | Renderer-supplied numbers converted without range checks; request JSON built with unchecked `snprintf` chaining | compromised renderer | low (hardening) | by reading |
+| G6 | The shell still takes a tab's URL from the renderer | compromised renderer | high (unchanged S1) | by reading |
+| G7 | Remote control still starts from a configuration-file change | compromised renderer on macOS/Windows | high there (unchanged S3) | by reading |
+
+**G1. Downloads need no gesture.** An anchor with a `download` attribute is
+honoured from a synthetic `click()` (`src/js.c:51022-51026`), and the shell
+starts a download for every `X-Download` offer when the site's `downloads`
+permission is at its default, `allow` (`src/gtk/procwindow.c:2012-2033`).
+Confirmed: a page with a timer saved twelve files into the download folder
+in eight seconds with no interaction; the only visible effect is that the
+Downloads window opens. Other browsers allow one automatic download per page
+and ask before the next.
+
+Fix: carry the user-activation bit with the offer, as navigation already
+does (`X-ND-User-Activated`); let one offer per page load through without a
+gesture and move the site to `ask` for further ones. As the shell cannot
+trust that bit from a compromised renderer, also rate-limit offers per tab
+in the shell.
+
+**G2. Hidden file names.** `download_sanitize_name`
+(`src/gtk/procwindow.c:1392-1427`) strips path separators, control and bidi
+characters, trailing dots and Windows device names, but keeps a leading dot.
+Confirmed: the page above saved `.bash_aliases` into the download folder
+silently. In the default `~/Downloads` that is only a hidden file. Where the
+download folder is the home directory itself, a name such as
+`.bash_aliases` or `.xprofile` that does not exist yet becomes a file the
+user's shell or session runs — code execution from visiting a page, when
+combined with G1.
+
+Fix: replace leading dots with `_`, as other browsers do.
+
+**G3. Name chosen at start, file moved at the end.** `pw_start_download`
+picks a free name with `g_file_test` (`procwindow.c:1604-1611`) and the file
+is renamed into place when the transfer finishes (`download_move_posix`,
+`:1210-1244`), replacing whatever is there. Two downloads of the same name
+started before either finishes get the same path, and the second replaces
+the first. Sequential downloads were confirmed to get `name.1`.
+
+Fix: reserve the name when the download starts (create it with `O_EXCL`),
+or re-check with `renameat2(RENAME_NOREPLACE)` at the end.
+
+**G4. Warning list.** `download_name_is_executable` is a deny-list of about
+120 extensions. It covers programs and installers but not documents that
+run script with local-file privileges when opened from the Downloads
+window's Open button: `.html`, `.htm`, `.xhtml`, `.svg`. With F1 fixed such
+a page can no longer read its neighbours through script errors, so this is
+low; it is listed because a deny-list will keep missing types.
+
+**G5. Unchecked conversions and string building.**
+`on_download_polled` casts the renderer's `bytes` and `total` doubles to
+`guint64`/`gint64` (`procwindow.c:1300-1311`), which is undefined for NaN or
+negative values. `render_request_json` (`src/rproc_http.c:763-794`) appends
+to a 320-byte stack buffer with `jn += snprintf(json + jn, cap - jn, …)`
+and never checks `jn` against `cap`; with every integer at its longest the
+text is about 316 bytes, so it fits today by four bytes, and one more field
+would make `cap - jn` wrap. Clamp the doubles and build the request with a
+bounded appender.
+
+**G6 and G7** are S1 and S3 of the earlier report and are unchanged:
+`on_result` stores `res->url` from the renderer as the tab's URL
+(`src/gtk/procview.c:3808-3809`), and that value still decides the
+`history_clear` gate (`:3738`), the origin used for permission and download
+decisions, and the URL bar; `rc_on_config_changed`
+(`src/gtk/remotectl.c:1010-1028`) still starts the remote-control server
+when the configuration file changes on disk. In addition, any renderer can
+raise the "Apply these security-related settings?" dialog at any time,
+whatever page it shows (`procview.c:3859-3860`); the dialog is correctly
+default-cancel, so this is a nuisance rather than a bypass.
+
+### Checked and found sound
+
+Observed in the running shell:
+
+- **URL bar.** User information is stripped (`http://user:pass@host/` shows
+  the host only), percent-escapes are not decoded (an encoded right-to-left
+  override stays as `%E2%80%AE`), and IDN hosts are shown as punycode. A
+  page-initiated navigation does not change the bar until it commits.
+- **Popups.** Blocked without a click; one click opens one tab however many
+  `window.open` calls it makes. A cross-origin popup sees a non-null
+  `opener` but can neither read it nor navigate it.
+- **Dialogs.** `alert`, `confirm` and `prompt` draw no browser UI at all
+  (`prompt` returns `null`), so a page cannot imitate a browser or
+  cross-site dialog with them.
+- **Fullscreen.** Refused without a click; on entry a notice names the host
+  and Esc leaves.
+- **Clipboard.** Writing needs a click; reading is denied.
+- **Permissions.** The camera prompt names the page's origin. (By reading:
+  a request for any origin other than the tab's is refused by the shell.)
+- **Program downloads.** `setup.exe` raised "Save this program file?" with
+  Cancel as the default.
+- **Profile.** Directories are `0700` and files `0600`; private tabs are not
+  written to the session store.
+
+By reading:
+
+- Frame, tile, favicon and layer geometry from the renderer is range-checked
+  against the shared-memory size before any pixel is read
+  (`src/rproc_http.c:827-846`, `:2210-2216`, `src/gtk/pagelayers.c:133-146`).
+- The JSON parser used on renderer data has a depth limit of 64.
+- A finished download is moved only if it is a regular file directly inside
+  the staging directory, opened with `O_NOFOLLOW` and re-checked by inode.
+- Renderer-requested settings pass an allow-list of fifteen keys and all
+  but one of those (`images_enabled`) prompt; cross-window `call` and `post` relays check the
+  claimed origin against the sender's tab and are re-checked by the
+  receiving renderer.
+- The shell launches no external program for a page; only the Open button of
+  a finished download does. Titles and URLs are escaped in the generated
+  history and start pages.
+
+## 6. Suggested order of work
+
+1. F1 and F2 — done.
+2. G1 and G2 — a gesture and rate limit for downloads, and no leading dots
+   in download names. Small, and the only findings a plain web page can
+   use against the user's files.
 3. F3 and F4 — two one-line policy checks.
 4. F5 — one more scheme in the navigation deny-list.
 5. F6 — refuse wasm buffers in the transfer list.

@@ -3,6 +3,11 @@ Changelog:
 
 1.0.47-dev:
 ======
+* `docs/security-review-report.md` gains a review of the GTK shell,
+  run under sanitizers on a virtual display. It confirms that a page
+  can start downloads with no click and no prompt, and that download
+  names may begin with a dot; the URL bar, popups, script dialogs,
+  fullscreen, clipboard and permission prompts held up.
 * Security: an error raised by a script loaded from another origin
   without CORS now reaches `window.onerror` as "Script error." with no
   file, position or error object, as HTML requires. Before, the page
