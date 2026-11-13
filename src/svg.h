@@ -65,6 +65,11 @@ void ns_svg_render_node(cairo_t          *cr,
                         GHashTable       *styles,
                         const struct ns_style *inherited);
 
+const ns_node *ns_svg_hit_node(const ns_node *svg, double width, double height,
+                               GHashTable *styles,
+                               const struct ns_style *inherited,
+                               double x, double y);
+
 gboolean ns_svg_node_geometry(const ns_node *svg, const ns_node *target,
                               double width, double height,
                               GHashTable *styles,
@@ -80,6 +85,8 @@ typedef struct ns_svg_doc ns_svg_doc;
 ns_svg_doc *ns_svg_doc_parse(const guchar *data, gsize len);
 gboolean    ns_svg_doc_render(cairo_t *cr, ns_svg_doc *doc,
                               double width, double height);
+gboolean    ns_svg_doc_tick(ns_svg_doc *doc, gint64 now_us);
+gboolean    ns_svg_doc_animating(const ns_svg_doc *doc);
 void        ns_svg_doc_free(ns_svg_doc *doc);
 
 gboolean ns_svg_render_bytes(cairo_t *cr, const guchar *data, gsize len,
