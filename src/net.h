@@ -134,6 +134,10 @@ gboolean ns_net_connection_allowlist_allows(const char *doc_url,
 gboolean ns_net_csp_allows(const char *doc_url, ns_csp_kind kind,
                            const char *url, const char *nonce,
                            gboolean parser_inserted);
+gboolean ns_net_csp_registered(void);
+gboolean ns_net_csp_inline_style_allows(const char *doc_url, const char *body,
+                                        gsize body_len, const char *nonce,
+                                        gboolean is_attribute);
 gboolean ns_net_blob_url_visible_to(const char *blob_url, const char *doc_url);
 
 void ns_net_fetch_async(const char        *url,

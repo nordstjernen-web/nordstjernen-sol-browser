@@ -332,6 +332,9 @@ static void ns_media_run_load_algorithm(JSContext *ctx, JSValueConst this_val,
 static gboolean ns_js_report_error_event(ns_js *js, const char *message,
                                          const char *filename, int lineno,
                                          int colno, JSValueConst error);
+static void ns_js_mute_script_errors(ns_js *js, const char *script_url);
+static gboolean ns_js_exception_is_muted(ns_js *js, JSContext *ctx,
+                                         JSValueConst ex, const char *filename);
 static gboolean ns_js_report_exception_at(ns_js *js, JSValueConst ex,
                                           const char *filename, int lineno,
                                           int colno);
@@ -3494,7 +3497,7 @@ ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
         if (end && *end == '\0' && idx >= 0) {
             JS_FreeCString(ctx, name);
             const GPtrArray *names =
-                ns_inline_style_names(ns_element_get_attr(n, "style"));
+                ns_inline_style_names(ns_element_inline_style(n));
             if ((gulong)idx >= names->len) return 0;
             if (desc) {
                 desc->flags = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
@@ -3515,7 +3518,7 @@ ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
         g_free(css);
         return 0;
     }
-    const char *style = ns_element_get_attr(n, "style");
+    const char *style = ns_element_inline_style(n);
     char *val = ns_inline_style_get(style, css);
     if (val) ns_inline_value_strip_important(val);
     char *canon = val && !(css[0] == '-' && css[1] == '-')
@@ -3538,8 +3541,17 @@ ns_style_get_length(JSContext *ctx, JSValueConst this_val)
     ns_node *n = ns_style_node(this_val);
     if (!n) return JS_NewInt32(ctx, 0);
     const GPtrArray *names =
-        ns_inline_style_names(ns_element_get_attr(n, "style"));
+        ns_inline_style_names(ns_element_inline_style(n));
     return JS_NewInt32(ctx, (int32_t)names->len);
+}
+
+static void
+ns_style_attr_write(ns_js *js, ns_node *n, const char *text)
+{
+    if (js) js->cssom_style_write++;
+    ns_js_set_attr_recorded(js, n, "style", text);
+    if (js) js->cssom_style_write--;
+    n->flags |= NS_NODE_STYLE_ATTR_TRUSTED;
 }
 
 static void
@@ -3547,7 +3559,7 @@ ns_style_attr_update(ns_js *js, ns_node *n, const char *old,
                      const char *new_style)
 {
     if (old ? strcmp(old, new_style) == 0 : !*new_style) return;
-    ns_js_set_attr_recorded(js, n, "style", new_style);
+    ns_style_attr_write(js, n, new_style);
 }
 
 static int
@@ -3567,7 +3579,7 @@ ns_style_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
         JS_FreeCString(ctx, name);
         const char *s = JS_ToCString(ctx, val);
         if (s) {
-            ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", s);
+            ns_style_attr_write(js_from_ctx(ctx), n, s);
             JS_FreeCString(ctx, s);
         }
         return TRUE;
@@ -3581,7 +3593,7 @@ ns_style_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
         JS_FreeCString(ctx, vstr);
         return TRUE;
     }
-    const char *old = ns_element_get_attr(n, "style");
+    const char *old = ns_element_inline_style(n);
     char *new_style = ns_inline_style_set(old, css, vstr ? vstr : "");
     ns_style_attr_update(js_from_ctx(ctx), n, old, new_style);
     g_free(new_style);
@@ -4976,7 +4988,7 @@ ns_style_get_cssText(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *n = ns_style_node(this_val);
     if (!n) return JS_NewString(ctx, "");
-    char *s = ns_inline_style_serialize(ns_element_get_attr(n, "style"));
+    char *s = ns_inline_style_serialize(ns_element_inline_style(n));
     JSValue result = JS_NewString(ctx, s);
     g_free(s);
     return result;
@@ -4989,7 +5001,7 @@ ns_style_set_cssText(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     if (!n) return JS_UNDEFINED;
     const char *s = JS_ToCString(ctx, val);
     if (s) {
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", s);
+        ns_style_attr_write(js_from_ctx(ctx), n, s);
         JS_FreeCString(ctx, s);
     }
     return JS_UNDEFINED;
@@ -5003,7 +5015,7 @@ ns_style_getPropertyValue(JSContext *ctx, JSValueConst this_val,
     if (!n || argc < 1) return JS_NewString(ctx, "");
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NewString(ctx, "");
-    const char *style = ns_element_get_attr(n, "style");
+    const char *style = ns_element_inline_style(n);
     char *val = ns_inline_style_get(style, name);
     if (val) ns_inline_value_strip_important(val);
     char *canon = val && !(name[0] == '-' && name[1] == '-')
@@ -5033,7 +5045,7 @@ ns_style_setProperty(JSContext *ctx, JSValueConst this_val,
     gboolean priority_valid = !priority || !*priority || important;
     if (name && (!value || !*value || priority_valid) &&
         (!value || !*value || ns_css_named_declaration_valid(css_name, value))) {
-        const char *old = ns_element_get_attr(n, "style");
+        const char *old = ns_element_inline_style(n);
         char *stored = (value && *value && important)
                        ? g_strconcat(value, " !important", NULL)
                        : g_strdup(value ? value : "");
@@ -5057,7 +5069,7 @@ ns_style_removeProperty(JSContext *ctx, JSValueConst this_val,
     if (!n || argc < 1) return JS_NewString(ctx, "");
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NewString(ctx, "");
-    const char *style = ns_element_get_attr(n, "style");
+    const char *style = ns_element_inline_style(n);
     char *old_val = ns_inline_style_get(style, name);
     char *new_style = ns_inline_style_set(style, name, "");
     ns_style_attr_update(js_from_ctx(ctx), n, style, new_style);
@@ -5097,7 +5109,7 @@ ns_style_getPropertyPriority(JSContext *ctx, JSValueConst this_val,
     if (!n || argc < 1) return JS_NewString(ctx, "");
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NewString(ctx, "");
-    const char *style = ns_element_get_attr(n, "style");
+    const char *style = ns_element_inline_style(n);
     char *val = ns_inline_style_get(style, name);
     JS_FreeCString(ctx, name);
     gboolean important = val ? ns_inline_value_strip_important(val) : FALSE;
@@ -8459,7 +8471,13 @@ ns_element_put_forwards_attr(JSContext *ctx, JSValueConst this_val,
 static JSValue
 ns_element_set_style(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
-    return ns_element_put_forwards_attr(ctx, this_val, val, "style");
+    ns_node *n = ns_unwrap_element_mut(this_val);
+    if (!n) return JS_UNDEFINED;
+    const char *s = JS_ToCString(ctx, val);
+    if (!s) return JS_EXCEPTION;
+    ns_style_attr_write(js_from_ctx(ctx), n, s);
+    JS_FreeCString(ctx, s);
+    return JS_UNDEFINED;
 }
 
 static JSValue
@@ -17672,6 +17690,18 @@ ns_window_matchMedia(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_window_nd_adopt_style_element(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1 || !JS_IsHostAccess(ctx)) return JS_UNDEFINED;
+    ns_node *style = ns_unwrap_element_mut(argv[0]);
+    if (style && ns_node_is_element_named(style, "style"))
+        style->flags |= NS_NODE_STYLE_ATTR_TRUSTED;
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_window_nd_adopt_css(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
@@ -19542,7 +19572,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         if (needs_layout) ns_js_flush_layout(js);
         else ns_js_flush_style(js);
     }
-    const char *style = ns_element_get_attr(n, "style");
+    const char *style = ns_element_inline_style(n);
     const struct ns_box *lbox = (needs_layout && js && js->layout_root)
         ? ns_box_find_by_dom(js->layout_root, n) : NULL;
     const ns_style *computed = (js && js->style_table)
@@ -29426,13 +29456,20 @@ ns_worker_report_exception(ns_js *js, JSValueConst ex)
     if (!host || !js->ctx || js->in_error_report) return FALSE;
     JSContext *ctx = js->ctx;
     js->in_error_report = 1;
-    char *raw = ns_js_exception_message(ctx, ex);
-    char *message = g_strdup_printf("Uncaught %s", raw);
+    gboolean muted = ns_js_exception_is_muted(js, ctx, ex, NULL);
+    char *raw = muted ? NULL : ns_js_exception_message(ctx, ex);
+    char *message = muted ? g_strdup("Script error.")
+                          : g_strdup_printf("Uncaught %s", raw);
     g_free(raw);
     char *file = NULL;
     int line = 0, col = 0;
-    ns_js_exception_position(ctx, ex, &file, &line, &col);
-    if (!file || !*file) {
+    if (muted) {
+        file = g_strdup("");
+        ex = JS_NULL;
+    } else {
+        ns_js_exception_position(ctx, ex, &file, &line, &col);
+    }
+    if (!muted && (!file || !*file)) {
         g_free(file);
         file = g_strdup(js->current_url ? js->current_url : host->url);
     }
@@ -29767,8 +29804,11 @@ ns_worker_import_scripts(JSContext *ctx, JSValueConst this_val,
             g_free(error);
             return ret;
         }
+        gboolean muted = host->opaque_origin || !final_url ||
+                         !ns_url_same_origin(host->url, final_url);
         char *prev_url = js->current_url;
         js->current_url = g_strdup(final_url ? final_url : host->url);
+        if (muted) ns_js_mute_script_errors(js, js->current_url);
         gboolean ok = ns_worker_eval_script(js, body, strlen(body),
                                             js->current_url, &error, NULL);
         g_free(js->current_url);
@@ -29776,8 +29816,11 @@ ns_worker_import_scripts(JSContext *ctx, JSValueConst this_val,
         g_free(final_url);
         g_free(body);
         if (!ok) {
-            JSValue ret = JS_ThrowTypeError(ctx, "importScripts: %s",
-                                            error ? error : "evaluation failed");
+            JSValue ret = muted
+                ? ns_throw_dom_exception(ctx, "NetworkError", 19,
+                      "importScripts: a cross-origin script failed")
+                : JS_ThrowTypeError(ctx, "importScripts: %s",
+                                    error ? error : "evaluation failed");
             g_free(error);
             return ret;
         }
@@ -30572,6 +30615,7 @@ ns_js_add_engine_private_names(JSContext *ctx)
                                          "__ndRealmProtos",
                                          "__ndPlatformFns",
                                          "__ndAdoptCss",
+                                         "__ndAdoptStyleElement",
                                          "__ndCrossWindowMaker",
                                          "__nsPostMessageTo",
                                          "__nsPostMessageThis",
@@ -32647,6 +32691,11 @@ ns_js_set_attr_recorded_len(ns_js *js, ns_node *n, const char *name,
     gboolean changed = !(old && old_len == vlen &&
                          memcmp(old, new_value, vlen) == 0);
     char *old_copy = old ? ns_value_dup_len(old, old_len) : NULL;
+    if (g_ascii_strcasecmp(name, "style") == 0 &&
+        !ns_node_is_element_named(n, "style")) {
+        if (js && js->cssom_style_write) n->flags |= NS_NODE_STYLE_ATTR_TRUSTED;
+        else n->flags &= ~NS_NODE_STYLE_ATTR_TRUSTED;
+    }
     ns_element_set_attr_len(n, name, new_value, (gssize)vlen);
     if (js) {
         if (changed) {
@@ -40328,6 +40377,9 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         gboolean img_src_paint_only =
             changed && g_ascii_strcasecmp(name, "src") == 0 &&
             ns_js_img_src_layout_neutral(n);
+        if (g_ascii_strcasecmp(name, "style") == 0 &&
+            !ns_node_is_element_named(n, "style"))
+            n->flags &= ~NS_NODE_STYLE_ATTR_TRUSTED;
         if (changed) {
             ns_element_set_attr_len(n, name, val, (gssize)val_len);
         }
@@ -61031,7 +61083,7 @@ ns_view_transition_show(JSContext *ctx, JSValueConst this_val,
         snapshot, g_ascii_formatd(number, sizeof number, "%.0f", duration_ms));
     JS_FreeCString(ctx, snapshot);
     ns_node *overlay = ns_node_new_element(g_strdup("nd-view-transition"));
-    overlay->flags |= NS_NODE_UA_OVERLAY;
+    overlay->flags |= NS_NODE_UA_OVERLAY | NS_NODE_STYLE_ATTR_TRUSTED;
     ns_element_set_attr(overlay, "style", style);
     ns_node_append_child(root, overlay);
     js->view_transition_overlay = overlay;
@@ -63688,6 +63740,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "matchMedia",            ns_window_matchMedia,             1);
     ns_bind_fn(ctx, global, "__ndMediaListSerialize", ns_window_nd_media_serialize,    1);
     ns_bind_fn(ctx, global, "__ndAdoptCss",          ns_window_nd_adopt_css,           2);
+    ns_bind_fn(ctx, global, "__ndAdoptStyleElement", ns_window_nd_adopt_style_element, 1);
     ns_bind_fn(ctx, global, "getComputedStyle",      ns_window_getComputedStyle,       1);
     JS_DefinePropertyValueStr(ctx, global, "__ns_css_supported",
         JS_NewCFunction(ctx, ns_css_supported_property, "__ns_css_supported", 1),
@@ -67796,6 +67849,7 @@ ns_js_reset_runtime_state(ns_js *js)
         g_hash_table_remove_all(js->realm_doc_origins);
     if (js->frame_referrers)
         g_hash_table_remove_all(js->frame_referrers);
+    g_clear_pointer(&js->muted_error_scripts, g_hash_table_destroy);
     ns_js_drop_pending_rejections(js);
     ns_js_drop_realm_helpers(js);
     ns_js_drop_remote_helper(js);
@@ -68853,6 +68907,7 @@ ns_js_free(ns_js *js)
         g_hash_table_destroy(js->frame_referrers);
         js->frame_referrers = NULL;
     }
+    g_clear_pointer(&js->muted_error_scripts, g_hash_table_destroy);
     ns_js_drop_pending_rejections(js);
     ns_js_drop_realm_helpers(js);
     ns_js_drop_remote_helper(js);
@@ -68998,6 +69053,9 @@ ns_js_report_exception_at(ns_js *js, JSValueConst ex, const char *filename,
 {
     if (!js || !js->ctx || js->in_error_report) return FALSE;
     if (js->worker_host) return ns_worker_report_exception(js, ex);
+    if (ns_js_exception_is_muted(js, js->ctx, ex, filename))
+        return ns_js_report_error_event(js, "Script error.", "", 0, 0,
+                                        JS_NULL);
     char *file = g_strdup(filename);
     char *message = ns_js_exception_message(js->ctx, ex);
     gboolean prevented = ns_js_report_error_event(js, message, file,
@@ -69037,6 +69095,57 @@ ns_js_parse_location(const char *loc, char **file, int *line, int *col)
     *col = atoi(c2 + 1);
     *file = g_strndup(loc, (gsize)(c1 - loc));
     return TRUE;
+}
+
+static void
+ns_js_mute_script_errors(ns_js *js, const char *script_url)
+{
+    if (!js || !script_url || !*script_url) return;
+    if (!js->muted_error_scripts)
+        js->muted_error_scripts = g_hash_table_new_full(g_str_hash,
+                                                        g_str_equal,
+                                                        g_free, NULL);
+    g_hash_table_add(js->muted_error_scripts, g_strdup(script_url));
+}
+
+static gboolean
+ns_js_script_errors_muted(const ns_js *js, const char *script_url)
+{
+    return js->muted_error_scripts && script_url &&
+           g_hash_table_contains(js->muted_error_scripts, script_url);
+}
+
+static gboolean
+ns_js_exception_is_muted(ns_js *js, JSContext *ctx, JSValueConst ex,
+                         const char *filename)
+{
+    if (!js || !js->muted_error_scripts) return FALSE;
+    if (ns_js_script_errors_muted(js, filename)) return TRUE;
+    JSValue stack = JS_IsObject(ex) ? JS_GetPropertyStr(ctx, ex, "stack")
+                                    : JS_UNDEFINED;
+    if (JS_IsException(stack)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return TRUE;
+    }
+    const char *text = JS_IsString(stack) ? JS_ToCString(ctx, stack) : NULL;
+    JS_FreeValue(ctx, stack);
+    gboolean muted = FALSE;
+    gboolean thrower_found = FALSE;
+    for (const char *p = text; p && *p && !thrower_found; ) {
+        const char *eol = strchr(p, '\n');
+        g_autofree char *loc = ns_js_stack_line_location(
+            p, eol ? (gsize)(eol - p) : strlen(p));
+        g_autofree char *file = NULL;
+        int line = 0, col = 0;
+        if (loc && ns_js_parse_location(loc, &file, &line, &col) &&
+            file[0] != '<') {
+            thrower_found = TRUE;
+            muted = ns_js_script_errors_muted(js, file);
+        }
+        p = eol ? eol + 1 : NULL;
+    }
+    if (text) JS_FreeCString(ctx, text);
+    return muted;
 }
 
 static gboolean
@@ -71046,6 +71155,25 @@ ns_js_decode_classic_script(const char *data, gsize len,
     return out;
 }
 
+static gboolean
+ns_js_script_response_is_opaque(ns_js *js, const ns_node *script,
+                                const char *request_url,
+                                const ns_response *resp)
+{
+    JSContext *realm = ns_js_node_realm_context(js, script);
+    if (!realm) realm = js->ctx;
+    gboolean opaque = ns_js_realm_origin_is_opaque(js, realm);
+    const char *doc_url = ns_js_realm_url_or_current(js, realm);
+    const char *final_url = resp->final_url && *resp->final_url
+        ? resp->final_url : request_url;
+    if (g_ascii_strncasecmp(final_url, "file:", 5) == 0) return TRUE;
+    if (ns_origin_matches(opaque, doc_url, request_url) &&
+        ns_origin_matches(opaque, doc_url, final_url))
+        return FALSE;
+    return !ns_element_get_attr(script, "crossorigin") ||
+           !cors_allows(opaque, doc_url, final_url, resp->cors_allow_origin);
+}
+
 static void
 ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
                          gsize length, const char *origin,
@@ -71301,6 +71429,9 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
                           resp->content_type,
                           ns_element_get_attr(n, "charset"), &decoded_len);
                 if (decoded && !decoded_len) decoded_len = strlen(decoded);
+                if (!is_module &&
+                    ns_js_script_response_is_opaque(js, n, abs_url, resp))
+                    ns_js_mute_script_errors(js, abs_url);
                 ns_js_eval_script_source(js, n,
                                          decoded ? decoded : src_data,
                                          decoded ? decoded_len : src_len,

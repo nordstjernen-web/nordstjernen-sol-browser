@@ -1396,6 +1396,7 @@ void ns_css_set_doc_base(const char *base_url);
 const char *ns_css_doc_base(void);
 void ns_css_set_doc_url(const char *url);
 const char *ns_css_doc_url(void);
+const char *ns_element_inline_style(const ns_node *el);
 int           ns_css_font_face_weight(const char *val);
 ns_font_slant ns_css_font_face_slant(const char *val);
 char         *ns_css_font_face_src_url(const char *src);

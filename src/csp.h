@@ -50,6 +50,11 @@ gboolean ns_csp_inline_script_allowed(const ns_csp *csp,
 
 gboolean ns_csp_inline_event_handler_allowed(const ns_csp *csp);
 
+gboolean ns_csp_inline_style_allowed(const ns_csp *csp,
+                                     const char *body, gsize body_len,
+                                     const char *nonce,
+                                     gboolean is_attribute);
+
 gboolean ns_csp_eval_allowed(const ns_csp *csp, gboolean wasm);
 
 gboolean ns_csp_upgrades_insecure_requests(const ns_csp *csp);

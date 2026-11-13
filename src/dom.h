@@ -71,6 +71,7 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_NODE_STYLE_USES_ATTR (1u << 21)
 #define NS_NODE_UA_OVERLAY (1u << 25)
 #define NS_NODE_SANDBOX_OPAQUE (1u << 26)
+#define NS_NODE_STYLE_ATTR_TRUSTED (1u << 27)
 #define NS_NODE_ATTR_MAYBE_ID  (1u << 22)
 #define NS_NODE_ATTR_MAYBE_SHADOW (1u << 23)
 #define NS_NODE_TEXT_HASHED    (1u << 24)

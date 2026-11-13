@@ -26,8 +26,8 @@ WebAssembly. The review changed no source file.
 
 | # | Finding | Attacker | Severity | Status |
 |---|---------|----------|----------|--------|
-| F1 | Errors from cross-origin scripts are reported unmuted | any web page | medium | confirmed |
-| F2 | CSP `style-src` is not applied to inline `<style>` or `style` attributes | injected markup on a CSP-protected site | medium | confirmed |
+| F1 | Errors from cross-origin scripts are reported unmuted | any web page | medium | fixed after this review |
+| F2 | CSP `style-src` is not applied to inline `<style>` or `style` attributes | injected markup on a CSP-protected site | medium | fixed after this review |
 | F3 | `import()` of `data:` and `blob:` modules skips CSP `script-src` | script on a CSP-protected site | low | confirmed |
 | F4 | CSP `'self'` matches `blob:` URLs (workers under `worker-src 'self'`) | script on a CSP-protected site | low | confirmed |
 | F5 | A page may navigate the top level to a `data:` URL | any web page | low | confirmed |

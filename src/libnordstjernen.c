@@ -4009,6 +4009,7 @@ browser_resize_apply(ns_browser *browser, double border_w, double border_h)
             g_ascii_formatd(num, sizeof num, "%.0f",
                             MAX(border_h - browser->resize_extra_h, 1.0)));
     ns_element_set_attr(node, "style", style->str);
+    node->flags |= NS_NODE_STYLE_ATTR_TRUSTED;
     browser->dirty = TRUE;
 }
 

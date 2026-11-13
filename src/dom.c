@@ -1576,7 +1576,8 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
         out = ns_node_new_element(src->name ? g_strdup(src->name) : g_strdup(""));
         out->flags |= src->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS |
                                     NS_NODE_KEEP_CASE |
-                                    NS_NODE_INPUT_INDETERMINATE);
+                                    NS_NODE_INPUT_INDETERMINATE |
+                                    NS_NODE_STYLE_ATTR_TRUSTED);
         for (const ns_attr *a = src->attrs; a; a = a->next)
             ns_element_set_attr_ns(out, a->namespace_uri, a->prefix,
                                    ns_attr_local_name(a), a->name,
