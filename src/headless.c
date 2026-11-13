@@ -17,6 +17,7 @@
 #endif
 
 #include "anim.h"
+#include "smil.h"
 #include "cache.h"
 #include "config.h"
 #include "css.h"
@@ -872,6 +873,7 @@ typedef struct headless_flush_ctx {
     ns_image_cache    *image_cache;
     ns_video_cache    *video_cache;
     ns_anim           *anim;
+    ns_smil           *smil;
     GHashTable        *css_cache;
     GHashTable       **styles;
     ns_box           **layout;
@@ -1048,6 +1050,12 @@ settle_tick_media(headless_flush_ctx *fc, gint64 now)
     }
 }
 
+static void
+headless_tick_smil(headless_flush_ctx *fc, gint64 now)
+{
+    ns_smil_tick(fc->smil, fc->js ? ns_js_mutation_serial(fc->js) : 0, now);
+}
+
 static gboolean
 settle_tick_scripts(headless_flush_ctx *fc, gint64 now)
 {
@@ -1057,6 +1065,7 @@ settle_tick_scripts(headless_flush_ctx *fc, gint64 now)
         if (ns_anim_needs_layout(fc->anim)) g_headless_layout_dirty = TRUE;
     }
     if (fc->anim && fc->js) ns_js_dispatch_anim_events(fc->js, fc->anim);
+    headless_tick_smil(fc, now);
     if (fc->js) ns_js_run_animation_frame(fc->js);
     if (!fc->js || !ns_js_consume_mutated(fc->js)) return FALSE;
     g_headless_styles_stale = TRUE;
@@ -2331,6 +2340,8 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     ns_anim *anim = ns_anim_new();
     ns_engine_load_keyframes(anim, doc, page_url, css_cache);
     ns_engine_anim_observe(anim, styles, g_get_monotonic_time());
+    gint64 smil_origin_us = g_get_monotonic_time();
+    ns_smil *smil = ns_smil_new(doc, smil_origin_us);
     g_timing.style_us += g_get_monotonic_time() - phase_t0;
 
     headless_nav_capture nav_cap = {0};
@@ -2349,6 +2360,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     headless_flush_ctx flush_ctx = {
         .doc = doc, .js = js, .base = flush_base, .vw = vw, .vh = vh,
         .image_cache = image_cache, .video_cache = video_cache, .anim = anim,
+        .smil = smil,
         .css_cache = css_cache, .styles = &styles, .layout = &layout,
     };
     if (js) {
@@ -2408,6 +2420,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         if (js)            ns_js_set_layout_root(js, NULL);
         if (js)            ns_js_set_style_table(js, NULL);
         if (anim)          ns_anim_free(anim);
+        ns_smil_free(smil);
         if (layout)        { ns_paint_3d_invalidate(); ns_box_free(layout); }
         if (styles)        g_hash_table_destroy(styles);
         g_clear_pointer(&flush_ctx.retired_styles, g_hash_table_destroy);
@@ -2501,6 +2514,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
 
         ns_anim_rebase(anim, 0);
         ns_anim_tick(anim, 0);
+        headless_tick_smil(&flush_ctx, smil_origin_us);
         ns_paint_set_anim(anim);
         char *initial_path = ns_engine_suffix_before_ext(opts->out_path, "-initial");
         phase_t0 = g_get_monotonic_time();
@@ -2527,6 +2541,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         for (gint64 t = 0; t <= (gint64)time_ms * 1000; t += 16000)
             ns_anim_tick(anim, t);
         ns_anim_tick(anim, (gint64)time_ms * 1000);
+        headless_tick_smil(&flush_ctx, smil_origin_us + (gint64)time_ms * 1000);
         ns_paint_set_anim(anim);
         int rc2 = write_capture(layout, opts->out_path, opts->dump);
         fprintf(stderr, "[headless] after %dms -> %s\n", time_ms, opts->out_path);
@@ -2561,6 +2576,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     headless_nav_capture_clear_post(&nav_cap);
     ns_paint_set_anim(NULL);
     if (anim)          ns_anim_free(anim);
+    ns_smil_free(smil);
     if (js)            ns_js_set_layout_root(js, NULL);
     if (js)            ns_js_set_style_table(js, NULL);
     if (layout)        { ns_paint_3d_invalidate(); ns_box_free(layout); }

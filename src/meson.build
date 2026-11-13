@@ -143,6 +143,7 @@ nordstjernen_engine_sources = files(
   'html.c',
   'i18n.c',
   'image.c',
+  'smil.c',
   'svg.c',
   'svg_external.c',
   'image_ico.c',
