@@ -18,7 +18,7 @@ Changelog:
   `begin="button.mouseover+1s"`, `end="other.begin"`); animation
   elements fire `beginEvent`, `endEvent` and `repeatEvent` (a
   `TimeEvent`, with `onbegin`/`onend`/`onrepeat`); and an SVG used as an
-  image (`<img>`, CSS background) animates when it is drawn scaled.
+  image (`<img>`, CSS background) animates.
 * Mouse events inside an inline `<svg>` now target the shape under the
   pointer instead of the `<svg>` element, so a click or hover handler
   on a `<path>` or `<circle>` runs.
