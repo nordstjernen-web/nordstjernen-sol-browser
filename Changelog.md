@@ -3,6 +3,21 @@ Changelog:
 
 1.0.47-dev:
 ======
+* Security: a page can no longer save files without the user taking
+  part. A download goes through when the user has just loaded the page
+  or clicked or typed in it; a further download the page starts on its
+  own shows the permission bar ("This site wants to download a file"),
+  and after "Not now" the page's remaining attempts are dropped until
+  the user acts again. Before, a page could save any number of files
+  into the download folder with no click and no prompt.
+* Security: a download name can no longer begin with a dot. Leading
+  dots become underscores, so a page cannot place a hidden file such as
+  `.bash_aliases` in the download folder.
+* `docs/security-review-report.md` gains a review of the GTK shell,
+  run under sanitizers on a virtual display. It confirms that a page
+  can start downloads with no click and no prompt, and that download
+  names may begin with a dot; the URL bar, popups, script dialogs,
+  fullscreen, clipboard and permission prompts held up.
 * Security: an error raised by a script loaded from another origin
   without CORS now reaches `window.onerror` as "Script error." with no
   file, position or error object, as HTML requires. Before, the page
