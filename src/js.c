@@ -49,6 +49,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #endif
 
 #include "anim.h"
+#include "smil.h"
 #include "bytecode_cache.h"
 #include "camera.h"
 #include "mic.h"
@@ -6859,9 +6860,8 @@ ns_make_svg_animated_length(JSContext *ctx, const ns_node *n, const char *attr)
 {
     const char *base_attr = ns_element_get_attr(n, attr);
     g_autofree char *base = g_strdup(base_attr ? base_attr : "0");
-    char anim_attr[64];
-    g_snprintf(anim_attr, sizeof anim_attr, "data-nd-anim-%s", attr);
-    g_autofree char *anim = g_strdup(ns_element_get_attr(n, anim_attr));
+    ns_smil_refresh(n);
+    g_autofree char *anim = g_strdup(ns_smil_attr(n, attr));
     JSValue o = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, o, "baseVal", ns_make_svg_length(ctx, base));
     JS_SetPropertyStr(ctx, o, "animVal",
@@ -6944,33 +6944,6 @@ ns_element_dimension_getter(JSContext *ctx, JSValueConst this_val, int magic)
                           : ns_element_img_natural_height(ctx, this_val);
     }
     return ns_element_int_attr_getter(ctx, this_val, magic);
-}
-
-static JSValue
-ns_svg_beginElement(JSContext *ctx, JSValueConst this_val,
-                    int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || !(n->flags & NS_NODE_SVG_NS) || !n->parent) return JS_UNDEFINED;
-    const char *attr = ns_element_get_attr(n, "attributeName");
-    const char *to   = ns_element_get_attr(n, "to");
-    if (attr && *attr && to) {
-        char anim_attr[64];
-        g_snprintf(anim_attr, sizeof anim_attr, "data-nd-anim-%s", attr);
-        char *to_copy = g_strdup(to);
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n->parent, anim_attr, to_copy);
-        g_free(to_copy);
-    }
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_svg_setCurrentTime(JSContext *ctx, JSValueConst this_val,
-                      int argc, JSValueConst *argv)
-{
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
-    return JS_UNDEFINED;
 }
 
 static JSValue
@@ -42840,6 +42813,95 @@ ns_element_getTotalLength(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_element_pauseAnimations(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    (void)ctx; (void)argc; (void)argv;
+    ns_smil_pause(ns_unwrap_element(this_val), TRUE);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_element_unpauseAnimations(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    (void)ctx; (void)argc; (void)argv;
+    ns_smil_pause(ns_unwrap_element(this_val), FALSE);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_element_animationsPaused(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    return JS_NewBool(ctx, ns_smil_paused(ns_unwrap_element(this_val)));
+}
+
+static JSValue
+ns_element_smil_getCurrentTime(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    return JS_NewFloat64(ctx, ns_smil_current_time(ns_unwrap_element(this_val)));
+}
+
+static JSValue
+ns_element_smil_setCurrentTime(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    double seconds = 0;
+    if (argc >= 1 && JS_ToFloat64(ctx, &seconds, argv[0]) < 0)
+        return JS_EXCEPTION;
+    ns_smil_set_current_time(ns_unwrap_element(this_val), seconds);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_element_smil_begin(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv, int magic)
+{
+    double offset = 0;
+    if (argc >= 1 && JS_ToFloat64(ctx, &offset, argv[0]) < 0)
+        return JS_EXCEPTION;
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (magic) ns_smil_end_element(n, offset);
+    else       ns_smil_begin_element(n, offset);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_element_smil_getStartTime(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    double start;
+    if (!ns_smil_start_time(ns_unwrap_element(this_val), &start))
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+                                      "No current interval");
+    return JS_NewFloat64(ctx, start);
+}
+
+static JSValue
+ns_element_smil_getSimpleDuration(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    double dur;
+    if (!ns_smil_simple_duration(ns_unwrap_element(this_val), &dur))
+        return ns_throw_dom_exception(ctx, "NotSupportedError", 9,
+                                      "The simple duration is not defined");
+    return JS_NewFloat64(ctx, dur);
+}
+
+static JSValue
+ns_element_get_smil_targetElement(JSContext *ctx, JSValueConst this_val)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    return ns_make_element(ctx, (ns_node *)ns_smil_target(n));
+}
+
+static JSValue
 ns_element_getPointAtLength(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
@@ -56994,6 +57056,18 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("getScreenCTM",            0, ns_element_getScreenCTM),
     JS_CFUNC_DEF("getTotalLength",          0, ns_element_getTotalLength),
     JS_CFUNC_DEF("getPointAtLength",        1, ns_element_getPointAtLength),
+    JS_CFUNC_DEF("pauseAnimations",         0, ns_element_pauseAnimations),
+    JS_CFUNC_DEF("unpauseAnimations",       0, ns_element_unpauseAnimations),
+    JS_CFUNC_DEF("animationsPaused",        0, ns_element_animationsPaused),
+    JS_CFUNC_DEF("getCurrentTime",          0, ns_element_smil_getCurrentTime),
+    JS_CFUNC_DEF("setCurrentTime",          1, ns_element_smil_setCurrentTime),
+    JS_CFUNC_MAGIC_DEF("beginElement",      0, ns_element_smil_begin, 0),
+    JS_CFUNC_MAGIC_DEF("beginElementAt",    1, ns_element_smil_begin, 0),
+    JS_CFUNC_MAGIC_DEF("endElement",        0, ns_element_smil_begin, 1),
+    JS_CFUNC_MAGIC_DEF("endElementAt",      1, ns_element_smil_begin, 1),
+    JS_CFUNC_DEF("getStartTime",            0, ns_element_smil_getStartTime),
+    JS_CFUNC_DEF("getSimpleDuration",       0, ns_element_smil_getSimpleDuration),
+    JS_CGETSET_DEF("targetElement",         ns_element_get_smil_targetElement, NULL),
     JS_CFUNC_DEF("createSVGPoint",          0, ns_element_createSVGPoint),
     JS_CFUNC_DEF("createSVGRect",           0, ns_element_createSVGRect),
     JS_CFUNC_DEF("createSVGMatrix",         0, ns_element_createSVGMatrix),
@@ -57118,8 +57192,6 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("span",           ns_element_int_attr_getter, ns_element_int_attr_setter, 5),
     JS_CGETSET_MAGIC_DEF("width",          ns_element_dimension_getter, ns_element_dimension_setter, 8),
     JS_CGETSET_MAGIC_DEF("height",         ns_element_dimension_getter, ns_element_dimension_setter, 9),
-    JS_CFUNC_DEF("beginElement",   0, ns_svg_beginElement),
-    JS_CFUNC_DEF("setCurrentTime", 1, ns_svg_setCurrentTime),
     JS_CGETSET_MAGIC_DEF("start",          ns_element_int_attr_getter, ns_element_int_attr_setter, 10),
     JS_CGETSET_MAGIC_DEF("coords",         ns_element_attr_getter, ns_element_attr_setter, 37),
     JS_CGETSET_MAGIC_DEF("shape",          ns_element_attr_getter, ns_element_attr_setter, 38),
@@ -62822,6 +62894,12 @@ static const struct { const char *iface, *parent, *tags; } ns_svg_ifaces[] = {
     { "SVGStyleElement",           "SVGElement",                "style" },
     { "SVGScriptElement",          "SVGElement",                "script" },
     { "SVGViewElement",            "SVGElement",                "view" },
+    { "SVGAnimationElement",       "SVGElement",                NULL },
+    { "SVGAnimateElement",         "SVGAnimationElement",       "animate" },
+    { "SVGSetElement",             "SVGAnimationElement",       "set" },
+    { "SVGAnimateTransformElement", "SVGAnimationElement",      "animateTransform" },
+    { "SVGAnimateMotionElement",   "SVGAnimationElement",       "animateMotion" },
+    { "SVGMPathElement",           "SVGElement",                "mpath" },
 };
 
 static void

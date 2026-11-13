@@ -3,6 +3,19 @@ Changelog:
 
 1.0.47-dev:
 ======
+* SVG SMIL animation runs. `<animate>`, `<set>`, `<animateTransform>`
+  and `<animateMotion>` (with `path` or `<mpath>`) animate inline SVG:
+  `values`/`from`/`to`/`by`, `keyTimes`, `keySplines`, `calcMode`,
+  `repeatCount`/`repeatDur`, `fill="freeze"`, `additive`, `accumulate`,
+  and `begin`/`end` as offsets or as another animation's `id.begin` /
+  `id.end`. `<svg>` gains `pauseAnimations()`, `unpauseAnimations()`,
+  `animationsPaused()`, `getCurrentTime()` and `setCurrentTime()`, and
+  the animation elements gain `beginElement()`, `endElement()`,
+  `getStartTime()`, `getSimpleDuration()` and `targetElement`, with the
+  `SVGAnimateElement` family of interfaces. Before, nothing moved and a
+  page calling `pauseAnimations()` threw a `TypeError` (#1103). Not yet
+  covered: event-based `begin` values such as `click`, and animation
+  inside an SVG loaded as an image.
 * Security: a page can no longer save files without the user taking
   part. A download goes through when the user has just loaded the page
   or clicked or typed in it; a further download the page starts on its

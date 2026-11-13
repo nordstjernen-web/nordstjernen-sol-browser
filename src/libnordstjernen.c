@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "anim.h"
+#include "smil.h"
 #include "bytecode_cache.h"
 #include "cache.h"
 #include "debuglog.h"
@@ -57,6 +58,7 @@ struct ns_browser {
     guint64         styles_serial;
     ns_js          *js;
     ns_anim        *anim;
+    ns_smil        *smil;
     ns_image_cache *images;
     ns_video_cache *videos;
     GHashTable     *css_cache;
@@ -379,6 +381,15 @@ browser_note_anim_tick(ns_browser *b)
         b->anim_paint_dirty = TRUE;
     else
         b->cascade_dirty = TRUE;
+}
+
+static gboolean
+browser_tick_smil(ns_browser *b, gint64 now)
+{
+    guint64 serial = (b->js ? ns_js_mutation_serial(b->js) : 0) + b->layout_seq;
+    if (!ns_smil_tick(b->smil, serial, now)) return FALSE;
+    b->repaint_requested = TRUE;
+    return TRUE;
 }
 
 static gboolean
@@ -880,6 +891,7 @@ settle_tick_cb(gpointer user_data)
         browser_note_anim_tick(b);
         if (ns_anim_needs_layout(b->anim)) b->dirty = TRUE;
     }
+    browser_tick_smil(b, now);
     if (b->anim && b->js) ns_js_dispatch_anim_events(b->js, b->anim);
     if (b->js) ns_js_run_animation_frame(b->js);
     if (b->js && ns_js_consume_mutated(b->js))
@@ -1540,6 +1552,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
     ns_engine_anim_track_layout(b->anim, &b->layout);
     ns_engine_load_keyframes(b->anim, doc, base, b->css_cache);
     ns_engine_anim_observe(b->anim, b->styles, g_get_monotonic_time());
+    b->smil = ns_smil_new(doc, g_get_monotonic_time());
 
     b->js = ns_js_new(browser_js_log, b,
                       browser_js_mutated, b,
@@ -2556,6 +2569,10 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             browser_note_anim_tick(browser);
             if (ns_anim_needs_layout(browser->anim)) browser->dirty = TRUE;
         }
+        if (browser_tick_smil(browser, now)) {
+            changed = TRUE;
+            other_changed = TRUE;
+        }
         if (browser->anim && browser->js)
             ns_js_dispatch_anim_events(browser->js, browser->anim);
         if (browser->js && ns_js_run_animation_frame(browser->js)) {
@@ -2626,6 +2643,8 @@ ns_browser_animating(ns_browser *browser)
         return 1;
     if (browser->anim && ns_anim_has_active(browser->anim))
         return 1;
+    if (ns_smil_has_active(browser->smil))
+        return 1;
     if (browser->images && ns_image_cache_animating(browser->images))
         return 1;
     if (browser->videos && ns_video_cache_animating(browser->videos))
@@ -2644,6 +2663,7 @@ browser_needs_frame_tick(ns_browser *browser)
            browser_images_outstanding(browser) > 0 ||
            (browser->js && ns_js_needs_frame_tick(browser->js)) ||
            (browser->anim && ns_anim_has_active(browser->anim)) ||
+           ns_smil_has_active(browser->smil) ||
            (browser->videos && ns_video_cache_animating(browser->videos)) ||
            ns_svg_external_pending() > 0;
 }
@@ -6008,6 +6028,7 @@ ns_browser_close(ns_browser *browser)
         ns_js_set_style_table(browser->js, NULL);
     }
     if (browser->anim) ns_anim_free(browser->anim);
+    ns_smil_free(browser->smil);
     if (browser->layout) { ns_paint_3d_invalidate(); ns_box_free(browser->layout); }
     if (browser->styles) g_hash_table_destroy(browser->styles);
     g_clear_pointer(&browser->retired_styles, g_hash_table_destroy);
