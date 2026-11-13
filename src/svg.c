@@ -81,9 +81,16 @@ typedef struct {
     gboolean          instanced;
 } svg_state;
 
+typedef struct svg_hit {
+    double         x, y;
+    const ns_node *node;
+    const ns_node *owner;
+} svg_hit;
+
 typedef struct {
     cairo_t       *cr;
     const ns_node *root;
+    svg_hit       *hit;
     GHashTable    *styles;
     GHashTable    *ids;
     int            depth;
@@ -1951,6 +1958,43 @@ svg_apply_stroke_params(svg_ctx *ctx, const svg_state *st)
         cairo_set_dash(cr, NULL, 0, 0.0);
 }
 
+static gboolean
+svg_hit_ignores(svg_ctx *ctx, const ns_node *n)
+{
+    const ns_style *s = ctx->styles
+        ? g_hash_table_lookup(ctx->styles, (gpointer)n) : NULL;
+    const char *pe = s ? ns_style_keyword(s, NS_CSS_POINTER_EVENTS) : NULL;
+    if (!pe) pe = svg_prop(n, "pointer-events");
+    return pe && g_ascii_strcasecmp(pe, "none") == 0;
+}
+
+static void
+svg_hit_record(svg_ctx *ctx, const ns_node *n)
+{
+    ctx->hit->node = ctx->hit->owner ? ctx->hit->owner : n;
+}
+
+static gboolean
+svg_hit_current_path(svg_ctx *ctx, const ns_node *n, const svg_state *st)
+{
+    if (!ctx->hit) return FALSE;
+    cairo_t *cr = ctx->cr;
+    double x = ctx->hit->x, y = ctx->hit->y;
+    cairo_device_to_user(cr, &x, &y);
+    gboolean inside = FALSE;
+    if (!st->hidden && !svg_hit_ignores(ctx, n)) {
+        cairo_set_fill_rule(cr, st->fill_rule);
+        if (st->fill.kind != SVG_PAINT_NONE) inside = cairo_in_fill(cr, x, y);
+        if (!inside && st->stroke.kind != SVG_PAINT_NONE && st->stroke_width > 0) {
+            svg_apply_stroke_params(ctx, st);
+            inside = cairo_in_stroke(cr, x, y);
+        }
+    }
+    if (inside) svg_hit_record(ctx, n);
+    cairo_new_path(cr);
+    return TRUE;
+}
+
 static void
 svg_paint_current_path(svg_ctx *ctx, const svg_state *st)
 {
@@ -2288,6 +2332,7 @@ svg_render_text(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     cairo_move_to(ctx->cr, x, top);
     ns_pango_cairo_layout_path(ctx->cr, layout);
     g_object_unref(layout);
+    if (svg_hit_current_path(ctx, n, st)) return;
     svg_paint_current_path(ctx, st);
 }
 
@@ -2612,6 +2657,7 @@ svg_render_shape(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     cairo_t *cr = ctx->cr;
     cairo_new_path(cr);
     if (svg_shape_path(ctx, n, st)) {
+        if (svg_hit_current_path(ctx, n, st)) return;
         cairo_path_t *kept = svg_shape_markable(n->name)
             ? cairo_copy_path(cr) : NULL;
         svg_paint_current_path(ctx, st);
@@ -2836,9 +2882,16 @@ svg_render_image(svg_ctx *ctx, const ns_node *n, const svg_state *st)
                          cairo_image_surface_get_height(img) };
     svg_rect box;
     svg_image_box(ctx, n, st->font_size, &natural, &box);
-    if (box.w > 0 && box.h > 0)
+    if (ctx->hit) {
+        double x = ctx->hit->x, y = ctx->hit->y;
+        cairo_device_to_user(ctx->cr, &x, &y);
+        if (x >= box.x && x <= box.x + box.w && y >= box.y &&
+            y <= box.y + box.h && !svg_hit_ignores(ctx, n))
+            svg_hit_record(ctx, n);
+    } else if (box.w > 0 && box.h > 0) {
         svg_draw_image(ctx->cr, img, &natural, &box,
                        svg_attr(n, "preserveAspectRatio"));
+    }
     cairo_surface_destroy(img);
 }
 
@@ -2878,7 +2931,7 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
     cairo_save(cr);
     svg_apply_transform_attr(ctx, n, "transform");
 
-    cairo_surface_t *mask = svg_mask_surface(ctx, n, &st);
+    cairo_surface_t *mask = ctx->hit ? NULL : svg_mask_surface(ctx, n, &st);
     double blur = svg_filter_blur(ctx, n);
     gboolean grouped = opacity < 1.0 || mask != NULL || blur > 0;
     if (grouped) cairo_push_group(cr);
@@ -2922,6 +2975,8 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
             double x = svg_attr_length(n, "x", ctx->vw, st.font_size, 0);
             double y = svg_attr_length(n, "y", ctx->vh, st.font_size, 0);
             cairo_translate(cr, x, y);
+            const ns_node *outer_owner = ctx->hit ? ctx->hit->owner : NULL;
+            if (ctx->hit && !outer_owner) ctx->hit->owner = n;
             ctx->depth++;
             st.instanced = TRUE;
             if (t->name && strcmp(t->name, "symbol") == 0) {
@@ -2939,13 +2994,14 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
                 svg_render_node(ctx, t, &st);
             }
             ctx->depth--;
+            if (ctx->hit) ctx->hit->owner = outer_owner;
         }
     } else if (strcmp(tag, "foreignObject") == 0) {
         double x = svg_attr_length(n, "x", ctx->vw, st.font_size, 0);
         double y = svg_attr_length(n, "y", ctx->vh, st.font_size, 0);
         double w = svg_attr_length(n, "width", ctx->vw, st.font_size, ctx->vw);
         double h = svg_attr_length(n, "height", ctx->vh, st.font_size, ctx->vh);
-        if (g_foreign_painter && w > 0 && h > 0) {
+        if (g_foreign_painter && !ctx->hit && w > 0 && h > 0) {
             cairo_translate(cr, x, y);
             cairo_rectangle(cr, 0, 0, w, h);
             cairo_clip(cr);
@@ -3372,11 +3428,12 @@ svg_ctx_clear(svg_ctx *ctx)
 static void
 svg_render_root(cairo_t *cr, const ns_node *svg, double width, double height,
                 GHashTable *styles, const struct ns_style *inherited,
-                gboolean declared)
+                gboolean declared, svg_hit *hit)
 {
     svg_ctx ctx = {
         .cr = cr,
         .root = svg,
+        .hit = hit,
         .styles = styles,
         .icb_w = width,
         .icb_h = height,
@@ -3416,7 +3473,23 @@ ns_svg_render_node(cairo_t *cr, const ns_node *svg, double width, double height,
                    GHashTable *styles, const struct ns_style *inherited)
 {
     if (!cr || !svg || width <= 0 || height <= 0) return;
-    svg_render_root(cr, svg, width, height, styles, inherited, FALSE);
+    svg_render_root(cr, svg, width, height, styles, inherited, FALSE, NULL);
+}
+
+const ns_node *
+ns_svg_hit_node(const ns_node *svg, double width, double height,
+                GHashTable *styles, const struct ns_style *inherited,
+                double x, double y)
+{
+    if (!svg || width <= 0 || height <= 0) return NULL;
+    if (x < 0 || y < 0 || x > width || y > height) return NULL;
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
+    cairo_t *cr = cairo_create(surface);
+    svg_hit hit = { x, y, NULL, NULL };
+    svg_render_root(cr, svg, width, height, styles, inherited, FALSE, &hit);
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+    return hit.node;
 }
 
 static GHashTable *
@@ -3904,13 +3977,14 @@ svg_render_document(cairo_t *cr, ns_node *doc, const ns_node *root,
     root = svg_document_element(doc, root);
     svg_sheets sheets;
     svg_sheets_build(&sheets, root, width, height);
-    svg_render_root(cr, root, width, height, sheets.styles, NULL, TRUE);
+    svg_render_root(cr, root, width, height, sheets.styles, NULL, TRUE, NULL);
     svg_sheets_free(&sheets);
 }
 
 struct ns_svg_doc {
     ns_node       *doc;
     const ns_node *root;
+    ns_smil       *smil;
 };
 
 ns_node *
@@ -3937,7 +4011,23 @@ ns_svg_doc_parse(const guchar *data, gsize len)
     ns_svg_doc *d = g_new(ns_svg_doc, 1);
     d->doc = doc;
     d->root = root;
+    d->smil = ns_smil_new(doc, g_get_monotonic_time());
     return d;
+}
+
+gboolean
+ns_svg_doc_tick(ns_svg_doc *d, gint64 now_us)
+{
+    if (!d) return FALSE;
+    gboolean changed = ns_smil_tick(d->smil, 0, now_us);
+    ns_smil_settle_events(d->smil);
+    return changed;
+}
+
+gboolean
+ns_svg_doc_animating(const ns_svg_doc *d)
+{
+    return d && ns_smil_has_active(d->smil);
 }
 
 gboolean
@@ -3952,6 +4042,7 @@ void
 ns_svg_doc_free(ns_svg_doc *d)
 {
     if (!d) return;
+    ns_smil_free(d->smil);
     ns_node_free(d->doc);
     g_free(d);
 }

@@ -7689,6 +7689,7 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
 #define SVG_RASTER_BUDGET ((gsize)96 * 1024 * 1024)
 #define SVG_RASTER_REUSE 1.5
 #define SVG_RASTER_STEPS 4.0
+#define SVG_IMAGE_ANIMATION_LINGER_US 300000
 
 static gsize g_svg_raster_bytes;
 
@@ -7710,6 +7711,22 @@ typedef struct {
     gboolean         svg_doc_failed;
 } texture_surfaces;
 
+static gint64 g_svg_image_clock_us;
+static gint64 g_svg_image_animated_us;
+
+void
+ns_paint_set_svg_image_clock(gint64 now_us)
+{
+    g_svg_image_clock_us = now_us;
+}
+
+gboolean
+ns_paint_svg_images_animating(gint64 now_us)
+{
+    return g_svg_image_animated_us > 0 &&
+           now_us - g_svg_image_animated_us < SVG_IMAGE_ANIMATION_LINGER_US;
+}
+
 static void
 svg_raster_drop(svg_raster *r)
 {
@@ -7720,6 +7737,18 @@ svg_raster_drop(svg_raster *r)
     }
     g_free(r->filter);
     *r = (svg_raster){ 0 };
+}
+
+static void
+svg_rasters_advance(texture_surfaces *ts)
+{
+    if (!ts->svg_doc) return;
+    gint64 now = g_svg_image_clock_us ? g_svg_image_clock_us
+                                      : g_get_monotonic_time();
+    if (ns_svg_doc_tick(ts->svg_doc, now))
+        for (int i = 0; i < SVG_RASTERS; i++) svg_raster_drop(&ts->svg[i]);
+    if (ns_svg_doc_animating(ts->svg_doc))
+        g_svg_image_animated_us = g_get_monotonic_time();
 }
 
 static void
@@ -7894,6 +7923,7 @@ svg_raster_cached(ns_texture *tex, GBytes *svg, double vw, double vh,
                   int pw, int ph, const char *filter_kw)
 {
     texture_surfaces *ts = texture_surfaces_for(tex);
+    svg_rasters_advance(ts);
     svg_raster *slot = &ts->svg[0], *hit = NULL;
     for (int i = 0; i < SVG_RASTERS; i++) {
         svg_raster *r = &ts->svg[i];
@@ -7918,6 +7948,7 @@ svg_raster_cached(ns_texture *tex, GBytes *svg, double vw, double vh,
         const guchar *data = g_bytes_get_data(svg, &len);
         ts->svg_doc = ns_svg_doc_parse(data, len);
         ts->svg_doc_failed = !ts->svg_doc;
+        svg_rasters_advance(ts);
     }
     if (!ts->svg_doc) return NULL;
     cairo_surface_t *surf =

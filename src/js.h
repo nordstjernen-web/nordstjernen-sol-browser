@@ -251,6 +251,8 @@ void ns_js_dump_stats(ns_js *js, GString *out);
 
 typedef struct ns_anim ns_anim;
 void ns_js_dispatch_anim_events(ns_js *js, ns_anim *anim);
+struct ns_smil;
+void ns_js_dispatch_smil_events(ns_js *js, struct ns_smil *smil);
 
 void     ns_js_set_style_table(ns_js *js, GHashTable *styles);
 GHashTable *ns_js_session_storage_area_new(void);

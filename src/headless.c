@@ -1054,6 +1054,7 @@ static void
 headless_tick_smil(headless_flush_ctx *fc, gint64 now)
 {
     ns_smil_tick(fc->smil, fc->js ? ns_js_mutation_serial(fc->js) : 0, now);
+    ns_js_dispatch_smil_events(fc->js, fc->smil);
 }
 
 static gboolean

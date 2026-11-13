@@ -22527,12 +22527,26 @@ ns_box_image_map_area(const ns_box *b, double local_x, double local_y)
                              0);
 }
 
+static const ns_node *
+box_svg_hit_node(const ns_box *b, double local_x, double local_y)
+{
+    if (b->kind != NS_BOX_SVG || !b->dom) return NULL;
+    double x = local_x - (b->x + b->margin.left + b->border.left +
+                          b->padding.left);
+    double y = local_y - (b->y + b->margin.top + b->border.top +
+                          b->padding.top);
+    return ns_svg_hit_node(b->dom, b->content_width, b->content_height,
+                           b->svg_styles, b->style, x, y);
+}
+
 const ns_node *
 ns_box_hit_element(const ns_box *root, double x, double y,
                    const ns_box **out_box, double *local_x, double *local_y)
 {
     const ns_box *hit = ns_box_hit_test_local(root, x, y, local_x, local_y);
     const ns_node *target = hit ? hit->dom : NULL;
+    const ns_node *shape = hit ? box_svg_hit_node(hit, *local_x, *local_y) : NULL;
+    if (shape) target = shape;
     const ns_node *inline_target = ns_box_hit_inline_dom(root, x, y);
     if (inline_target) target = inline_target;
     const ns_node *form_target = ns_box_hit_form_dom(root, x, y);

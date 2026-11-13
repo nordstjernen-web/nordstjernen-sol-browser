@@ -13,9 +13,15 @@ Changelog:
   the animation elements gain `beginElement()`, `endElement()`,
   `getStartTime()`, `getSimpleDuration()` and `targetElement`, with the
   `SVGAnimateElement` family of interfaces. Before, nothing moved and a
-  page calling `pauseAnimations()` threw a `TypeError` (#1103). Not yet
-  covered: event-based `begin` values such as `click`, and animation
-  inside an SVG loaded as an image.
+  page calling `pauseAnimations()` threw a `TypeError` (#1103).
+* SMIL follow-up: `begin` and `end` accept events (`begin="click"`,
+  `begin="button.mouseover+1s"`, `end="other.begin"`); animation
+  elements fire `beginEvent`, `endEvent` and `repeatEvent` (a
+  `TimeEvent`, with `onbegin`/`onend`/`onrepeat`); and an SVG used as an
+  image (`<img>`, CSS background) animates when it is drawn scaled.
+* Mouse events inside an inline `<svg>` now target the shape under the
+  pointer instead of the `<svg>` element, so a click or hover handler
+  on a `<path>` or `<circle>` runs.
 * Security: a page can no longer save files without the user taking
   part. A download goes through when the user has just loaded the page
   or clicked or typed in it; a further download the page starts on its

@@ -387,9 +387,12 @@ static gboolean
 browser_tick_smil(ns_browser *b, gint64 now)
 {
     guint64 serial = (b->js ? ns_js_mutation_serial(b->js) : 0) + b->layout_seq;
-    if (!ns_smil_tick(b->smil, serial, now)) return FALSE;
-    b->repaint_requested = TRUE;
-    return TRUE;
+    gboolean changed = ns_smil_tick(b->smil, serial, now);
+    ns_js_dispatch_smil_events(b->js, b->smil);
+    ns_paint_set_svg_image_clock(now);
+    if (ns_paint_svg_images_animating(now)) changed = TRUE;
+    if (changed) b->repaint_requested = TRUE;
+    return changed;
 }
 
 static gboolean
@@ -2645,6 +2648,8 @@ ns_browser_animating(ns_browser *browser)
         return 1;
     if (ns_smil_has_active(browser->smil))
         return 1;
+    if (ns_paint_svg_images_animating(g_get_monotonic_time()))
+        return 1;
     if (browser->images && ns_image_cache_animating(browser->images))
         return 1;
     if (browser->videos && ns_video_cache_animating(browser->videos))
@@ -2664,6 +2669,7 @@ browser_needs_frame_tick(ns_browser *browser)
            (browser->js && ns_js_needs_frame_tick(browser->js)) ||
            (browser->anim && ns_anim_has_active(browser->anim)) ||
            ns_smil_has_active(browser->smil) ||
+           ns_paint_svg_images_animating(g_get_monotonic_time()) ||
            (browser->videos && ns_video_cache_animating(browser->videos)) ||
            ns_svg_external_pending() > 0;
 }

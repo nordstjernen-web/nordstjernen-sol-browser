@@ -13,17 +13,27 @@
 #define SMIL_KEPT_INSTANCES 16
 #define SMIL_SYNC_PASSES    32
 #define SMIL_TIME_EPSILON   1e-6
+#define SMIL_MAX_EVENTS     4096
 
 typedef enum { SMIL_ANIMATE, SMIL_SET, SMIL_TRANSFORM, SMIL_MOTION } smil_kind;
 typedef enum { SMIL_LINEAR, SMIL_DISCRETE, SMIL_PACED, SMIL_SPLINE } smil_calc;
 typedef enum { SMIL_RESTART_ALWAYS, SMIL_RESTART_WHEN_IDLE, SMIL_RESTART_NEVER } smil_restart;
-typedef enum { SMIL_AT_OFFSET, SMIL_AT_SYNC_BEGIN, SMIL_AT_SYNC_END } smil_begin_kind;
+typedef enum {
+    SMIL_AT_OFFSET, SMIL_AT_SYNC_BEGIN, SMIL_AT_SYNC_END, SMIL_AT_EVENT,
+} smil_begin_kind;
 
 typedef struct smil_begin {
     smil_begin_kind kind;
     double          offset;
     char           *id;
+    char           *event;
 } smil_begin;
+
+typedef struct smil_event {
+    const ns_node     *node;
+    ns_smil_event_kind kind;
+    int                iteration;
+} smil_event;
 
 typedef struct smil_clock {
     gboolean paused;
@@ -47,6 +57,8 @@ typedef struct smil_el {
     GArray        *key_points;
     GArray        *begins;
     GArray        *ends;
+    GArray        *end_specs;
+    GArray        *end_instances;
     GArray        *instances;
     GArray        *path;
     double         dur;
@@ -56,7 +68,11 @@ typedef struct smil_el {
     double         forced_end;
     double         horizon;
     double         rotate;
+    double         reported_begin;
+    double         reported_iteration;
     guint          order;
+    gboolean       reported;
+    gboolean       reported_end;
     gboolean       has_forced_end;
     gboolean       is_color;
     gboolean       to_anim;
@@ -91,6 +107,7 @@ struct ns_smil {
     GHashTable    *by_node;
     GHashTable    *clocks;
     GHashTable    *overrides;
+    GArray        *events;
     char          *signature;
     gint64         origin_us;
     gint64         now_us;
@@ -99,10 +116,12 @@ struct ns_smil {
     gboolean       dirty;
     gboolean       active;
     gboolean       unreported;
+    gboolean       has_event_specs;
 };
 
 static __thread GPtrArray *g_smils;
 static __thread guint      g_smil_override_nodes;
+static __thread guint      g_smil_event_docs;
 
 static const char *
 smil_skip_ws(const char *p)
@@ -717,54 +736,68 @@ smil_build_values(smil_el *el, const ns_node *n)
     g_free(zero);
 }
 
-static void
-smil_parse_begin_item(smil_el *el, const char *item)
+static const char *
+smil_event_name_start(const char *item)
 {
-    smil_begin b = { SMIL_AT_OFFSET, 0, NULL };
-    if (smil_parse_clock(item, &b.offset)) {
-        g_array_append_val(el->begins, b);
-        return;
+    const char *start = item;
+    for (const char *p = item; *p; p++)
+        if (*p == '.' && g_ascii_isalpha(p[1])) start = p + 1;
+    return start;
+}
+
+static gboolean
+smil_parse_reference(const char *item, smil_begin *out)
+{
+    const char *name = smil_event_name_start(item);
+    const char *end = name;
+    while (g_ascii_isalpha(*end)) end++;
+    if (end == name) return FALSE;
+    const char *rest = smil_skip_ws(end);
+    if (*rest && !smil_parse_clock(rest, &out->offset)) return FALSE;
+    gsize id_len = name > item ? (gsize)(name - item - 1) : 0;
+    gsize name_len = (gsize)(end - name);
+    out->kind = SMIL_AT_EVENT;
+    if (id_len && name_len == 5 && strncmp(name, "begin", 5) == 0)
+        out->kind = SMIL_AT_SYNC_BEGIN;
+    else if (id_len && name_len == 3 && strncmp(name, "end", 3) == 0)
+        out->kind = SMIL_AT_SYNC_END;
+    out->id = id_len ? g_strndup(item, id_len) : NULL;
+    if (out->kind == SMIL_AT_EVENT) out->event = g_strndup(name, name_len);
+    return TRUE;
+}
+
+static void
+smil_parse_time_list(const char *list, GArray *offsets, GArray *specs)
+{
+    char **items = g_strsplit(list, ";", -1);
+    for (char **it = items; *it; it++) {
+        const char *item = g_strstrip(*it);
+        smil_begin b = { SMIL_AT_OFFSET, 0, NULL, NULL };
+        if (smil_parse_clock(item, &b.offset)) {
+            if (offsets) g_array_append_val(offsets, b.offset);
+            else         g_array_append_val(specs, b);
+        } else if (smil_parse_reference(item, &b)) {
+            g_array_append_val(specs, b);
+        }
     }
-    const char *ref = g_strrstr(item, ".begin");
-    gsize ref_len = 6;
-    b.kind = SMIL_AT_SYNC_BEGIN;
-    const char *end_ref = g_strrstr(item, ".end");
-    if (end_ref && (!ref || end_ref > ref)) {
-        ref = end_ref;
-        ref_len = 4;
-        b.kind = SMIL_AT_SYNC_END;
-    }
-    if (!ref || ref == item) return;
-    const char *rest = smil_skip_ws(ref + ref_len);
-    if (*rest && !smil_parse_clock(rest, &b.offset)) return;
-    b.id = g_strndup(item, (gsize)(ref - item));
-    g_array_append_val(el->begins, b);
+    g_strfreev(items);
 }
 
 static void
 smil_parse_begins(smil_el *el, const char *list)
 {
     if (!list || !*smil_skip_ws(list)) {
-        smil_begin b = { SMIL_AT_OFFSET, 0, NULL };
+        smil_begin b = { SMIL_AT_OFFSET, 0, NULL, NULL };
         g_array_append_val(el->begins, b);
         return;
     }
-    char **items = g_strsplit(list, ";", -1);
-    for (char **it = items; *it; it++)
-        smil_parse_begin_item(el, g_strstrip(*it));
-    g_strfreev(items);
+    smil_parse_time_list(list, NULL, el->begins);
 }
 
 static void
 smil_parse_ends(smil_el *el, const char *list)
 {
-    if (!list) return;
-    char **items = g_strsplit(list, ";", -1);
-    for (char **it = items; *it; it++) {
-        double v;
-        if (smil_parse_clock(*it, &v)) g_array_append_val(el->ends, v);
-    }
-    g_strfreev(items);
+    if (list) smil_parse_time_list(list, el->ends, el->end_specs);
 }
 
 static double
@@ -857,7 +890,9 @@ smil_attr_is(const ns_node *n, const char *name, const char *value)
 static void
 smil_begin_clear(gpointer data)
 {
-    g_free(((smil_begin *)data)->id);
+    smil_begin *b = data;
+    g_free(b->id);
+    g_free(b->event);
 }
 
 static void
@@ -874,6 +909,8 @@ smil_el_free(gpointer data)
     if (el->path) g_array_free(el->path, TRUE);
     g_array_free(el->begins, TRUE);
     g_array_free(el->ends, TRUE);
+    g_array_free(el->end_specs, TRUE);
+    g_array_free(el->end_instances, TRUE);
     g_array_free(el->instances, TRUE);
     g_free(el);
 }
@@ -907,6 +944,9 @@ smil_el_parse(const ns_smil *s, const ns_node *n, smil_kind kind)
     el->begins = g_array_new(FALSE, FALSE, sizeof(smil_begin));
     g_array_set_clear_func(el->begins, smil_begin_clear);
     el->ends = g_array_new(FALSE, FALSE, sizeof(double));
+    el->end_specs = g_array_new(FALSE, FALSE, sizeof(smil_begin));
+    g_array_set_clear_func(el->end_specs, smil_begin_clear);
+    el->end_instances = g_array_new(FALSE, FALSE, sizeof(double));
     el->instances = g_array_new(FALSE, FALSE, sizeof(double));
     el->horizon = -INFINITY;
 
@@ -956,17 +996,23 @@ smil_el_parse(const ns_smil *s, const ns_node *n, smil_kind kind)
 }
 
 static gboolean
-smil_instance_add(smil_el *el, double at)
+smil_time_insert(GArray *times, double at, double horizon)
 {
-    if (!isfinite(at) || at <= el->horizon) return FALSE;
+    if (!isfinite(at) || at <= horizon) return FALSE;
     guint i = 0;
-    for (; i < el->instances->len; i++) {
-        double v = g_array_index(el->instances, double, i);
+    for (; i < times->len; i++) {
+        double v = g_array_index(times, double, i);
         if (fabs(v - at) < SMIL_TIME_EPSILON) return FALSE;
         if (v > at) break;
     }
-    g_array_insert_val(el->instances, i, at);
+    g_array_insert_val(times, i, at);
     return TRUE;
+}
+
+static gboolean
+smil_instance_add(smil_el *el, double at)
+{
+    return smil_time_insert(el->instances, at, el->horizon);
 }
 
 static void
@@ -984,10 +1030,35 @@ smil_inherit_runtime(smil_el *el, smil_el *old)
     GArray *fresh = el->instances;
     el->instances = old->instances;
     old->instances = fresh;
+    fresh = el->end_instances;
+    el->end_instances = old->end_instances;
+    old->end_instances = fresh;
+    el->reported = old->reported;
+    el->reported_end = old->reported_end;
+    el->reported_begin = old->reported_begin;
+    el->reported_iteration = old->reported_iteration;
     el->horizon = old->horizon;
     el->has_forced_end = old->has_forced_end;
     el->forced_begin = old->forced_begin;
     el->forced_end = old->forced_end;
+}
+
+static gboolean
+smil_has_event_spec(const GArray *specs)
+{
+    for (guint i = 0; i < specs->len; i++)
+        if (g_array_index(specs, smil_begin, i).kind == SMIL_AT_EVENT)
+            return TRUE;
+    return FALSE;
+}
+
+static void
+smil_set_event_specs(ns_smil *s, gboolean has)
+{
+    if (s->has_event_specs == has) return;
+    s->has_event_specs = has;
+    if (has) g_smil_event_docs++;
+    else     g_smil_event_docs--;
 }
 
 static int
@@ -1034,6 +1105,7 @@ smil_scan(ns_smil *s)
 
     GPtrArray *els = g_ptr_array_new_with_free_func(smil_el_free);
     GHashTable *by_node = g_hash_table_new(g_direct_hash, g_direct_equal);
+    gboolean event_specs = FALSE;
     for (guint i = 0; i < nodes->len; i++) {
         const ns_node *n = g_ptr_array_index(nodes, i);
         smil_kind kind;
@@ -1047,8 +1119,11 @@ smil_scan(ns_smil *s)
             smil_seed_instances(el);
         g_ptr_array_add(els, el);
         g_hash_table_insert(by_node, (gpointer)n, el);
+        event_specs |= smil_has_event_spec(el->begins) ||
+                       smil_has_event_spec(el->end_specs);
     }
     g_ptr_array_free(nodes, TRUE);
+    smil_set_event_specs(s, event_specs);
 
     g_hash_table_destroy(s->by_node);
     g_ptr_array_free(s->els, TRUE);
@@ -1096,6 +1171,10 @@ smil_interval_end(const smil_el *el, double begin)
         double v = g_array_index(el->ends, double, i);
         if (v >= begin && v < end) end = v;
     }
+    for (guint i = 0; i < el->end_instances->len; i++) {
+        double v = g_array_index(el->end_instances, double, i);
+        if (v >= begin && v < end) end = v;
+    }
     if (el->has_forced_end &&
         fabs(el->forced_begin - begin) < SMIL_TIME_EPSILON &&
         el->forced_end < end)
@@ -1137,8 +1216,11 @@ smil_el_by_id(const ns_smil *s, const char *id)
 }
 
 static gboolean
-smil_sync_from(const ns_smil *s, smil_el *el, const smil_begin *spec, double t)
+smil_sync_from(const ns_smil *s, smil_el *el, const smil_begin *spec, double t,
+               GArray *into)
 {
+    if (spec->kind != SMIL_AT_SYNC_BEGIN && spec->kind != SMIL_AT_SYNC_END)
+        return FALSE;
     const smil_el *base = smil_el_by_id(s, spec->id);
     if (!base || base == el) return FALSE;
     gboolean grew = FALSE;
@@ -1147,9 +1229,29 @@ smil_sync_from(const ns_smil *s, smil_el *el, const smil_begin *spec, double t)
         if (at > t) break;
         if (spec->kind == SMIL_AT_SYNC_END) at = smil_interval_end(base, at);
         at += spec->offset;
-        if (at <= t && smil_instance_add(el, at)) grew = TRUE;
+        if (at <= t && smil_time_insert(into, at, el->horizon)) grew = TRUE;
     }
     return grew;
+}
+
+static gboolean
+smil_sync_specs(const ns_smil *s, smil_el *el, const GArray *specs, double t,
+                GArray *into)
+{
+    gboolean grew = FALSE;
+    for (guint k = 0; k < specs->len; k++)
+        if (smil_sync_from(s, el, &g_array_index(specs, smil_begin, k), t, into))
+            grew = TRUE;
+    return grew;
+}
+
+static void
+smil_prune_times(GArray *times, double t)
+{
+    guint past = 0;
+    while (past < times->len && g_array_index(times, double, past) <= t) past++;
+    if (past > SMIL_KEPT_INSTANCES)
+        g_array_remove_range(times, 0, past - SMIL_KEPT_INSTANCES);
 }
 
 static void
@@ -1173,17 +1275,17 @@ smil_resolve_sync(ns_smil *s)
         for (guint i = 0; i < s->els->len; i++) {
             smil_el *el = g_ptr_array_index(s->els, i);
             double t = smil_time_at(s, el->svg, s->now_us);
-            for (guint k = 0; k < el->begins->len; k++) {
-                const smil_begin *spec = &g_array_index(el->begins, smil_begin, k);
-                if (spec->kind != SMIL_AT_OFFSET && smil_sync_from(s, el, spec, t))
-                    grew = TRUE;
-            }
+            if (smil_sync_specs(s, el, el->begins, t, el->instances)) grew = TRUE;
+            if (smil_sync_specs(s, el, el->end_specs, t, el->end_instances))
+                grew = TRUE;
         }
         if (!grew) break;
     }
     for (guint i = 0; i < s->els->len; i++) {
         smil_el *el = g_ptr_array_index(s->els, i);
-        smil_prune_instances(el, smil_time_at(s, el->svg, s->now_us));
+        double t = smil_time_at(s, el->svg, s->now_us);
+        smil_prune_instances(el, t);
+        smil_prune_times(el->end_instances, t);
     }
 }
 
@@ -1196,6 +1298,42 @@ smil_running_order(gconstpointer a, gconstpointer b)
     return ra->el->order < rb->el->order ? -1 : ra->el->order > rb->el->order;
 }
 
+static void
+smil_queue_event(ns_smil *s, const smil_el *el, ns_smil_event_kind kind,
+                 double iteration)
+{
+    smil_event ev = { el->node, kind, (int)MIN(iteration, (double)G_MAXINT) };
+    if (s->events->len < SMIL_MAX_EVENTS) g_array_append_val(s->events, ev);
+}
+
+static void
+smil_note_progress(ns_smil *s, smil_el *el, double t)
+{
+    double begin;
+    if (!smil_current_begin(el, t, &begin)) return;
+    if (!el->reported || fabs(el->reported_begin - begin) > SMIL_TIME_EPSILON) {
+        if (el->reported && !el->reported_end)
+            smil_queue_event(s, el, NS_SMIL_EVENT_END, 0);
+        smil_queue_event(s, el, NS_SMIL_EVENT_BEGIN, 0);
+        el->reported = TRUE;
+        el->reported_end = FALSE;
+        el->reported_begin = begin;
+        el->reported_iteration = 0;
+    }
+    if (el->reported_end) return;
+    if (t >= smil_interval_end(el, begin)) {
+        smil_queue_event(s, el, NS_SMIL_EVENT_END, 0);
+        el->reported_end = TRUE;
+        return;
+    }
+    if (el->dur <= 0) return;
+    double iteration = floor((t - begin) / el->dur);
+    if (iteration > el->reported_iteration) {
+        el->reported_iteration = iteration;
+        smil_queue_event(s, el, NS_SMIL_EVENT_REPEAT, iteration);
+    }
+}
+
 static GArray *
 smil_collect_running(ns_smil *s)
 {
@@ -1203,8 +1341,9 @@ smil_collect_running(ns_smil *s)
     s->active = FALSE;
     for (guint i = 0; i < s->els->len; i++) {
         smil_el *el = g_ptr_array_index(s->els, i);
-        if (!el->target || !el->attr) continue;
         double t = smil_time_at(s, el->svg, s->now_us);
+        smil_note_progress(s, el, t);
+        if (!el->target || !el->attr) continue;
         gboolean ticking = !smil_clock_paused(s, el->svg);
         if (ticking && smil_has_future_begin(el, t)) s->active = TRUE;
         smil_running r = { .el = el };
@@ -1338,6 +1477,7 @@ ns_smil_new(const ns_node *doc, gint64 now_us)
     s->by_node = g_hash_table_new(g_direct_hash, g_direct_equal);
     s->clocks = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
     s->overrides = smil_overrides_new();
+    s->events = g_array_new(FALSE, FALSE, sizeof(smil_event));
     s->dirty = TRUE;
     if (!g_smils) g_smils = g_ptr_array_new();
     g_ptr_array_add(g_smils, s);
@@ -1349,6 +1489,8 @@ ns_smil_free(ns_smil *s)
 {
     if (!s) return;
     if (g_smils) g_ptr_array_remove_fast(g_smils, s);
+    smil_set_event_specs(s, FALSE);
+    g_array_free(s->events, TRUE);
     g_smil_override_nodes -= g_hash_table_size(s->overrides);
     g_hash_table_destroy(s->overrides);
     g_hash_table_destroy(s->clocks);
@@ -1401,6 +1543,105 @@ ns_smil_refresh(const ns_node *n)
     if (ns_smil_tick(s, s->serial, g_get_monotonic_time())) {
         s->unreported = TRUE;
         s->dirty = TRUE;
+    }
+}
+
+void
+ns_smil_drain_events(ns_smil *s, ns_smil_event_cb cb, gpointer user)
+{
+    if (!s || s->events->len == 0) return;
+    GArray *events = s->events;
+    s->events = g_array_new(FALSE, FALSE, sizeof(smil_event));
+    gboolean script_ran = FALSE;
+    for (guint i = 0; i < events->len; i++) {
+        const smil_event *ev = &g_array_index(events, smil_event, i);
+        if (script_ran) smil_scan(s);
+        script_ran = FALSE;
+        if (g_hash_table_contains(s->by_node, ev->node))
+            script_ran = cb(ev->node, ev->kind, ev->iteration, user);
+    }
+    g_array_free(events, TRUE);
+}
+
+const char *
+ns_smil_event_type(ns_smil_event_kind kind)
+{
+    static const char *const types[] = { "beginEvent", "endEvent", "repeatEvent" };
+    return types[kind];
+}
+
+static gboolean
+smil_settle_event(const ns_node *node, ns_smil_event_kind kind, int iteration,
+                  gpointer user)
+{
+    (void)iteration; (void)user;
+    ns_smil_dom_event(node, ns_smil_event_type(kind));
+    return FALSE;
+}
+
+void
+ns_smil_settle_events(ns_smil *s)
+{
+    ns_smil_drain_events(s, smil_settle_event, NULL);
+}
+
+static gboolean
+smil_event_bubbles(const char *type)
+{
+    static const char *const stays[] = {
+        "mouseenter", "mouseleave", "focus", "blur", "load", "beginEvent",
+        "endEvent", "repeatEvent",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(stays); i++)
+        if (strcmp(type, stays[i]) == 0) return FALSE;
+    return TRUE;
+}
+
+static gboolean
+smil_event_reaches(const ns_node *base, const ns_node *target, gboolean bubbles)
+{
+    if (!base) return FALSE;
+    if (base == target) return TRUE;
+    for (const ns_node *p = bubbles ? target->parent : NULL; p; p = p->parent)
+        if (p == base) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+smil_event_matches(const ns_smil *s, const smil_el *el, const smil_begin *spec,
+                   const ns_node *target, const char *type)
+{
+    if (spec->kind != SMIL_AT_EVENT) return FALSE;
+    const char *want = strcmp(spec->event, "activate") == 0 ? "click"
+                                                             : spec->event;
+    if (strcmp(want, type) != 0) return FALSE;
+    const ns_node *base = spec->id ? ns_node_find_by_id(s->doc, spec->id)
+                                   : el->target;
+    return smil_event_reaches(base, target, smil_event_bubbles(type));
+}
+
+void
+ns_smil_dom_event(const ns_node *target, const char *type)
+{
+    if (!g_smil_event_docs || !target || !type) return;
+    ns_smil *s = smil_for_node(target);
+    if (!s || !s->has_event_specs) return;
+    gint64 now = g_get_monotonic_time();
+    for (guint i = 0; i < s->els->len; i++) {
+        smil_el *el = g_ptr_array_index(s->els, i);
+        double t = smil_time_at(s, el->svg, now);
+        for (guint k = 0; k < el->begins->len; k++) {
+            const smil_begin *spec = &g_array_index(el->begins, smil_begin, k);
+            if (smil_event_matches(s, el, spec, target, type) &&
+                smil_instance_add(el, t + spec->offset))
+                s->dirty = TRUE;
+        }
+        for (guint k = 0; k < el->end_specs->len; k++) {
+            const smil_begin *spec = &g_array_index(el->end_specs, smil_begin, k);
+            if (smil_event_matches(s, el, spec, target, type) &&
+                smil_time_insert(el->end_instances, t + spec->offset, -INFINITY))
+                s->dirty = TRUE;
+        }
     }
 }
 

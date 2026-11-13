@@ -17,6 +17,20 @@ void     ns_smil_free(ns_smil *s);
 gboolean ns_smil_tick(ns_smil *s, guint64 dom_serial, gint64 now_us);
 gboolean ns_smil_has_active(const ns_smil *s);
 
+typedef enum ns_smil_event_kind {
+    NS_SMIL_EVENT_BEGIN,
+    NS_SMIL_EVENT_END,
+    NS_SMIL_EVENT_REPEAT,
+} ns_smil_event_kind;
+
+typedef gboolean (*ns_smil_event_cb)(const ns_node *node,
+                                     ns_smil_event_kind kind, int iteration,
+                                     gpointer user);
+const char *ns_smil_event_type(ns_smil_event_kind kind);
+void     ns_smil_drain_events(ns_smil *s, ns_smil_event_cb cb, gpointer user);
+void     ns_smil_settle_events(ns_smil *s);
+void     ns_smil_dom_event(const ns_node *target, const char *type);
+
 void        ns_smil_refresh(const ns_node *n);
 const char *ns_smil_attr(const ns_node *n, const char *name);
 gboolean    ns_smil_node_animated(const ns_node *n);

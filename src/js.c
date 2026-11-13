@@ -3174,6 +3174,8 @@ static const ns_event_attr ns_event_attrs[] = {
     { "TextUpdateEvent", "text", NS_EV_STRING, FALSE },
     { "TextUpdateEvent", "updateRangeEnd", NS_EV_NUMBER, FALSE },
     { "TextUpdateEvent", "updateRangeStart", NS_EV_NUMBER, FALSE },
+    { "TimeEvent", "detail", NS_EV_NUMBER, FALSE },
+    { "TimeEvent", "view", NS_EV_NULL, FALSE },
     { "ToggleEvent", "newState", NS_EV_STRING, FALSE },
     { "ToggleEvent", "oldState", NS_EV_STRING, FALSE },
     { "ToggleEvent", "source", NS_EV_NULL, FALSE },
@@ -34427,6 +34429,8 @@ ns_event_interface_for(JSContext *ctx, JSValueConst ev)
         { "dragend", "DragEvent" }, { "dragenter", "DragEvent" },
         { "dragover", "DragEvent" }, { "dragleave", "DragEvent" },
         { "drop", "DragEvent" },
+        { "beginEvent", "TimeEvent" }, { "endEvent", "TimeEvent" },
+        { "repeatEvent", "TimeEvent" },
         { "animationstart", "AnimationEvent" },
         { "animationend", "AnimationEvent" },
         { "animationiteration", "AnimationEvent" },
@@ -36195,6 +36199,7 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
 
     JS_SetPropertyStr(js->ctx, event, "_dispatching", JS_TRUE);
 
+    ns_smil_dom_event(target, type);
     GPtrArray *path = g_ptr_array_new();
     for (const ns_node *cur = target; cur; cur = cur->parent) {
         g_ptr_array_add(path, (gpointer)cur);
@@ -37179,6 +37184,50 @@ ns_js_dispatch_anim_events(ns_js *js, ns_anim *anim)
 {
     if (!js || !anim || js->halted || js->in_pump) return;
     ns_anim_drain_events(anim, ns_js_anim_event_cb, js);
+}
+
+static gboolean
+ns_js_smil_event_cb(const ns_node *node, ns_smil_event_kind kind,
+                    int iteration, gpointer user)
+{
+    static const char *const handlers[] = { "onbegin", "onend", "onrepeat" };
+    ns_js *js = user;
+    const char *type = ns_smil_event_type(kind);
+    if (!js || !js->ctx ||
+        (!node->js_wrapper && !ns_element_get_attr(node, handlers[kind]))) {
+        ns_smil_dom_event(node, type);
+        return FALSE;
+    }
+    JSContext *ctx = js->ctx;
+    JSValue el = ns_make_element(ctx, node);
+    JSValue event = ns_make_event(ctx, type, node);
+    JS_SetPropertyStr(ctx, event, "bubbles",    JS_FALSE);
+    JS_SetPropertyStr(ctx, event, "cancelable", JS_FALSE);
+    JS_SetPropertyStr(ctx, event, "detail",     JS_NewInt32(ctx, iteration));
+    JSValue for_handler = JS_DupValue(ctx, event);
+    ns_js_dispatch_built_event(js, node, type, event, NULL);
+    JSValue fn = JS_GetPropertyStr(ctx, el, handlers[kind]);
+    if (JS_IsFunction(ctx, fn)) {
+        JSValue r = JS_Call(ctx, fn, el, 1, &for_handler);
+        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, r);
+    }
+    JS_FreeValue(ctx, fn);
+    JS_FreeValue(ctx, for_handler);
+    JS_FreeValue(ctx, el);
+    return TRUE;
+}
+
+void
+ns_js_dispatch_smil_events(ns_js *js, struct ns_smil *smil)
+{
+    if (!smil) return;
+    if (!js) {
+        ns_smil_settle_events(smil);
+        return;
+    }
+    if (js->halted || js->in_pump) return;
+    ns_smil_drain_events(smil, ns_js_smil_event_cb, js);
 }
 
 gboolean
@@ -61484,6 +61533,7 @@ static const char *const ns_event_handler_names[] = {
     "ontransitionstart", "onvolumechange", "onwaiting", "onwebkitanimationend",
     "onwebkitanimationiteration", "onwebkitanimationstart",
     "onwebkittransitionend", "onwheel",
+    "onbegin", "onend", "onrepeat",
 };
 
 static void
@@ -64017,7 +64067,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
         "MediaQueryListEvent","BlobEvent","FontFaceSetLoadEvent",
         "GamepadEvent","DeviceMotionEvent","DeviceOrientationEvent",
         "PromiseRejectionEvent","SecurityPolicyViolationEvent",
-        "TextEvent","ToggleEvent","FormDataEvent","TrackEvent",
+        "TextEvent","ToggleEvent","FormDataEvent","TrackEvent","TimeEvent",
         "MediaStreamTrackEvent","CookieChangeEvent",
         "AnimationPlaybackEvent","OfflineAudioCompletionEvent",
     };
