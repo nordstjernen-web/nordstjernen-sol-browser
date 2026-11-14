@@ -73102,6 +73102,37 @@ ns_js_realm_trials_finish(ns_js *js, GArray *trials)
 }
 
 static void
+ns_js_unpin_detached_documents(ns_js *js)
+{
+    GHashTableIter it;
+    gpointer key;
+    g_hash_table_iter_init(&it, js->orphan_nodes);
+    while (g_hash_table_iter_next(&it, &key, NULL)) {
+        ns_node *root = key;
+        if (root->kind == NS_NODE_DOCUMENT && !root->parent &&
+            !(root->flags & NS_NODE_FRAGMENT))
+            ns_js_unpin_subtree(js, root);
+    }
+    GPtrArray *owned = g_ptr_array_new();
+    g_hash_table_iter_init(&it, js->pinned_wrappers_set);
+    while (g_hash_table_iter_next(&it, &key, NULL)) {
+        ns_node *node = key;
+        if (!node->js_wrapper || ns_js_node_in_page(js, node)) continue;
+        JSValue owner = JS_GetPropertyStr(js->ctx,
+            JS_MKPTR(JS_TAG_OBJECT, node->js_wrapper), "__ndOwnerDoc");
+        const ns_node *doc = JS_IsObject(owner) ? ns_unwrap_element(owner) : NULL;
+        if (doc && !ns_js_node_in_page(js, doc)) g_ptr_array_add(owned, node);
+        JS_FreeValue(js->ctx, owner);
+    }
+    for (guint i = 0; i < owned->len; i++) {
+        ns_node *node = g_ptr_array_index(owned, i);
+        if (g_hash_table_remove(js->pinned_wrappers_set, node))
+            JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, node->js_wrapper));
+    }
+    g_ptr_array_free(owned, TRUE);
+}
+
+static void
 ns_js_retire_realms(ns_js *js)
 {
     if (!js || js->halted || !js->frame_ctxs || js->frame_ctxs->len == 0 ||
@@ -73118,7 +73149,10 @@ ns_js_retire_realms(ns_js *js)
     GArray *trials = g_array_new(FALSE, FALSE, sizeof(ns_realm_trial));
     ns_js_orphan_frame_trials(js, trials);
     ns_js_replaced_realm_trials(js, trials);
-    if (trials->len > 0) JS_RunGC(js->rt);
+    if (trials->len > 0) {
+        ns_js_unpin_detached_documents(js);
+        JS_RunGC(js->rt);
+    }
     ns_js_realm_trials_finish(js, trials);
 }
 
