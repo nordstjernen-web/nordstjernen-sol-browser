@@ -22365,6 +22365,53 @@ ns_xhr_uses_user_defined_text(JSContext *ctx, JSValueConst obj,
     return yes;
 }
 
+static gboolean
+ns_xhr_mime_is_xml(const char *content_type)
+{
+    if (!content_type) return FALSE;
+    gsize len = strcspn(content_type, ";");
+    while (len > 0 && g_ascii_isspace(content_type[len - 1])) len--;
+    g_autofree char *mime = g_ascii_strdown(content_type, (gssize)len);
+    g_strstrip(mime);
+    return strcmp(mime, "text/xml") == 0 ||
+        strcmp(mime, "application/xml") == 0 ||
+        g_str_has_suffix(mime, "+xml");
+}
+
+static JSValue
+ns_xhr_parse_document(JSContext *ctx, const char *body, gsize blen,
+                      gboolean xml)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue dp_ctor = JS_GetPropertyStr(ctx, global, "DOMParser");
+    JS_FreeValue(ctx, global);
+    JSValue doc = JS_NULL;
+    JSValue parser = JS_IsConstructor(ctx, dp_ctor)
+        ? JS_CallConstructor(ctx, dp_ctor, 0, NULL) : JS_UNDEFINED;
+    JS_FreeValue(ctx, dp_ctor);
+    if (JS_IsException(parser)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return JS_NULL;
+    }
+    JSValue parse_fn = JS_IsObject(parser)
+        ? JS_GetPropertyStr(ctx, parser, "parseFromString") : JS_UNDEFINED;
+    if (JS_IsFunction(ctx, parse_fn)) {
+        JSValue src_v = JS_NewStringLen(ctx, body ? body : "", blen);
+        JSValue mime_v = JS_NewString(ctx, xml ? "application/xml" : "text/html");
+        JSValueConst args[2] = { src_v, mime_v };
+        doc = JS_Call(ctx, parse_fn, parser, 2, args);
+        if (JS_IsException(doc)) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+            doc = JS_NULL;
+        }
+        JS_FreeValue(ctx, src_v);
+        JS_FreeValue(ctx, mime_v);
+    }
+    JS_FreeValue(ctx, parse_fn);
+    JS_FreeValue(ctx, parser);
+    return doc;
+}
+
 static JSValue
 ns_xhr_response_text_value(JSContext *ctx, JSValueConst obj,
                            const guint8 *body, gsize blen,
@@ -22563,40 +22610,14 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
             JS_FreeValue(ctx, blob_ctor);
             JS_SetPropertyStr(ctx, st->obj, "response", blob);
         } else if (rt && strcmp(rt, "document") == 0) {
-            JSValue global = JS_GetGlobalObject(ctx);
-            JSValue dp_ctor = JS_GetPropertyStr(ctx, global, "DOMParser");
-            JS_FreeValue(ctx, global);
-            JSValue doc = JS_NULL;
-            if (JS_IsConstructor(ctx, dp_ctor)) {
-                JSValue parser = JS_CallConstructor(ctx, dp_ctor, 0, NULL);
-                if (!JS_IsException(parser) && JS_IsObject(parser)) {
-                    JSValue parse_fn =
-                        JS_GetPropertyStr(ctx, parser, "parseFromString");
-                    if (JS_IsFunction(ctx, parse_fn)) {
-                        gboolean xml = resp->content_type &&
-                            (strstr(resp->content_type, "xml") != NULL ||
-                             strstr(resp->content_type, "svg") != NULL);
-                        JSValue src_v = JS_NewStringLen(ctx, body, blen);
-                        JSValue mime_v = JS_NewString(ctx,
-                            xml ? "application/xml" : "text/html");
-                        JSValueConst args[2] = { src_v, mime_v };
-                        doc = JS_Call(ctx, parse_fn, parser, 2, args);
-                        if (JS_IsException(doc)) {
-                            JS_FreeValue(ctx, JS_GetException(ctx));
-                            doc = JS_NULL;
-                        }
-                        JS_FreeValue(ctx, src_v);
-                        JS_FreeValue(ctx, mime_v);
-                    }
-                    JS_FreeValue(ctx, parse_fn);
-                } else if (JS_IsException(parser)) {
-                    JS_FreeValue(ctx, JS_GetException(ctx));
-                }
-                JS_FreeValue(ctx, parser);
-            }
-            JS_FreeValue(ctx, dp_ctor);
+            JSValue doc = ns_xhr_parse_document(ctx, body, blen,
+                ns_xhr_mime_is_xml(resp->content_type));
+            JS_SetPropertyStr(ctx, st->obj, "responseXML", JS_DupValue(ctx, doc));
             JS_SetPropertyStr(ctx, st->obj, "response", doc);
         } else {
+            if ((!rt || !*rt) && ns_xhr_mime_is_xml(resp->content_type))
+                JS_SetPropertyStr(ctx, st->obj, "responseXML",
+                                  ns_xhr_parse_document(ctx, body, blen, TRUE));
             JS_SetPropertyStr(ctx, st->obj, "response",
                               ns_xhr_response_text_value(ctx, st->obj,
                                   (const guint8 *)body, blen,
@@ -44620,6 +44641,27 @@ ns_element_get_null(JSContext *ctx, JSValueConst this_val)
     return JS_NULL;
 }
 
+static void
+ns_input_files_adopt_list_proto(JSContext *ctx, JSValueConst list)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue symbol_ctor = JS_GetPropertyStr(ctx, global, "Symbol");
+    JSValue iterator_sym = JS_GetPropertyStr(ctx, symbol_ctor, "iterator");
+    JSAtom iterator = JS_ValueToAtom(ctx, iterator_sym);
+    JSValue array_values = JS_GetProperty(ctx, list, iterator);
+    JSValue list_proto = ns_realm_proto(ctx, "FileList");
+    if (JS_IsObject(list_proto)) JS_SetPrototype(ctx, list, list_proto);
+    if (JS_IsFunction(ctx, array_values))
+        JS_DefinePropertyValue(ctx, list, iterator, JS_DupValue(ctx, array_values),
+                               JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_FreeValue(ctx, list_proto);
+    JS_FreeValue(ctx, array_values);
+    JS_FreeAtom(ctx, iterator);
+    JS_FreeValue(ctx, iterator_sym);
+    JS_FreeValue(ctx, symbol_ctor);
+    JS_FreeValue(ctx, global);
+}
+
 static JSValue
 ns_input_get_files(JSContext *ctx, JSValueConst this_val)
 {
@@ -44632,8 +44674,10 @@ ns_input_get_files(JSContext *ctx, JSValueConst this_val)
     JS_FreeValue(ctx, cached);
 
     JSValue arr = JS_NewArray(ctx);
-    JS_SetPropertyStr(ctx, arr, "item",
-        JS_NewCFunction(ctx, ns_namedmap_item, "item", 1));
+    ns_input_files_adopt_list_proto(ctx, arr);
+    JS_DefinePropertyValueStr(ctx, arr, "item",
+        JS_NewCFunction(ctx, ns_namedmap_item, "item", 1),
+        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_DefinePropertyValueStr(ctx, this_val, "__nd_files_cache",
         JS_DupValue(ctx, arr),
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
@@ -74228,6 +74272,36 @@ ns_js_wait_for_frame_images(ns_js *js, ns_node *content_root)
     js->in_pump = saved;
 }
 
+static ns_csp *
+ns_js_frame_meta_csp_rec(const ns_node *node, ns_csp *csp, int depth)
+{
+    if (depth > NS_DOM_MAX_DEPTH) return csp;
+    for (const ns_node *c = node ? node->first_child : NULL; c;
+         c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "meta")) {
+            const char *equiv = ns_element_get_attr(c, "http-equiv");
+            const char *content = ns_element_get_attr(c, "content");
+            ns_csp *parsed = equiv && content && *content &&
+                g_ascii_strcasecmp(equiv, "content-security-policy") == 0
+                ? ns_csp_parse(content) : NULL;
+            if (parsed && csp) {
+                ns_csp_merge(csp, parsed);
+                ns_csp_free(parsed);
+            } else if (parsed) {
+                csp = parsed;
+            }
+        }
+        csp = ns_js_frame_meta_csp_rec(c, csp, depth + 1);
+    }
+    return csp;
+}
+
+static ns_csp *
+ns_js_frame_meta_csp(const ns_node *content_root, ns_csp *csp)
+{
+    return ns_js_frame_meta_csp_rec(content_root, csp, 0);
+}
+
 static gboolean
 ns_js_tree_has_unstarted_script(ns_node *root)
 {
@@ -74650,9 +74724,15 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         if (resp) {
             ns_csp *own_csp = resp->csp_header && *resp->csp_header
                 ? ns_csp_parse(resp->csp_header) : NULL;
-            g_hash_table_replace(js->frame_csps, iframe, own_csp);
+            g_hash_table_replace(js->frame_csps, iframe,
+                                 ns_js_frame_meta_csp(content_root, own_csp));
         } else {
             g_hash_table_remove(js->frame_csps, iframe);
+            if (!ns_js_frame_csp(js, ns_js_node_frame(iframe->parent))) {
+                ns_csp *meta_csp = ns_js_frame_meta_csp(content_root, NULL);
+                if (meta_csp)
+                    g_hash_table_replace(js->frame_csps, iframe, meta_csp);
+            }
         }
         if (resp && resp->csp_header && *resp->csp_header)
             ns_element_set_attr(iframe, "data-nd-frame-csp", resp->csp_header);
