@@ -33,6 +33,12 @@ Changelog:
   frames, and frames that used WebAssembly, WebGL, WebGPU or Web Audio
   are kept as before. A page that created and dropped fifteen frames
   holding 20 MB each grew to 320 MB and now stays under 90 MB.
+* Security: loading the same ES module again in one tab no longer
+  crashes the tab. A module of 1 KB or more is kept as compiled
+  bytecode, and the copy read back on the second load was run without
+  its imports being resolved, so the engine followed a null pointer.
+  Speedometer 3.1 crashed this way at the start of its second
+  iteration, in TodoMVC-WebComponents.
 * A promise reaction now runs in the realm of its handler. When a
   script in an `<iframe>` settled a promise that belonged to the parent
   page, the page's `then` callbacks and `await` continuations ran with
