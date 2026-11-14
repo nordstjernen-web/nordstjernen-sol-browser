@@ -13,7 +13,7 @@ nordstjernen --webdriver=0          # a free port, printed at startup
 ```
 
 The server prints one line when it is ready,
-`Nordstjernen WebDriver 1.0.46 listening on http://127.0.0.1:4444`, and runs
+`Nordstjernen WebDriver 1.0.47 listening on http://127.0.0.1:4444`, and runs
 until it gets `SIGINT` or `SIGTERM`. `--viewport=WxH` sets the window size a
 session starts with (default 1280×800), `--settle-ms=N` how long each load
 settles (default 200) and `--debug` logs every request and reply to stderr.
