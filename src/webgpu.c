@@ -1055,6 +1055,7 @@ wg_make_device(JSContext *ctx, WGPUDevice device, ns_wg_error_sink *sink,
     d->sink = sink;
     d->lost_resolve = JS_UNDEFINED;
     sink->ctx = ctx;
+    ns_js_pin_realm(ctx);
     sink->device_obj = obj;
     JS_SetOpaque(obj, d);
     wg_link_event_target(ctx, obj);

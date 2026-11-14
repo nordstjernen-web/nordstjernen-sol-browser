@@ -625,6 +625,28 @@ ns_perf_move_timeline(ns_js *js, gconstpointer from, gconstpointer to)
     }
 }
 
+gboolean
+ns_perf_realm_observed(const ns_js *js, gconstpointer realm)
+{
+    for (guint i = 0; js && js->perf_observers && i < js->perf_observers->len; i++) {
+        const ns_perf_observer *o = g_ptr_array_index(js->perf_observers, i);
+        if (o && o->realm == realm) return TRUE;
+    }
+    return FALSE;
+}
+
+void
+ns_perf_forget_realm(ns_js *js, gconstpointer realm)
+{
+    if (!js || !realm) return;
+    if (js->realm_origins) g_hash_table_remove(js->realm_origins, realm);
+    for (guint i = js->perf_entries ? js->perf_entries->len : 0; i > 0; i--) {
+        const ns_perf_entry *e = g_ptr_array_index(js->perf_entries, i - 1);
+        if (e && e->realm == realm)
+            g_ptr_array_remove_index(js->perf_entries, i - 1);
+    }
+}
+
 static JSClassID ns_perf_observer_class_id;
 
 static JSValue

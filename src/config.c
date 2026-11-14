@@ -276,6 +276,7 @@ static const struct { const char *env; const char *key; } env_value[] = {
     { "NS_NO_PROXY",    "no_proxy"    },
     { "NS_DOH_URL",     "doh_url"     },
     { "NS_GSK_RENDERER","gsk_renderer"},
+    { "NS_JS_EVAL_BUDGET_MS", "js_eval_budget_ms" },
 };
 
 static void

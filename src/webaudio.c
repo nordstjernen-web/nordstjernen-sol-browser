@@ -499,6 +499,7 @@ ns_webaudio_rt_add(ns_js *js, JSContext *ctx, JSValueConst obj, double rate,
         js->webaudio_rt = g_ptr_array_new_with_free_func(ns_wa_rt_free_one);
     ns_wa_rt *rt = g_new0(ns_wa_rt, 1);
     rt->ctx = ctx;
+    ns_js_pin_realm(ctx);
     rt->obj = JS_DupValue(ctx, obj);
     rt->rate = rate > 0 ? rate : 44100.0;
     g_snprintf(rt->token, sizeof rt->token, "wa%u", ++serial);

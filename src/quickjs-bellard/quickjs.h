@@ -442,6 +442,7 @@ JS_BOOL JS_IsLiveObject(JSRuntime *rt, JSValueConst obj);
 JSContext *JS_NewContext(JSRuntime *rt);
 void JS_FreeContext(JSContext *s);
 JSContext *JS_DupContext(JSContext *ctx);
+int JS_IsLiveContext(JSRuntime *rt, const JSContext *ctx);
 void *JS_GetContextOpaque(JSContext *ctx);
 void JS_SetContextOpaque(JSContext *ctx, void *opaque);
 JSRuntime *JS_GetRuntime(JSContext *ctx);

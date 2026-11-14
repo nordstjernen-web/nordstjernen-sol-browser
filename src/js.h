@@ -15,7 +15,7 @@
 
 G_BEGIN_DECLS
 
-#define NS_JS_EVAL_BUDGET_MAX_MS 60000
+#define NS_JS_EVAL_BUDGET_MAX_MS 3600000
 
 typedef struct ns_js ns_js;
 struct JSContext;

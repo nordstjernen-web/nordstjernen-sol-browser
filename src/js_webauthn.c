@@ -181,6 +181,7 @@ ns_window_webauthn_request(JSContext *ctx, JSValueConst this_val,
         }
         ns_webauthn_pending *p = g_new0(ns_webauthn_pending, 1);
         p->ctx = ctx;
+        ns_js_pin_realm(ctx);
         p->resolve = resolving[0];
         p->reject = resolving[1];
         g_hash_table_insert(ns_webauthn_table(js), GUINT_TO_POINTER(id), p);

@@ -267,6 +267,7 @@ static void ns_js_highlights_clear(ns_js *js);
 static JSValue ns_script_supports(JSContext *ctx, JSValueConst this_val,
                                   int argc, JSValueConst *argv);
 static void ns_js_smooth_scrolls_clear(ns_js *js);
+static void ns_js_retire_realms(ns_js *js);
 static JSValue ns_document_element_from_point(JSContext *ctx,
                                               JSValueConst this_val,
                                               int argc, JSValueConst *argv);
@@ -994,7 +995,8 @@ ns_js_budget_push(ns_js *js, ns_budget_guard *g)
     if (g->saved == 0) {
         js->task_epoch++;
         if (js->task_epoch == 0) js->task_epoch++;
-        js->js_monitor_deadline_us = now + NS_JS_MONITOR_LIMIT_US;
+        js->js_monitor_deadline_us =
+            now + MAX(NS_JS_MONITOR_LIMIT_US, ns_js_eval_budget_us());
         js->task_start_us = now;
     }
     gint64 fresh = now + ns_js_eval_budget_us();
@@ -26815,6 +26817,7 @@ ns_window_eventsource_ctor(JSContext *ctx, JSValueConst this_val,
     ns_js_es *s = g_new0(ns_js_es, 1);
     s->js = js;
     s->ctx = ctx;
+    ns_js_pin_realm(ctx);
     s->wrapper = obj;
     JS_SetOpaque(obj, s);
 
@@ -36645,6 +36648,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
     ns_js_flush_ready_images(js);
     ns_js_flush_autofocus(js);
     ns_drain_microtasks(js);
+    ns_js_retire_realms(js);
     ns_js_promote_deferred_iframes(js);
     ns_js_process_pending_iframes(js);
     ns_drain_microtasks(js);
@@ -38099,6 +38103,7 @@ ns_js_drag_session_transfer_for(ns_js_drag_session *session,
     if (session->frame_ctx != target_ctx) {
         JS_FreeValue(main_ctx, session->frame_transfer);
         session->frame_ctx = target_ctx;
+        ns_js_pin_realm(target_ctx);
         session->frame_transfer = ns_js_new_data_transfer(target_ctx);
         for (guint i = 0; i + 1 < session->engine_data->len; i += 2)
             if (JS_IsObject(session->frame_transfer))
@@ -56207,6 +56212,12 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         JS_FreeValue(fctx, fglobal);
         g_ptr_array_add(js->frame_ctxs, fctx);
         if (iframe) {
+            JSContext *replaced = g_hash_table_lookup(js->frame_contexts, iframe);
+            if (replaced) {
+                if (!js->replaced_realms)
+                    js->replaced_realms = g_ptr_array_new();
+                g_ptr_array_add(js->replaced_realms, replaced);
+            }
             g_hash_table_replace(js->frame_contexts, iframe, fctx);
             ns_perf_move_timeline(js, iframe, fctx);
         }
@@ -67174,6 +67185,63 @@ ns_realmdoc_open(JSContext *ctx, JSValueConst this_val,
     return JS_DupValue(ctx, this_val);
 }
 
+static gboolean
+ns_realmdoc_flush_written(ns_js *js, ns_node *doc)
+{
+    if (!js || !doc || !doc->js_wrapper) return FALSE;
+    JSContext *ctx = js->ctx;
+    JSValue wrapper = JS_MKPTR(JS_TAG_OBJECT, doc->js_wrapper);
+    JSValue cur = JS_GetPropertyStr(ctx, wrapper, "\xff" "wbuf");
+    if (!JS_IsString(cur)) { JS_FreeValue(ctx, cur); return FALSE; }
+    const char *buf = JS_ToCString(ctx, cur);
+    JS_FreeValue(ctx, cur);
+    if (buf) {
+        ns_node *parsed = ns_html_parse(buf, -1);
+        JS_FreeCString(ctx, buf);
+        if (parsed) {
+            ns_js_orphan_children(js, doc);
+            ns_node *c = parsed->first_child;
+            while (c) {
+                ns_node *next = c->next_sibling;
+                ns_node_own_strings_deep(c);
+                ns_node_remove(c);
+                ns_node_append_child(doc, c);
+                ns_js_index_child_change(js, doc, c, NULL);
+                c = next;
+            }
+            ns_node_free(parsed);
+            js->mutated = TRUE;
+        }
+    }
+    JS_SetPropertyStr(ctx, wrapper, "\xff" "wbuf", JS_UNDEFINED);
+    return TRUE;
+}
+
+static ns_node *
+ns_realmdoc_frame_host(const ns_node *doc)
+{
+    ns_node *host = doc ? doc->parent : NULL;
+    if (host && host->kind == NS_NODE_ELEMENT &&
+        (ns_node_is_element_named(host, "iframe") ||
+         ns_node_is_element_named(host, "frame")))
+        return host;
+    return NULL;
+}
+
+static void
+ns_realmdoc_queue_written_load(ns_js *js, ns_node *host)
+{
+    ns_element_set_attr(host, "data-nd-doc-written", "1");
+    if (!js->pending_iframe_loads)
+        js->pending_iframe_loads = g_ptr_array_new();
+    gboolean present = FALSE;
+    for (guint i = 0; i < js->pending_iframe_loads->len; i++)
+        if (g_ptr_array_index(js->pending_iframe_loads, i) == host)
+            present = TRUE;
+    if (!present) g_ptr_array_add(js->pending_iframe_loads, host);
+    js->mutated = TRUE;
+}
+
 static void
 ns_realmdoc_append_write(JSContext *ctx, JSValueConst this_val, int argc,
                          JSValueConst *argv, gboolean newline)
@@ -67201,6 +67269,8 @@ ns_realmdoc_append_write(JSContext *ctx, JSValueConst this_val, int argc,
     if (newline) g_string_append_c(buf, '\n');
     JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf", JS_NewString(ctx, buf->str));
     g_string_free(buf, TRUE);
+    ns_node *host = ns_realmdoc_frame_host(doc);
+    if (host) ns_realmdoc_queue_written_load(js, host);
 }
 
 static gboolean
@@ -67246,43 +67316,9 @@ ns_realmdoc_close(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     ns_node *doc = ns_unwrap_element_mut(this_val);
     if (!js || !doc) return JS_UNDEFINED;
-    JSValue cur = JS_GetPropertyStr(ctx, this_val, "\xff" "wbuf");
-    if (!JS_IsString(cur)) { JS_FreeValue(ctx, cur); return JS_UNDEFINED; }
-    const char *buf = JS_ToCString(ctx, cur);
-    JS_FreeValue(ctx, cur);
-    if (buf) {
-        ns_node *parsed = ns_html_parse(buf, -1);
-        JS_FreeCString(ctx, buf);
-        if (parsed) {
-            ns_js_orphan_children(js, doc);
-            ns_node *c = parsed->first_child;
-            while (c) {
-                ns_node *next = c->next_sibling;
-                ns_node_own_strings_deep(c);
-                ns_node_remove(c);
-                ns_node_append_child(doc, c);
-                ns_js_index_child_change(js, doc, c, NULL);
-                c = next;
-            }
-            ns_node_free(parsed);
-            js->mutated = TRUE;
-        }
-    }
-    JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf", JS_UNDEFINED);
-    ns_node *host = doc->parent;
-    if (host && host->kind == NS_NODE_ELEMENT &&
-        (ns_node_is_element_named(host, "iframe") ||
-         ns_node_is_element_named(host, "frame"))) {
-        ns_element_set_attr(host, "data-nd-doc-written", "1");
-        if (!js->pending_iframe_loads)
-            js->pending_iframe_loads = g_ptr_array_new();
-        gboolean present = FALSE;
-        for (guint i = 0; i < js->pending_iframe_loads->len; i++)
-            if (g_ptr_array_index(js->pending_iframe_loads, i) == host)
-                present = TRUE;
-        if (!present) g_ptr_array_add(js->pending_iframe_loads, host);
-        js->mutated = TRUE;
-    }
+    if (!ns_realmdoc_flush_written(js, doc)) return JS_UNDEFINED;
+    ns_node *host = ns_realmdoc_frame_host(doc);
+    if (host) ns_realmdoc_queue_written_load(js, host);
     return JS_UNDEFINED;
 }
 
@@ -67987,6 +68023,8 @@ ns_js_reset_runtime_state(ns_js *js)
             JS_FreeContext(g_ptr_array_index(js->frame_ctxs, i));
         g_ptr_array_set_size(js->frame_ctxs, 0);
     }
+    if (js->pinned_realms) g_hash_table_remove_all(js->pinned_realms);
+    if (js->replaced_realms) g_ptr_array_set_size(js->replaced_realms, 0);
 
     ns_drain_microtasks(js);
     JS_RunGC(js->rt);
@@ -69046,6 +69084,8 @@ ns_js_free(ns_js *js)
         g_ptr_array_free(js->frame_ctxs, TRUE);
         js->frame_ctxs = NULL;
     }
+    g_clear_pointer(&js->pinned_realms, g_hash_table_destroy);
+    g_clear_pointer(&js->replaced_realms, g_ptr_array_unref);
     JS_FreeContext(js->ctx);
     ns_js_runtime_free(js->rt);
     ns_set_active_js(resume_active);
@@ -72828,6 +72868,260 @@ ns_js_purge_subtree_node_refs(ns_js *js, ns_node *root)
     ns_js_link_fetches_drop(js, root);
 }
 
+static void ns_js_unpin_subtree(ns_js *js, ns_node *root);
+static void ns_js_iframe_stop_activity(ns_js *js, ns_node *iframe);
+
+typedef struct {
+    JSContext *realm;
+    ns_node   *frame;
+} ns_realm_trial;
+
+void
+ns_js_pin_realm(JSContext *ctx)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !ctx || ctx == js->main_realm_ctx) return;
+    if (!js->pinned_realms)
+        js->pinned_realms = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_hash_table_add(js->pinned_realms, ctx);
+}
+
+static gboolean
+ns_js_realm_has_pending_work(ns_js *js, JSContext *realm)
+{
+    GHashTableIter it;
+    gpointer value;
+    if (js->timers) {
+        g_hash_table_iter_init(&it, js->timers);
+        while (g_hash_table_iter_next(&it, NULL, &value))
+            if (((ns_timer *)value)->ctx == realm) return TRUE;
+    }
+    for (guint i = 0; js->raf_pending && i < js->raf_pending->len; i++)
+        if (g_array_index(js->raf_pending, ns_raf_entry, i).ctx == realm)
+            return TRUE;
+    for (GList *l = js->message_tasks ? js->message_tasks->head : NULL; l;
+         l = l->next)
+        if (((ns_message_task *)l->data)->ctx == realm) return TRUE;
+    if (js->js_image_loads) {
+        g_hash_table_iter_init(&it, js->js_image_loads);
+        while (g_hash_table_iter_next(&it, NULL, &value))
+            if (((ns_js_image_load *)value)->realm == realm) return TRUE;
+    }
+    GHashTable *rejections[] = { js->pending_rejections,
+                                 js->reported_rejections };
+    for (guint t = 0; t < G_N_ELEMENTS(rejections); t++) {
+        if (!rejections[t]) continue;
+        g_hash_table_iter_init(&it, rejections[t]);
+        while (g_hash_table_iter_next(&it, NULL, &value))
+            if (((ns_pending_rejection *)value)->ctx == realm) return TRUE;
+    }
+    for (guint i = 0; js->smooth_scrolls && i < js->smooth_scrolls->len; i++)
+        if (g_array_index(js->smooth_scrolls, ns_smooth_scroll, i).ctx == realm)
+            return TRUE;
+    for (guint i = 0; js->fetch_later && i < js->fetch_later->len; i++)
+        if (((ns_fetch_later *)g_ptr_array_index(js->fetch_later, i))->ctx ==
+            realm)
+            return TRUE;
+    for (guint i = 0; js->pending_fetches && i < js->pending_fetches->len; i++) {
+        ns_js_fetch_state *st = g_ptr_array_index(js->pending_fetches, i);
+        if (st->ctx == realm || st->timeline == realm) return TRUE;
+    }
+    for (guint i = 0; js->pending_xhrs && i < js->pending_xhrs->len; i++) {
+        ns_xhr_state *st = g_ptr_array_index(js->pending_xhrs, i);
+        if (st->ctx == realm || st->timeline == realm) return TRUE;
+    }
+    for (guint i = 0; js->pending_aborts && i < js->pending_aborts->len; i++)
+        if (((ns_abort_timeout *)g_ptr_array_index(js->pending_aborts, i))->ctx ==
+            realm)
+            return TRUE;
+    for (guint i = 0; js->pending_ws && i < js->pending_ws->len; i++) {
+        ns_js_ws *s = g_ptr_array_index(js->pending_ws, i);
+        if (s && s->ctx == realm) return TRUE;
+    }
+    for (guint i = 0; js->workers && i < js->workers->len; i++) {
+        ns_worker_host *host = g_ptr_array_index(js->workers, i);
+        if (host && host->owner_ctx == realm) return TRUE;
+    }
+    return ns_perf_realm_observed(js, realm);
+}
+
+static gboolean
+ns_js_realm_may_retire(ns_js *js, JSContext *realm)
+{
+    if (!realm || realm == js->ctx || realm == js->main_realm_ctx ||
+        realm == js->module_ctx || realm == js->remote_ctx ||
+        realm == js->webdriver_ctx || realm == js->fullscreen_request_ctx)
+        return FALSE;
+    if (js->pinned_realms && g_hash_table_contains(js->pinned_realms, realm))
+        return FALSE;
+    ns_realm_cloner *rc = ns_realm_cloner_lookup(js, realm);
+    if (rc && rc->native) return FALSE;
+    gboolean owned = FALSE;
+    for (guint i = 0; !owned && i < js->frame_ctxs->len; i++)
+        owned = g_ptr_array_index(js->frame_ctxs, i) == realm;
+    return owned && !ns_js_realm_has_pending_work(js, realm);
+}
+
+static void
+ns_js_frame_drop_realm_links(ns_js *js, ns_node *frame)
+{
+    if (frame->js_wrapper) {
+        JSValue wrapper = JS_MKPTR(JS_TAG_OBJECT, frame->js_wrapper);
+        static const char *const links[] = { "__ndRealmWindow", "__ndRealmDoc" };
+        for (guint i = 0; i < G_N_ELEMENTS(links); i++) {
+            JSAtom atom = JS_NewAtom(js->ctx, links[i]);
+            if (JS_DeleteProperty(js->ctx, wrapper, atom, 0) < 0)
+                JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+            JS_FreeAtom(js->ctx, atom);
+        }
+    }
+    gpointer window = g_hash_table_lookup(js->frame_windows, frame);
+    if (window) {
+        g_hash_table_remove(js->frame_windows, frame);
+        JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, window));
+    }
+    if (js->initial_blank_realms)
+        g_hash_table_remove(js->initial_blank_realms, frame);
+    for (ns_node *c = frame->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_DOCUMENT) ns_js_unpin_subtree(js, c);
+}
+
+static void
+ns_js_realm_trial_start(ns_js *js, GArray *trials, JSContext *realm,
+                        ns_node *frame)
+{
+    if (frame) ns_js_frame_drop_realm_links(js, frame);
+    ns_realm_cloner *rc = ns_realm_cloner_lookup(js, realm);
+    if (rc) {
+        g_hash_table_remove(js->realm_cloners, realm);
+        ns_realm_cloner_free(rc);
+    }
+    if (js->realm_helpers) g_hash_table_remove(js->realm_helpers, realm);
+    g_ptr_array_remove(js->frame_ctxs, realm);
+    ns_realm_trial trial = { .realm = realm, .frame = frame };
+    g_array_append_val(trials, trial);
+    JS_FreeContext(realm);
+}
+
+static void
+ns_js_orphan_frame_trials(ns_js *js, GArray *trials)
+{
+    GHashTable *by_root = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+        NULL, (GDestroyNotify)g_ptr_array_unref);
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, js->frame_contexts);
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        ns_node *frame = key;
+        ns_node *root = frame;
+        while (root->parent) root = root->parent;
+        if (!g_hash_table_contains(js->orphan_nodes, root)) continue;
+        GPtrArray *frames = g_hash_table_lookup(by_root, root);
+        if (!frames) {
+            frames = g_ptr_array_new();
+            g_hash_table_insert(by_root, root, frames);
+        }
+        g_ptr_array_add(frames, frame);
+    }
+    g_hash_table_iter_init(&it, by_root);
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        GPtrArray *frames = value;
+        gboolean eligible = TRUE;
+        for (guint i = 0; i < frames->len; i++) {
+            ns_node *frame = g_ptr_array_index(frames, i);
+            ns_js_iframe_stop_activity(js, frame);
+            if (ns_element_get_attr(frame, "data-nd-realm-kept"))
+                eligible = FALSE;
+        }
+        for (guint i = 0; eligible && i < frames->len; i++)
+            eligible = ns_js_realm_may_retire(js,
+                g_hash_table_lookup(js->frame_contexts,
+                                    g_ptr_array_index(frames, i)));
+        for (guint i = 0; eligible && i < frames->len; i++) {
+            ns_node *frame = g_ptr_array_index(frames, i);
+            ns_js_realm_trial_start(js, trials,
+                g_hash_table_lookup(js->frame_contexts, frame), frame);
+        }
+    }
+    g_hash_table_destroy(by_root);
+}
+
+static void
+ns_js_replaced_realm_trials(ns_js *js, GArray *trials)
+{
+    if (!js->replaced_realms) return;
+    guint i = 0;
+    while (i < js->replaced_realms->len) {
+        JSContext *realm = g_ptr_array_index(js->replaced_realms, i);
+        if (!ns_js_realm_may_retire(js, realm)) {
+            i++;
+            continue;
+        }
+        g_ptr_array_remove_index_fast(js->replaced_realms, i);
+        ns_js_realm_trial_start(js, trials, realm, NULL);
+    }
+}
+
+static void
+ns_js_realm_forget(ns_js *js, JSContext *realm, ns_node *frame)
+{
+    GHashTableIter it;
+    gpointer value;
+    g_hash_table_iter_init(&it, js->frame_contexts);
+    while (g_hash_table_iter_next(&it, NULL, &value))
+        if (value == realm) g_hash_table_iter_remove(&it);
+    if (js->replaced_realms) g_ptr_array_remove(js->replaced_realms, realm);
+    g_hash_table_remove(js->realm_doc_origins, realm);
+    ns_perf_forget_realm(js, realm);
+    if (!frame) return;
+    g_hash_table_remove(js->frame_csps, frame);
+    g_hash_table_remove(js->frame_posts, frame);
+    g_hash_table_remove(js->frame_urls, frame);
+    g_hash_table_remove(js->frame_referrers, frame);
+    ns_js_import_map_forget_frame(js, frame);
+}
+
+static void
+ns_js_realm_trials_finish(ns_js *js, GArray *trials)
+{
+    for (guint i = 0; i < trials->len; i++) {
+        ns_realm_trial *trial = &g_array_index(trials, ns_realm_trial, i);
+        if (JS_IsLiveContext(js->rt, trial->realm)) {
+            g_ptr_array_add(js->frame_ctxs, JS_DupContext(trial->realm));
+            if (trial->frame)
+                ns_element_set_attr(trial->frame, "data-nd-realm-kept", "1");
+        } else {
+            ns_js_realm_forget(js, trial->realm, trial->frame);
+        }
+        if (trial->frame) {
+            ns_element_remove_attr(trial->frame, "data-nd-frame-loaded");
+            ns_element_remove_attr(trial->frame, "data-nd-frame-url");
+        }
+    }
+    g_array_free(trials, TRUE);
+}
+
+static void
+ns_js_retire_realms(ns_js *js)
+{
+    if (!js || js->halted || !js->frame_ctxs || js->frame_ctxs->len == 0 ||
+        !js->frame_contexts || !js->orphan_nodes)
+        return;
+    if (js->eval_depth > 0 || js->callback_depth > 0 || js->dispatch_depth > 0 ||
+        js->iframe_load_depth > 0 || js->in_pump)
+        return;
+    gint64 now = g_get_monotonic_time();
+    if (js->last_realm_retire_us != 0 &&
+        now - js->last_realm_retire_us < 250000)
+        return;
+    js->last_realm_retire_us = now;
+    GArray *trials = g_array_new(FALSE, FALSE, sizeof(ns_realm_trial));
+    ns_js_orphan_frame_trials(js, trials);
+    ns_js_replaced_realm_trials(js, trials);
+    if (trials->len > 0) JS_RunGC(js->rt);
+    ns_js_realm_trials_finish(js, trials);
+}
+
 static void
 ns_js_sweep_orphans(ns_js *js)
 {
@@ -72883,11 +73177,17 @@ ns_js_unpin_subtree(ns_js *js, ns_node *root)
 }
 
 static void
-ns_js_iframe_clear_content(ns_js *js, ns_node *iframe)
+ns_js_iframe_stop_activity(ns_js *js, ns_node *iframe)
 {
     ns_js_purge_frame_rafs(js, iframe);
     ns_js_purge_frame_timers(js, iframe);
     ns_js_scrub_iframe_globals(js, iframe);
+}
+
+static void
+ns_js_iframe_clear_content(ns_js *js, ns_node *iframe)
+{
+    ns_js_iframe_stop_activity(js, iframe);
     ns_node *c = iframe->first_child;
     while (c) {
         ns_node *next = c->next_sibling;
@@ -73889,6 +74189,21 @@ ns_js_wait_for_frame_images(ns_js *js, ns_node *content_root)
     js->in_pump = saved;
 }
 
+static gboolean
+ns_js_tree_has_unstarted_script(ns_node *root)
+{
+    if (!root) return FALSE;
+    GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
+    ns_js_collect_script_tasks(root, tasks);
+    gboolean found = FALSE;
+    for (guint i = 0; i < tasks->len && !found; i++) {
+        ns_node *n = g_array_index(tasks, ns_script_task, i).node;
+        found = n && !ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED);
+    }
+    g_array_free(tasks, TRUE);
+    return found;
+}
+
 static void
 ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
 {
@@ -73896,15 +74211,21 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
     if (!js || !iframe || js->halted || !js->current_doc) return;
     if (!ns_js_node_in_page(js, iframe)) return;
 
+    gboolean adopt_written = FALSE;
     if (ns_element_get_attr(iframe, "data-nd-doc-written")) {
         const char *sa = ns_frame_src_attr(iframe);
         const char *sv = sa ? ns_element_get_attr(iframe, sa) : NULL;
         const char *sd = ns_element_get_attr(iframe, "srcdoc");
         if ((!sv || !*sv) && (!sd || !*sd)) {
-            ns_element_set_attr(iframe, "data-nd-frame-loaded", "1");
-            ns_css_mark_attr_dirty(iframe, "data-nd-frame-loaded", NULL);
-            ns_js_dispatch_resource_event(js, iframe, "load");
-            return;
+            ns_node *written = ns_iframe_document_node(iframe);
+            ns_realmdoc_flush_written(js, written);
+            if (!ns_js_tree_has_unstarted_script(written)) {
+                ns_element_set_attr(iframe, "data-nd-frame-loaded", "1");
+                ns_css_mark_attr_dirty(iframe, "data-nd-frame-loaded", NULL);
+                ns_js_dispatch_resource_event(js, iframe, "load");
+                return;
+            }
+            adopt_written = TRUE;
         }
     }
 
@@ -74092,7 +74413,11 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         }
     }
 
-    ns_js_iframe_clear_content(js, iframe);
+    if (adopt_written) {
+        ns_js_iframe_stop_activity(js, iframe);
+    } else {
+        ns_js_iframe_clear_content(js, iframe);
+    }
     ns_js_sweep_orphans(js);
 
     gboolean is_plain_xml = resp && resp->content_type

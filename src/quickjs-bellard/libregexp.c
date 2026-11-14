@@ -3324,6 +3324,382 @@ static intptr_t lre_exec_backtrack(REExecContext *s, uint8_t **capture,
 /* Return 1 if match, 0 if not match or < 0 if error (see LRE_RET_x). cindex is the
    starting position of the match and must be such as 0 <= cindex <=
    clen. */
+typedef enum {
+    RE_PREFILTER_NONE,
+    RE_PREFILTER_ANCHORED,
+    RE_PREFILTER_CHAR,
+    RE_PREFILTER_BITMAP,
+} REPrefilterKind;
+
+typedef struct {
+    REPrefilterKind kind;
+    uint32_t c;
+    uint32_t map[8];
+    BOOL wide;
+    int single;
+} REPrefilter;
+
+static BOOL re_prefilter_test(const REPrefilter *pf, uint32_t c)
+{
+    if (c >= 0x100)
+        return pf->wide;
+    return (pf->map[c >> 5] >> (c & 31)) & 1;
+}
+
+static void re_prefilter_add(REPrefilter *pf, uint32_t c)
+{
+    pf->map[c >> 5] |= (uint32_t)1 << (c & 31);
+}
+
+static BOOL re_range_contains(const uint8_t *pc, int n, BOOL wide, uint32_t c)
+{
+    int i;
+    for(i = 0; i < n; i++) {
+        uint32_t low, high;
+        if (wide) {
+            low = get_u32(pc + i * 8);
+            high = get_u32(pc + i * 8 + 4);
+        } else {
+            low = get_u16(pc + i * 4);
+            high = get_u16(pc + i * 4 + 2);
+        }
+        if (c < low)
+            return FALSE;
+        if (c <= high)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static uint32_t re_prefilter_canonicalize(uint32_t c, BOOL is_unicode)
+{
+    if (c < 0x80) {
+        if (is_unicode) {
+            if (c >= 'A' && c <= 'Z')
+                c = c - 'A' + 'a';
+        } else {
+            if (c >= 'a' && c <= 'z')
+                c = c - 'a' + 'A';
+        }
+        return c;
+    }
+    return lre_canonicalize(c, is_unicode);
+}
+
+static void re_prefilter_add_folded(REPrefilter *pf, uint32_t c,
+                                    BOOL is_unicode)
+{
+    uint32_t i;
+
+    if (c < 0x80) {
+        if (re_prefilter_canonicalize(c, is_unicode) == c)
+            re_prefilter_add(pf, c);
+        if ((c | 0x20) >= 'a' && (c | 0x20) <= 'z' &&
+            re_prefilter_canonicalize(c ^ 0x20, is_unicode) == c)
+            re_prefilter_add(pf, c ^ 0x20);
+        return;
+    }
+    for(i = 0x80; i < 0x100; i++) {
+        if (lre_canonicalize(i, is_unicode) == c)
+            re_prefilter_add(pf, i);
+    }
+}
+
+static void re_prefilter_from_range(REPrefilter *pf, const uint8_t *pc,
+                                    int n, BOOL wide, BOOL ignore_case,
+                                    BOOL is_unicode)
+{
+    uint32_t c, last_high;
+    int i;
+
+    if (ignore_case) {
+        for(c = 0; c < 0x100; c++) {
+            if (re_range_contains(pc, n, wide,
+                                  re_prefilter_canonicalize(c, is_unicode)))
+                re_prefilter_add(pf, c);
+        }
+    } else {
+        for(i = 0; i < n; i++) {
+            uint32_t low, high;
+            if (wide) {
+                low = get_u32(pc + i * 8);
+                high = get_u32(pc + i * 8 + 4);
+            } else {
+                low = get_u16(pc + i * 4);
+                high = get_u16(pc + i * 4 + 2);
+            }
+            if (low >= 0x100)
+                break;
+            if (high > 0xff)
+                high = 0xff;
+            for(c = low; c <= high; c++)
+                re_prefilter_add(pf, c);
+        }
+    }
+    last_high = wide ? get_u32(pc + (n - 1) * 8 + 4) : get_u16(pc + (n - 1) * 4 + 2);
+    pf->wide = ignore_case || last_high >= 0x100;
+    pf->kind = RE_PREFILTER_BITMAP;
+}
+
+/* Summarize what a match must start with, so the search can skip positions
+   that cannot begin one instead of running the matcher at every index. */
+static BOOL re_prefilter_collect(REPrefilter *pf, const uint8_t *pc,
+                                 BOOL is_unicode, int *budget)
+{
+    for(;;) {
+        int opcode;
+        if (--*budget < 0)
+            return FALSE;
+        opcode = *pc++;
+        switch(opcode) {
+        case REOP_save_start:
+        case REOP_save_end:
+            pc += 1;
+            break;
+        case REOP_set_char_pos:
+            pc += 1;
+            break;
+        case REOP_save_reset:
+            pc += 2;
+            break;
+        case REOP_set_i32:
+            pc += 5;
+            break;
+        case REOP_goto:
+            pc += 4 + (int)get_u32(pc);
+            break;
+        case REOP_split_goto_first:
+        case REOP_split_next_first:
+            {
+                const uint8_t *alt = pc + 4 + (int)get_u32(pc);
+                if (!re_prefilter_collect(pf, pc + 4, is_unicode, budget))
+                    return FALSE;
+                pc = alt;
+            }
+            break;
+        case REOP_char:
+        case REOP_char32:
+            {
+                uint32_t c = opcode == REOP_char ? get_u16(pc) : get_u32(pc);
+                if (c < 0x100)
+                    re_prefilter_add(pf, c);
+                else
+                    pf->wide = TRUE;
+            }
+            return TRUE;
+        case REOP_char_i:
+        case REOP_char32_i:
+            {
+                uint32_t c = opcode == REOP_char_i ? get_u16(pc) : get_u32(pc);
+                uint32_t i;
+                for(i = 0; i < 0x100; i++) {
+                    if (lre_canonicalize(i, is_unicode) == c)
+                        re_prefilter_add(pf, i);
+                }
+                pf->wide = TRUE;
+            }
+            return TRUE;
+        case REOP_range:
+        case REOP_range_i:
+        case REOP_range32:
+        case REOP_range32_i:
+            {
+                BOOL wide = opcode == REOP_range32 || opcode == REOP_range32_i;
+                BOOL ignore_case = opcode == REOP_range_i ||
+                                   opcode == REOP_range32_i;
+                int n = get_u16(pc), i;
+                REPrefilter range;
+                if (n < 1)
+                    return FALSE;
+                memset(&range, 0, sizeof(range));
+                re_prefilter_from_range(&range, pc + 2, n, wide, ignore_case,
+                                        is_unicode);
+                for(i = 0; i < 8; i++)
+                    pf->map[i] |= range.map[i];
+                pf->wide |= range.wide;
+            }
+            return TRUE;
+        default:
+            return FALSE;
+        }
+    }
+}
+
+static void re_prefilter_union(REPrefilter *pf, const uint8_t *pc,
+                               BOOL is_unicode)
+{
+    int budget = 256, i, count = 0;
+    if (!re_prefilter_collect(pf, pc, is_unicode, &budget)) {
+        memset(pf, 0, sizeof(*pf));
+        return;
+    }
+    pf->kind = RE_PREFILTER_BITMAP;
+    pf->single = -1;
+    for(i = 0; i < 0x100; i++) {
+        if (re_prefilter_test(pf, i)) {
+            count++;
+            pf->single = i;
+        }
+    }
+    if (count != 1)
+        pf->single = -1;
+}
+
+static void re_prefilter_init(REPrefilter *pf, const uint8_t *pc,
+                              BOOL is_unicode)
+{
+    memset(pf, 0, sizeof(*pf));
+    pf->single = -1;
+    for(;;) {
+        int opcode = *pc++;
+        switch(opcode) {
+        case REOP_save_start:
+        case REOP_save_end:
+            pc += 1;
+            break;
+        case REOP_set_char_pos:
+            pc += 1;
+            break;
+        case REOP_save_reset:
+            pc += 2;
+            break;
+        case REOP_set_i32:
+            pc += 5;
+            break;
+        case REOP_line_start:
+            pf->kind = RE_PREFILTER_ANCHORED;
+            return;
+        case REOP_char:
+        case REOP_char32:
+            pf->c = opcode == REOP_char ? get_u16(pc) : get_u32(pc);
+            pf->kind = RE_PREFILTER_CHAR;
+            return;
+        case REOP_char_i:
+        case REOP_char32_i:
+            {
+                uint32_t c = opcode == REOP_char_i ? get_u16(pc) : get_u32(pc);
+                if (c >= 0x100)
+                    return;
+                re_prefilter_add_folded(pf, c, is_unicode);
+                pf->wide = TRUE;
+                pf->kind = RE_PREFILTER_BITMAP;
+            }
+            return;
+        case REOP_range:
+        case REOP_range_i:
+        case REOP_range32:
+        case REOP_range32_i:
+            {
+                BOOL wide = opcode == REOP_range32 || opcode == REOP_range32_i;
+                BOOL ignore_case = opcode == REOP_range_i ||
+                                   opcode == REOP_range32_i;
+                int n = get_u16(pc);
+                if (n >= 1)
+                    re_prefilter_from_range(pf, pc + 2, n, wide, ignore_case,
+                                            is_unicode);
+            }
+            return;
+        case REOP_split_goto_first:
+        case REOP_split_next_first:
+            re_prefilter_union(pf, pc - 1, is_unicode);
+            return;
+        default:
+            return;
+        }
+    }
+}
+
+static BOOL re_inside_pair(const uint16_t *p, const uint8_t *cbuf,
+                           int cbuf_type)
+{
+    return cbuf_type == 2 && (const uint8_t *)p > cbuf &&
+           is_lo_surrogate(*p) && is_hi_surrogate(p[-1]);
+}
+
+static const uint8_t *re_prefilter_skip(const REPrefilter *pf,
+                                        const uint8_t *cptr,
+                                        const uint8_t *cbuf,
+                                        const uint8_t *cbuf_end, int cbuf_type)
+{
+    if (cbuf_type == 0) {
+        if (pf->kind == RE_PREFILTER_CHAR) {
+            if (pf->c >= 0x100)
+                return NULL;
+            return memchr(cptr, (int)pf->c, cbuf_end - cptr);
+        }
+        if (pf->single >= 0)
+            return memchr(cptr, pf->single, cbuf_end - cptr);
+        for(; cptr < cbuf_end; cptr++) {
+            if (re_prefilter_test(pf, *cptr))
+                return cptr;
+        }
+        return NULL;
+    } else {
+        const uint16_t *p = (const uint16_t *)cptr;
+        const uint16_t *end = (const uint16_t *)cbuf_end;
+        if (pf->kind == RE_PREFILTER_CHAR) {
+            uint32_t want = pf->c;
+            if (want > 0xffff) {
+                if (cbuf_type != 2)
+                    return NULL;
+                want = get_hi_surrogate(pf->c);
+            }
+            for(; p < end; p++) {
+                if (*p == want && !re_inside_pair(p, cbuf, cbuf_type))
+                    return (const uint8_t *)p;
+            }
+            return NULL;
+        }
+        for(; p < end; p++) {
+            if (re_prefilter_test(pf, *p) && !re_inside_pair(p, cbuf, cbuf_type))
+                return (const uint8_t *)p;
+        }
+        return NULL;
+    }
+}
+
+/* The search loop the '.*?' bytecode prologue would otherwise run one
+   character at a time, with the positions that cannot start a match skipped
+   in C rather than by re-entering the matcher. */
+static intptr_t re_exec_search(REExecContext *s, uint8_t **capture,
+                               const uint8_t *pc, const uint8_t *cptr,
+                               const REPrefilter *pf)
+{
+    const uint8_t *cbuf_end = s->cbuf_end;
+    int cbuf_type = s->cbuf_type;
+    intptr_t ret;
+
+    for(;;) {
+        if (pf->kind == RE_PREFILTER_ANCHORED) {
+            if (cptr != s->cbuf)
+                return 0;
+        } else {
+            cptr = re_prefilter_skip(pf, cptr, s->cbuf, cbuf_end, cbuf_type);
+            if (!cptr)
+                return 0;
+        }
+        memset(capture, 0, sizeof(*capture) * s->capture_count * 2);
+        ret = lre_exec_backtrack(s, capture, pc, cptr);
+        if (ret != 0)
+            return ret;
+        if (pf->kind == RE_PREFILTER_ANCHORED || cptr >= cbuf_end)
+            return 0;
+        if (lre_poll_timeout(s))
+            return LRE_RET_TIMEOUT;
+        if (cbuf_type == 0) {
+            cptr++;
+        } else {
+            const uint16_t *p = (const uint16_t *)cptr;
+            const uint16_t *end = (const uint16_t *)cbuf_end;
+            uint32_t c = *p++;
+            if (is_hi_surrogate(c) && cbuf_type == 2 &&
+                p < end && is_lo_surrogate(*p))
+                p++;
+            cptr = (const uint8_t *)p;
+        }
+    }
+}
+
 int lre_exec(uint8_t **capture,
              const uint8_t *bc_buf, const uint8_t *cbuf, int cindex, int clen,
              int cbuf_type, void *opaque)
@@ -3357,7 +3733,20 @@ int lre_exec(uint8_t **capture,
         }
     }
 
-    ret = lre_exec_backtrack(s, capture, bc_buf + RE_HEADER_LEN, cptr);
+    {
+        const uint8_t *pc = bc_buf + RE_HEADER_LEN;
+        REPrefilter pf;
+
+        pf.kind = RE_PREFILTER_NONE;
+        if (!(re_flags & LRE_FLAG_STICKY) &&
+            pc[0] == REOP_split_goto_first && get_u32(pc + 1) == 1 + 5 &&
+            pc[5] == REOP_any && pc[6] == REOP_goto)
+            re_prefilter_init(&pf, pc + 11, s->is_unicode);
+        if (pf.kind != RE_PREFILTER_NONE)
+            ret = re_exec_search(s, capture, pc + 11, cptr, &pf);
+        else
+            ret = lre_exec_backtrack(s, capture, pc, cptr);
+    }
 
     if (s->stack_buf != s->static_stack_buf)
         lre_realloc(s->opaque, s->stack_buf, 0);
