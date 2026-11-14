@@ -33,6 +33,27 @@ Changelog:
   frames, and frames that used WebAssembly, WebGL, WebGPU or Web Audio
   are kept as before. A page that created and dropped fifteen frames
   holding 20 MB each grew to 320 MB and now stays under 90 MB.
+* `window.postMessage()` delivers its message again. The `message`
+  event reached the listener with `data`, `origin` and `source` all
+  `null`, both between windows and frames and to the posting window
+  itself, so any page that talks to its iframes, or uses `postMessage`
+  to schedule work, saw empty messages. `MessageChannel` ports were
+  not affected. The cause was in the default JavaScript engine: a C
+  function made with `JS_NewCFunctionData` ran without a stack frame
+  of its own, so the engine took its writes for page script and
+  dropped them on the event's read-only attributes.
+* A Content-Security-Policy given in a `<meta http-equiv>` element of a
+  document in an `<iframe>` now applies to that frame. Only the frame's
+  HTTP header was read, so such a frame could still `eval()` and load
+  what its policy forbade.
+* `XMLHttpRequest` with `responseType = "document"` now sets
+  `responseXML` to the parsed document, as well as `response`; with the
+  default `responseType`, an XML response (`text/xml`,
+  `application/xml`, `+xml`) is parsed into `responseXML`. Both were
+  always `null`.
+* `input.files` on a file input is a `FileList` (`instanceof FileList`,
+  `[object FileList]`, iterable) instead of a plain array.
+* html5test.co scores 546 of 588, up from 540.
 * Security: loading the same ES module again in one tab no longer
   crashes the tab. A module of 1 KB or more is kept as compiled
   bytecode, and the copy read back on the second load was run without
