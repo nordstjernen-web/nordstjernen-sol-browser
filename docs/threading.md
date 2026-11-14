@@ -106,8 +106,8 @@ Every blocking or unbounded operation has a bound:
 | HTTP redirects | `max_redirects` (default and cap 10) | `CURLOPT_MAXREDIRS`, `net.c` |
 | WebSocket connect | 15 s | `CURLOPT_CONNECTTIMEOUT`, `ws.c` |
 | WebSocket transfer | none (long-lived); 10 ms poll cadence | `ws.c` |
-| Page JS eval slice | `js_eval_budget_ms` (default 60 s, max 60 s) | `ns_js_budget_push`, `js.c` |
-| Page JS hard monitor | 60 s of wall-clock per top-level entry | `NS_JS_MONITOR_LIMIT_US`, `js.c` |
+| Page JS eval slice | `js_eval_budget_ms` (default 60 s, max 1 h; `NS_JS_EVAL_BUDGET_MS` for one run) | `ns_js_budget_push`, `js.c` |
+| Page JS hard monitor | 60 s of wall-clock per top-level entry, or `js_eval_budget_ms` when that is larger | `NS_JS_MONITOR_LIMIT_US`, `js.c` |
 | JS heap (page runtime) | `js_memory_cap_mb` (config default 2048; 2048 no-config fallback, no clamp) | `JS_SetMemoryLimit`, `js.c` |
 | JS heap (worker runtime) | `js_memory_cap_mb` clamped to ≤512; 256 no-config fallback | `JS_SetMemoryLimit`, `js.c` |
 | Per-origin in-flight requests | 6 | `NS_NET_MAX_PER_ORIGIN`, `net.c` |

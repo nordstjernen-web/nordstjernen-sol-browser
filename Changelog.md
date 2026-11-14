@@ -3,6 +3,28 @@ Changelog:
 
 1.0.48-dev:
 ======
+* Scripts in a document written into an `<iframe>` with
+  `document.open()` / `document.write()` now run, in the frame's own
+  realm, whether or not the page calls `document.close()`. Before, the
+  markup was parsed on `close()` but its `<script>` elements never
+  executed, and a document that was written and left open stayed empty.
+  JetStream 2 loads every benchmark this way, so it never got past its
+  first test.
+* A regular expression that begins with `^` no longer scans the whole
+  string before it reports a failed match, and a search for a literal
+  first character or character class skips ahead to the next position
+  that can start a match. The default JavaScript engine gains the search
+  prefilter the quickjs-ng engine already had. A failed `/^\s+/.test()`
+  on a 1 MB string took 3 ms and now takes under a microsecond.
+* `String.prototype.match()` with a global built-in `RegExp` collects
+  its matches without creating a result object per match, which makes
+  it about 3.5 times faster. Together with the prefilter, JetStream 2's
+  WSL test builds its standard library in 6 seconds instead of 98.
+* `js_eval_budget_ms` may now be set above 60 seconds (up to one hour),
+  and the page-script monitor follows it instead of halting at 60
+  seconds regardless. The default is unchanged. The new
+  `NS_JS_EVAL_BUDGET_MS` environment variable sets it for one run, which
+  long-running benchmarks need.
 
 1.0.47:
 ======

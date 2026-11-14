@@ -994,7 +994,8 @@ ns_js_budget_push(ns_js *js, ns_budget_guard *g)
     if (g->saved == 0) {
         js->task_epoch++;
         if (js->task_epoch == 0) js->task_epoch++;
-        js->js_monitor_deadline_us = now + NS_JS_MONITOR_LIMIT_US;
+        js->js_monitor_deadline_us =
+            now + MAX(NS_JS_MONITOR_LIMIT_US, ns_js_eval_budget_us());
         js->task_start_us = now;
     }
     gint64 fresh = now + ns_js_eval_budget_us();
@@ -67174,6 +67175,63 @@ ns_realmdoc_open(JSContext *ctx, JSValueConst this_val,
     return JS_DupValue(ctx, this_val);
 }
 
+static gboolean
+ns_realmdoc_flush_written(ns_js *js, ns_node *doc)
+{
+    if (!js || !doc || !doc->js_wrapper) return FALSE;
+    JSContext *ctx = js->ctx;
+    JSValue wrapper = JS_MKPTR(JS_TAG_OBJECT, doc->js_wrapper);
+    JSValue cur = JS_GetPropertyStr(ctx, wrapper, "\xff" "wbuf");
+    if (!JS_IsString(cur)) { JS_FreeValue(ctx, cur); return FALSE; }
+    const char *buf = JS_ToCString(ctx, cur);
+    JS_FreeValue(ctx, cur);
+    if (buf) {
+        ns_node *parsed = ns_html_parse(buf, -1);
+        JS_FreeCString(ctx, buf);
+        if (parsed) {
+            ns_js_orphan_children(js, doc);
+            ns_node *c = parsed->first_child;
+            while (c) {
+                ns_node *next = c->next_sibling;
+                ns_node_own_strings_deep(c);
+                ns_node_remove(c);
+                ns_node_append_child(doc, c);
+                ns_js_index_child_change(js, doc, c, NULL);
+                c = next;
+            }
+            ns_node_free(parsed);
+            js->mutated = TRUE;
+        }
+    }
+    JS_SetPropertyStr(ctx, wrapper, "\xff" "wbuf", JS_UNDEFINED);
+    return TRUE;
+}
+
+static ns_node *
+ns_realmdoc_frame_host(const ns_node *doc)
+{
+    ns_node *host = doc ? doc->parent : NULL;
+    if (host && host->kind == NS_NODE_ELEMENT &&
+        (ns_node_is_element_named(host, "iframe") ||
+         ns_node_is_element_named(host, "frame")))
+        return host;
+    return NULL;
+}
+
+static void
+ns_realmdoc_queue_written_load(ns_js *js, ns_node *host)
+{
+    ns_element_set_attr(host, "data-nd-doc-written", "1");
+    if (!js->pending_iframe_loads)
+        js->pending_iframe_loads = g_ptr_array_new();
+    gboolean present = FALSE;
+    for (guint i = 0; i < js->pending_iframe_loads->len; i++)
+        if (g_ptr_array_index(js->pending_iframe_loads, i) == host)
+            present = TRUE;
+    if (!present) g_ptr_array_add(js->pending_iframe_loads, host);
+    js->mutated = TRUE;
+}
+
 static void
 ns_realmdoc_append_write(JSContext *ctx, JSValueConst this_val, int argc,
                          JSValueConst *argv, gboolean newline)
@@ -67201,6 +67259,8 @@ ns_realmdoc_append_write(JSContext *ctx, JSValueConst this_val, int argc,
     if (newline) g_string_append_c(buf, '\n');
     JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf", JS_NewString(ctx, buf->str));
     g_string_free(buf, TRUE);
+    ns_node *host = ns_realmdoc_frame_host(doc);
+    if (host) ns_realmdoc_queue_written_load(js, host);
 }
 
 static gboolean
@@ -67246,43 +67306,9 @@ ns_realmdoc_close(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     ns_node *doc = ns_unwrap_element_mut(this_val);
     if (!js || !doc) return JS_UNDEFINED;
-    JSValue cur = JS_GetPropertyStr(ctx, this_val, "\xff" "wbuf");
-    if (!JS_IsString(cur)) { JS_FreeValue(ctx, cur); return JS_UNDEFINED; }
-    const char *buf = JS_ToCString(ctx, cur);
-    JS_FreeValue(ctx, cur);
-    if (buf) {
-        ns_node *parsed = ns_html_parse(buf, -1);
-        JS_FreeCString(ctx, buf);
-        if (parsed) {
-            ns_js_orphan_children(js, doc);
-            ns_node *c = parsed->first_child;
-            while (c) {
-                ns_node *next = c->next_sibling;
-                ns_node_own_strings_deep(c);
-                ns_node_remove(c);
-                ns_node_append_child(doc, c);
-                ns_js_index_child_change(js, doc, c, NULL);
-                c = next;
-            }
-            ns_node_free(parsed);
-            js->mutated = TRUE;
-        }
-    }
-    JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf", JS_UNDEFINED);
-    ns_node *host = doc->parent;
-    if (host && host->kind == NS_NODE_ELEMENT &&
-        (ns_node_is_element_named(host, "iframe") ||
-         ns_node_is_element_named(host, "frame"))) {
-        ns_element_set_attr(host, "data-nd-doc-written", "1");
-        if (!js->pending_iframe_loads)
-            js->pending_iframe_loads = g_ptr_array_new();
-        gboolean present = FALSE;
-        for (guint i = 0; i < js->pending_iframe_loads->len; i++)
-            if (g_ptr_array_index(js->pending_iframe_loads, i) == host)
-                present = TRUE;
-        if (!present) g_ptr_array_add(js->pending_iframe_loads, host);
-        js->mutated = TRUE;
-    }
+    if (!ns_realmdoc_flush_written(js, doc)) return JS_UNDEFINED;
+    ns_node *host = ns_realmdoc_frame_host(doc);
+    if (host) ns_realmdoc_queue_written_load(js, host);
     return JS_UNDEFINED;
 }
 
@@ -72883,11 +72909,17 @@ ns_js_unpin_subtree(ns_js *js, ns_node *root)
 }
 
 static void
-ns_js_iframe_clear_content(ns_js *js, ns_node *iframe)
+ns_js_iframe_stop_activity(ns_js *js, ns_node *iframe)
 {
     ns_js_purge_frame_rafs(js, iframe);
     ns_js_purge_frame_timers(js, iframe);
     ns_js_scrub_iframe_globals(js, iframe);
+}
+
+static void
+ns_js_iframe_clear_content(ns_js *js, ns_node *iframe)
+{
+    ns_js_iframe_stop_activity(js, iframe);
     ns_node *c = iframe->first_child;
     while (c) {
         ns_node *next = c->next_sibling;
@@ -73889,6 +73921,21 @@ ns_js_wait_for_frame_images(ns_js *js, ns_node *content_root)
     js->in_pump = saved;
 }
 
+static gboolean
+ns_js_tree_has_unstarted_script(ns_node *root)
+{
+    if (!root) return FALSE;
+    GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
+    ns_js_collect_script_tasks(root, tasks);
+    gboolean found = FALSE;
+    for (guint i = 0; i < tasks->len && !found; i++) {
+        ns_node *n = g_array_index(tasks, ns_script_task, i).node;
+        found = n && !ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED);
+    }
+    g_array_free(tasks, TRUE);
+    return found;
+}
+
 static void
 ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
 {
@@ -73896,15 +73943,21 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
     if (!js || !iframe || js->halted || !js->current_doc) return;
     if (!ns_js_node_in_page(js, iframe)) return;
 
+    gboolean adopt_written = FALSE;
     if (ns_element_get_attr(iframe, "data-nd-doc-written")) {
         const char *sa = ns_frame_src_attr(iframe);
         const char *sv = sa ? ns_element_get_attr(iframe, sa) : NULL;
         const char *sd = ns_element_get_attr(iframe, "srcdoc");
         if ((!sv || !*sv) && (!sd || !*sd)) {
-            ns_element_set_attr(iframe, "data-nd-frame-loaded", "1");
-            ns_css_mark_attr_dirty(iframe, "data-nd-frame-loaded", NULL);
-            ns_js_dispatch_resource_event(js, iframe, "load");
-            return;
+            ns_node *written = ns_iframe_document_node(iframe);
+            ns_realmdoc_flush_written(js, written);
+            if (!ns_js_tree_has_unstarted_script(written)) {
+                ns_element_set_attr(iframe, "data-nd-frame-loaded", "1");
+                ns_css_mark_attr_dirty(iframe, "data-nd-frame-loaded", NULL);
+                ns_js_dispatch_resource_event(js, iframe, "load");
+                return;
+            }
+            adopt_written = TRUE;
         }
     }
 
@@ -74092,8 +74145,12 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         }
     }
 
-    ns_js_iframe_clear_content(js, iframe);
-    ns_js_sweep_orphans(js);
+    if (adopt_written) {
+        ns_js_iframe_stop_activity(js, iframe);
+    } else {
+        ns_js_iframe_clear_content(js, iframe);
+        ns_js_sweep_orphans(js);
+    }
 
     gboolean is_plain_xml = resp && resp->content_type
         && strstr(resp->content_type, "xml") != NULL
