@@ -33,6 +33,13 @@ Changelog:
   frames, and frames that used WebAssembly, WebGL, WebGPU or Web Audio
   are kept as before. A page that created and dropped fifteen frames
   holding 20 MB each grew to 320 MB and now stays under 90 MB.
+* A promise reaction now runs in the realm of its handler. When a
+  script in an `<iframe>` settled a promise that belonged to the parent
+  page, the page's `then` callbacks and `await` continuations ran with
+  the frame as the current realm, so DOM objects they created were
+  tied to the frame and kept it alive after it was removed.
+* Releasing a removed frame's realm also lets go of detached nodes that
+  belonged to the frame's document.
 * `js_eval_budget_ms` may now be set above 60 seconds (up to one hour),
   and the page-script monitor follows it instead of halting at 60
   seconds regardless. The default is unchanged. The new

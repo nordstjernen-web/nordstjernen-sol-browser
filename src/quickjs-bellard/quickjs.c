@@ -58074,6 +58074,32 @@ void JS_SetHostPromiseRejectionTracker(JSRuntime *rt,
     rt->host_promise_rejection_tracker_opaque = opaque;
 }
 
+/* A reaction job runs in the realm of its handler, not in the realm
+   of the code that settled the promise. */
+static JSContext *js_promise_job_realm(JSContext *ctx, JSValueConst handler)
+{
+    JSContext *realm;
+    JSObject *p;
+
+    if (JS_VALUE_GET_TAG(handler) != JS_TAG_OBJECT)
+        return ctx;
+    p = JS_VALUE_GET_OBJ(handler);
+    if (p->class_id == JS_CLASS_ASYNC_FUNCTION_RESOLVE ||
+        p->class_id == JS_CLASS_ASYNC_FUNCTION_REJECT) {
+        JSAsyncFunctionState *s =
+            js_cload(JSAsyncFunctionState *, p->u.async_function_data);
+        if (!s || s->is_completed)
+            return ctx;
+        handler = s->frame.cur_func;
+    }
+    realm = JS_GetFunctionRealm(ctx, handler);
+    if (!realm) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return ctx;
+    }
+    return realm;
+}
+
 static void fulfill_or_reject_promise(JSContext *ctx, JSValueConst promise,
                                       JSValueConst value, BOOL is_reject)
 {
@@ -58104,7 +58130,8 @@ static void fulfill_or_reject_promise(JSContext *ctx, JSValueConst promise,
         args[2] = rd->handler;
         args[3] = JS_NewBool(ctx, is_reject);
         args[4] = value;
-        JS_EnqueueJob(ctx, promise_reaction_job, 5, args);
+        JS_EnqueueJob(js_promise_job_realm(ctx, args[2]),
+                      promise_reaction_job, 5, args);
         list_del(&rd->link);
         promise_reaction_data_free(ctx->rt, rd);
     }
@@ -59176,7 +59203,8 @@ static __exception int perform_promise_then(JSContext *ctx,
         args[2] = rd->handler;
         args[3] = JS_NewBool(ctx, i);
         args[4] = s->promise_result;
-        JS_EnqueueJob(ctx, promise_reaction_job, 5, args);
+        JS_EnqueueJob(js_promise_job_realm(ctx, args[2]),
+                      promise_reaction_job, 5, args);
         for(i = 0; i < 2; i++)
             promise_reaction_data_free(ctx->rt, rd_array[i]);
     }
