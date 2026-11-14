@@ -236,8 +236,6 @@ static void ns_attr_detach_matching(ns_js *js, ns_node *owner,
                                     const char *local_name);
 static void ns_attr_detach_owner(ns_js *js, ns_node *owner);
 static void ns_attr_detach_all(ns_js *js);
-static void ns_attribute_map_release_owner(ns_js *js, ns_node *owner);
-static void ns_attribute_maps_release_all(ns_js *js);
 static void ns_js_orphan_node(ns_js *js, ns_node *n);
 static void ns_qcache_invalidate(ns_js *js);
 static void ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
@@ -5295,7 +5293,6 @@ ns_invalidate_wrapper(ns_node *n)
     ns_mut_scrub_node(js, n);
     ns_slot_scrub_node(js, n);
     ns_attr_detach_owner(js, n);
-    ns_attribute_map_release_owner(js, n);
     if (n->js_wrapper) {
         JSValue obj = JS_MKPTR(JS_TAG_OBJECT, n->js_wrapper);
         JS_SetOpaque(obj, NULL);
@@ -39747,27 +39744,6 @@ ns_attr_detach_all(ns_js *js)
 }
 
 static void
-ns_attribute_map_release_owner(ns_js *js, ns_node *owner)
-{
-    if (!js || !js->ctx || !js->attribute_maps || !owner) return;
-    gpointer wrapper = g_hash_table_lookup(js->attribute_maps, owner);
-    if (!wrapper) return;
-    g_hash_table_remove(js->attribute_maps, owner);
-    JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, wrapper));
-}
-
-static void
-ns_attribute_maps_release_all(ns_js *js)
-{
-    if (!js || !js->ctx || !js->attribute_maps) return;
-    GList *wrappers = g_hash_table_get_values(js->attribute_maps);
-    g_hash_table_remove_all(js->attribute_maps);
-    for (GList *item = wrappers; item; item = item->next)
-        JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, item->data));
-    g_list_free(wrappers);
-}
-
-static void
 ns_attr_finalizer(JSRuntime *rt, JSValue value)
 {
     (void)rt;
@@ -39958,11 +39934,9 @@ ns_element_get_attributes(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return JS_NewObject(ctx);
-    ns_js *js = js_from_ctx(ctx);
-    gpointer cached = js && js->attribute_maps
-        ? g_hash_table_lookup(js->attribute_maps, n) : NULL;
-    if (cached)
-        return JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, cached));
+    JSValue cached = JS_GetPropertyStr(ctx, this_val, "__ndAttributes");
+    if (JS_IsObject(cached)) return cached;
+    JS_FreeValue(ctx, cached);
     JSValue arr = ns_make_live(ctx, this_val, NS_LIVE_ATTRIBUTES, NULL);
     if (JS_IsException(arr)) return arr;
     JSValue global = JS_GetGlobalObject(ctx);
@@ -39972,11 +39946,8 @@ ns_element_get_attributes(JSContext *ctx, JSValueConst this_val)
     JS_FreeValue(ctx, proto);
     JS_FreeValue(ctx, ctor);
     JS_FreeValue(ctx, global);
-    if (js && js->attribute_maps) {
-        JS_DupValue(ctx, arr);
-        g_hash_table_insert(js->attribute_maps, (gpointer)n,
-                            JS_VALUE_GET_PTR(arr));
-    }
+    JS_DefinePropertyValueStr(ctx, this_val, "__ndAttributes",
+                              JS_DupValue(ctx, arr), 0);
     return arr;
 }
 
@@ -64883,7 +64854,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->attr_wrappers = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                               NULL,
                                               (GDestroyNotify)g_ptr_array_unref);
-    js->attribute_maps = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->pending_fetches = g_ptr_array_new();
     js->fetch_states_by_id = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->next_fetch_id = 0;
@@ -67995,7 +67965,6 @@ ns_js_reset_runtime_state(ns_js *js)
         g_ptr_array_set_size(js->script_root_order, 0);
 
     ns_attr_detach_all(js);
-    ns_attribute_maps_release_all(js);
     if (js->pinned_wrappers_set)
         ns_pinned_wrappers_release(js);
 
@@ -68888,14 +68857,9 @@ ns_js_free(ns_js *js)
         js->filereader_idles = NULL;
     }
     ns_attr_detach_all(js);
-    ns_attribute_maps_release_all(js);
     if (js->attr_wrappers) {
         g_hash_table_destroy(js->attr_wrappers);
         js->attr_wrappers = NULL;
-    }
-    if (js->attribute_maps) {
-        g_hash_table_destroy(js->attribute_maps);
-        js->attribute_maps = NULL;
     }
     if (js->pinned_wrappers_set) {
         ns_pinned_wrappers_release(js);
@@ -73035,11 +72999,158 @@ ns_js_frame_drop_realm_links(ns_js *js, ns_node *frame)
         if (c->kind == NS_NODE_DOCUMENT) ns_js_unpin_subtree(js, c);
 }
 
+static gboolean
+ns_js_value_of_realm(ns_js *js, JSValueConst fn, JSContext *realm)
+{
+    if (!JS_IsFunction(js->ctx, fn)) return FALSE;
+    JSContext *owner = JS_GetFunctionRealm(js->ctx, fn);
+    if (!owner) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+    return owner == realm;
+}
+
+static void
+ns_js_realm_drop_custom_elements(ns_js *js, JSContext *realm)
+{
+    if (!js->ce_registry) return;
+    GHashTableIter it;
+    gpointer value;
+    g_hash_table_iter_init(&it, js->ce_registry);
+    while (g_hash_table_iter_next(&it, NULL, &value))
+        if (ns_js_value_of_realm(js, *(JSValue *)value, realm))
+            g_hash_table_iter_remove(&it);
+}
+
+static gboolean
+ns_js_wrapper_of_realm(ns_js *js, ns_node *node, JSContext *realm)
+{
+    JSValue wrapper = JS_MKPTR(JS_TAG_OBJECT, node->js_wrapper);
+    JSValue proto = JS_GetPrototype(js->ctx, wrapper);
+    if (!JS_IsObject(proto)) {
+        JS_FreeValue(js->ctx, proto);
+        return FALSE;
+    }
+    JSPropertyDescriptor desc;
+    JSAtom atom = JS_NewAtom(js->ctx, "constructor");
+    int has = JS_GetOwnProperty(js->ctx, &desc, proto, atom);
+    JS_FreeAtom(js->ctx, atom);
+    JS_FreeValue(js->ctx, proto);
+    if (has < 0) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+    if (has <= 0) return FALSE;
+    gboolean ours = !(desc.flags & JS_PROP_GETSET) &&
+                    ns_js_value_of_realm(js, desc.value, realm);
+    JS_FreeValue(js->ctx, desc.value);
+    JS_FreeValue(js->ctx, desc.getter);
+    JS_FreeValue(js->ctx, desc.setter);
+    return ours;
+}
+
+static void
+ns_js_realm_unpin_detached_wrappers(ns_js *js, JSContext *realm)
+{
+    GPtrArray *ours = g_ptr_array_new();
+    GHashTableIter it;
+    gpointer key;
+    g_hash_table_iter_init(&it, js->pinned_wrappers_set);
+    while (g_hash_table_iter_next(&it, &key, NULL)) {
+        ns_node *node = key;
+        if (node->js_wrapper && !ns_js_node_in_page(js, node) &&
+            ns_js_wrapper_of_realm(js, node, realm))
+            g_ptr_array_add(ours, node);
+    }
+    for (guint i = 0; i < ours->len; i++) {
+        ns_node *node = g_ptr_array_index(ours, i);
+        if (g_hash_table_remove(js->pinned_wrappers_set, node))
+            JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, node->js_wrapper));
+    }
+    g_ptr_array_free(ours, TRUE);
+}
+
+static void
+ns_js_realm_detach_attr_wrappers(ns_js *js, JSContext *realm)
+{
+    if (!js->attr_wrappers) return;
+    GPtrArray *ours = g_ptr_array_new();
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, js->attr_wrappers);
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        if (ns_js_node_in_page(js, key)) continue;
+        GPtrArray *states = value;
+        for (guint i = 0; i < states->len; i++) {
+            ns_js_attr *state = g_ptr_array_index(states, i);
+            if (!JS_IsObject(state->pinned)) continue;
+            JSValue proto = JS_GetPrototype(js->ctx, state->pinned);
+            JSValue ctor = JS_IsObject(proto)
+                ? JS_GetPropertyStr(js->ctx, proto, "constructor") : JS_UNDEFINED;
+            if (JS_IsException(ctor)) {
+                JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+                ctor = JS_UNDEFINED;
+            }
+            if (ns_js_value_of_realm(js, ctor, realm))
+                g_ptr_array_add(ours, state);
+            JS_FreeValue(js->ctx, ctor);
+            JS_FreeValue(js->ctx, proto);
+        }
+    }
+    for (guint i = 0; i < ours->len; i++)
+        ns_attr_state_detach(g_ptr_array_index(ours, i));
+    g_ptr_array_free(ours, TRUE);
+}
+
+static void
+ns_js_realm_drop_window_links(ns_js *js, JSContext *realm)
+{
+    JSValue global = JS_GetGlobalObject(realm);
+    gpointer realm_window = JS_VALUE_GET_PTR(global);
+    GHashTable *tables[] = { js->window_forwards, js->window_outwards };
+    for (guint t = 0; t < G_N_ELEMENTS(tables); t++) {
+        if (!tables[t]) continue;
+        GPtrArray *dead = g_ptr_array_new();
+        GHashTableIter it;
+        gpointer key, value;
+        g_hash_table_iter_init(&it, tables[t]);
+        while (g_hash_table_iter_next(&it, &key, &value))
+            if (key == realm_window || value == realm_window) {
+                g_ptr_array_add(dead, key);
+                g_ptr_array_add(dead, value);
+            }
+        for (guint i = 0; i < dead->len; i += 2) {
+            g_hash_table_remove(tables[t], g_ptr_array_index(dead, i));
+            JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, g_ptr_array_index(dead, i)));
+            JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, g_ptr_array_index(dead, i + 1)));
+        }
+        g_ptr_array_free(dead, TRUE);
+    }
+    JS_FreeValue(realm, global);
+}
+
+static void
+ns_js_realm_drop_detached_listeners(ns_js *js, JSContext *realm)
+{
+    if (!js->listeners) return;
+    gboolean dropped = FALSE;
+    for (guint i = 0; i < js->listeners->len; i++) {
+        ns_listener *l = g_ptr_array_index(js->listeners, i);
+        if (ns_listener_is_tombstoned(l) || !l->target ||
+            ns_js_node_in_page(js, l->target) ||
+            !ns_js_value_of_realm(js, l->cb, realm))
+            continue;
+        ns_listener_tombstone(js->ctx, l);
+        dropped = TRUE;
+    }
+    if (dropped) ns_listeners_sweep(js);
+}
+
 static void
 ns_js_realm_trial_start(ns_js *js, GArray *trials, JSContext *realm,
                         ns_node *frame)
 {
     if (frame) ns_js_frame_drop_realm_links(js, frame);
+    ns_js_realm_drop_custom_elements(js, realm);
+    ns_js_realm_unpin_detached_wrappers(js, realm);
+    ns_js_realm_drop_detached_listeners(js, realm);
+    ns_js_realm_detach_attr_wrappers(js, realm);
+    ns_js_realm_drop_window_links(js, realm);
     ns_realm_cloner *rc = ns_realm_cloner_lookup(js, realm);
     if (rc) {
         g_hash_table_remove(js->realm_cloners, realm);

@@ -33,6 +33,19 @@ Changelog:
   frames, and frames that used WebAssembly, WebGL, WebGPU or Web Audio
   are kept as before. A page that created and dropped fifteen frames
   holding 20 MB each grew to 320 MB and now stays under 90 MB.
+* Memory: an element whose `attributes` was read is freed again once
+  nothing refers to it. The `NamedNodeMap` was cached in a table that
+  held it strongly, and the map refers to its element, so every such
+  element lived until the page was left; jQuery and Backbone read
+  `attributes` all the time. The map is now cached on the element
+  wrapper, where the garbage collector sees the cycle.
+* Memory: when an `<iframe>` is removed, the engine also lets go of the
+  custom element definitions the frame registered, its listeners on its
+  own detached nodes, its `Attr` objects, pinned wrappers of its
+  detached nodes, and the window links to it, so the frame's realm can
+  be freed. Over six Speedometer 3.1 iterations of four TodoMVC suites
+  the JavaScript heap grows to 17 MB instead of 53 MB, and
+  Svelte-Complex-DOM and Backbone run about 25% faster.
 * `window.postMessage()` delivers its message again. The `message`
   event reached the listener with `data`, `origin` and `source` all
   `null`, both between windows and frames and to the posting window
