@@ -1,6 +1,9 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.48-dev:
+======
+
 1.0.47:
 ======
 * SVG SMIL animation runs. `<animate>`, `<set>`, `<animateTransform>`
