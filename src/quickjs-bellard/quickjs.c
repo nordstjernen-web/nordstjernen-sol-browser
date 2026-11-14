@@ -6484,11 +6484,14 @@ static JSValue js_c_function_data_call(JSContext *ctx, JSValueConst func_obj,
 {
     JSCFunctionDataRecord *s = JS_GetOpaque(func_obj, JS_CLASS_C_FUNCTION_DATA);
     const JSInternEntry *fe = js_cpt_call_entry(s->func, JS_CPT_KIND_CFUNC_DATA);
+    JSRuntime *rt = ctx->rt;
+    JSStackFrame sf_s, *sf = &sf_s;
+    JSContext *prev_caller_realm;
     JSValueConst *arg_buf;
+    JSValue ret_val;
     int i, length;
 
     length = fe->length;
-    /* XXX: could add the function on the stack for debug */
     if (unlikely(argc < length)) {
         arg_buf = alloca(sizeof(arg_buf[0]) * length);
         for(i = 0; i < argc; i++)
@@ -6499,7 +6502,21 @@ static JSValue js_c_function_data_call(JSContext *ctx, JSValueConst func_obj,
         arg_buf = argv;
     }
 
-    return ((JSCFunctionData *)fe->value)(ctx, this_val, argc, arg_buf, (uint16_t)fe->magic, s->data);
+    /* a frame of its own, so that the function counts as the embedder's
+       code (JS_IsHostAccess) and shows in backtraces like any C function */
+    memset(sf, 0, sizeof(*sf));
+    sf->prev_frame = rt->current_stack_frame;
+    sf->cur_func = (JSValue)func_obj;
+    sf->arg_count = max_int(argc, length);
+    sf->arg_buf = (JSValue *)arg_buf;
+    rt->current_stack_frame = sf;
+    prev_caller_realm = rt->cfunc_caller_realm;
+    rt->cfunc_caller_realm = ctx;
+    ret_val = ((JSCFunctionData *)fe->value)(ctx, this_val, argc, arg_buf,
+                                             (uint16_t)fe->magic, s->data);
+    rt->cfunc_caller_realm = prev_caller_realm;
+    rt->current_stack_frame = sf->prev_frame;
+    return ret_val;
 }
 
 JSValue JS_NewCFunctionData(JSContext *ctx, JSCFunctionData *func,
