@@ -11,6 +11,7 @@
 #include <cairo.h>
 #include "ns_pango.h"
 #include "ns_quickjs.h"
+#include "js_classid.h"
 
 #include "js.h"
 #include "dom.h"
@@ -70,6 +71,8 @@ struct ns_js {
     JSContext    *webdriver_ctx;
     JSValue       webdriver_helper;
     GPtrArray    *frame_ctxs;
+    GHashTable   *pinned_realms;
+    GPtrArray    *replaced_realms;
     GHashTable   *frame_contexts;
     GHashTable   *frame_csps;
     GHashTable   *frame_posts;
@@ -310,6 +313,7 @@ struct ns_js {
     GArray       *pending_storage_events;
     gboolean      storage_events_draining;
     gint64        last_orphan_sweep_us;
+    gint64        last_realm_retire_us;
     int           dispatch_depth;
     int           listener_snapshots;
     guint         listener_tombstones;
@@ -857,6 +861,8 @@ void ns_perf_add_resource_timed(ns_js *js, const ns_perf_resource_info *info,
 gboolean ns_perf_has_resource(ns_js *js, gconstpointer timeline,
                               const char *url, const char *initiator);
 void ns_perf_move_timeline(ns_js *js, gconstpointer from, gconstpointer to);
+gboolean ns_perf_realm_observed(const ns_js *js, gconstpointer realm);
+void ns_perf_forget_realm(ns_js *js, gconstpointer realm);
 JSValue ns_perf_new_performance_object(JSContext *ctx);
 void    ns_perf_set_performance_objects(JSContext *ctx, JSValueConst perf,
                                         JSValue timing, JSValue navigation,

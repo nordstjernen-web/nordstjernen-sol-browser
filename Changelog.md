@@ -20,6 +20,19 @@ Changelog:
   its matches without creating a result object per match, which makes
   it about 3.5 times faster. Together with the prefilter, JetStream 2's
   WSL test builds its standard library in 6 seconds instead of 98.
+* A `WeakMap` entry whose value refers back to its key is now garbage
+  collected. The default JavaScript engine kept every such pair alive
+  for as long as the map lived, which is the common
+  `map.set(element, { element, ... })` pattern: a hundred entries that
+  each held a 4 MB array kept 380 MB in use, and now keep none.
+* The JavaScript realm of an `<iframe>` that was removed from the page
+  is released once nothing refers to it, instead of living until the
+  next navigation. A removed frame's timers and animation frame
+  callbacks stop, and the frame loads afresh if it is inserted again.
+  Frames with requests, sockets or workers still running, cross-origin
+  frames, and frames that used WebAssembly, WebGL, WebGPU or Web Audio
+  are kept as before. A page that created and dropped fifteen frames
+  holding 20 MB each grew to 320 MB and now stays under 90 MB.
 * `js_eval_budget_ms` may now be set above 60 seconds (up to one hour),
   and the page-script monitor follows it instead of halting at 60
   seconds regardless. The default is unchanged. The new

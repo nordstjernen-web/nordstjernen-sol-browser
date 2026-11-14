@@ -5925,6 +5925,7 @@ ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
     }
     JS_SetOpaque(obj, g);
     g->ctx = ctx;
+    ns_js_pin_realm(ctx);
     g->js_obj = obj;
     g->canvas_obj = JS_DupValue(ctx, canvas_obj);
 

@@ -618,6 +618,7 @@ ns_wasm_make_func(JSContext *ctx, JSValueConst instance,
         return obj;
     ns_wasm_func *f = g_new0(ns_wasm_func, 1);
     f->ctx = ctx;
+    ns_js_pin_realm(ctx);
     f->instance = JS_DupValue(ctx, instance);
     f->func = func;
     JS_SetOpaque(obj, f);
@@ -1655,6 +1656,7 @@ ns_wasm_bind_imports(JSContext *ctx, wasm_module_t module,
 
         ns_wasm_binding *b = g_new0(ns_wasm_binding, 1);
         b->ctx = ctx;
+        ns_js_pin_realm(ctx);
         b->fn = fn;
         b->index = linkage->bindings->len;
         b->param_count = wasm_func_type_get_param_count(imp.u.func_type);
@@ -1827,6 +1829,7 @@ ns_wasm_build_exports(JSContext *ctx, JSValueConst instance_obj,
                 }
                 ns_wasm_memory *m = g_new0(ns_wasm_memory, 1);
                 m->ctx = ctx;
+                ns_js_pin_realm(ctx);
                 m->instance = JS_DupValue(ctx, instance_obj);
                 m->buffer = JS_UNDEFINED;
                 JS_SetOpaque(mem_obj, m);
@@ -1846,6 +1849,7 @@ ns_wasm_build_exports(JSContext *ctx, JSValueConst instance_obj,
             }
             ns_wasm_table *t = g_new0(ns_wasm_table, 1);
             t->ctx = ctx;
+            ns_js_pin_realm(ctx);
             t->instance = JS_DupValue(ctx, instance_obj);
             t->name = g_strdup(exp.name);
             t->elem_kind = wasm_table_type_get_elem_kind(exp.u.table_type);
@@ -1867,6 +1871,7 @@ ns_wasm_build_exports(JSContext *ctx, JSValueConst instance_obj,
             }
             ns_wasm_global *g = g_new0(ns_wasm_global, 1);
             g->ctx = ctx;
+            ns_js_pin_realm(ctx);
             g->instance = JS_DupValue(ctx, instance_obj);
             g->name = g_strdup(exp.name);
             g->ref_value = JS_UNDEFINED;
@@ -2055,6 +2060,7 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
 
     ns_wasm_instance *wi = g_new0(ns_wasm_instance, 1);
     wi->ctx = ctx;
+    ns_js_pin_realm(ctx);
     wi->module_obj = JS_UNDEFINED;
     wi->exports = JS_UNDEFINED;
     wi->memory_obj = JS_UNDEFINED;
@@ -2203,6 +2209,7 @@ ns_wasm_global_ctor(JSContext *ctx, JSValueConst new_target, int argc,
         return obj;
     ns_wasm_global *g = g_new0(ns_wasm_global, 1);
     g->ctx = ctx;
+    ns_js_pin_realm(ctx);
     g->instance = JS_UNDEFINED;
     if (kind == WASM_FUNCREF && JS_IsUndefined(init))
         g->ref_value = JS_NULL;
@@ -2261,6 +2268,7 @@ ns_wasm_memory_ctor(JSContext *ctx, JSValueConst new_target, int argc,
     }
     ns_wasm_memory *m = g_new0(ns_wasm_memory, 1);
     m->ctx = ctx;
+    ns_js_pin_realm(ctx);
     m->instance = JS_UNDEFINED;
     m->buffer = JS_UNDEFINED;
     m->staging = staging;
@@ -2291,6 +2299,7 @@ ns_wasm_table_ctor(JSContext *ctx, JSValueConst new_target, int argc,
         return obj;
     ns_wasm_table *t = g_new0(ns_wasm_table, 1);
     t->ctx = ctx;
+    ns_js_pin_realm(ctx);
     t->instance = JS_UNDEFINED;
     t->elem_kind = elem_kind;
     JS_SetOpaque(obj, t);

@@ -3328,6 +3328,17 @@ JSContext *JS_DupContext(JSContext *ctx)
     return ctx;
 }
 
+int JS_IsLiveContext(JSRuntime *rt, const JSContext *ctx)
+{
+    struct list_head *el;
+
+    list_for_each(el, &rt->context_list) {
+        if (list_entry(el, JSContext, link) == ctx)
+            return 1;
+    }
+    return 0;
+}
+
 /* used by the GC */
 static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
                            JS_MarkFunc *mark_func)

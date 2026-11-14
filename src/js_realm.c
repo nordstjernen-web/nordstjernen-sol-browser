@@ -156,6 +156,7 @@ ns_shadowrealm_ctor(JSContext *ctx, JSValueConst new_target,
     ns_shadowrealm *r = g_new0(ns_shadowrealm, 1);
     JS_SetContextOpaque(child, JS_GetContextOpaque(ctx));
     r->outer = ctx;
+    ns_js_pin_realm(ctx);
     r->child = child;
     r->realm_obj = JS_VALUE_GET_PTR(obj);
     r->refs = 1;

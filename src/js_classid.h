@@ -9,5 +9,6 @@
 #include "ns_quickjs.h"
 
 JSClassID ns_new_class_id(JSClassID *pclass_id);
+void ns_js_pin_realm(JSContext *ctx);
 
 #endif
