@@ -60,6 +60,17 @@
   </branding>
 
   <releases>
+    <release version="1.0.47" date="2026-11-14">
+      <description>
+        <p>Security, web platform and engine release.</p>
+        <ul>
+          <li>Bellard's QuickJS, with the full heap hardening, is the default JavaScript engine, and HTML and URL parsing moved to in-tree parsers written in safe Rust.</li>
+          <li>Many security fixes: tighter Linux sandboxing of renderers and helpers, Permissions Policy, stricter Content-Security-Policy and frame isolation, and downloads that need the user to take part.</li>
+          <li>PDF documents open in a built-in viewer with find, zoom and selectable text.</li>
+          <li>SVG SMIL animation, view transitions, the Custom Highlight API, speculation rules, and CSS such as @starting-style, color-scheme, resize and field-sizing.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.46" date="2026-11-09">
       <description>
         <p>JavaScript heap hardening and compatibility release.</p>

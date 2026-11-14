@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.47-dev:
+1.0.47:
 ======
 * SVG SMIL animation runs. `<animate>`, `<set>`, `<animateTransform>`
   and `<animateMotion>` (with `path` or `<mpath>`) animate inline SVG:
