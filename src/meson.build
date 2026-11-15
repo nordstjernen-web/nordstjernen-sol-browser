@@ -508,12 +508,6 @@ if not is_mobile
     if have_libav
       audio_deps += [libavformat, libavcodec, libavutil, libswresample]
     endif
-    if libvorbisfile.found()
-      audio_deps += [libvorbisfile]
-    endif
-    if libopusfile.found()
-      audio_deps += [libopusfile]
-    endif
     # libm is needed by pl_mpeg / minimp3 on Linux and the BSDs; it is part of
     # the C runtime on macOS and Windows, where find_library('m') is a harmless
     # no-op.

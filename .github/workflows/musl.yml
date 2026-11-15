@@ -40,7 +40,7 @@ jobs:
             build-base clang rust ccache pkgconf meson ninja git cmake \
             gtk4.0-dev libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev libwebp-dev libavif-dev sdl2-dev glslang-dev \
             libseccomp-dev ffmpeg-dev libjxl-dev brotli-dev \
-            gstreamer-dev gst-plugins-base-dev enchant2-dev libvorbis-dev opusfile-dev \
+            gstreamer-dev gst-plugins-base-dev enchant2-dev \
             fontconfig font-dejavu ca-certificates file nodejs
           do
             attempt=$((attempt + 1))

@@ -14165,12 +14165,6 @@ static gboolean
 ns_media_codec_supported(const char *codec)
 {
     if (!codec || !*codec) return FALSE;
-#ifdef NS_AUDIO_NATIVE_VORBIS
-    if (strstr(codec, "vorbis")) return TRUE;
-#endif
-#ifdef NS_AUDIO_NATIVE_OPUS
-    if (strstr(codec, "opus")) return TRUE;
-#endif
     if (strstr(codec, "mp3") || g_str_has_prefix(codec, "mp4a.69") ||
         g_str_has_prefix(codec, "mp4a.6b"))
         return TRUE;
@@ -14210,24 +14204,9 @@ ns_media_container_supported(const char *container)
 #else
     gboolean libav = FALSE;
 #endif
-#if defined(NS_AUDIO_NATIVE_VORBIS) || defined(NS_AUDIO_NATIVE_OPUS)
-    gboolean native_ogg = TRUE;
-#else
-    gboolean native_ogg = FALSE;
-#endif
-#ifdef NS_AUDIO_NATIVE_OPUS
-    gboolean native_opus = TRUE;
-#else
-    gboolean native_opus = FALSE;
-#endif
     if (strcmp(container, "audio/mpeg") == 0 ||
         strcmp(container, "audio/mp3")  == 0 ||
         strcmp(container, "video/mpeg") == 0)
-        return TRUE;
-    if (native_ogg && (strcmp(container, "audio/ogg") == 0 ||
-                       strcmp(container, "application/ogg") == 0))
-        return TRUE;
-    if (native_opus && strcmp(container, "audio/opus") == 0)
         return TRUE;
 #ifdef NS_HAVE_OS_MP4
     if (strcmp(container, "video/mp4") == 0 ||

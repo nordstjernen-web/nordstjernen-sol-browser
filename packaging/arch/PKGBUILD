@@ -32,10 +32,8 @@ depends=(
   libpsl
   libseccomp
   libthai
-  libvorbis
   libwebp
   openssl
-  opusfile
   sdl2
   sqlite
   uchardet
