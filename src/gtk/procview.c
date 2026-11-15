@@ -10,6 +10,7 @@
 
 #include "proc_limits.h"
 #include "libnordstjernen.h"
+#include "about_page.h"
 #include "history.h"
 #include "netutil.h"
 #include "print_setup.h"
@@ -3003,6 +3004,34 @@ pv_url_is_history(const char *url)
 }
 
 static gboolean
+pv_url_is_start(const char *url)
+{
+    static const char *const names[] = {
+        "about:start", "about:home", "about:newtab" };
+    for (gsize i = 0; url && i < G_N_ELEMENTS(names); i++) {
+        gsize n = strlen(names[i]);
+        if (strncmp(url, names[i], n) == 0 &&
+            (url[n] == '\0' || url[n] == '?' || url[n] == '#'))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+pv_forget_top_site(NsProcView *v, const char *url, gboolean user_activated)
+{
+    const char *query = strchr(url, '?');
+    if (!query || !g_str_has_prefix(query + 1, "forget="))
+        return FALSE;
+    if (user_activated && pv_url_is_start(v->current_url)) {
+        g_autofree char *site = g_uri_unescape_string(query + 8, NULL);
+        if (site)
+            ns_history_forget_site(site);
+    }
+    return TRUE;
+}
+
+static gboolean
 pv_url_is_settings(const char *url)
 {
     return url && (g_str_has_prefix(url, "about:settings") ||
@@ -3029,6 +3058,10 @@ do_load_full(NsProcView *v, const char *url, gboolean record,
 {
     if (!url || !*url)
         return;
+    if (pv_url_is_start(url) && pv_forget_top_site(v, url, user_activated)) {
+        url = "about:start";
+        record = FALSE;
+    }
     if (!history && !reload) {
         pv_remember_scroll(v);
         v->restore_scroll_x = v->restore_scroll_y = 0;
@@ -3101,6 +3134,8 @@ do_load_full(NsProcView *v, const char *url, gboolean record,
     req->url = g_strdup(url);
     if (pv_url_is_history(url))
         req->html = ns_history_html_page();
+    else if (pv_url_is_start(url))
+        req->html = ns_about_start_html(v->private_mode);
     req->vw = v->last_vp_w;
     req->vh = v->last_vp_h;
     req->dpr = v->last_vp_dpr;

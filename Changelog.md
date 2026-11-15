@@ -3,6 +3,15 @@ Changelog:
 
 1.0.48-dev:
 ======
+* about:start shows your top sites in the desktop browser again. The
+  page was built inside the sandboxed renderer, which has no access to
+  the history database, so the list was always empty there; the browser
+  process now builds it, as it does about:history. Top sites are labelled
+  by site rather than by page title, and each has a remove button that
+  forgets the site's history. A Bookmarks row shows up to eight
+  bookmarks, and a private window says that it keeps no history. The
+  heading with the version number is gone, and the search box now says
+  that it also takes addresses.
 * The audio helper no longer links vorbisfile and opusfile. They only
   decoded Ogg audio after FFmpeg had already failed to, and FFmpeg, which
   is required on Linux and Windows, plays Ogg Vorbis and Opus itself. A

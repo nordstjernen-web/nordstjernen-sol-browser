@@ -5,6 +5,7 @@
 
 #include "history.h"
 #include "about_style.h"
+#include "bookmarks.h"
 #include "config.h"
 #include "db.h"
 
@@ -408,6 +409,53 @@ history_site_label(const char *title, const char *fallback)
     return out;
 }
 
+static void
+history_append_tile(GString *s, const char *url, const char *tooltip,
+                    const char *label, const char *forget_site)
+{
+    char *host = history_host(url);
+    char initial[8];
+    guint tint = history_initial(host, initial);
+    gunichar first = g_utf8_get_char_validated(label, -1);
+    if (first != (gunichar)-1 && first != (gunichar)-2 &&
+        g_unichar_isalnum(first))
+        initial[g_unichar_to_utf8(first, initial)] = '\0';
+    char *e_url = g_markup_escape_text(url, -1);
+    char *e_tip = g_markup_escape_text(tooltip, -1);
+    char *e_init = g_markup_escape_text(initial, -1);
+    char *e_label = g_markup_escape_text(label, -1);
+    g_string_append_printf(s,
+        "<li class=\"site\"><a class=\"tile\" href=\"%s\" title=\"%s\">"
+        "<span class=\"av h%u\" aria-hidden=\"true\">%s</span>"
+        "<span class=\"nm\">%s</span></a>",
+        e_url, e_tip, tint, e_init, e_label);
+    if (forget_site) {
+        char *q = g_uri_escape_string(forget_site, NULL, FALSE);
+        char *e_site = g_markup_escape_text(forget_site, -1);
+        g_string_append_printf(s,
+            "<a class=\"forget\" href=\"about:start?forget=%s\" "
+            "title=\"Remove from top sites\" "
+            "aria-label=\"Remove %s from top sites\">\xc3\x97</a>",
+            q, e_site);
+        g_free(e_site);
+        g_free(q);
+    }
+    g_string_append(s, "</li>");
+    g_free(e_label);
+    g_free(e_init);
+    g_free(e_tip);
+    g_free(e_url);
+    g_free(host);
+}
+
+static void
+history_open_tile_row(GString *s, const char *id, const char *heading)
+{
+    g_string_append_printf(s,
+        "<section class=\"row\" aria-labelledby=\"%s\">"
+        "<h2 id=\"%s\">%s</h2><ul class=\"sites\">", id, id, heading);
+}
+
 char *
 ns_history_top_sites_html(int max_sites)
 {
@@ -429,43 +477,21 @@ ns_history_top_sites_html(int max_sites)
                 continue;
             char *url = g_utf8_make_valid(raw_url, -1);
             char *host = history_host(url);
-            char initial[8];
-            guint tint = history_initial(host, initial);
             char *site = history_site(host);
+            g_free(host);
             if (g_hash_table_contains(seen, site)) {
                 g_free(site);
-                g_free(host);
                 g_free(url);
                 continue;
             }
             g_hash_table_add(seen, site);
             char *title = raw_title && *raw_title
-                ? g_utf8_make_valid(raw_title, -1) : g_strdup(host);
-            char *label = history_site_label(raw_title ? title : NULL, site);
-            gunichar first = g_utf8_get_char_validated(label, -1);
-            if (first != (gunichar)-1 && first != (gunichar)-2 &&
-                g_unichar_isalnum(first))
-                initial[g_unichar_to_utf8(first, initial)] = '\0';
-            char *e_url = g_markup_escape_text(url, -1);
-            char *e_init = g_markup_escape_text(initial, -1);
-            char *e_title = g_markup_escape_text(title, -1);
-            char *e_site = g_markup_escape_text(label, -1);
-            g_free(label);
+                ? g_utf8_make_valid(raw_title, -1) : g_strdup(url);
             if (count == 0)
-                g_string_append(s, "<nav class=\"sites\" "
-                                   "aria-label=\"Top sites\">");
-            g_string_append_printf(s,
-                "<a class=\"site\" href=\"%s\" title=\"%s\">"
-                "<span class=\"av h%u\">%s</span>"
-                "<span class=\"nm\">%s</span></a>",
-                e_url, e_title, tint, e_init, e_site);
+                history_open_tile_row(s, "top-sites", "Top sites");
+            history_append_tile(s, url, title, site, site);
             count++;
-            g_free(e_site);
-            g_free(e_url);
-            g_free(e_init);
-            g_free(e_title);
             g_free(title);
-            g_free(host);
             g_free(url);
         }
         sqlite3_finalize(st);
@@ -473,8 +499,78 @@ ns_history_top_sites_html(int max_sites)
     g_mutex_unlock(&g_history_mutex);
     g_hash_table_destroy(seen);
     if (count)
-        g_string_append(s, "</nav>");
+        g_string_append(s, "</ul></section>");
     return g_string_free(s, FALSE);
+}
+
+char *
+ns_history_bookmark_tiles_html(int max_tiles)
+{
+    GString *s = g_string_new(NULL);
+    ns_bookmarks *bm = ns_bookmarks_load();
+    int count = 0;
+    for (guint i = 0; i < ns_bookmarks_count(bm) && count < max_tiles; i++) {
+        const ns_bookmark *b = ns_bookmarks_get(bm, i);
+        if (!b->url || (!g_str_has_prefix(b->url, "https://") &&
+                        !g_str_has_prefix(b->url, "http://")))
+            continue;
+        char *url = g_utf8_make_valid(b->url, -1);
+        char *title = g_utf8_make_valid(b->title ? b->title : b->url, -1);
+        char *host = history_host(url);
+        char *label = history_site_label(title, host);
+        if (count == 0)
+            history_open_tile_row(s, "bookmarks", "Bookmarks");
+        history_append_tile(s, url, title, label, NULL);
+        count++;
+        g_free(label);
+        g_free(host);
+        g_free(title);
+        g_free(url);
+    }
+    ns_bookmarks_free(bm);
+    if (count)
+        g_string_append(s, "</ul></section>");
+    return g_string_free(s, FALSE);
+}
+
+void
+ns_history_forget_site(const char *site)
+{
+    if (!site || !*site)
+        return;
+    g_mutex_lock(&g_history_mutex);
+    GPtrArray *doomed = g_ptr_array_new_with_free_func(g_free);
+    sqlite3_stmt *st = NULL;
+    if (g_history_db &&
+        sqlite3_prepare_v2(g_history_db,
+            "SELECT url FROM visits WHERE url LIKE 'http%'",
+            -1, &st, NULL) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char *url = (const char *)sqlite3_column_text(st, 0);
+            if (!url)
+                continue;
+            char *host = history_host(url);
+            char *url_site = history_site(host);
+            if (strcmp(url_site, site) == 0)
+                g_ptr_array_add(doomed, g_strdup(url));
+            g_free(url_site);
+            g_free(host);
+        }
+        sqlite3_finalize(st);
+    }
+    if (g_history_db && doomed->len &&
+        sqlite3_prepare_v2(g_history_db, "DELETE FROM visits WHERE url=?",
+                           -1, &st, NULL) == SQLITE_OK) {
+        for (guint i = 0; i < doomed->len; i++) {
+            sqlite3_bind_text(st, 1, g_ptr_array_index(doomed, i), -1,
+                              SQLITE_STATIC);
+            sqlite3_step(st);
+            sqlite3_reset(st);
+        }
+        sqlite3_finalize(st);
+    }
+    g_mutex_unlock(&g_history_mutex);
+    g_ptr_array_free(doomed, TRUE);
 }
 
 char *

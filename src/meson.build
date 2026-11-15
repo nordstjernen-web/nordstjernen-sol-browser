@@ -106,6 +106,7 @@ foreach name, src : pdf_viewer_embedded
 endforeach
 
 nordstjernen_engine_sources = files(
+  'about_page.c',
   'anim.c',
   'bytecode_cache.c',
   'bookmarks.c',
@@ -224,6 +225,7 @@ if have_os_mp4
 endif
 
 nordstjernen_platform_sources = files(
+  'about_page.c',
   'bookmarks.c',
   'capability.c',
   'config.c',
