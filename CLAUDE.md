@@ -445,8 +445,9 @@ don't add `meson test` targets.
   through `subprojects/pdfjs-dist.wrap`, never committed, and installed
   as data files in `share/nordstjernen/pdfjs/` (`src/pdfjs/meson.build`;
   a development build reads the copy in `builddir/src/pdfjs/`, and
-  `NS_PDFJS_DIR` points at another one). `src/pdf.c` loads them the first
-  time a PDF opens. `-Dpdfjs=disabled` drops it, and PDFs then show a
+  `NS_PDFJS_DIR` points at another one). The viewer page imports them as
+  `about:pdfjs/<file>`, which the module loader serves through
+  `ns_pdfjs_file()` in `src/pdf.c`. `-Dpdfjs=disabled` drops it, and PDFs then show a
   notice with a link to the file, as they do when the files are missing.
   There is no native PDF library in the build.
 - **Don't add site-specific hacks.** No per-site rendering shims, no

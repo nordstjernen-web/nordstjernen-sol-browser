@@ -2256,46 +2256,9 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         }
     }
 
-    if (resp->content_type &&
-        g_ascii_strncasecmp(resp->content_type, "image/", 6) == 0 &&
-        resp->body && resp->body->len > 0) {
-        char *html = ns_html_image_document(
-            resp->final_url ? resp->final_url : fetch_url);
-        g_byte_array_set_size(resp->body, 0);
-        g_byte_array_append(resp->body, (const guint8 *)html, strlen(html));
-        g_free(html);
-        g_free(resp->content_type);
-        resp->content_type = g_strdup("text/html; charset=utf-8");
-    }
-
-    if (resp->content_type && resp->body && resp->body->len > 0) {
-        const char *ct = resp->content_type;
-        gboolean is_json = strstr(ct, "json") != NULL;
-        gboolean is_xml = !strstr(ct, "xhtml") && !strstr(ct, "svg") &&
-                          (g_str_has_prefix(ct, "text/xml") ||
-                           g_str_has_prefix(ct, "application/xml") ||
-                           strstr(ct, "+xml") != NULL);
-        if (is_json || is_xml) {
-            char *decoded = ns_html_decode_body_full(
-                (const char *)resp->body->data, resp->body->len, ct, NULL);
-            char *html = is_json
-                ? ns_html_json_document(resp->final_url ? resp->final_url
-                                        : fetch_url, decoded,
-                                        decoded ? strlen(decoded) : 0)
-                : ns_html_xml_document(resp->final_url ? resp->final_url
-                                       : fetch_url, decoded,
-                                       decoded ? strlen(decoded) : 0);
-            g_free(decoded);
-            if (html) {
-                g_byte_array_set_size(resp->body, 0);
-                g_byte_array_append(resp->body, (const guint8 *)html,
-                                    strlen(html));
-                g_free(html);
-                g_free(resp->content_type);
-                resp->content_type = g_strdup("text/html; charset=utf-8");
-            }
-        }
-    }
+    if (!resp->final_url)
+        resp->final_url = g_strdup(fetch_url);
+    ns_html_prepare_document_response(resp);
 
     phase_t0 = g_get_monotonic_time();
     const char *raw = resp->body ? (const char *)resp->body->data : "";

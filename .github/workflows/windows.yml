@@ -173,6 +173,12 @@ jobs:
           head -3 about.txt
           grep -q Nordstjernen about.txt
 
+      - name: Headless PDF smoke (PDF.js viewer, file://)
+        if: hashFiles('builddir/src/pdfjs/pdf.min.mjs') != ''
+        env:
+          NS_ALLOW_ROOT: '1'
+        run: python3 scripts/pdf-smoke.py ./builddir/src/gtk/nordstjernen.exe
+
       - name: Upload build log
         if: always() && hashFiles('build.log') != ''
         continue-on-error: true
