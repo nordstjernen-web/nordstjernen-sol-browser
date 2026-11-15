@@ -2846,9 +2846,13 @@ ns_engine_dump_text(const ns_box *b, GString *out)
     } else if (b->kind == NS_BOX_IMAGE && b->dom) {
         const char *alt = ns_element_get_attr(b->dom, "alt");
         const char *src = b->media ? b->media->image_src : NULL;
-        if (alt && *alt) g_string_append_printf(out, "[image: %s]\n", alt);
-        else if (src)    g_string_append_printf(out, "[image: %s]\n", src);
-        else             g_string_append(out, "[image]\n");
+        gboolean decorative = alt && !*alt;
+        if (alt && *alt)
+            g_string_append_printf(out, "[image: %s]\n", alt);
+        else if (!decorative && src && !g_str_has_prefix(src, "data:"))
+            g_string_append_printf(out, "[image: %s]\n", src);
+        else if (!decorative)
+            g_string_append(out, "[image]\n");
     }
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         ns_engine_dump_text(c, out);
