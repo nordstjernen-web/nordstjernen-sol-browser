@@ -76,6 +76,16 @@ Changelog:
   Before, the container counted the item at its narrowest wrap, so a
   header group that had to shrink squeezed the item and wrapped its
   text: the "Sign in" link in the AP News header stood on two lines.
+* `word-break` and `overflow-wrap` work on inline elements. A link or
+  span with `word-break: break-all`, `overflow-wrap: anywhere` or
+  `overflow-wrap: break-word` inside a paragraph now breaks its own
+  text that way while the words around it stay whole, and an inline
+  element can switch back to `normal` inside a block that breaks
+  anywhere. Before, only the block's own values counted, so a long URL
+  in a link overflowed its column. The legacy `word-break: break-word`
+  now breaks an overlong word, `word-break: keep-all` no longer switches
+  `overflow-wrap` off, and the min-content width of text that may break
+  anywhere is its widest character, as in Chrome.
 * about:start and about:nordstjernen follow the operating-system
   language: their headings, buttons, search hints and status words come
   from the UI catalogues, with translations into the 13 fuller ones

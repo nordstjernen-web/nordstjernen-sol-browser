@@ -99,6 +99,7 @@
 #define ns_pango_font_metrics_get_height                  pango_font_metrics_get_height
 #define ns_pango_font_metrics_unref                       pango_font_metrics_unref
 #define NS_PANGO_GLYPH_EMPTY                              PANGO_GLYPH_EMPTY
+#define ns_pango_glyph_item_get_logical_widths            pango_glyph_item_get_logical_widths
 #define ns_pango_glyph_item_split                         pango_glyph_item_split
 #define ns_pango_glyph_string_extents                     pango_glyph_string_extents
 #define ns_pango_glyph_string_free                        pango_glyph_string_free
@@ -125,6 +126,7 @@
 #define ns_pango_layout_get_line_count                    pango_layout_get_line_count
 #define ns_pango_layout_get_line_readonly                 pango_layout_get_line_readonly
 #define ns_pango_layout_get_line_spacing                  pango_layout_get_line_spacing
+#define ns_pango_layout_get_lines_readonly                pango_layout_get_lines_readonly
 #define ns_pango_layout_get_log_attrs_readonly            pango_layout_get_log_attrs_readonly
 #define ns_pango_layout_get_pixel_extents                 pango_layout_get_pixel_extents
 #define ns_pango_layout_get_pixel_size                    pango_layout_get_pixel_size
@@ -221,6 +223,7 @@
 #define NsPangoFontMap                                    PangoFontMap
 #define NsPangoFontMetrics                                PangoFontMetrics
 #define NsPangoGlyphInfo                                  PangoGlyphInfo
+#define NsPangoGlyphItem                                  PangoGlyphItem
 #define NsPangoGlyphString                                PangoGlyphString
 #define NsPangoLayout                                     PangoLayout
 #define NsPangoLayoutIter                                 PangoLayoutIter

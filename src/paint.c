@@ -3287,8 +3287,8 @@ ns_paint_wrap_mode_for(const ns_style *style)
         if (wb && wb->kind == NS_CSS_V_KEYWORD && wb->u.keyword) {
             if (strcmp(wb->u.keyword, "break-all") == 0)
                 return NS_PANGO_WRAP_CHAR;
-            if (strcmp(wb->u.keyword, "keep-all") == 0)
-                return NS_PANGO_WRAP_WORD;
+            if (strcmp(wb->u.keyword, "break-word") == 0)
+                return NS_PANGO_WRAP_WORD_CHAR;
         }
         const ns_css_value *ow = style->values[NS_CSS_OVERFLOW_WRAP];
         if (ow && ow->kind == NS_CSS_V_KEYWORD && ow->u.keyword) {
@@ -3300,6 +3300,163 @@ ns_paint_wrap_mode_for(const ns_style *style)
         }
     }
     return NS_PANGO_WRAP_WORD;
+}
+
+static gboolean
+ns_style_is_nowrap(const ns_style *style);
+
+static gboolean
+style_breaks_anywhere(const ns_style *style)
+{
+    return style &&
+           (keyword_is(style->values[NS_CSS_WORD_BREAK], "break-word") ||
+            keyword_is(style->values[NS_CSS_OVERFLOW_WRAP], "anywhere"));
+}
+
+static NsPangoWrapMode
+wrap_mode_of(const ns_style *style, gboolean min_content)
+{
+    NsPangoWrapMode m = ns_paint_wrap_mode_for(style);
+    if (!min_content || m != NS_PANGO_WRAP_WORD_CHAR) return m;
+    return style_breaks_anywhere(style) ? NS_PANGO_WRAP_CHAR
+                                        : NS_PANGO_WRAP_WORD;
+}
+
+#ifdef NS_USE_WEB_TEXT_LIB
+static gboolean
+inline_attr_wraps_own_way(const ns_inline_attr *r)
+{
+    return r->kind == NS_INLINE_ELEMENT && r->style && r->len > 0 &&
+           !ns_style_is_nowrap(r->style);
+}
+
+static gboolean
+range_has_text(const char *text, gsize start, gsize end)
+{
+    gsize len = text ? strlen(text) : 0;
+    if (end > len) end = len;
+    for (const char *p = text + MIN(start, len); p < text + end;
+         p = g_utf8_next_char(p)) {
+        gunichar c = g_utf8_get_char(p);
+        if (c != 0xFFFC && !g_unichar_isspace(c)) return TRUE;
+    }
+    return FALSE;
+}
+
+static int
+wrap_range_outer_first(gconstpointer a, gconstpointer b)
+{
+    const ns_inline_attr *x = *(const ns_inline_attr *const *)a;
+    const ns_inline_attr *y = *(const ns_inline_attr *const *)b;
+    if (x->start != y->start) return x->start < y->start ? -1 : 1;
+    if (x->len != y->len) return x->len > y->len ? -1 : 1;
+    return 0;
+}
+
+static NsPangoAttribute *
+wrap_breaks_attr(NsPangoWrapMode wanted, NsPangoWrapMode layout_mode,
+                 gsize start, gsize end)
+{
+    int breaks = TRUE;
+    if (wanted == NS_PANGO_WRAP_CHAR)
+        breaks = NS_PANGO_BREAKS_ANYWHERE;
+    else if (wanted == NS_PANGO_WRAP_WORD &&
+             layout_mode == NS_PANGO_WRAP_WORD_CHAR)
+        breaks = NS_PANGO_BREAKS_WORDS;
+    NsPangoAttribute *a = ns_pango_attr_allow_breaks_new(breaks);
+    a->start_index = (guint)start;
+    a->end_index = (guint)MIN(end, (gsize)G_MAXUINT);
+    return a;
+}
+
+static gboolean
+text_outside_ranges(const char *text, const GPtrArray *ranges)
+{
+    gsize len = text ? strlen(text) : 0, covered = 0;
+    for (guint i = 0; i < ranges->len; i++) {
+        const ns_inline_attr *r = g_ptr_array_index(ranges, i);
+        if (range_has_text(text, covered, r->start)) return TRUE;
+        covered = MAX(covered, MIN(r->start + r->len, len));
+    }
+    return range_has_text(text, covered, len);
+}
+#endif
+
+static NsPangoWrapMode
+box_wrap(const ns_box *box, const ns_style *style, gboolean min_content,
+         NsPangoAttrList *attrs, gboolean *ranges_differ)
+{
+    NsPangoWrapMode own = wrap_mode_of(style, min_content);
+    if (ranges_differ) *ranges_differ = FALSE;
+#ifdef NS_USE_WEB_TEXT_LIB
+    if (!box || !box->attrs) return own;
+    gboolean mixed = FALSE;
+    for (guint i = 0; !mixed && i < box->attrs->len; i++) {
+        const ns_inline_attr *r = &g_array_index(box->attrs, ns_inline_attr, i);
+        mixed = inline_attr_wraps_own_way(r) &&
+                wrap_mode_of(r->style, min_content) != own &&
+                range_has_text(box->text, r->start, r->start + r->len);
+    }
+    if (!mixed) return own;
+    GPtrArray *ranges = g_ptr_array_new();
+    for (guint i = 0; i < box->attrs->len; i++) {
+        ns_inline_attr *r = &g_array_index(box->attrs, ns_inline_attr, i);
+        if (inline_attr_wraps_own_way(r) &&
+            range_has_text(box->text, r->start, r->start + r->len))
+            g_ptr_array_add(ranges, r);
+    }
+    g_ptr_array_sort(ranges, wrap_range_outer_first);
+    const ns_inline_attr *first = g_ptr_array_index(ranges, 0);
+    NsPangoWrapMode layout_mode = wrap_mode_of(first->style, min_content);
+    gboolean one_mode = !text_outside_ranges(box->text, ranges);
+    gboolean emergency = own == NS_PANGO_WRAP_WORD_CHAR;
+    for (guint i = 0; i < ranges->len; i++) {
+        const ns_inline_attr *r = g_ptr_array_index(ranges, i);
+        NsPangoWrapMode m = wrap_mode_of(r->style, min_content);
+        if (m != layout_mode) one_mode = FALSE;
+        if (m == NS_PANGO_WRAP_WORD_CHAR) emergency = TRUE;
+    }
+    if (!one_mode) {
+        layout_mode = emergency ? NS_PANGO_WRAP_WORD_CHAR : NS_PANGO_WRAP_WORD;
+        if (ranges_differ) *ranges_differ = TRUE;
+    }
+    if (!one_mode && attrs) {
+        ns_pango_attr_list_insert(
+            attrs, wrap_breaks_attr(own, layout_mode, 0, G_MAXUINT));
+        for (guint i = 0; i < ranges->len; i++) {
+            const ns_inline_attr *r = g_ptr_array_index(ranges, i);
+            ns_pango_attr_list_insert(
+                attrs, wrap_breaks_attr(wrap_mode_of(r->style, min_content),
+                                        layout_mode, r->start,
+                                        r->start + r->len));
+        }
+    }
+    g_ptr_array_free(ranges, TRUE);
+    return layout_mode;
+#else
+    (void)box; (void)attrs;
+    return own;
+#endif
+}
+
+NsPangoWrapMode
+ns_paint_wrap_mode_for_box(const ns_box *box, const ns_style *style)
+{
+    return box_wrap(box, style, FALSE, NULL, NULL);
+}
+
+void
+ns_paint_apply_wrap_attrs(NsPangoAttrList *attrs, const ns_box *box,
+                          const ns_style *style)
+{
+    box_wrap(box, style, FALSE, attrs, NULL);
+}
+
+NsPangoWrapMode
+ns_paint_min_content_wrap(NsPangoAttrList *attrs, const ns_box *box,
+                          const ns_style *style, gboolean *ranges_differ)
+{
+    return box_wrap(box, style, TRUE, attrs, ranges_differ);
 }
 
 static gboolean
@@ -4781,7 +4938,7 @@ inline_layout_begin(const ns_box *b, const ns_style *s,
         ns_pango_layout_set_width(layout, -1);
     else
         ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
-    ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(s));
+    ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for_box(b, s));
     if (!(b->inline_atomics && b->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, s);
     {
@@ -4801,6 +4958,7 @@ inline_layout_begin(const ns_box *b, const ns_style *s,
     ns_paint_layout_set_inline_text(layout, b->text);
 
     NsPangoAttrList *attrs = ns_pango_attr_list_new();
+    ns_paint_apply_wrap_attrs(attrs, b, s);
     ns_paint_apply_i18n(layout, attrs, b);
     ns_paint_apply_font_features(attrs, s, 0, G_MAXUINT);
     ns_inline_apply_atomic_shapes(attrs, b);

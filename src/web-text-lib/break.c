@@ -2094,6 +2094,69 @@ remove_breaks_from_range (const char   *text,
 }
 
 static gboolean
+handle_break_modes (const char      *text,
+                    int              length,
+                    NsPangoAttrList *attrs,
+                    int              offset,
+                    NsPangoLogAttr  *log_attrs,
+                    int              log_attrs_len)
+{
+  NsPangoAttrIterator iter;
+  gboolean tailored = FALSE;
+  int prev_value = TRUE;
+  int prev_end_pos = -1;
+
+  _ns_pango_attr_list_get_iterator (attrs, &iter);
+
+  do
+    {
+      const NsPangoAttribute *attr = ns_pango_attr_iterator_get (&iter, NS_PANGO_ATTR_ALLOW_BREAKS);
+      int value = attr ? ((NsPangoAttrInt*)attr)->value : TRUE;
+      int start, end;
+      int start_pos, end_pos;
+      int pos;
+
+      ns_pango_attr_iterator_range (&iter, &start, &end);
+      if (end <= offset || start >= offset + length)
+        continue;
+
+      if (start < offset)
+        start_pos = 0;
+      else
+        start_pos = g_utf8_pointer_to_offset (text, text + start - offset);
+      if (end >= offset + length)
+        end_pos = log_attrs_len;
+      else
+        end_pos = g_utf8_pointer_to_offset (text, text + end - offset);
+
+      if (value == NS_PANGO_BREAKS_ANYWHERE || value == NS_PANGO_BREAKS_WORDS)
+        {
+          pos = prev_value == value && prev_end_pos == start_pos ? start_pos : start_pos + 1;
+          for (pos = MAX (pos, 1); pos < end_pos; pos++)
+            {
+              if (value == NS_PANGO_BREAKS_ANYWHERE)
+                {
+                  if (log_attrs[pos].is_char_break)
+                    log_attrs[pos].is_line_break = TRUE;
+                }
+              else if (!log_attrs[pos].is_line_break)
+                log_attrs[pos].is_char_break = FALSE;
+            }
+
+          tailored = TRUE;
+        }
+
+      prev_value = value;
+      prev_end_pos = end_pos;
+    }
+  while (ns_pango_attr_iterator_next (&iter));
+
+  _ns_pango_attr_iterator_destroy (&iter);
+
+  return tailored;
+}
+
+static gboolean
 handle_allow_breaks (const char    *text,
                      int            length,
                      NsPangoAttrList *attrs,
@@ -2432,6 +2495,9 @@ break_attrs (const char   *text,
 
   tailored |= handle_hyphens (text, length, &hyphens, offset,
                               log_attrs, log_attrs_len);
+
+  tailored |= handle_break_modes (text, length, &allow_breaks, offset,
+                                  log_attrs, log_attrs_len);
 
   tailored |= handle_allow_breaks (text, length, &allow_breaks, offset,
                                    log_attrs, log_attrs_len);
