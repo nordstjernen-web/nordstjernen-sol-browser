@@ -69,7 +69,7 @@ typedef enum {
     REQ_LOAD, REQ_RENDER, REQ_LINK, REQ_CLICK, REQ_VIEWPORT, REQ_KEY,
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
     REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLLBAR,
-    REQ_PERMISSION, REQ_COLOR_SCHEME, REQ_FAVICON,
+    REQ_PERMISSION, REQ_MEDIA_PREFERENCES, REQ_FAVICON,
     REQ_TICK, REQ_PRINT, REQ_AUDIO_EVENT, REQ_DOWNLOAD, REQ_POPUP, REQ_WEBAUTHN,
     REQ_SESSION_PULL, REQ_CLEAR_CACHE, REQ_QUIT
 } ReqType;
@@ -1689,9 +1689,10 @@ worker_main(gpointer data)
                                                        &res->print_scale);
             res->ok = res->print_pages != NULL;
             post(res);
-        } else if (req->type == REQ_COLOR_SCHEME) {
+        } else if (req->type == REQ_MEDIA_PREFERENCES) {
             if (v->proc)
-                ns_rproc_http_set_color_scheme(v->proc, req->mods);
+                ns_rproc_http_set_media_preferences(v->proc, req->mods & 1,
+                                                    req->mods & 2);
         } else if (req->type == REQ_AUDIO_EVENT) {
             if (v->proc)
                 ns_rproc_http_audio_event(v->proc, req->query);
@@ -5040,12 +5041,13 @@ ns_proc_view_find_open(NsProcView *v)
 }
 
 void
-ns_proc_view_set_color_scheme(NsProcView *v, gboolean dark)
+ns_proc_view_set_media_preferences(NsProcView *v, gboolean dark,
+                                   gboolean reduce_motion)
 {
     if (!v) return;
     Req *req = g_new0(Req, 1);
-    req->type = REQ_COLOR_SCHEME;
-    req->mods = dark ? 1 : 0;
+    req->type = REQ_MEDIA_PREFERENCES;
+    req->mods = (dark ? 1 : 0) | (reduce_motion ? 2 : 0);
     push_req(v, req);
 }
 

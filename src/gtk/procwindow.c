@@ -75,7 +75,7 @@ typedef struct {
     GtkWidget      *status;
     char           *status_base;
     guint           status_timer;
-    gulong          theme_watch[2];
+    gulong          theme_watch[3];
     gboolean        element_fullscreen;
     NsProcView     *fullscreen_view;
     GtkWidget      *fullscreen_notice;
@@ -112,7 +112,7 @@ procwindow_free(gpointer data)
     if (pw->fullscreen_notice_timer)
         g_source_remove(pw->fullscreen_notice_timer);
     GtkSettings *settings = gtk_settings_get_default();
-    for (int i = 0; settings && i < 2; i++)
+    for (gsize i = 0; settings && i < G_N_ELEMENTS(pw->theme_watch); i++)
         if (pw->theme_watch[i])
             g_signal_handler_disconnect(settings, pw->theme_watch[i]);
     g_free(pw->status_base);
@@ -949,8 +949,28 @@ sync_gtk_dark_preference(ns_color_scheme_pref pref)
                      NULL);
 }
 
+static gboolean
+desktop_reduces_motion(void)
+{
+    GtkSettings *settings = gtk_settings_get_default();
+    gboolean animations = TRUE;
+    if (settings)
+        g_object_get(settings, "gtk-enable-animations", &animations, NULL);
+    return !animations;
+}
+
+static gboolean
+env_changed(const char *name, const char *want)
+{
+    const char *have = g_getenv(name);
+    if (have && g_str_equal(have, want))
+        return FALSE;
+    g_setenv(name, want, TRUE);
+    return TRUE;
+}
+
 static void
-apply_color_scheme(ProcWindow *pw)
+apply_media_preferences(ProcWindow *pw)
 {
     const ns_config *cfg = ns_config_get();
     sync_gtk_dark_preference(cfg ? cfg->color_scheme
@@ -962,17 +982,19 @@ apply_color_scheme(ProcWindow *pw)
     default: dark = desktop_prefers_dark(pw->window); break;
     }
     toggle_css_class(pw->window, "ns-dark", dark);
-    const char *want = dark ? "dark" : "light";
-    const char *have = g_getenv("NS_COLOR_SCHEME");
-    if (have && g_str_equal(have, want))
+    gboolean reduce_motion = desktop_reduces_motion();
+    gboolean scheme_changed = env_changed("NS_COLOR_SCHEME",
+                                          dark ? "dark" : "light");
+    gboolean motion_changed = env_changed("NS_REDUCED_MOTION",
+                                          reduce_motion ? "1" : "0");
+    if (!scheme_changed && !motion_changed)
         return;
-    g_setenv("NS_COLOR_SCHEME", want, TRUE);
     int pages = gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook));
     for (int i = 0; i < pages; i++) {
         NsProcView *v = view_for_page(
             gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), i));
         if (!v) continue;
-        ns_proc_view_set_color_scheme(v, dark);
+        ns_proc_view_set_media_preferences(v, dark, reduce_motion);
         const char *url = ns_proc_view_url(v);
         if (url && *url)
             ns_proc_view_reload(v);
@@ -983,7 +1005,7 @@ static void
 on_theme_changed(GObject *settings, GParamSpec *pspec, gpointer ud)
 {
     (void)settings; (void)pspec;
-    apply_color_scheme(ud);
+    apply_media_preferences(ud);
 }
 
 static void
@@ -3891,6 +3913,9 @@ proc_window_new(GtkApplication *app)
         pw->theme_watch[1] = g_signal_connect(
             settings, "notify::gtk-application-prefer-dark-theme",
             G_CALLBACK(on_theme_changed), pw);
+        pw->theme_watch[2] = g_signal_connect(
+            settings, "notify::gtk-enable-animations",
+            G_CALLBACK(on_theme_changed), pw);
     }
 
     return pw;
@@ -4261,7 +4286,7 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
     install_chrome_css();
     ProcWindow *pw = proc_window_new(app);
     gtk_window_present(GTK_WINDOW(pw->window));
-    apply_color_scheme(pw);
+    apply_media_preferences(pw);
 
     gboolean opened = FALSE;
     if (!ctx->private_mode && ns_session_open(ctx->instance_id)) {

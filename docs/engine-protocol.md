@@ -57,6 +57,12 @@ Every request is `POST <path>` with an `application/json` body. The reply is
 | Storage | `/session-storage`, `/cookies` |
 | Media | `/media`, `/audio-event` |
 
+`/colorscheme` takes `{"dark":0|1}` and, optionally, `"reduce_motion":0|1`.
+These drive the `prefers-color-scheme` and `prefers-reduced-motion` media
+features. A renderer leaves the motion preference unchanged when the field
+is absent. At launch, the shell passes the same two preferences as
+`NS_COLOR_SCHEME` (`light`/`dark`) and `NS_REDUCED_MOTION` (`0`/`1`).
+
 `/render` and `/tick` are the heartbeat: the shell calls them from its frame
 clock and the renderer reports page geometry, animation state and the
 side-channel events below in the reply.

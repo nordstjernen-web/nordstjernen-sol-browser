@@ -1735,12 +1735,14 @@ ns_rproc_http_resolve_webgl(ns_rproc_http *r, const char *origin, int allow)
 }
 
 int
-ns_rproc_http_set_color_scheme(ns_rproc_http *r, int dark)
+ns_rproc_http_set_media_preferences(ns_rproc_http *r, int dark,
+                                    int reduce_motion)
 {
     if (!r)
         return -1;
     char *json = NULL;
-    if (asprintf(&json, "{\"dark\":%d}", dark ? 1 : 0) < 0)
+    if (asprintf(&json, "{\"dark\":%d,\"reduce_motion\":%d}", dark ? 1 : 0,
+                 reduce_motion ? 1 : 0) < 0)
         json = NULL;
     return request_ok(r, "/colorscheme", json);
 }
