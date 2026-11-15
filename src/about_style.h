@@ -31,6 +31,12 @@
     "a{color:var(--accent);text-decoration:none}\n" \
     "input::placeholder{color:var(--muted);opacity:1}\n" \
     "a:hover{text-decoration:underline}\n" \
+    "a:focus-visible,button:focus-visible,summary:focus-visible," \
+    "input:focus-visible{outline:2px solid var(--accent);" \
+    "outline-offset:2px}\n" \
+    ".mark-img{display:block;box-shadow:0 8px 22px rgba(20,40,110,.24)}\n" \
+    "@media (prefers-color-scheme:dark){.mark-img{box-shadow:" \
+    "0 0 0 1px rgba(255,255,255,.1),0 8px 24px rgba(0,0,0,.5)}}\n" \
     ".card{background:var(--card);border:1px solid var(--line);" \
     "border-radius:var(--radius);box-shadow:var(--shadow)}\n" \
     ".btn{display:inline-flex;align-items:center;gap:8px;height:40px;" \

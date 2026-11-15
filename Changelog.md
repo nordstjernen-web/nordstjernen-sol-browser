@@ -3,6 +3,14 @@ Changelog:
 
 1.0.48-dev:
 ======
+* about:start and about:nordstjernen follow the operating-system
+  language: their headings, buttons, search hints and status words come
+  from the UI catalogues, with translations into the 13 fuller ones
+  (German, Spanish, French, Italian, Japanese, Korean, Dutch, Polish,
+  Portuguese, Russian, Turkish, Ukrainian and Chinese). The renderer now
+  loads the catalogue before it enters its sandbox. The built-in pages
+  draw a visible outline around the focused link, button or field when
+  you move with the keyboard.
 * The page text from `--dump=text`, the embedding API and the Java
   `Page.text()` leaves out decorative images (`alt=""`), and shows an
   image whose source is a `data:` URL as `[image]` rather than its whole

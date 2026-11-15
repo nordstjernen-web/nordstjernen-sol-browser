@@ -9,6 +9,7 @@
 #include "config.h"
 #include "content_decode.h"
 #include "about_page.h"
+#include "i18n.h"
 #include "history.h"
 #include "csp.h"
 #include "connection_allowlist.h"
@@ -2968,43 +2969,50 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
 }
 
 static void
+diag_row(GString *s, const char *row_class, const char *key,
+         const char *value_class, const char *value)
+{
+    char *ek = g_markup_escape_text(ns_i18n(key), -1);
+    char *ev = g_markup_escape_text(value, -1);
+    g_string_append_printf(s,
+        "<div class=\"%s\"><span class=\"dk\">%s</span>"
+        "<span class=\"%s\">%s</span></div>", row_class, ek, value_class, ev);
+    g_free(ev);
+    g_free(ek);
+}
+
+static void
 diag_kv(GString *s, const char *key, const char *value)
 {
-    char *ev = g_markup_escape_text((value && *value) ? value : "Unknown",
-                                    -1);
-    g_string_append_printf(s,
-        "<div class=\"drow\"><span class=\"dk\">%s</span>"
-        "<span class=\"dv\">%s</span></div>", key, ev);
-    g_free(ev);
+    diag_row(s, "drow", key, "dv",
+             (value && *value) ? value : ns_i18n("Unknown"));
 }
 
 static void
 diag_kv_long(GString *s, const char *key, const char *value)
 {
-    char *ev = g_markup_escape_text((value && *value) ? value : "Unknown",
-                                    -1);
-    g_string_append_printf(s,
-        "<div class=\"drow long\"><span class=\"dk\">%s</span>"
-        "<span class=\"dv\">%s</span></div>", key, ev);
-    g_free(ev);
+    diag_row(s, "drow long", key, "dv",
+             (value && *value) ? value : ns_i18n("Unknown"));
 }
 
 static void
 diag_feature(GString *s, const char *key, gboolean on)
 {
-    g_string_append_printf(s,
-        "<div class=\"drow\"><span class=\"dk\">%s</span>"
-        "<span class=\"dv %s\">%s</span></div>",
-        key, on ? "on" : "off", on ? "On" : "Not built");
+    diag_row(s, "drow", key, on ? "dv on" : "dv off",
+             ns_i18n(on ? "On" : "Not built"));
 }
 
 static void
 diag_state(GString *s, const char *key, gboolean on, const char *text)
 {
-    char *et = g_markup_escape_text(text, -1);
-    g_string_append_printf(s,
-        "<div class=\"drow\"><span class=\"dk\">%s</span>"
-        "<span class=\"dv %s\">%s</span></div>", key, on ? "on" : "off", et);
+    diag_row(s, "drow", key, on ? "dv on" : "dv off", ns_i18n(text));
+}
+
+static void
+diag_heading(GString *s, const char *text)
+{
+    char *et = g_markup_escape_text(ns_i18n(text), -1);
+    g_string_append_printf(s, "<h3>%s</h3>", et);
     g_free(et);
 }
 
@@ -3193,11 +3201,12 @@ about_sandbox_rows(GString *s)
 static char *
 about_security_html(void)
 {
-    GString *s = g_string_new("<div class=\"diag\"><h3>Privacy</h3>");
+    GString *s = g_string_new("<div class=\"diag\">");
+    diag_heading(s, "Privacy");
     about_privacy_rows(s);
-    g_string_append(s, "<h3>Sandbox and hardening</h3>");
+    diag_heading(s, "Sandbox and hardening");
     about_sandbox_rows(s);
-    g_string_append(s, "<h3>Safe Browsing</h3>");
+    diag_heading(s, "Safe Browsing");
     about_safe_browsing_rows(s);
     g_string_append(s, "</div>");
     return g_string_free(s, FALSE);
@@ -3211,9 +3220,12 @@ about_extensions_html(void)
     if (n == 0) {
         g_autofree char *root = ns_ext_default_root();
         g_autofree char *esc_root = ns_html_escape_text(root ? root : "");
-        g_string_append_printf(s,
-            "<p>No extensions installed. Nordstjernen loads unpacked "
-            "WebExtensions from <code>%s</code>.</p>", esc_root);
+        g_autofree char *note = g_markup_escape_text(
+            ns_i18n("No extensions installed. Nordstjernen loads unpacked "
+                    "WebExtensions from %s."), -1);
+        g_autofree char *code = g_strdup_printf("<code>%s</code>", esc_root);
+        g_autofree char *line = ns_about_format(note, code);
+        g_string_append_printf(s, "<p>%s</p>", line);
     }
     for (guint i = 0; i < n; i++) {
         ns_ext_info info;
@@ -3284,9 +3296,12 @@ static char *
 about_build_line(void)
 {
     g_autofree char *os = about_os_name();
-    char *line = g_strdup_printf("Version " NS_VERSION " \xc2\xb7 built "
-                                 NS_BUILD_DATE " \xc2\xb7 %s, %s",
-                                 os, about_arch_name());
+    g_autofree char *version = ns_about_format(ns_i18n("Version %s"),
+                                               NS_VERSION);
+    g_autofree char *built = ns_about_format(ns_i18n("built %s"),
+                                             NS_BUILD_DATE);
+    char *line = g_strdup_printf("%s \xc2\xb7 %s \xc2\xb7 %s, %s", version,
+                                 built, os, about_arch_name());
     char *escaped = g_markup_escape_text(line, -1);
     g_free(line);
     return escaped;
@@ -3295,7 +3310,8 @@ about_build_line(void)
 static char *
 about_diagnostics_html(void)
 {
-    GString *s = g_string_new("<div class=\"diag\"><h3>System</h3>");
+    GString *s = g_string_new("<div class=\"diag\">");
+    diag_heading(s, "System");
     char *os = about_os_name();
     diag_kv(s, "Operating system", os);
     g_free(os);
@@ -3304,7 +3320,7 @@ about_diagnostics_html(void)
     diag_kv(s, "Logical CPUs", cores);
     g_free(cores);
 
-    g_string_append(s, "<h3>Engine and libraries</h3>");
+    diag_heading(s, "Engine and libraries");
     {
         const ns_config *ua_cfg = ns_config_get();
         const char *ua = ua_cfg && ua_cfg->user_agent && *ua_cfg->user_agent
@@ -3332,7 +3348,7 @@ about_diagnostics_html(void)
     diag_kv(s, "TLS / crypto", OpenSSL_version(OPENSSL_VERSION));
     diag_kv_long(s, "Networking", curl_version());
 
-    g_string_append(s, "<h3>Features</h3>");
+    diag_heading(s, "Features");
 #ifdef NS_ENABLE_WEBGL
     diag_feature(s, "WebGL (3D canvas)", TRUE);
 #else
@@ -4810,14 +4826,11 @@ static const char k_about_nordstjernen_template[] =
     "<meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "<meta name=\"color-scheme\" content=\"light dark\">"
-    "<title>About Nordstjernen</title>" NS_ABOUT_ICON_INFO
+    "<title>" NS_TR("About Nordstjernen") "</title>" NS_ABOUT_ICON_INFO
     "<style>\n" NS_ABOUT_BASE_CSS
     ".wrap{max-width:860px;margin:0 auto;padding:36px 24px 48px}\n"
     ".head{display:flex;align-items:center;gap:18px;margin:0 4px 26px}\n"
-    ".mark-img{display:block;width:64px;height:64px;border-radius:17px;"
-    "box-shadow:0 8px 24px rgba(20,40,110,.25)}\n"
-    "@media (prefers-color-scheme:dark){.mark-img{box-shadow:"
-    "0 0 0 1px rgba(255,255,255,.1),0 8px 24px rgba(0,0,0,.5)}}\n"
+    ".mark-img{width:64px;height:64px;border-radius:17px}\n"
     ".head h1{margin:0;font-size:30px;font-weight:700;letter-spacing:-.02em;"
     "line-height:1.15}\n"
     ".head p{margin:2px 0 0;color:var(--muted);font-size:14px}\n"
@@ -4864,36 +4877,42 @@ static const char k_about_nordstjernen_template[] =
     "<p>__ND_BUILD__</p>"
     "<div class=\"actions\">"
     "<button class=\"btn primary\" id=\"copy\" type=\"button\">"
-    "Copy details</button>"
-    "<a class=\"btn\" href=\"about:settings\">Settings</a>"
+    NS_TR("Copy details") "</button>"
+    "<a class=\"btn\" href=\"about:settings\">" NS_TR("Settings") "</a>"
     "</div></div></div>"
-    "<h2 class=\"group-label\">Privacy &amp; security"
-    "<a class=\"edit\" href=\"about:settings#privacy\">Change in Settings</a>"
-    "</h2>"
+    "<h2 class=\"group-label\">" NS_TR("Privacy & security")
+    "<a class=\"edit\" href=\"about:settings#privacy\">"
+    NS_TR("Change in Settings") "</a></h2>"
     "<section class=\"card\">__ND_SECURITY__</section>"
-    "<h2 class=\"group-label\">Extensions</h2>"
+    "<h2 class=\"group-label\">" NS_TR("Extensions") "</h2>"
     "<section class=\"card\">__ND_EXTENSIONS__</section>"
-    "<details class=\"tech\"><summary>Technical details</summary>"
-    "<section class=\"card\">__ND_DIAG__</section></details>"
-    "<h2 class=\"group-label\">License</h2>"
+    "<details class=\"tech\"><summary>" NS_TR("Technical details")
+    "</summary><section class=\"card\">__ND_DIAG__</section></details>"
+    "<h2 class=\"group-label\">" NS_TR("License") "</h2>"
     "<section class=\"card\">"
-    "<p>Nordstjernen is \xc2\xa9 2026 Andreas R\xc3\xb8sdal, free to use, "
-    "change and share under the <b>Nordstjernen Source License 1.0</b> or "
-    "the <b>GNU GPL, version\xc2\xa0" "3 or later</b>, at your option, and "
-    "comes with no warranty. The third-party software it includes is "
-    "listed, with its licenses, in the notices.</p>"
+    "<p>" NS_TR("Nordstjernen is \xc2\xa9 2026 Andreas R\xc3\xb8sdal, free to "
+    "use, change and share under the Nordstjernen Source License 1.0 or the "
+    "GNU GPL, version 3 or later, at your option, and comes with no warranty. "
+    "The third-party software it includes is listed, with its licenses, in "
+    "the notices.") "</p>"
     "<div class=\"actions\">"
-    "<a class=\"btn\" href=\"about:license\">Nordstjernen Source License</a>"
-    "<a class=\"btn\" href=\"about:gpl\">GNU GPL v3</a>"
-    "<a class=\"btn\" href=\"about:third-party\">Third-party notices</a>"
+    "<a class=\"btn\" href=\"about:license\">"
+    NS_TR("Nordstjernen Source License") "</a>"
+    "<a class=\"btn\" href=\"about:gpl\">" NS_TR("GNU GPL v3") "</a>"
+    "<a class=\"btn\" href=\"about:third-party\">"
+    NS_TR("Third-party notices") "</a>"
     "</div>"
     "</section>"
-    "<nav class=\"foot\" aria-label=\"Project\">"
-    "<a href=\"https://nordstjernen.org/privacy\">Privacy policy</a>"
+    "<nav class=\"foot\" aria-label=\"" NS_TR("Project") "\">"
+    "<a href=\"https://nordstjernen.org/privacy\">" NS_TR("Privacy policy")
+    "</a>"
     "<a href=\"https://nordstjernen.org\">nordstjernen.org</a>"
     "</nav>"
     "</main>"
     "<script>\n"
+    "var copyLabel='" NS_TR_JS("Copy details") "';\n"
+    "var copiedLabel='" NS_TR_JS("Copied") "';\n"
+    "var failedLabel='" NS_TR_JS("Could not copy") "';\n"
     "var copy=document.getElementById('copy');\n"
     "function detailsText(){\n"
     " var out=[document.querySelector('.head h1').textContent,"
@@ -4913,10 +4932,10 @@ static const char k_about_nordstjernen_template[] =
     "  }});\n"
     " return out.join('\\n')+'\\n';}\n"
     "function label(t){copy.textContent=t;"
-    "setTimeout(function(){copy.textContent='Copy details';},2000);}\n"
+    "setTimeout(function(){copy.textContent=copyLabel;},2000);}\n"
     "copy.addEventListener('click',function(){\n"
     " navigator.clipboard.writeText(detailsText()).then(\n"
-    "  function(){label('Copied');},function(){label('Could not copy');});});\n"
+    "  function(){label(copiedLabel);},function(){label(failedLabel);});});\n"
     "</script></body></html>";
 
 #define SETTINGS_NAV_ICON(paths) \
@@ -5439,13 +5458,8 @@ synthesize_about_response(const char *url, const char *top_url,
             "__ND_LOGO_MARK__", "__ND_BUILD__", "__ND_SECURITY__",
             "__ND_EXTENSIONS__", "__ND_DIAG__",
         };
-        char *body = g_strdup(k_about_nordstjernen_template);
-        for (gsize i = 0; i < G_N_ELEMENTS(values); i++) {
-            char *next = ns_about_substitute(body, keys[i], values[i]);
-            g_free(body);
-            g_free(values[i]);
-            body = next;
-        }
+        char *body = ns_about_fill(k_about_nordstjernen_template, keys,
+                                   values, G_N_ELEMENTS(values));
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "mozilla")) {
