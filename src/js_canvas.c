@@ -1276,6 +1276,19 @@ ns_ctx_set_stroke_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state 
 }
 
 static void
+ns_paint_rect_keeping_path(cairo_t *cr, double x, double y, double w, double h,
+                           gboolean stroke)
+{
+    cairo_path_t *current = cairo_copy_path(cr);
+    cairo_new_path(cr);
+    cairo_rectangle(cr, x, y, w, h);
+    if (stroke) cairo_stroke(cr);
+    else cairo_fill(cr);
+    cairo_append_path(cr, current);
+    cairo_path_destroy(current);
+}
+
+static void
 ns_draw_fillrect(cairo_t *cr, void *vud)
 {
     ns_draw_rect_ud *u = vud;
@@ -1286,8 +1299,7 @@ ns_draw_fillrect(cairo_t *cr, void *vud)
                               u->st->fill_b, u->st->fill_a * ga);
     }
     ns_ctx_apply_composite(u->ctx, u->this_val, cr);
-    cairo_rectangle(cr, u->x, u->y, u->w, u->h);
-    cairo_fill(cr);
+    ns_paint_rect_keeping_path(cr, u->x, u->y, u->w, u->h, FALSE);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 }
 
@@ -1303,8 +1315,7 @@ ns_draw_strokerect(cairo_t *cr, void *vud)
     }
     ns_ctx_apply_composite(u->ctx, u->this_val, cr);
     cairo_set_line_width(cr, u->lw);
-    cairo_rectangle(cr, u->x, u->y, u->w, u->h);
-    cairo_stroke(cr);
+    ns_paint_rect_keeping_path(cr, u->x, u->y, u->w, u->h, TRUE);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 }
 
@@ -1352,8 +1363,7 @@ ns_ctx_clearRect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     if (!st) return JS_UNDEFINED;
     cairo_save(st->cr);
     cairo_set_operator(st->cr, CAIRO_OPERATOR_CLEAR);
-    cairo_rectangle(st->cr, x, y, w, h);
-    cairo_fill(st->cr);
+    ns_paint_rect_keeping_path(st->cr, x, y, w, h, FALSE);
     cairo_restore(st->cr);
     ns_js_request_repaint(js_from_ctx(ctx));
     return JS_UNDEFINED;
