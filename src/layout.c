@@ -11604,11 +11604,15 @@ flex_row_item_min_contribution(ns_box *c, const ns_style *child_style)
         return 0;
     double min_content = min_content_width_of(c, child_style);
     double preferred = definite_width_limit(c, s->values[NS_CSS_WIDTH]);
+    if (preferred < 0 && keyword_is(s->values[NS_CSS_WIDTH], "max-content"))
+        preferred = measure_max_content_width(c, child_style);
     double contribution = flex_contribution_clamp_to_basis(
         c, MAX(min_content, preferred), preferred);
     double max_main = definite_width_limit(c, s->values[NS_CSS_MAX_WIDTH]);
     if (max_main >= 0 && contribution > max_main) contribution = max_main;
     double min_main = definite_width_limit(c, s->values[NS_CSS_MIN_WIDTH]);
+    if (min_main < 0 && keyword_is(s->values[NS_CSS_MIN_WIDTH], "max-content"))
+        min_main = measure_max_content_width(c, child_style);
     if (min_main < 0 && !overflow_establishes_bfc(s))
         min_main = preferred >= 0 ? MIN(min_content, preferred) : min_content;
     if (min_main >= 0 && contribution < min_main) contribution = min_main;
