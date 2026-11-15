@@ -9,6 +9,7 @@
 #include "net.h"
 #include "renderer_serve.h"
 #include "headless_main.h"
+#include "i18n.h"
 #include "proc_limits.h"
 #include "threaddump.h"
 
@@ -262,6 +263,7 @@ main(int argc, char **argv)
     const char *scheme = g_getenv("NS_COLOR_SCHEME");
     if (scheme && *scheme)
         ns_browser_set_color_scheme(g_str_equal(scheme, "dark"));
+    ns_i18n_init(argv[0]);
     ns_browser_sandbox(argv[0]);
     ns_thread_dump_install_signal("nordstjernen-renderer");
 

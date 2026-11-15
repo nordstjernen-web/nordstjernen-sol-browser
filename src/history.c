@@ -4,10 +4,12 @@
  */
 
 #include "history.h"
+#include "about_page.h"
 #include "about_style.h"
 #include "bookmarks.h"
 #include "config.h"
 #include "db.h"
+#include "i18n.h"
 
 #include <glib/gstdio.h>
 #include <libpsl.h>
@@ -431,13 +433,18 @@ history_append_tile(GString *s, const char *url, const char *tooltip,
         e_url, e_tip, tint, e_init, e_label);
     if (forget_site) {
         char *q = g_uri_escape_string(forget_site, NULL, FALSE);
-        char *e_site = g_markup_escape_text(forget_site, -1);
+        char *e_title = g_markup_escape_text(ns_i18n("Remove from top sites"),
+                                             -1);
+        char *forget_label =
+            ns_about_format(ns_i18n("Remove %s from top sites"), forget_site);
+        char *e_forget_label = g_markup_escape_text(forget_label, -1);
         g_string_append_printf(s,
             "<a class=\"forget\" href=\"about:start?forget=%s\" "
-            "title=\"Remove from top sites\" "
-            "aria-label=\"Remove %s from top sites\">\xc3\x97</a>",
-            q, e_site);
-        g_free(e_site);
+            "title=\"%s\" aria-label=\"%s\">\xc3\x97</a>",
+            q, e_title, e_forget_label);
+        g_free(e_forget_label);
+        g_free(forget_label);
+        g_free(e_title);
         g_free(q);
     }
     g_string_append(s, "</li>");
@@ -451,9 +458,11 @@ history_append_tile(GString *s, const char *url, const char *tooltip,
 static void
 history_open_tile_row(GString *s, const char *id, const char *heading)
 {
+    char *e_heading = g_markup_escape_text(ns_i18n(heading), -1);
     g_string_append_printf(s,
         "<section class=\"row\" aria-labelledby=\"%s\">"
-        "<h2 id=\"%s\">%s</h2><ul class=\"sites\">", id, id, heading);
+        "<h2 id=\"%s\">%s</h2><ul class=\"sites\">", id, id, e_heading);
+    g_free(e_heading);
 }
 
 char *

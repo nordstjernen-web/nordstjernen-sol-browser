@@ -8,6 +8,7 @@
 #include "about_style.h"
 #include "config.h"
 #include "history.h"
+#include "i18n.h"
 #include "netutil.h"
 
 #include <string.h>
@@ -91,19 +92,91 @@ ns_about_substitute(const char *template_text,
     return joined;
 }
 
+static void
+about_append_js_escaped(GString *out, const char *s)
+{
+    for (const char *p = s; *p; p++) {
+        if (*p == '\'' || *p == '\\' || *p == '<' || *p == '"' ||
+            (guchar)*p < 0x20)
+            g_string_append_printf(out, "\\u%04x", (guchar)*p);
+        else
+            g_string_append_c(out, *p);
+    }
+}
+
+static char *
+about_js_escape(const char *s)
+{
+    GString *out = g_string_new(NULL);
+    about_append_js_escaped(out, s ? s : "");
+    return g_string_free(out, FALSE);
+}
+
+char *
+ns_about_localize(const char *template_text)
+{
+    GString *out = g_string_new(NULL);
+    const char *p = template_text;
+    while (*p) {
+        if (*p != '\x01' && *p != '\x03') {
+            g_string_append_c(out, *p++);
+            continue;
+        }
+        gboolean js = *p == '\x03';
+        const char *end = strchr(p + 1, js ? '\x04' : '\x02');
+        if (!end) {
+            g_string_append(out, p + 1);
+            break;
+        }
+        char *source = g_strndup(p + 1, (gsize)(end - p - 1));
+        const char *text = ns_i18n(source);
+        if (js) {
+            about_append_js_escaped(out, text);
+        } else {
+            char *escaped = g_markup_escape_text(text, -1);
+            g_string_append(out, escaped);
+            g_free(escaped);
+        }
+        g_free(source);
+        p = end + 1;
+    }
+    return g_string_free(out, FALSE);
+}
+
+char *
+ns_about_fill(const char *template_text, const char *const *keys,
+              char **values, gsize n)
+{
+    char *page = ns_about_localize(template_text);
+    for (gsize i = 0; i < n; i++) {
+        char *next = ns_about_substitute(page, keys[i], values[i]);
+        g_free(page);
+        g_free(values[i]);
+        page = next;
+    }
+    return page;
+}
+
+char *
+ns_about_format(const char *template_text, const char *value)
+{
+    const char *slot = strstr(template_text, "%s");
+    if (!slot)
+        return g_strdup(template_text);
+    return g_strdup_printf("%.*s%s%s", (int)(slot - template_text),
+                           template_text, value, slot + 2);
+}
+
 static const char k_about_start_template[] =
     "<!doctype html><html lang=\"en\"><head>"
     "<meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "<meta name=\"color-scheme\" content=\"light dark\">"
-    "<title>New Tab</title>" NS_ABOUT_ICON_START
+    "<title>" NS_TR("New Tab") "</title>" NS_ABOUT_ICON_START
     "<style>\n" NS_ABOUT_BASE_CSS
     ".ntp{max-width:640px;margin:0 auto;padding:12vh 24px 48px;"
     "display:flex;flex-direction:column;align-items:center}\n"
-    ".mark-img{display:block;width:48px;height:48px;border-radius:13px;"
-    "box-shadow:0 8px 22px rgba(20,40,110,.24)}\n"
-    "@media (prefers-color-scheme:dark){.mark-img{box-shadow:"
-    "0 0 0 1px rgba(255,255,255,.1),0 8px 24px rgba(0,0,0,.5)}}\n"
+    ".mark-img{width:48px;height:48px;border-radius:13px}\n"
     ".brand{display:flex;flex-direction:column;align-items:center;gap:10px}\n"
     ".brand h1{margin:0;font-size:20px;font-weight:600;color:var(--muted);"
     "letter-spacing:-.01em}\n"
@@ -130,8 +203,6 @@ static const char k_about_start_template[] =
     ".search button:hover{filter:brightness(1.08)}\n"
     ".hint{min-height:18px;margin:10px 0 0;color:var(--muted);"
     "font-size:13px;text-align:center}\n"
-    ".hint kbd{padding:1px 6px;border:1px solid var(--line);"
-    "border-radius:5px;font:inherit;font-size:12px}\n"
     ".row{width:100%;margin-top:30px}\n"
     ".row h2{margin:0 0 6px 8px;font-size:13px;font-weight:600;"
     "color:var(--muted)}\n"
@@ -175,9 +246,9 @@ static const char k_about_start_template[] =
     " aria-hidden=\"true\">"
     "<circle cx=\"7\" cy=\"7\" r=\"4.6\"/><path d=\"M10.4 10.4 14 14\"/></svg>"
     "<input id=\"sq\" name=\"q\" autocomplete=\"off\" dir=\"auto\""
-    " aria-label=\"Search with __ND_SEARCH_NAME__ or enter an address\""
-    " placeholder=\"Search with __ND_SEARCH_NAME__ or enter an address\">"
-    "<button type=\"submit\" aria-label=\"Go\">"
+    " aria-label=\"__ND_SEARCH_PLACEHOLDER__\""
+    " placeholder=\"__ND_SEARCH_PLACEHOLDER__\">"
+    "<button type=\"submit\" aria-label=\"" NS_TR("Go") "\">"
     "<svg width=\"18\" height=\"18\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\""
     " stroke-linejoin=\"round\" aria-hidden=\"true\">"
@@ -185,30 +256,33 @@ static const char k_about_start_template[] =
     "</button></form>"
     "<p class=\"hint\" id=\"hint\" aria-live=\"polite\"></p>"
     "__ND_NOTE____ND_TOP_SITES____ND_BOOKMARKS__"
-    "<nav class=\"links\" aria-label=\"Browser pages\">"
+    "<nav class=\"links\" aria-label=\"" NS_TR("Browser pages") "\">"
     "<a href=\"about:history\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\""
     " stroke-linejoin=\"round\" aria-hidden=\"true\">"
     "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/>"
-    "<path d=\"M8 4.75V8l2.25 1.5\"/></svg>History</a>"
+    "<path d=\"M8 4.75V8l2.25 1.5\"/></svg>" NS_TR("History") "</a>"
     "<a href=\"about:settings\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\""
     " aria-hidden=\"true\">"
     "<path d=\"M2.75 4.5h6.5M12.25 4.5h1M2.75 11.5h1M6.75 11.5h6.5\"/>"
     "<circle cx=\"10.75\" cy=\"4.5\" r=\"1.5\"/>"
-    "<circle cx=\"5.25\" cy=\"11.5\" r=\"1.5\"/></svg>Settings</a>"
+    "<circle cx=\"5.25\" cy=\"11.5\" r=\"1.5\"/></svg>" NS_TR("Settings")
+    "</a>"
     "<a href=\"about:nordstjernen\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\""
     " aria-hidden=\"true\">"
     "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/><path d=\"M8 7.25v3.5\"/>"
     "<circle cx=\"8\" cy=\"5.1\" r=\".4\" fill=\"currentColor\"/>"
-    "</svg>About</a>"
+    "</svg>" NS_TR("About") "</a>"
     "</nav></main>"
     "<script>\n"
     "var searchUrl='__ND_SEARCH_URL__';\n"
+    "var hintOpen='" NS_TR_JS("Press Enter to open %s") "';\n"
+    "var hintSearch='__ND_SEARCH_HINT__';\n"
     "var form=document.getElementById('dsearch');\n"
     "var sq=document.getElementById('sq');\n"
     "var hint=document.getElementById('hint');\n"
@@ -218,16 +292,12 @@ static const char k_about_start_template[] =
     "(:\\d+)?(\\/.*)?$/i.test(s)) return 'https://'+s;\n"
     " return null;}\n"
     "sq.addEventListener('input',function(){\n"
-    " var s=sq.value.trim(); hint.textContent='';\n"
+    " var s=sq.value.trim();\n"
     " form.classList.toggle('typed',s!=='');\n"
-    " if(!s) return;\n"
-    " var a=addressFor(s);\n"
-    " hint.appendChild(document.createTextNode('Press '));\n"
-    " var k=document.createElement('kbd'); k.textContent='Enter';\n"
-    " hint.appendChild(k);\n"
-    " hint.appendChild(document.createTextNode(a\n"
-    "  ? ' to open '+a.replace(/^https:\\/\\//,'')\n"
-    "  : ' to search with __ND_SEARCH_NAME__'));});\n"
+    " var a=s?addressFor(s):null;\n"
+    " hint.textContent=!s?'':a\n"
+    "  ? hintOpen.replace('%s',a.replace(/^https:\\/\\//,''))\n"
+    "  : hintSearch;});\n"
     "form.addEventListener('submit',function(e){e.preventDefault();\n"
     " var s=sq.value.trim(); if(!s) return;\n"
     " var a=addressFor(s); if(a){window.location.href=a;return;}\n"
@@ -244,50 +314,44 @@ about_search_url_js(void)
     char *engine = (cfg && cfg->search_engine && *cfg->search_engine)
         ? g_strdup(cfg->search_engine) : g_strdup(NS_DEFAULT_SEARCH_ENGINE);
     ns_config_unlock();
-    GString *out = g_string_new(NULL);
-    for (const char *p = engine; *p; p++) {
-        if (*p == '\'' || *p == '\\' || *p == '<' || *p == '"' ||
-            (guchar)*p < 0x20)
-            g_string_append_printf(out, "\\u%04x", (guchar)*p);
-        else
-            g_string_append_c(out, *p);
-    }
+    char *escaped = about_js_escape(engine);
     g_free(engine);
-    return g_string_free(out, FALSE);
+    return escaped;
 }
 
 char *
 ns_about_start_html(gboolean private_window)
 {
-    char *logo = ns_about_logo_markup();
-    char *sites = private_window ? g_strdup("")
-                                 : ns_history_top_sites_html(8);
-    char *bookmarks = ns_history_bookmark_tiles_html(8);
-    const char *note = "";
-    if (private_window)
-        note = "<p class=\"note\">Private window: pages you visit here are "
-               "not added to your history</p>";
-    char *page = ns_about_substitute(k_about_start_template,
-                                     "__ND_LOGO_MARK__", logo);
-    char *next = ns_about_substitute(page, "__ND_NOTE__", note);
-    g_free(page);
-    char *engine_name = ns_search_engine_name();
-    char *search_name = g_markup_escape_text(engine_name ? engine_name
-                                                         : "the web", -1);
-    page = ns_about_substitute(next, "__ND_SEARCH_NAME__", search_name);
-    g_free(next);
-    char *search_url = about_search_url_js();
-    next = ns_about_substitute(page, "__ND_SEARCH_URL__", search_url);
-    g_free(page);
-    g_free(search_url);
-    g_free(search_name);
-    g_free(engine_name);
-    page = ns_about_substitute(next, "__ND_TOP_SITES__", sites);
-    g_free(next);
-    next = ns_about_substitute(page, "__ND_BOOKMARKS__", bookmarks);
-    g_free(page);
-    g_free(bookmarks);
-    g_free(sites);
-    g_free(logo);
-    return next;
+    char *engine = ns_search_engine_name();
+    char *placeholder = engine
+        ? ns_about_format(ns_i18n("Search with %s or enter an address"),
+                          engine)
+        : g_strdup(ns_i18n("Search or enter an address"));
+    char *hint = engine
+        ? ns_about_format(ns_i18n("Press Enter to search with %s"), engine)
+        : g_strdup(ns_i18n("Press Enter to search"));
+    char *note = private_window
+        ? g_strdup_printf("<p class=\"note\">%s</p>",
+                          ns_i18n("Private window: pages you visit here are "
+                                  "not added to your history"))
+        : g_strdup("");
+    static const char *const keys[] = {
+        "__ND_LOGO_MARK__", "__ND_SEARCH_PLACEHOLDER__", "__ND_SEARCH_HINT__",
+        "__ND_SEARCH_URL__", "__ND_NOTE__", "__ND_TOP_SITES__",
+        "__ND_BOOKMARKS__",
+    };
+    char *values[G_N_ELEMENTS(keys)] = {
+        ns_about_logo_markup(),
+        g_markup_escape_text(placeholder, -1),
+        about_js_escape(hint),
+        about_search_url_js(),
+        note,
+        private_window ? g_strdup("") : ns_history_top_sites_html(8),
+        ns_history_bookmark_tiles_html(8),
+    };
+    g_free(hint);
+    g_free(placeholder);
+    g_free(engine);
+    return ns_about_fill(k_about_start_template, keys, values,
+                         G_N_ELEMENTS(keys));
 }
