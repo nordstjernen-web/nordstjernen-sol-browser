@@ -3,6 +3,25 @@ Changelog:
 
 1.0.48-dev:
 ======
+* The PDF viewer:
+  - Local PDFs (`file://`) display instead of opening to a blank page.
+    PDF.js started its worker from a script that imported a `blob:` URL
+    made by the page, and the module loader only looked that URL up in
+    the worker's own blob table. It now also finds blob URLs that other
+    contexts of the same origin made, as browsers do.
+  - The viewer says "This PDF could not be displayed." when PDF.js fails
+    to start, instead of staying blank.
+  - Japanese, Chinese and Korean text set with PDF's predefined CMaps
+    renders, and the 14 standard PDF fonts use PDF.js's own font files,
+    so they look the same on every system: PDF.js's CMaps and standard
+    fonts are now installed and loaded.
+  - The viewer page no longer carries 2 MB of PDF.js as text and base64.
+    It imports the library, worker and data files as `about:pdfjs/<file>`,
+    which the module loader serves from the installed files, so opening a
+    PDF parses only the PDF.
+  - Headless runs (`--dump`, WebDriver, MCP) show PDFs in the viewer
+    instead of their raw source. Headless and the browser now prepare
+    non-HTML documents (images, PDF, JSON, XML, text) with the same code.
 * PDF.js is no longer compiled into the browser. The build installs the
   pinned release's files in `share/nordstjernen/pdfjs/`, and the viewer
   reads them the first time a PDF opens, so PDF.js can be updated without

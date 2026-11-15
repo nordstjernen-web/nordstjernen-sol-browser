@@ -242,7 +242,7 @@ mkdir -p "$APP/share/nordstjernen/i18n"
 cp "$ROOT"/data/i18n/*.lang "$APP/share/nordstjernen/i18n/"
 if [ -d "$BUILDDIR/src/pdfjs" ]; then
     mkdir -p "$APP/share/nordstjernen/pdfjs"
-    cp "$BUILDDIR"/src/pdfjs/* "$APP/share/nordstjernen/pdfjs/"
+    cp -R "$BUILDDIR"/src/pdfjs/. "$APP/share/nordstjernen/pdfjs/"
 fi
 
 # Third-party copyright + license notices required by the libraries we ship.

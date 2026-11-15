@@ -13,6 +13,10 @@ G_BEGIN_DECLS
 char *ns_pdf_document_html(const guint8 *data, gsize len, const char *url,
                            char **csp_out);
 
+#define NS_PDFJS_URL_PREFIX "about:pdfjs/"
+
+GBytes *ns_pdfjs_file(const char *name);
+
 G_END_DECLS
 
 #endif

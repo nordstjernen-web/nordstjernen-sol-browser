@@ -70878,6 +70878,43 @@ module_mime_acceptable(const char *content_type, ns_module_kind kind)
     return ok;
 }
 
+static GBytes *
+ns_js_module_blob(ns_js *js, const char *url)
+{
+    GBytes *own = ns_js_blob_url_lookup(js, url, NULL);
+    if (own) return g_bytes_ref(own);
+    const char *doc_url = js ? ns_js_current_url(js) : NULL;
+    if (!ns_net_blob_url_visible_to(url, doc_url)) return NULL;
+    return ns_js_net_blob_resolver(url, NULL, NULL);
+}
+
+static JSModuleDef *
+ns_js_load_module_bytes(ns_js *js, JSContext *ctx, const char *module_name,
+                       GBytes *blob, ns_module_kind kind)
+{
+    gsize body_len = 0;
+    const char *body = g_bytes_get_data(blob, &body_len);
+    if (body_len > NS_MAX_SCRIPT_BYTES) {
+        JS_ThrowRangeError(ctx, "blob module exceeds script size limit");
+        return NULL;
+    }
+    if (js) {
+        js->module_load_count++;
+        js->module_load_bytes += body_len;
+    }
+    if (kind != NS_MODULE_JAVASCRIPT)
+        return ns_js_make_data_module(ctx, module_name, body, body_len, kind);
+    JSValue func_val =
+        ns_js_compile_module_cached(ctx, body, body_len, module_name);
+    if (JS_IsException(func_val)) {
+        ns_js_log_module_compile_error(js, ctx, module_name);
+        return NULL;
+    }
+    JSModuleDef *m = JS_VALUE_GET_PTR(func_val);
+    JS_FreeValue(ctx, func_val);
+    return m;
+}
+
 static JSModuleDef *
 ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
                     JSValueConst attributes)
@@ -70926,33 +70963,34 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
         return m;
     }
     if (g_str_has_prefix(module_name, "blob:")) {
-        GBytes *blob = ns_js_blob_url_lookup(js, module_name, NULL);
+        GBytes *blob = ns_js_module_blob(js, module_name);
         if (!blob) {
             JS_ThrowReferenceError(ctx, "blob module URL not found: %s",
                                    module_name);
             return NULL;
         }
-        gsize body_len = 0;
-        const char *body = g_bytes_get_data(blob, &body_len);
-        if (body_len > NS_MAX_SCRIPT_BYTES) {
-            JS_ThrowRangeError(ctx, "blob module exceeds script size limit");
+        JSModuleDef *m = ns_js_load_module_bytes(js, ctx, module_name, blob,
+                                                kind);
+        g_bytes_unref(blob);
+        return m;
+    }
+    if (g_str_has_prefix(module_name, NS_PDFJS_URL_PREFIX)) {
+        GBytes *file = ns_pdfjs_file(module_name + strlen(NS_PDFJS_URL_PREFIX));
+        if (!file) {
+            JS_ThrowReferenceError(ctx, "PDF.js file not found: %s",
+                                   module_name);
             return NULL;
         }
-        if (js) {
-            js->module_load_count++;
-            js->module_load_bytes += body_len;
+        if (kind == NS_MODULE_TEXT) {
+            gsize len = 0;
+            const guchar *data = g_bytes_get_data(file, &len);
+            char *encoded = g_base64_encode(data, len);
+            g_bytes_unref(file);
+            file = g_bytes_new_take(encoded, strlen(encoded));
         }
-        if (kind != NS_MODULE_JAVASCRIPT)
-            return ns_js_make_data_module(ctx, module_name, body, body_len,
-                                          kind);
-        JSValue func_val =
-            ns_js_compile_module_cached(ctx, body, body_len, module_name);
-        if (JS_IsException(func_val)) {
-            ns_js_log_module_compile_error(js, ctx, module_name);
-            return NULL;
-        }
-        JSModuleDef *m = JS_VALUE_GET_PTR(func_val);
-        JS_FreeValue(ctx, func_val);
+        JSModuleDef *m = ns_js_load_module_bytes(js, ctx, module_name, file,
+                                                kind);
+        g_bytes_unref(file);
         return m;
     }
     if (!ns_url_is_http_or_https(module_name)) {

@@ -16,66 +16,36 @@
 
 #define NS_PDF_VIEWER_MAX_BYTES ((gsize)64u * 1024u * 1024u)
 
-typedef enum {
-    NS_PDFJS_LIB,
-    NS_PDFJS_WORKER,
-    NS_PDFJS_OPENJPEG,
-    NS_PDFJS_JBIG2,
-    NS_PDFJS_QCMS,
-    NS_PDFJS_FILE_COUNT,
-} ns_pdfjs_file_id;
-
-static const char *const ns_pdfjs_names[NS_PDFJS_FILE_COUNT] = {
+static const char *const ns_pdfjs_required[] = {
     "pdf.min.mjs", "pdf.worker.min.mjs", "openjpeg.wasm", "jbig2.wasm",
     "qcms_bg.wasm",
 };
 
-typedef struct {
-    char  *data;
-    gsize  len;
-} ns_pdfjs_file;
+static const char *const ns_pdfjs_data_dirs[] = { "cmaps/", "standard_fonts/" };
 
-static ns_pdfjs_file g_pdfjs[NS_PDFJS_FILE_COUNT];
-static gsize         g_pdfjs_once;
-static gboolean      g_pdfjs_ready;
+static char       *g_pdfjs_dir;
+static gsize       g_pdfjs_once;
+static GMutex      g_pdfjs_lock;
+static GHashTable *g_pdfjs_cache;
 
 static gboolean
-ns_pdfjs_closes_script(const char *text)
+ns_pdfjs_dir_complete(const char *dir)
 {
-    char *lower = g_ascii_strdown(text, -1);
-    gboolean closes = strstr(lower, "</script") != NULL;
-    g_free(lower);
-    return closes;
-}
-
-static gboolean
-ns_pdfjs_load_from(const char *dir)
-{
-    ns_pdfjs_file files[NS_PDFJS_FILE_COUNT] = {{0}};
-    gboolean ok = TRUE;
-    for (int i = 0; ok && i < NS_PDFJS_FILE_COUNT; i++) {
-        char *path = g_build_filename(dir, ns_pdfjs_names[i], NULL);
-        ok = g_file_get_contents(path, &files[i].data, &files[i].len, NULL);
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_pdfjs_required); i++) {
+        char *path = g_build_filename(dir, ns_pdfjs_required[i], NULL);
+        gboolean present = g_file_test(path, G_FILE_TEST_IS_REGULAR);
         g_free(path);
+        if (!present) return FALSE;
     }
-    if (ok)
-        ok = !ns_pdfjs_closes_script(files[NS_PDFJS_LIB].data) &&
-             !ns_pdfjs_closes_script(files[NS_PDFJS_WORKER].data);
-    if (!ok) {
-        for (int i = 0; i < NS_PDFJS_FILE_COUNT; i++)
-            g_free(files[i].data);
-        return FALSE;
-    }
-    memcpy(g_pdfjs, files, sizeof files);
     return TRUE;
 }
 
-static gboolean
-ns_pdfjs_find(void)
+static char *
+ns_pdfjs_find_dir(void)
 {
     const char *override = g_getenv("NS_PDFJS_DIR");
-    if (override && *override && ns_pdfjs_load_from(override))
-        return TRUE;
+    if (override && *override && ns_pdfjs_dir_complete(override))
+        return g_strdup(override);
     static const char *const exe_relative[] = {
         "../Resources/share/nordstjernen/pdfjs",
         "../share/nordstjernen/pdfjs",
@@ -84,35 +54,96 @@ ns_pdfjs_find(void)
         "../pdfjs",
     };
     char *exe_dir = ns_net_exe_dir();
-    if (exe_dir) {
-        gboolean found = FALSE;
-        for (gsize i = 0; !found && i < G_N_ELEMENTS(exe_relative); i++) {
-            char *dir = g_build_filename(exe_dir, exe_relative[i], NULL);
-            found = ns_pdfjs_load_from(dir);
-            g_free(dir);
+    for (gsize i = 0; exe_dir && i < G_N_ELEMENTS(exe_relative); i++) {
+        char *dir = g_build_filename(exe_dir, exe_relative[i], NULL);
+        if (ns_pdfjs_dir_complete(dir)) {
+            g_free(exe_dir);
+            return dir;
         }
-        g_free(exe_dir);
-        if (found) return TRUE;
+        g_free(dir);
     }
+    g_free(exe_dir);
     const char *const *system_dirs = g_get_system_data_dirs();
     for (int i = 0; system_dirs && system_dirs[i]; i++) {
         char *dir = g_build_filename(system_dirs[i], "nordstjernen", "pdfjs",
                                      NULL);
-        gboolean found = ns_pdfjs_load_from(dir);
+        if (ns_pdfjs_dir_complete(dir)) return dir;
         g_free(dir);
-        if (found) return TRUE;
     }
+    return NULL;
+}
+
+static const char *
+ns_pdfjs_dir(void)
+{
+    if (g_once_init_enter(&g_pdfjs_once)) {
+        g_pdfjs_dir = ns_pdfjs_find_dir();
+        g_once_init_leave(&g_pdfjs_once, 1);
+    }
+    return g_pdfjs_dir;
+}
+
+static gboolean
+ns_pdfjs_is_required(const char *name)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_pdfjs_required); i++)
+        if (strcmp(name, ns_pdfjs_required[i]) == 0) return TRUE;
     return FALSE;
 }
 
 static gboolean
-ns_pdfjs_available(void)
+ns_pdfjs_name_valid(const char *name)
 {
-    if (g_once_init_enter(&g_pdfjs_once)) {
-        g_pdfjs_ready = ns_pdfjs_find();
-        g_once_init_leave(&g_pdfjs_once, 1);
+    if (ns_pdfjs_is_required(name)) return TRUE;
+    const char *file = NULL;
+    for (gsize i = 0; !file && i < G_N_ELEMENTS(ns_pdfjs_data_dirs); i++)
+        if (g_str_has_prefix(name, ns_pdfjs_data_dirs[i]))
+            file = name + strlen(ns_pdfjs_data_dirs[i]);
+    if (!file || !*file || *file == '.') return FALSE;
+    for (const char *p = file; *p; p++)
+        if (!g_ascii_isalnum(*p) && *p != '.' && *p != '_' && *p != '-')
+            return FALSE;
+    return TRUE;
+}
+
+GBytes *
+ns_pdfjs_file(const char *name)
+{
+    const char *dir = ns_pdfjs_dir();
+    if (!dir || !name || !ns_pdfjs_name_valid(name)) return NULL;
+    gboolean cacheable = ns_pdfjs_is_required(name);
+    g_mutex_lock(&g_pdfjs_lock);
+    GBytes *bytes = g_pdfjs_cache ? g_hash_table_lookup(g_pdfjs_cache, name)
+                                  : NULL;
+    if (bytes) {
+        g_bytes_ref(bytes);
+        g_mutex_unlock(&g_pdfjs_lock);
+        return bytes;
     }
-    return g_pdfjs_ready;
+    char *path = g_build_filename(dir, name, NULL);
+    char *data = NULL;
+    gsize len = 0;
+    if (g_file_get_contents(path, &data, &len, NULL)) {
+        bytes = g_bytes_new_take(data, len);
+        if (cacheable) {
+            if (!g_pdfjs_cache)
+                g_pdfjs_cache = g_hash_table_new_full(
+                    g_str_hash, g_str_equal, g_free,
+                    (GDestroyNotify)g_bytes_unref);
+            g_hash_table_insert(g_pdfjs_cache, g_strdup(name),
+                                g_bytes_ref(bytes));
+        }
+    }
+    g_free(path);
+    g_mutex_unlock(&g_pdfjs_lock);
+    return bytes;
+}
+#else
+GBytes *
+ns_pdfjs_file(const char *name)
+{
+    (void)name;
+    return NULL;
 }
 #endif
 
@@ -169,14 +200,6 @@ ns_pdf_append_base64_block(GString *out, const char *id, const void *data,
     g_free(b64);
 }
 
-static void
-ns_pdf_append_text_block(GString *out, const char *id, const char *text)
-{
-    g_string_append_printf(out, "<script type=\"text/plain\" id=\"%s\">", id);
-    g_string_append(out, text);
-    g_string_append(out, "</script>");
-}
-
 static char *
 ns_pdf_script_nonce(void)
 {
@@ -191,7 +214,8 @@ ns_pdf_viewer_csp(const char *nonce)
     return g_strdup_printf(
         "sandbox allow-scripts allow-modals allow-popups "
         "allow-popups-to-escape-sandbox; "
-        "default-src 'none'; script-src 'nonce-%s' 'wasm-unsafe-eval' blob:; "
+        "default-src 'none'; "
+        "script-src 'nonce-%s' 'wasm-unsafe-eval' blob: about:; "
         "worker-src blob:; style-src 'unsafe-inline'; "
         "img-src data: blob:; font-src data: blob:; "
         "form-action 'none'; base-uri 'none'", nonce);
@@ -203,10 +227,7 @@ ns_pdf_viewer_html(const guint8 *data, gsize len, const char *url,
 {
     char *title = ns_pdf_title_html(url);
     char *href = ns_html_escape_text(url ? url : "");
-    GString *out = g_string_sized_new(len / 3 * 4 +
-                                      g_pdfjs[NS_PDFJS_LIB].len +
-                                      g_pdfjs[NS_PDFJS_WORKER].len +
-                                      1024 * 1024);
+    GString *out = g_string_sized_new(len / 3 * 4 + 64 * 1024);
     g_string_append_printf(out,
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<title>%s</title><style>%s</style></head><body>"
@@ -230,14 +251,6 @@ ns_pdf_viewer_html(const guint8 *data, gsize len, const char *url,
     g_free(title);
     g_free(href);
     ns_pdf_append_base64_block(out, "pdf-data", data, len);
-    for (int i = NS_PDFJS_OPENJPEG; i <= NS_PDFJS_QCMS; i++) {
-        char *id = g_strconcat("wasm:", ns_pdfjs_names[i], NULL);
-        ns_pdf_append_base64_block(out, id, g_pdfjs[i].data, g_pdfjs[i].len);
-        g_free(id);
-    }
-    ns_pdf_append_text_block(out, "pdfjs-lib", g_pdfjs[NS_PDFJS_LIB].data);
-    ns_pdf_append_text_block(out, "pdfjs-worker",
-                             g_pdfjs[NS_PDFJS_WORKER].data);
     g_string_append_printf(out, "<script nonce=\"%s\">", nonce);
     g_string_append(out, ns_pdf_viewer_js);
     g_string_append(out, "</script></body></html>");
@@ -252,7 +265,7 @@ ns_pdf_document_html(const guint8 *data, gsize len, const char *url,
     *csp_out = g_strdup("sandbox allow-downloads; default-src 'none'; "
                         "style-src 'unsafe-inline'");
 #ifdef NS_HAVE_PDFJS
-    if (!ns_pdfjs_available())
+    if (!ns_pdfjs_dir())
         return ns_pdf_notice_html(
             url, "The PDF viewer (PDF.js) is not installed.");
     char *nonce = data && len > 0 && len <= NS_PDF_VIEWER_MAX_BYTES

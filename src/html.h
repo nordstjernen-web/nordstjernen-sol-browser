@@ -57,6 +57,9 @@ char *ns_html_image_document(const char *url);
 char *ns_html_json_document(const char *url, const char *json, gsize len);
 char *ns_html_xml_document(const char *url, const char *xml, gsize len);
 
+struct ns_response;
+void  ns_html_prepare_document_response(struct ns_response *resp);
+
 G_END_DECLS
 
 #endif

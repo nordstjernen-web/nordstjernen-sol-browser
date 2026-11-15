@@ -1,21 +1,26 @@
 (async () => {
+    const PDFJS = 'about:pdfjs/';
+    const DATA_DIRS = { cMapUrl: 'cmaps/', standardFontDataUrl: 'standard_fonts/' };
     const byId = id => document.getElementById(id);
-    const embedded = id => byId(id).textContent;
-    const moduleUrl = id =>
-        URL.createObjectURL(new Blob([embedded(id)], { type: 'text/javascript' }));
-    const embeddedBytes = id => Uint8Array.fromBase64(embedded(id));
     const pagesEl = byId('pages');
     const statusEl = byId('status');
     const fail = message => {
         statusEl.textContent = message;
         statusEl.hidden = false;
     };
+    let opened = false;
+    const failUnopened = () => {
+        if (!opened && byId('password').hidden)
+            fail('This PDF could not be displayed.');
+    };
+    window.addEventListener('unhandledrejection', failUnopened);
+    setTimeout(failUnopened, 20000);
 
-    class EmbeddedDataFactory {
+    class InstalledDataFactory {
         async fetch({ kind, filename }) {
-            const el = kind === 'wasmUrl' && byId('wasm:' + filename);
-            if (!el) throw new Error('Not bundled: ' + filename);
-            return Uint8Array.fromBase64(el.textContent);
+            const file = (DATA_DIRS[kind] || '') + filename;
+            const module = await import(PDFJS + file, { with: { type: 'text' } });
+            return Uint8Array.fromBase64(module.default);
         }
     }
 
@@ -38,11 +43,16 @@
 
     let pdfjs, pdf;
     try {
-        pdfjs = await import(moduleUrl('pdfjs-lib'));
-        pdfjs.GlobalWorkerOptions.workerSrc = moduleUrl('pdfjs-worker');
+        pdfjs = await import(PDFJS + 'pdf.min.mjs');
+        pdfjs.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.mjs';
         const loading = pdfjs.getDocument({
-            data: embeddedBytes('pdf-data'),
-            BinaryDataFactory: EmbeddedDataFactory,
+            data: Uint8Array.fromBase64(byId('pdf-data').textContent),
+            BinaryDataFactory: InstalledDataFactory,
+            cMapUrl: PDFJS + DATA_DIRS.cMapUrl,
+            cMapPacked: true,
+            standardFontDataUrl: PDFJS + DATA_DIRS.standardFontDataUrl,
+            wasmUrl: PDFJS,
+            useSystemFonts: false,
             useWorkerFetch: false,
             isEvalSupported: false,
             isOffscreenCanvasSupported: false,
@@ -58,6 +68,7 @@
         fail('This PDF could not be displayed.');
         return;
     }
+    opened = true;
     byId('pdf-data').remove();
 
     const MAX_CANVAS_SIDE = 16384;

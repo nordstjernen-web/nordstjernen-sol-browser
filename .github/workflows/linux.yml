@@ -156,6 +156,10 @@ jobs:
           grep -q 'video @' /tmp/layout.txt
           pkill -f "http.server 18765" || true
 
+      - name: Headless PDF smoke (PDF.js viewer, file://)
+        if: hashFiles('builddir/src/pdfjs/pdf.min.mjs') != ''
+        run: python3 scripts/pdf-smoke.py ./builddir/src/gtk/nordstjernen
+
       - name: Headless baseline smoke (./scripts/dev.sh smoke)
         if: hashFiles('builddir/src/gtk/nordstjernen') != ''
         run: ./scripts/dev.sh smoke

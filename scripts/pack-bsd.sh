@@ -46,7 +46,7 @@ mkdir -p "$STAGE/share/nordstjernen/i18n"
 cp "$ROOT"/data/i18n/*.lang "$STAGE/share/nordstjernen/i18n/"
 if [ -d "$BUILDDIR/src/pdfjs" ]; then
     mkdir -p "$STAGE/share/nordstjernen/pdfjs"
-    cp "$BUILDDIR"/src/pdfjs/* "$STAGE/share/nordstjernen/pdfjs/"
+    cp -R "$BUILDDIR"/src/pdfjs/. "$STAGE/share/nordstjernen/pdfjs/"
 fi
 
 case "$OS" in

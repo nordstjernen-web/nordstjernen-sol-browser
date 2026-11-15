@@ -4,6 +4,8 @@
  */
 
 #include "html.h"
+#include "net.h"
+#include "pdf.h"
 
 #include <math.h>
 #include <string.h>
@@ -825,4 +827,112 @@ ns_html_decode_body_full(const char *body, gsize len,
 
     charset_report(charset_out, "UTF-8");
     return g_utf8_make_valid(body, (gssize)len);
+}
+
+static gboolean
+html_content_type_starts(const char *content_type, const char *prefix)
+{
+    return content_type && prefix &&
+        g_ascii_strncasecmp(content_type, prefix, strlen(prefix)) == 0;
+}
+
+static gboolean
+html_content_type_is_html(const char *content_type)
+{
+    return html_content_type_starts(content_type, "text/html") ||
+           html_content_type_starts(content_type, "application/xhtml");
+}
+
+static gboolean
+html_content_type_is_json(const char *content_type)
+{
+    return html_content_type_starts(content_type, "application/json") ||
+           html_content_type_starts(content_type, "text/json") ||
+           (content_type && strstr(content_type, "+json") != NULL);
+}
+
+static gboolean
+html_content_type_is_xml(const char *content_type)
+{
+    if (!content_type) return FALSE;
+    if (strstr(content_type, "xhtml") || strstr(content_type, "svg"))
+        return FALSE;
+    return html_content_type_starts(content_type, "text/xml") ||
+           html_content_type_starts(content_type, "application/xml") ||
+           strstr(content_type, "+xml") != NULL;
+}
+
+static gboolean
+html_content_type_is_pdf(const char *content_type)
+{
+    return html_content_type_starts(content_type, "application/pdf") ||
+           html_content_type_starts(content_type, "application/x-pdf");
+}
+
+static char *
+html_text_document(const char *url, const char *text)
+{
+    char *esc_url = ns_html_escape_text(url && *url ? url : "text file");
+    char *esc_text = ns_html_escape_text(text ? text : "");
+    char *html = g_strconcat(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>",
+        esc_url,
+        "</title><style>"
+        "body{margin:0;background:#fff;color:#111}"
+        "pre{margin:0;padding:12px;font:13px/1.45 ui-monospace,"
+        "\"SF Mono\",Menlo,Consolas,monospace;white-space:pre-wrap;"
+        "overflow-wrap:anywhere}"
+        "</style></head><body><pre>",
+        esc_text,
+        "</pre></body></html>",
+        NULL);
+    g_free(esc_url);
+    g_free(esc_text);
+    return html;
+}
+
+void
+ns_html_prepare_document_response(ns_response *resp)
+{
+    if (!resp || !resp->body || !resp->content_type)
+        return;
+    const char *final_url = resp->final_url ? resp->final_url : "";
+    char *html = NULL;
+    if (html_content_type_starts(resp->content_type, "image/")) {
+        html = ns_html_image_document(final_url);
+    } else if (html_content_type_is_pdf(resp->content_type)) {
+        g_free(resp->csp_header);
+        html = ns_pdf_document_html(resp->body->data, resp->body->len,
+                                    final_url, &resp->csp_header);
+    } else if (html_content_type_is_json(resp->content_type)) {
+        char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
+                                                 resp->body->len,
+                                                 resp->content_type, NULL);
+        html = ns_html_json_document(final_url, decoded,
+                                     decoded ? strlen(decoded) : 0);
+        if (!html) html = html_text_document(final_url, decoded);
+        g_free(decoded);
+    } else if (html_content_type_is_xml(resp->content_type)) {
+        char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
+                                                 resp->body->len,
+                                                 resp->content_type, NULL);
+        html = ns_html_xml_document(final_url, decoded,
+                                    decoded ? strlen(decoded) : 0);
+        if (!html) html = html_text_document(final_url, decoded);
+        g_free(decoded);
+    } else if (html_content_type_starts(resp->content_type, "text/") &&
+               !html_content_type_is_html(resp->content_type)) {
+        char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
+                                                 resp->body->len,
+                                                 resp->content_type, NULL);
+        html = html_text_document(final_url, decoded);
+        g_free(decoded);
+    }
+    if (!html)
+        return;
+    g_byte_array_set_size(resp->body, 0);
+    g_byte_array_append(resp->body, (const guint8 *)html, strlen(html));
+    g_free(html);
+    g_free(resp->content_type);
+    resp->content_type = g_strdup("text/html; charset=utf-8");
 }

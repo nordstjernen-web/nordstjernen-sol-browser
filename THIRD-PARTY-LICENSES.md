@@ -119,8 +119,9 @@ license including the LLVM exceptions is reproduced in
 
 > PDF viewer library. Not in the source tree: the pinned `pdfjs-dist`
 > release is fetched by `subprojects/pdfjs-dist.wrap` at build time and
-> its `pdf.min.mjs`, `pdf.worker.min.mjs` and WebAssembly image decoders
-> are embedded in the engine binary (`-Dpdfjs`).
+> its `pdf.min.mjs`, `pdf.worker.min.mjs`, WebAssembly image decoders,
+> CMaps and standard fonts are installed, with PDF.js's own `LICENSE`, in
+> `share/nordstjernen/pdfjs/` (`-Dpdfjs`).
 > <https://github.com/mozilla/pdf.js>
 >
 > Copyright Mozilla Foundation.
