@@ -14,9 +14,6 @@ void       ns_js_runtime_free(JSRuntime *rt);
 
 gboolean   ns_js_cage_enabled(void);
 gboolean   ns_js_cage_contains(const void *ptr);
-uintptr_t  ns_js_cage_base(void);
-size_t     ns_js_cage_size(void);
-size_t     ns_js_cage_committed_bytes(void);
 
 void      *ns_js_cage_shared_malloc(size_t size);
 void      *ns_js_cage_shared_realloc(void *ptr, size_t size);

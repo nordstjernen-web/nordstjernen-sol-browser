@@ -2750,13 +2750,6 @@ ns_browser_set_device_pixel_ratio(ns_browser *browser, double dppx)
     return 1;
 }
 
-int
-ns_browser_set_viewport_width(ns_browser *browser, int css_width)
-{
-    return ns_browser_set_viewport(browser, css_width,
-                                   (double)css_width * 0.75);
-}
-
 void
 ns_browser_window_action_applied(ns_browser *browser)
 {

@@ -21,7 +21,6 @@ guint    ns_cookie_store_generation(void);
 void     ns_cookie_store_clear(void);
 void     ns_cookie_store_clear_site(const char *partition);
 char    *ns_cookie_store_sites_json(void);
-char    *ns_cookie_store_site_json(const char *partition);
 char    *ns_cookie_store_visible_json(const char *partition, const char *url);
 char    *ns_cookie_store_matching_json(const char *partition, const char *url,
                                        gboolean include_httponly);

@@ -2280,39 +2280,6 @@ ns_net_address_guard_message(const ns_net_address_guard *guard)
            "a private or local network address";
 }
 
-const char *
-ns_net_proxy_override(void)
-{
-    return g_proxy_override;
-}
-
-const char *
-ns_net_http_proxy(void)
-{
-    const ns_config *cfg = ns_config_get();
-    return cfg ? cfg->http_proxy : NULL;
-}
-
-const char *
-ns_net_https_proxy(void)
-{
-    const ns_config *cfg = ns_config_get();
-    return cfg ? cfg->https_proxy : NULL;
-}
-
-const char *
-ns_net_no_proxy(void)
-{
-    const ns_config *cfg = ns_config_get();
-    return cfg ? cfg->no_proxy : NULL;
-}
-
-const char *
-ns_net_ca_bundle_path(void)
-{
-    return g_ca_bundle;
-}
-
 void
 ns_net_apply_curl_tls(void *curl_handle)
 {
@@ -8712,13 +8679,6 @@ ns_net_request_blocking(const char        *url,
     if (hdrs) g_ptr_array_free(hdrs, TRUE);
     if (failure) g_propagate_error(error, failure);
     return resp;
-}
-
-ns_response *
-ns_net_fetch_blocking(const char *url, GCancellable *cancellable, GError **error)
-{
-    return ns_net_request_blocking(url, NULL, "GET", NULL, 0, NULL, NULL,
-                                   cancellable, error);
 }
 
 ns_response *

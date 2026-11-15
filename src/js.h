@@ -179,7 +179,6 @@ gboolean ns_js_post_form_frame(ns_js *js, const ns_node *form, const char *url,
 char    *ns_js_base_url_for_document(ns_js *js, const ns_node *doc,
                                      const char *document_url);
 const char *ns_js_current_url(const ns_js *js);
-const char *ns_js_storage_partition(const ns_js *js);
 const char *ns_js_realm_storage_partition(const ns_js *js, struct JSContext *realm);
 void   ns_js_dispatch_hashchange(ns_js *js,
                                  const char *old_url, const char *new_url);

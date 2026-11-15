@@ -1313,35 +1313,6 @@ ns_cookie_store_sites_json(void)
 }
 
 char *
-ns_cookie_store_site_json(const char *partition)
-{
-    if (!partition || !*partition) return g_strdup("[]");
-    GString *out = g_string_new("[");
-    g_mutex_lock(&S.lock);
-    store_open_locked();
-    store_check_external_writes_locked();
-    ns_cookie_partition *p = partition_get_locked(partition);
-    gint64 now = now_s();
-    GPtrArray *rows = g_ptr_array_new();
-    GHashTableIter it;
-    gpointer v;
-    g_hash_table_iter_init(&it, p->cookies);
-    while (g_hash_table_iter_next(&it, NULL, &v)) {
-        ns_cookie *c = v;
-        if (!c->expires || c->expires >= now) g_ptr_array_add(rows, c);
-    }
-    g_ptr_array_sort(rows, cmp_header_order);
-    for (guint i = 0; i < rows->len; i++) {
-        if (i) g_string_append_c(out, ',');
-        json_append_cookie(out, g_ptr_array_index(rows, i));
-    }
-    g_ptr_array_free(rows, TRUE);
-    g_mutex_unlock(&S.lock);
-    g_string_append_c(out, ']');
-    return g_string_free(out, FALSE);
-}
-
-char *
 ns_cookie_store_visible_json(const char *partition, const char *url)
 {
     return ns_cookie_store_matching_json(partition, url, FALSE);

@@ -43,24 +43,6 @@ ns_js_cage_contains(const void *ptr)
     return JS_CageContains(ptr);
 }
 
-uintptr_t
-ns_js_cage_base(void)
-{
-    return JS_CageBase();
-}
-
-size_t
-ns_js_cage_size(void)
-{
-    return JS_CageSize();
-}
-
-size_t
-ns_js_cage_committed_bytes(void)
-{
-    return JS_CageCommittedBytes();
-}
-
 void *
 ns_js_cage_shared_malloc(size_t size)
 {

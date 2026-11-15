@@ -75994,12 +75994,6 @@ ns_js_current_url(const ns_js *js)
 }
 
 const char *
-ns_js_storage_partition(const ns_js *js)
-{
-    return js ? js->partition_key : NULL;
-}
-
-const char *
 ns_js_realm_storage_partition(const ns_js *js, struct JSContext *realm)
 {
     if (!js || !realm) return NULL;
