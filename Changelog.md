@@ -3,6 +3,15 @@ Changelog:
 
 1.0.48-dev:
 ======
+* about:nordstjernen is reorganised:
+  - The header gives the version, build date, operating system and
+    architecture on one line, next to a Settings button.
+  - Privacy, sandbox and Safe Browsing share one card.
+  - Libraries and features fold away under "Technical details".
+  - The license section is a sentence and three buttons.
+  - Every on/off row uses the same check mark, which also reads well in
+    dark mode, and long values (user agent, curl) get a line of their own.
+  - The version, the copyright line and the platform no longer repeat.
 * about:start shows your top sites in the desktop browser again. The
   page was built inside the sandboxed renderer, which has no access to
   the history database, so the list was always empty there; the browser
