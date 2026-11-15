@@ -67,7 +67,6 @@ static struct {
     gboolean        inited;
     gboolean        requested;
     gboolean        config_enabled;
-    gboolean        stopped;
     GSocketService *service;
     guint16         port;
     char            token[65];
@@ -1020,7 +1019,6 @@ rc_on_config_changed(GFileMonitor *mon, GFile *file, GFile *other,
         return;
     rc.config_enabled = on;
     if (on) {
-        rc.stopped = FALSE;
         rc_start();
     } else {
         rc_close_all(FALSE);
@@ -1050,7 +1048,6 @@ ns_remote_control_init(void)
 void
 ns_remote_control_stop(void)
 {
-    rc.stopped = TRUE;
     rc_close_all(TRUE);
 }
 

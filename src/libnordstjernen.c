@@ -72,7 +72,6 @@ struct ns_browser {
     gboolean        bfcache_ok;
     double          cur_scroll_x;
     double          cur_scroll_y;
-    double          cur_scale;
     double          js_scroll_x;
     double          js_scroll_y;
     double          cur_viewport_h;
@@ -2800,7 +2799,6 @@ ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
 
     browser->cur_scroll_x = (double)scroll_x;
     browser->cur_scroll_y = (double)scroll_y;
-    browser->cur_scale = scale;
     browser->cur_viewport_h = (double)height / scale;
     browser_ensure_images(browser);
     if (browser->videos && browser->layout) {
@@ -2908,7 +2906,6 @@ browser_note_viewport(ns_browser *browser, int scroll_x, int scroll_y,
 {
     browser->cur_scroll_x = (double)scroll_x;
     browser->cur_scroll_y = (double)scroll_y;
-    browser->cur_scale = scale;
     browser->cur_viewport_h = (double)height / scale;
     ns_box_set_hit_viewport(browser->cur_scroll_x, browser->cur_scroll_y);
     browser_sync_scroll_timelines(browser);

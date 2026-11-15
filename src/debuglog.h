@@ -20,7 +20,6 @@ typedef enum ns_dlog_level {
 } ns_dlog_level;
 
 typedef struct ns_dlog_entry {
-    gint64        monotonic_us;
     ns_dlog_level level;
     char         *category;
     char         *message;
