@@ -148,6 +148,7 @@ struct _PangoFcFontMapPrivate
   GHashTable *font_hash;	/* Maps NsPangoFcFontKey -> NsPangoFcFont */
 
   GHashTable *patterns_hash;	/* Maps FcPattern -> NsPangoFcPatterns */
+  GHashTable *sized_families;	/* First families whose match depends on the size */
 
   /* pattern_hash is used to make sure we only store one copy of
    * each identical pattern. (Speeds up lookup).
@@ -768,6 +769,17 @@ struct _PangoFcPatterns {
   FcPattern *pattern;
   FcPattern *match;
   FcFontSet *fontset;
+
+  /* Which font matches best, and the order of the others, does not
+   * depend on the size unless the best font comes in fixed sizes. So a
+   * pattern with a size takes both from the pattern without it, which
+   * all sizes of one family, weight, slant, width and language share,
+   * and whose match is the font as fontconfig lists it
+   * (match_is_source), still to be prepared for each size.
+   */
+  NsPangoFcPatterns *sizeless;
+  gboolean match_is_source;
+  gboolean matches_alone;
 };
 
 static FcFontSet *
@@ -901,12 +913,76 @@ sort_in_thread (gpointer task_data)
   return NULL;
 }
 
+static const char *
+pattern_first_family (FcPattern *pattern)
+{
+  FcChar8 *family;
+
+  if (FcPatternGetString (pattern, FC_FAMILY, 0, &family) != FcResultMatch)
+    return "";
+
+  return (const char *) family;
+}
+
+static gboolean
+pattern_has_size (FcPattern *pattern)
+{
+  FcValue value;
+
+  return FcPatternGet (pattern, FC_PIXEL_SIZE, 0, &value) == FcResultMatch ||
+         FcPatternGet (pattern, FC_SIZE, 0, &value) == FcResultMatch;
+}
+
+/* The font in @fonts that @match was prepared from, when exactly one
+ * font has its file and index, is variable or not as it is, and comes
+ * in every size.
+ */
+static FcPattern *
+font_set_find_source (FcFontSet *fonts,
+                      FcPattern *match)
+{
+  FcPattern *source = NULL;
+  FcChar8 *file, *font_file;
+  int index, font_index;
+  FcBool variable, font_variable;
+  int i;
+
+  if (FcPatternGetString (match, FC_FILE, 0, &file) != FcResultMatch)
+    return NULL;
+  if (FcPatternGetInteger (match, FC_INDEX, 0, &index) != FcResultMatch)
+    index = 0;
+  if (FcPatternGetBool (match, FC_VARIABLE, 0, &variable) != FcResultMatch)
+    variable = FcFalse;
+
+  for (i = 0; i < fonts->nfont; i++)
+    {
+      if (FcPatternGetInteger (fonts->fonts[i], FC_INDEX, 0, &font_index) != FcResultMatch)
+        font_index = 0;
+      if (FcPatternGetBool (fonts->fonts[i], FC_VARIABLE, 0, &font_variable) != FcResultMatch)
+        font_variable = FcFalse;
+      if (font_index != index || font_variable != variable ||
+          FcPatternGetString (fonts->fonts[i], FC_FILE, 0, &font_file) != FcResultMatch ||
+          strcmp ((const char *) font_file, (const char *) file) != 0)
+        continue;
+      if (source)
+        return NULL;
+      source = fonts->fonts[i];
+    }
+
+  if (!source || pattern_has_size (source))
+    return NULL;
+
+  FcPatternReference (source);
+  return source;
+}
+
 static gpointer
 match_in_thread (gpointer task_data)
 {
   ThreadData *td = task_data;
   FcResult result;
   FcPattern *match;
+  FcPattern *source = NULL;
   gint64 before G_GNUC_UNUSED;
 
   before = NS_PANGO_TRACE_CURRENT_TIME;
@@ -916,10 +992,19 @@ match_in_thread (gpointer task_data)
                           td->pattern,
                           &result);
 
+  if (match && !pattern_has_size (td->pattern))
+    source = font_set_find_source (td->fonts, match);
+  if (source)
+    {
+      FcPatternDestroy (match);
+      match = source;
+    }
+
   ns_pango_trace_mark (before, "FcFontSetMatch", NULL);
 
   g_mutex_lock (&td->patterns->mutex);
   td->patterns->match = match;
+  td->patterns->match_is_source = source != NULL;
   g_cond_signal (&td->patterns->cond);
   g_mutex_unlock (&td->patterns->mutex);
 
@@ -992,7 +1077,22 @@ ns_pango_fc_patterns_new (FcPattern *pat, NsPangoFcFontMap *fontmap)
   g_mutex_init (&pats->mutex);
   g_cond_init (&pats->cond);
 
-  g_async_queue_push (fontmap->priv->queue, thread_data_new (FC_MATCH, pats));
+  if (pattern_has_size (pat) &&
+      !g_hash_table_contains (fontmap->priv->sized_families, pattern_first_family (pat)))
+    {
+      FcPattern *sizeless = FcPatternDuplicate (pat);
+
+      FcPatternDel (sizeless, FC_PIXEL_SIZE);
+      FcPatternDel (sizeless, FC_SIZE);
+      FcPatternDel (sizeless, FC_DPI);
+      pats->sizeless = ns_pango_fc_patterns_new (sizeless, fontmap);
+      FcPatternDestroy (sizeless);
+    }
+  else
+    {
+      pats->matches_alone = TRUE;
+      g_async_queue_push (fontmap->priv->queue, thread_data_new (FC_MATCH, pats));
+    }
 
   g_hash_table_insert (fontmap->priv->patterns_hash, pats->pattern, pats);
 
@@ -1024,6 +1124,9 @@ free_patterns (gpointer data)
 
   if (pats->fontset)
     FcFontSetDestroy (pats->fontset);
+
+  if (pats->sizeless)
+    ns_pango_fc_patterns_unref (pats->sizeless);
 
   g_cond_clear (&pats->cond);
   g_mutex_clear (&pats->mutex);
@@ -1125,11 +1228,39 @@ filter_by_format (FcFontSet **sets, int nsets)
   return result;
 }
 
+static void
+ns_pango_fc_patterns_wait_for_match (NsPangoFcPatterns *pats)
+{
+  g_mutex_lock (&pats->mutex);
+
+  while (!pats->match && !pats->fontset)
+    g_cond_wait (&pats->cond, &pats->mutex);
+
+  g_mutex_unlock (&pats->mutex);
+}
+
 static FcPattern *
 ns_pango_fc_patterns_get_font_pattern (NsPangoFcPatterns *pats, int i, gboolean *prepare)
 {
   FcPattern *match = NULL;
   FcFontSet *fontset = NULL;
+
+  if (pats->sizeless && !pats->matches_alone)
+    {
+      ns_pango_fc_patterns_wait_for_match (pats->sizeless);
+
+      if (pats->sizeless->match_is_source)
+        pats = pats->sizeless;
+      else
+        {
+          GHashTable *sized_families = pats->fontmap->priv->sized_families;
+
+          if (sized_families)
+            g_hash_table_add (sized_families, g_strdup (pattern_first_family (pats->pattern)));
+          pats->matches_alone = TRUE;
+          g_async_queue_push (pats->fontmap->priv->queue, thread_data_new (FC_MATCH, pats));
+        }
+    }
 
   if (i == 0)
     {
@@ -1156,7 +1287,7 @@ ns_pango_fc_patterns_get_font_pattern (NsPangoFcPatterns *pats, int i, gboolean 
 
       if (match)
         {
-          *prepare = FALSE;
+          *prepare = pats->match_is_source;
           return match;
         }
     }
@@ -1572,6 +1703,7 @@ ns_pango_fc_font_map_init (NsPangoFcFontMap *fcfontmap)
   priv->fontset_cache = g_queue_new ();
 
   priv->patterns_hash = g_hash_table_new (NULL, NULL);
+  priv->sized_families = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 
   priv->pattern_hash = g_hash_table_new_full ((GHashFunc) FcPatternHash,
 					      (GEqualFunc) FcPatternEqual,
@@ -1605,6 +1737,9 @@ ns_pango_fc_font_map_fini (NsPangoFcFontMap *fcfontmap)
 
   g_hash_table_destroy (priv->patterns_hash);
   priv->patterns_hash = NULL;
+
+  g_hash_table_destroy (priv->sized_families);
+  priv->sized_families = NULL;
 
   g_hash_table_destroy (priv->font_hash);
   priv->font_hash = NULL;
@@ -2580,6 +2715,7 @@ forget_fontsets (NsPangoFcFontMap *fcfontmap)
 
   g_hash_table_remove_all (priv->fontset_hash);
   g_hash_table_remove_all (priv->patterns_hash);
+  g_hash_table_remove_all (priv->sized_families);
 }
 
 void

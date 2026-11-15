@@ -35,6 +35,16 @@ Changelog:
   - Headless runs (`--dump`, WebDriver, MCP) show PDFs in the viewer
     instead of their raw source. Headless and the browser now prepare
     non-HTML documents (images, PDF, JSON, XML, text) with the same code.
+* Pages reach their first paint sooner: fontconfig is asked which font
+  matches a family, weight, slant, width and language once, and every
+  font size then shares the answer and the fallback order. Before, each
+  size was matched and sorted again while layout waited: 117 matches
+  and 24 sorts on a Wikipedia article, about 250 ms. Over 20 frozen
+  sites the first paint went from 5.5 to 4.1 times Chrome's first
+  contentful paint (Wikipedia article 359 to 206 ms, eBay 1,102 to
+  490 ms). Fonts that come in fixed sizes or carry an optical size,
+  such as the macOS system font, are still matched per size, and the
+  fonts chosen are the same as before.
 * PDF.js is no longer compiled into the browser. The build installs the
   pinned release's files in `share/nordstjernen/pdfjs/`, and the viewer
   reads them the first time a PDF opens, so PDF.js can be updated without
