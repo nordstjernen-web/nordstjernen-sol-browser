@@ -37,7 +37,8 @@ def main():
         sys.exit("usage: pdf-smoke.py BROWSER")
     sys.stdout.reconfigure(errors="replace")
     sys.stderr.reconfigure(errors="replace")
-    with tempfile.TemporaryDirectory() as tmp:
+    sandbox_readable = pathlib.Path(sys.argv[1]).resolve().parent
+    with tempfile.TemporaryDirectory(dir=sandbox_readable) as tmp:
         pdf = pathlib.Path(tmp) / "smoke.pdf"
         pdf.write_bytes(one_page_pdf())
         run = subprocess.run(
