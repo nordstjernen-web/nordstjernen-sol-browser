@@ -9,6 +9,21 @@ Changelog:
   with the property lost the lines past the clamp and got an ellipsis,
   so a card title that sets the clamp on a plain block, a flex item or
   a list item showed one line where Chrome shows all of them.
+* Text fields behave like text fields under the mouse:
+  - A click in an `<input>`, `<textarea>` or contenteditable element puts
+    the caret where you click, not at the end; Shift-click extends the
+    selection.
+  - Dragging selects text inside the field, double-clicking selects a
+    word and triple-clicking selects everything, so typing, Delete and cut
+    act on that selection.
+  - `selectionStart`/`selectionEnd` follow the caret as you click, drag,
+    type and move it with the keys.
+  - The first line of a `<textarea>` no longer starts one space to the
+    right of the lines below it.
+  - A focused password field no longer paints its leading dots as
+    selected.
+  - Clicking a field just above a `<textarea>` no longer hits the
+    textarea instead.
 * The desktop browser follows the system's "reduce motion" setting. When
   animations are switched off for GTK (`gtk-enable-animations`), pages
   see `prefers-reduced-motion: reduce`, in CSS and in `matchMedia()`.
