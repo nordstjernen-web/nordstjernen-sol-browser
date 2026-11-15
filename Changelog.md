@@ -3,6 +3,11 @@ Changelog:
 
 1.0.48-dev:
 ======
+* The audio helper no longer links vorbisfile and opusfile. They only
+  decoded Ogg audio after FFmpeg had already failed to, and FFmpeg, which
+  is required on Linux and Windows, plays Ogg Vorbis and Opus itself. A
+  macOS or BSD build without FFmpeg now treats Ogg audio as it treats
+  WebM: `canPlayType()` says no.
 * Canvas `fillRect()`, `strokeRect()` and `clearRect()` leave the current
   path alone, as the HTML spec requires. They used to paint whatever path
   the page had built in the rectangle's style and then discard it, so

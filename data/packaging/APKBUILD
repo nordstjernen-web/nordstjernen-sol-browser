@@ -32,8 +32,6 @@ makedepends="
 	gstreamer-dev
 	gst-plugins-base-dev
 	enchant2-dev
-	libvorbis-dev
-	opusfile-dev
 	sdl2-dev
 	glslang-dev
 	"

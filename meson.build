@@ -522,30 +522,6 @@ if have_os_mp4
   add_project_arguments('-DNS_HAVE_OS_MP4=1', language: 'c')
 endif
 
-# vorbisfile is the ov_* high-level decode API over libvorbis, used by the audio
-# helper (src/audio/main.c) to decode Ogg/Vorbis natively where FFmpeg is absent.
-libvorbisfile = dependency('vorbisfile', required: false)
-if libvorbisfile.found()
-  add_project_arguments('-DNS_HAVE_VORBISFILE=1', language: 'c')
-endif
-# opusfile is the high-level op_* decode API over libopus + libogg, used by the
-# audio helper to decode Ogg/Opus natively where FFmpeg is absent.
-libopusfile = dependency('opusfile', required: false)
-if libopusfile.found()
-  add_project_arguments('-DNS_HAVE_OPUSFILE=1', language: 'c')
-endif
-# canPlayType/mediaCapabilities may honestly advertise native Ogg audio only
-# where the decoder that plays it is built: the desktop (SDL2) nordstjernen-audio
-# helper. On mobile audio takes a different path, so these are gated off there.
-if not is_mobile and get_option('audio').allowed()
-  sdl2_probe = dependency('sdl2', required: false)
-  if sdl2_probe.found() and libvorbisfile.found()
-    add_project_arguments('-DNS_AUDIO_NATIVE_VORBIS=1', language: 'c')
-  endif
-  if sdl2_probe.found() and libopusfile.found()
-    add_project_arguments('-DNS_AUDIO_NATIVE_OPUS=1', language: 'c')
-  endif
-endif
 libenchant = dependency('enchant-2', required: get_option('enchant'))
 have_enchant = libenchant.found() and not is_mobile
 if have_enchant

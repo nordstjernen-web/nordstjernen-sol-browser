@@ -20,8 +20,7 @@ declares `arch="x86_64 aarch64"`.
 `makedepends` also lists every auto-detected optional library, so the
 package gets the full feature set: libjxl (JPEG XL), GStreamer with
 gst-plugins-base (H.264/AAC through the OS decoder), enchant2
-(spell-checking), libvorbis/opusfile (native Ogg audio), brotli (WOFF2)
-and freetype. GStreamer still needs a decoder at runtime to play H.264 —
+(spell-checking), brotli (WOFF2) and freetype. GStreamer still needs a decoder at runtime to play H.264 —
 `apk add gst-libav` or `gst-plugins-bad` — which the package does not
 pull in.
 

@@ -293,7 +293,6 @@ network.
 | SDL2 | `-Daudio` | audio output and microphone capture; without it the build is silent |
 | FFmpeg libav\* | `-Dlibav` (macOS and the BSDs) | inline WebM/Ogg where it is not required |
 | GStreamer | `-Dgstreamer` (the BSDs) | H.264/AAC where it is not required |
-| vorbisfile, opusfile | auto | Ogg Vorbis/Opus audio without FFmpeg |
 | brotli | auto | `br` content encoding and WOFF2 fonts |
 | zstd | auto | `zstd` content encoding |
 | FreeType | auto | WOFF/WOFF2 unpacking |
