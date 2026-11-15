@@ -860,6 +860,9 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         long dark = 0;
         json_get_long(body, "dark", &dark);
         ns_browser_set_color_scheme((int)dark);
+        long reduce_motion = 0;
+        if (json_get_long(body, "reduce_motion", &reduce_motion) == 0)
+            ns_browser_set_reduced_motion((int)reduce_motion);
         s->frame_valid = 0;
         http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
         return 0;

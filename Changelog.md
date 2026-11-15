@@ -3,6 +3,13 @@ Changelog:
 
 1.0.48-dev:
 ======
+* The desktop browser follows the system's "reduce motion" setting. When
+  animations are switched off for GTK (`gtk-enable-animations`), pages
+  see `prefers-reduced-motion: reduce`, in CSS and in `matchMedia()`.
+  The engine then skips CSS transitions and animations and scrolls
+  instantly instead of smoothly, as it already did on Android.
+  Open tabs pick up a change without a restart. Before, desktop pages
+  always saw `no-preference`.
 * about:start and about:nordstjernen follow the operating-system
   language: their headings, buttons, search hints and status words come
   from the UI catalogues, with translations into the 13 fuller ones

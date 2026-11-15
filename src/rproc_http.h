@@ -232,7 +232,8 @@ char *ns_rproc_http_carry_get(ns_rproc_http *r);
 int   ns_rproc_http_carry_set(ns_rproc_http *r, const char *data);
 char *ns_rproc_http_session_storage_get(ns_rproc_http *r);
 int   ns_rproc_http_session_storage_set(ns_rproc_http *r, const char *data);
-int   ns_rproc_http_set_color_scheme(ns_rproc_http *r, int dark);
+int   ns_rproc_http_set_media_preferences(ns_rproc_http *r, int dark,
+                                          int reduce_motion);
 int   ns_rproc_http_audio_event(ns_rproc_http *r, const char *line);
 char *ns_rproc_http_eval(ns_rproc_http *r, const char *src);
 char *ns_rproc_http_remote_call(ns_rproc_http *r, const char *call);

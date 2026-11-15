@@ -108,7 +108,8 @@ void   ns_proc_view_zoom_reset(NsProcView *view);
 int    ns_proc_view_zoom_percent(NsProcView *view);
 void   ns_proc_view_focus(NsProcView *view);
 void   ns_proc_view_find_open(NsProcView *view);
-void   ns_proc_view_set_color_scheme(NsProcView *view, gboolean dark);
+void   ns_proc_view_set_media_preferences(NsProcView *view, gboolean dark,
+                                          gboolean reduce_motion);
 
 typedef void (*NsProcViewTextFn)(const char *text, gpointer user_data);
 
