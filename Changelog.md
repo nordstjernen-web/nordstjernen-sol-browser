@@ -1,6 +1,9 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.49-dev:
+======
+
 1.0.48:
 ======
 * The PDF viewer:
