@@ -3,6 +3,10 @@ Changelog:
 
 1.0.48-dev:
 ======
+* The page text from `--dump=text`, the embedding API and the Java
+  `Page.text()` leaves out decorative images (`alt=""`), and shows an
+  image whose source is a `data:` URL as `[image]` rather than its whole
+  base64 payload.
 * about:nordstjernen has a "Copy details" button that puts the version,
   operating system, privacy, sandbox, Safe Browsing, library and feature
   rows on the clipboard as plain text, ready to paste into a bug report.
