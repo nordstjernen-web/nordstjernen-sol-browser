@@ -329,9 +329,13 @@ don't add `meson test` targets.
   exception is the PDF viewer: PDF.js (Mozilla, Apache-2.0) is not engine
   code; it runs as ordinary sandboxed script on the page that shows a PDF
   (`src/pdf.c`, `data/js/pdf-viewer.js`). It is fetched at build time
-  through `subprojects/pdfjs-dist.wrap` and embedded, never committed;
-  `-Dpdfjs=disabled` drops it, and PDFs then show a notice with a link to
-  the file. There is no native PDF library in the build.
+  through `subprojects/pdfjs-dist.wrap`, never committed, and installed
+  as data files in `share/nordstjernen/pdfjs/` (`src/pdfjs/meson.build`;
+  a development build reads the copy in `builddir/src/pdfjs/`, and
+  `NS_PDFJS_DIR` points at another one). `src/pdf.c` loads them the first
+  time a PDF opens. `-Dpdfjs=disabled` drops it, and PDFs then show a
+  notice with a link to the file, as they do when the files are missing.
+  There is no native PDF library in the build.
 - Don't add AI-style web-API surface area, even as stubs. (WebGL
   already exists as a deliberate exception — extend
   `src/webgl.c`, don't re-architect it. WebGPU is an experimental

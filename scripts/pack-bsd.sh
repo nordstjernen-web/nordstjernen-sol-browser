@@ -40,6 +40,15 @@ cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/" 2>/dev/null || true
 cp "$ROOT/License.md" "$STAGE/" 2>/dev/null || true
 cp "$ROOT/COPYING" "$STAGE/" 2>/dev/null || true
 
+# Runtime data the engine looks up next to the binary: the UI translation
+# catalogues and the PDF.js files the build fetched (absent when -Dpdfjs=disabled).
+mkdir -p "$STAGE/share/nordstjernen/i18n"
+cp "$ROOT"/data/i18n/*.lang "$STAGE/share/nordstjernen/i18n/"
+if [ -d "$BUILDDIR/src/pdfjs" ]; then
+    mkdir -p "$STAGE/share/nordstjernen/pdfjs"
+    cp "$BUILDDIR"/src/pdfjs/* "$STAGE/share/nordstjernen/pdfjs/"
+fi
+
 case "$OS" in
     freebsd)
         RUNTIME='    pkg install gtk4 libcurl uchardet webp sqlite3 libpsl libepoxy' ;;

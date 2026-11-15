@@ -90,7 +90,8 @@ wpt_hook_h = custom_target(
 
 pdf_viewer_embedded = {}
 if have_pdfjs
-  pdf_viewer_embedded = pdfjs_sub.get_variable('pdfjs_embedded') + {
+  subdir('pdfjs')
+  pdf_viewer_embedded = {
     'pdf_viewer_js': files('../data/js/pdf-viewer.js'),
     'pdf_viewer_css': files('../data/js/pdf-viewer.css'),
   }

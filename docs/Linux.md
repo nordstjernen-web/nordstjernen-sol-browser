@@ -67,8 +67,10 @@ VP9/WebM, which would otherwise not play inline.
     sudo apk add ffmpeg-dev                                     # Alpine
 
 PDFs are shown by PDF.js, which meson fetches through
-`subprojects/pdfjs-dist.wrap` and embeds (`-Dpdfjs=disabled`, or a build
-with `--wrap-mode=nodownload` and no cached copy, leaves it out).
+`subprojects/pdfjs-dist.wrap` and installs as data files in
+`share/nordstjernen/pdfjs/`, which the browser reads when a PDF opens
+(`-Dpdfjs=disabled`, or a build with `--wrap-mode=nodownload` and no cached
+copy, leaves it out).
 
 Optional, auto-detected:
 `libenchant-2-dev` plus a dictionary such as `hunspell-en-us`

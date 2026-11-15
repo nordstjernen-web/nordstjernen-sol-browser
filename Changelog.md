@@ -3,6 +3,14 @@ Changelog:
 
 1.0.48-dev:
 ======
+* PDF.js is no longer compiled into the browser. The build installs the
+  pinned release's files in `share/nordstjernen/pdfjs/`, and the viewer
+  reads them the first time a PDF opens, so PDF.js can be updated without
+  rebuilding the engine, which is 2.1 MB smaller. `NS_PDFJS_DIR` points
+  the browser at another copy. Without the files, a PDF shows a notice
+  with a link to download it. The portable Linux, BSD and Windows bundles
+  (and so the Microsoft Store package) now also carry the UI translation
+  catalogues, which they used to leave out.
 * `-webkit-line-clamp` cuts the text only in a vertical `-webkit-box`
   (`display: -webkit-box` or `-webkit-inline-box` with
   `-webkit-box-orient: vertical`), as in Chrome. Before, every block

@@ -299,7 +299,7 @@ network.
 | libavif | `-Davif` | AVIF images |
 | libjxl | `-Djxl` | JPEG XL images |
 | Enchant | `-Denchant` | spell checking of editable text |
-| pdfjs-dist | `-Dpdfjs` (fetched by a meson wrap) | the PDF viewer |
+| pdfjs-dist | `-Dpdfjs` (fetched by a meson wrap, installed to `share/nordstjernen/pdfjs`) | the PDF viewer |
 | wgpu-native | `-Dwebgpu` (the BSDs, musl, Windows on Arm) | WebGPU where wgpu-native publishes no release; not built for Android |
 | Rust IPC parser | `-Dipc_rust` | memory-safe parser for the renderer IPC framing |
 
