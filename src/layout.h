@@ -73,10 +73,17 @@ typedef enum ns_inline_attr_kind {
     NS_INLINE_ELEMENT,
     NS_INLINE_SPACER,
     NS_INLINE_SPELLCHECK,
+    NS_INLINE_FIELD_TEXT,
     NS_INLINE_EMPTY_ELEMENT,
     NS_INLINE_GENERATED,
     NS_INLINE_LETTER_SPACING,
 } ns_inline_attr_kind;
+
+typedef enum ns_field_text_map {
+    NS_FIELD_TEXT_BYTES,
+    NS_FIELD_TEXT_MASKED,
+    NS_FIELD_TEXT_LINES,
+} ns_field_text_map;
 
 typedef struct ns_inline_attr {
     ns_inline_attr_kind kind;
@@ -97,6 +104,8 @@ typedef struct ns_inline_attr {
     double rise_px;
     gboolean native_chrome;
     guint8 r, g, b, a;
+    ns_field_text_map value_map;
+    gsize value_skip;
     const char *family;
     const ns_node *dom;
     const ns_style *style;
@@ -342,6 +351,8 @@ ns_box *ns_box_hit_scrollbar(ns_box *root, double x, double y,
 gboolean ns_box_clips_out_point(const ns_box *b, double x, double y);
 
 const ns_node *ns_box_hit_form_dom(const ns_box *root, double x, double y);
+gboolean ns_box_field_value_offset_at(const ns_box *root, const ns_node *field,
+                                      double x, double y, gsize *out_byte);
 
 const ns_node *ns_box_hit_inline_dom(const ns_box *root, double x, double y);
 

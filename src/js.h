@@ -215,6 +215,10 @@ gboolean ns_js_activate_summary(ns_js *js, const ns_node *el);
 
 
 void           ns_js_set_focus(ns_js *js, const ns_node *el);
+void           ns_js_set_text_control_selection(ns_js *js,
+                                                const ns_node *el,
+                                                gsize anchor_byte,
+                                                gsize caret_byte);
 void           ns_js_note_user_edit(ns_js *js, const ns_node *el,
                                     const char *value_before);
 void           ns_js_commit_change(ns_js *js, const ns_node *el);

@@ -52231,6 +52231,40 @@ ns_text_selection_commit(JSContext *ctx, JSValueConst this_val)
     g_free(key);
 }
 
+static uint32_t
+ns_utf16_units_before(const char *value, gsize byte)
+{
+    uint32_t units = 0;
+    for (const char *p = value; *p && (gsize)(p - value) < byte;
+         p = g_utf8_next_char(p)) {
+        if (*p == '\r') continue;
+        units += g_utf8_get_char(p) >= 0x10000 ? 2 : 1;
+    }
+    return units;
+}
+
+void
+ns_js_set_text_control_selection(ns_js *js, const ns_node *el,
+                                 gsize anchor_byte, gsize caret_byte)
+{
+    if (!js || !js->ctx || !el || js->halted ||
+        !ns_text_selection_applies(el))
+        return;
+    const char *value = ns_node_editable_value(el);
+    if (!value) return;
+    gsize lo = MIN(anchor_byte, caret_byte);
+    gsize hi = MAX(anchor_byte, caret_byte);
+    const char *direction = lo == hi ? "none"
+                          : anchor_byte > caret_byte ? "backward" : "forward";
+    JSContext *ctx = js->ctx;
+    JSValue element = ns_make_element(ctx, el);
+    ns_text_selection_set_state(ctx, element,
+                                ns_utf16_units_before(value, lo),
+                                ns_utf16_units_before(value, hi), direction);
+    ns_text_selection_commit(ctx, element);
+    JS_FreeValue(ctx, element);
+}
+
 static JSValue
 ns_text_selection_fire_job(JSContext *ctx, int argc, JSValueConst *argv)
 {

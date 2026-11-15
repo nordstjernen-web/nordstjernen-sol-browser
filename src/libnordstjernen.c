@@ -107,6 +107,7 @@ struct ns_browser {
     char           *pending_post_ct;
     gsize           caret_byte;
     gsize           sel_anchor_byte;
+    const ns_node  *field_drag;
     const ns_node  *caret_blink_node;
     gsize           caret_blink_byte;
     gsize           caret_blink_anchor;
@@ -3574,6 +3575,97 @@ browser_field_select_all(ns_browser *b, const ns_node *field)
     b->dirty = FALSE;
 }
 
+static const ns_node *
+browser_editable_at(ns_browser *b, int x, int y)
+{
+    if (!b->layout) return NULL;
+    for (const ns_node *n = browser_hit_node(b, x, y); n; n = n->parent)
+        if (ns_node_is_editable(n) || ns_node_is_contenteditable_host(n))
+            return n;
+    const ns_node *form = ns_box_hit_form_dom(b->layout, (double)x, (double)y);
+    return ns_node_is_editable(form) ? form : NULL;
+}
+
+static void
+browser_sync_field_selection(ns_browser *b)
+{
+    const ns_node *field = b->js ? ns_js_focused_node(b->js) : NULL;
+    if (field && ns_node_editable_value(field))
+        ns_js_set_text_control_selection(b->js, field, b->sel_anchor_byte,
+                                         b->caret_byte);
+}
+
+static int
+browser_word_class(gunichar c)
+{
+    if (c == '\n' || c == '\r') return 0;
+    if (g_unichar_isalnum(c) || c == '_') return 1;
+    if (g_unichar_isspace(c)) return 2;
+    return 3;
+}
+
+static void
+browser_field_select_word(ns_browser *b, const ns_node *field, gsize at)
+{
+    const char *v = ns_node_editable_value(field);
+    gsize len = strlen(v);
+    if (at > len) at = len;
+    if (at == len && at > 0)
+        at = (gsize)(g_utf8_prev_char(v + at) - v);
+    b->sel_anchor_byte = b->caret_byte = at;
+    if (at >= len) return;
+    int cls = browser_word_class(g_utf8_get_char(v + at));
+    gsize lo = at;
+    gsize hi = (gsize)(g_utf8_next_char(v + at) - v);
+    while (lo > 0) {
+        const char *prev = g_utf8_prev_char(v + lo);
+        if (browser_word_class(g_utf8_get_char(prev)) != cls) break;
+        lo = (gsize)(prev - v);
+    }
+    while (hi < len && browser_word_class(g_utf8_get_char(v + hi)) == cls)
+        hi = (gsize)(g_utf8_next_char(v + hi) - v);
+    b->sel_anchor_byte = lo;
+    b->caret_byte = hi;
+}
+
+static gboolean
+browser_field_gesture(ns_browser *b, int kind, int x, int y)
+{
+    const ns_node *focused = b->js ? ns_js_focused_node(b->js) : NULL;
+    if (!focused || !ns_node_editable_value(focused)) return FALSE;
+    const ns_node *field = kind == 1 && b->field_drag == focused
+        ? focused : browser_editable_at(b, x, y);
+    gsize offset = 0;
+    if (field != focused ||
+        !ns_box_field_value_offset_at(b->layout, field, (double)x, (double)y,
+                                      &offset))
+        return FALSE;
+    switch (kind) {
+    case 0:
+        b->field_drag = field;
+        b->sel_anchor_byte = b->caret_byte = offset;
+        break;
+    case 1:
+        b->caret_byte = offset;
+        break;
+    case 5:
+        browser_field_select_word(b, field, offset);
+        break;
+    case 6:
+        b->sel_anchor_byte = 0;
+        b->caret_byte = strlen(ns_node_editable_value(field));
+        break;
+    default:
+        return FALSE;
+    }
+    ns_selection_clear(&b->selection);
+    browser_sync_js_selection(b);
+    browser_sync_field_selection(b);
+    browser_relayout(b);
+    b->dirty = FALSE;
+    return TRUE;
+}
+
 static char *
 browser_field_cut(ns_browser *b, ns_node *field)
 {
@@ -3676,6 +3768,10 @@ ns_browser_select(ns_browser *browser, int kind, int x, int y)
         }
         return NULL;
     }
+    if (kind == 0 || kind == 2) browser->field_drag = NULL;
+    if ((kind == 0 || kind == 1 || kind == 5 || kind == 6) &&
+        browser_field_gesture(browser, kind, x, y))
+        return NULL;
     ns_node *field = browser_focused_field(browser);
     switch (kind) {
     case 0: ns_selection_anchor_at(&browser->selection, browser->layout,
@@ -4233,13 +4329,7 @@ ns_browser_webdriver_call(ns_browser *browser, const char *request)
 static int
 browser_context_field(ns_browser *browser, int x, int y)
 {
-    if (!browser->layout) return 0;
-    const ns_node *form = ns_box_hit_form_dom(browser->layout, (double)x,
-                                              (double)y);
-    const ns_node *field = ns_node_is_editable(form) ? form : NULL;
-    for (const ns_node *n = browser_hit_node(browser, x, y); n && !field;
-         n = n->parent)
-        if (ns_node_is_contenteditable_host(n)) field = n;
+    const ns_node *field = browser_editable_at(browser, x, y);
     if (!field) return 0;
     if (ns_js_focused_node(browser->js) != field) {
         ns_js_set_focus(browser->js, field);
@@ -4721,10 +4811,22 @@ ns_browser_press_full(ns_browser *browser, int x, int y, int mods, int button,
         const ns_node *focus = NULL;
         for (const ns_node *a = node; a; a = a->parent)
             if (ns_node_is_focusable(a)) { focus = a; break; }
+        const ns_node *focused_before = ns_js_focused_node(browser->js);
         ns_js_focus_from_pointer(browser->js, node);
-        const char *val = focus ? ns_node_editable_value(focus) : NULL;
-        browser->caret_byte = val ? strlen(val) : 0;
-        browser->sel_anchor_byte = browser->caret_byte;
+        const ns_node *field = browser_editable_at(browser, x, y);
+        gsize offset = 0;
+        if (field && field == ns_js_focused_node(browser->js) &&
+            ns_box_field_value_offset_at(browser->layout, field, (double)x,
+                                         (double)y, &offset)) {
+            browser->caret_byte = offset;
+            if (!(mods & 1) || field != focused_before)
+                browser->sel_anchor_byte = offset;
+            browser_sync_field_selection(browser);
+        } else {
+            const char *val = focus ? ns_node_editable_value(focus) : NULL;
+            browser->caret_byte = val ? strlen(val) : 0;
+            browser->sel_anchor_byte = browser->caret_byte;
+        }
         browser->datalist_suppressed =
             !(focus && ns_node_is_element_named(focus, "input") &&
               ns_element_get_attr(focus, "list") != NULL);
@@ -5367,6 +5469,7 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
     if (!target && browser->doc)
         target = ns_node_find_first_element(browser->doc, "body");
     if (!target) return NULL;
+    gboolean field_edited = FALSE;
 
     if (kind == 2) {
         const ns_node *f = ns_js_focused_node(browser->js);
@@ -5388,10 +5491,13 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                                   "insertText");
             browser->datalist_suppressed = FALSE;
             browser->dirty = TRUE;
+            field_edited = TRUE;
         }
     } else if (kind == 4) {
-        if (key && *key && g_utf8_validate(key, -1, NULL))
+        if (key && *key && g_utf8_validate(key, -1, NULL)) {
             browser_paste(browser, target, key);
+            field_edited = TRUE;
+        }
     } else if (kind == 3) {
         int char_code = browser_key_char_code(key);
         if (!browser->keydown_prevented && char_code > 0 &&
@@ -5461,6 +5567,7 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                 browser->caret_byte = val ? strlen(val) : 0;
                 browser->sel_anchor_byte = browser->caret_byte;
                 browser->dirty = TRUE;
+                field_edited = TRUE;
             }
         } else if (!prevented && kind == 0) {
             const ns_node *f = ns_js_focused_node(browser->js);
@@ -5491,6 +5598,7 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
             } else if (f && ns_node_editable_value(f) &&
                 browser_edit_key(browser, (ns_node *)f, key, mods)) {
                 browser->dirty = TRUE;
+                field_edited = TRUE;
                 if (out_prevented) *out_prevented = 1;
             } else if (key && strcmp(key, "Escape") == 0 &&
                        ns_js_process_close_request(browser->js)) {
@@ -5508,6 +5616,8 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
     if (ns_js_run_animation_frame(browser->js)) browser->dirty = TRUE;
     if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     if (browser->dirty) {
+        if (field_edited)
+            browser_sync_field_selection(browser);
         browser_relayout(browser);
         browser->dirty = FALSE;
     }

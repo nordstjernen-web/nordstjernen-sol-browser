@@ -2442,6 +2442,15 @@ text_input_align_skip_cps(const ns_style *s, const ns_node *n,
 }
 
 static glong
+text_input_masked_shown(const char *value, gsize byte, glong skip_cps,
+                        glong shown_cps)
+{
+    glong before = value ? g_utf8_pointer_to_offset(value, value + byte) : 0;
+    glong shown = before > skip_cps ? before - skip_cps : 0;
+    return shown > shown_cps ? shown_cps : shown;
+}
+
+static glong
 text_input_focused_skip_cps(const char *value, gsize caret_byte,
                             glong cps, glong size)
 {
@@ -2532,6 +2541,18 @@ emit_attr(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize end)
 {
     if (end <= start) return;
     ns_inline_attr a = { .kind = k, .start = start, .len = end - start };
+    g_array_append_val(attrs, a);
+}
+
+static void
+emit_field_text(GArray *attrs, const ns_node *field, gsize start, gsize end,
+                ns_field_text_map map, gsize skip)
+{
+    ns_inline_attr a = {
+        .kind = NS_INLINE_FIELD_TEXT, .start = start,
+        .len = end > start ? end - start : 0, .dom = field,
+        .value_map = map, .value_skip = skip,
+    };
     g_array_append_val(attrs, a);
 }
 
@@ -3916,6 +3937,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                 };
                 g_array_append_val(ctx->links, r);
             }
+            if (n->parent->first_child == n && !n->next_sibling)
+                emit_field_text(ctx->attrs, n->parent, start, ctx->out->len,
+                                NS_FIELD_TEXT_LINES, 0);
             if (focused) {
                 g_string_append(ctx->out, "\xc2\xa0");
                 if (anchor_pos != caret_pos) {
@@ -4068,6 +4092,8 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             else if (!real_value) anchor_byte = 0;
             int size = text_input_columns(n);
             glong displayed_chars = 0;
+            ns_field_text_map text_map = NS_FIELD_TEXT_BYTES;
+            gsize text_skip = 0;
             if (v && *v && is_password && !is_placeholder) {
                 glong cps = g_utf8_strlen(v, -1);
                 glong skip_cps = focused
@@ -4079,15 +4105,14 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                 for (glong i = 0; i < shown_cps; i++)
                     g_string_append(ctx->out, "\xe2\x80\xa2");
                 displayed_chars = shown_cps;
+                text_map = NS_FIELD_TEXT_MASKED;
+                text_skip = (gsize)skip_cps;
                 disp_end = ctx->out->len;
                 if (focused) {
-                    glong cp_before = real_value
-                        ? g_utf8_pointer_to_offset(real_value, real_value + caret_byte)
-                        : 0;
-                    glong cp_in_shown = cp_before > skip_cps
-                                        ? cp_before - skip_cps : 0;
-                    if (cp_in_shown > shown_cps) cp_in_shown = shown_cps;
-                    caret_pos = val_start + (gsize)cp_in_shown * 3;
+                    caret_pos = val_start + 3 * (gsize)text_input_masked_shown(
+                        real_value, caret_byte, skip_cps, shown_cps);
+                    anchor_pos = val_start + 3 * (gsize)text_input_masked_shown(
+                        real_value, anchor_byte, skip_cps, shown_cps);
                 }
             } else if (v && *v) {
                 const char *display_v = v;
@@ -4109,6 +4134,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                 }
                 g_string_append_len(ctx->out, display_v, (gssize)display_bytes);
                 displayed_chars = g_utf8_strlen(display_v, (gssize)display_bytes);
+                text_skip = skip_bytes;
                 disp_end = ctx->out->len;
                 if (focused && real_value && *real_value) {
                     gsize caret_in_shown = caret_byte > skip_bytes
@@ -4145,6 +4171,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                 disp_end += shift;
                 val_start += shift;
             }
+            emit_field_text(ctx->attrs, n, val_start,
+                            is_placeholder ? val_start : disp_end, text_map,
+                            text_skip);
             for (glong i = 0; i < right_pad; i++)
                 g_string_append(ctx->out, "\xc2\xa0");
             g_string_append(ctx->out, "\xc2\xa0");
@@ -4399,7 +4428,8 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     if (strcmp(n->name, "textarea") == 0) {
         gsize start = ctx->out->len;
         gboolean focused = (n == g_focused_input_for_layout);
-        g_string_append(ctx->out, "\xc2\xa0");
+        if (n != g_form_control_inline)
+            g_string_append(ctx->out, "\xc2\xa0");
         gsize val_start = ctx->out->len;
         char *raw = ns_textarea_value_dup(n);
         gsize value_byte_len = strlen(raw);
@@ -4453,6 +4483,8 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                 else         { caret_pos = 0; }
             }
         }
+        emit_field_text(ctx->attrs, n, val_start, any ? disp_end : val_start,
+                        NS_FIELD_TEXT_LINES, 0);
         g_string_append(ctx->out, "\xc2\xa0");
         ns_inline_attr_kind ta_kind = focused
                                        ? NS_INLINE_INPUT_FIELD_FOCUSED
@@ -8698,15 +8730,10 @@ inline_attr_is_button_hit(ns_inline_attr_kind k)
            k == NS_INLINE_RADIO_CHECKED;
 }
 
-static const ns_node *
-inline_box_form_hit(const ns_box *box, double local_x, double local_y,
-                    const ns_style *parent_style)
+static NsPangoLayout *
+inline_box_hit_layout(const ns_box *box, const ns_style *parent_style,
+                      double *local_x, double *local_y)
 {
-    if (!box) return NULL;
-    if ((!box->attrs || box->attrs->len == 0) &&
-        (!box->inline_atomics || box->inline_atomics->len == 0))
-        return NULL;
-    if (!box->text || !*box->text) return NULL;
     NsPangoLayout *layout = make_pango_layout(parent_style);
     ns_pango_layout_set_width(layout, (int)(box->content_width * NS_PANGO_SCALE));
     ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
@@ -8729,7 +8756,21 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
     ns_pango_attr_list_unref(i18n);
     ns_paint_apply_text_align(layout, parent_style);
     ns_paint_start_align_overflow(layout);
-    ns_inline_unshift_point(box, layout, &local_x, &local_y);
+    ns_inline_unshift_point(box, layout, local_x, local_y);
+    return layout;
+}
+
+static const ns_node *
+inline_box_form_hit(const ns_box *box, double local_x, double local_y,
+                    const ns_style *parent_style)
+{
+    if (!box) return NULL;
+    if ((!box->attrs || box->attrs->len == 0) &&
+        (!box->inline_atomics || box->inline_atomics->len == 0))
+        return NULL;
+    if (!box->text || !*box->text) return NULL;
+    NsPangoLayout *layout = inline_box_hit_layout(box, parent_style,
+                                                  &local_x, &local_y);
 
     int index = 0, trailing = 0;
     gboolean inside = ns_pango_layout_xy_to_index(
@@ -8788,7 +8829,9 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
                 x0 = (double)r0.x / NS_PANGO_SCALE;
                 x1 = x0 + css_w;
             }
-            if (r->box_h > 0) {
+            if (r->box_h > 0 && ns_node_is_element_named(r->dom, "textarea")) {
+                y1 = y0 + r->box_h;
+            } else if (r->box_h > 0) {
                 double cy = (y0 + y1) / 2.0;
                 y0 = cy - r->box_h / 2.0;
                 y1 = cy + r->box_h / 2.0;
@@ -8821,6 +8864,7 @@ inline_attr_can_fragment(ns_inline_attr_kind k)
     case NS_INLINE_RANGE:
     case NS_INLINE_CARET:
     case NS_INLINE_SELECTION:
+    case NS_INLINE_FIELD_TEXT:
         return FALSE;
     default:
         return TRUE;
@@ -21389,6 +21433,104 @@ const ns_node *
 ns_box_hit_form_dom(const ns_box *root, double x, double y)
 {
     return ns_form_hit_walk(root, x, y, NULL);
+}
+
+static const ns_inline_attr *
+box_field_text_attr(const ns_box *box, const ns_node *field)
+{
+    if (!box->attrs) return NULL;
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *a =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (a->kind == NS_INLINE_FIELD_TEXT && a->dom == field) return a;
+    }
+    return NULL;
+}
+
+static gsize
+field_text_value_byte(const ns_inline_attr *a, gsize index, const char *value)
+{
+    gsize shown = index > a->start ? index - a->start : 0;
+    if (shown > a->len) shown = a->len;
+    gsize value_len = strlen(value);
+    switch (a->value_map) {
+    case NS_FIELD_TEXT_MASKED: {
+        glong cps = (glong)(shown / 3) + (glong)a->value_skip;
+        glong total = g_utf8_strlen(value, -1);
+        if (cps > total) cps = total;
+        return (gsize)(g_utf8_offset_to_pointer(value, cps) - value);
+    }
+    case NS_FIELD_TEXT_LINES: {
+        gsize laid_out = 0;
+        for (gsize i = 0; i < value_len; i++) {
+            if (laid_out >= shown) return i;
+            laid_out += value[i] == '\n' ? 3 : value[i] == '\r' ? 0 : 1;
+        }
+        return value_len;
+    }
+    case NS_FIELD_TEXT_BYTES:
+    default: {
+        gsize byte = a->value_skip + shown;
+        if (byte > value_len) byte = value_len;
+        while (byte > 0 && (value[byte] & 0xC0) == 0x80) byte--;
+        return byte;
+    }
+    }
+}
+
+static gboolean
+field_text_walk(const ns_box *box, double x, double y,
+                const ns_style *inherited, const ns_node *field,
+                gsize *out_byte)
+{
+    if (!box) return FALSE;
+    hit_enter_box(box, &x, &y);
+    if (!box_hit_untransform_point(box, &x, &y)) return FALSE;
+    const ns_style *child_inherited = box->style ? box->style : inherited;
+    const ns_inline_attr *a = box->kind == NS_BOX_INLINE && box->text &&
+                              *box->text
+                              ? box_field_text_attr(box, field) : NULL;
+    if (a) {
+        double local_x = x - box->x, local_y = y - box->y;
+        NsPangoLayout *layout = inline_box_hit_layout(box, child_inherited,
+                                                      &local_x, &local_y);
+        int index = 0, trailing = 0;
+        ns_pango_layout_xy_to_index(layout, (int)(local_x * NS_PANGO_SCALE),
+                                    (int)(local_y * NS_PANGO_SCALE),
+                                    &index, &trailing);
+        g_object_unref(layout);
+        gsize idx = index > 0 ? (gsize)index : 0;
+        for (; trailing > 0 && box->text[idx]; trailing--)
+            idx = (gsize)(g_utf8_next_char(box->text + idx) - box->text);
+        const char *value = ns_node_editable_value(field);
+        *out_byte = value ? field_text_value_byte(a, idx, value) : 0;
+        return TRUE;
+    }
+    double cx = x + box->scroll_x;
+    double cy = y + box->scroll_y;
+    for (const ns_box *c = box->first_child; c; c = c->next_sibling)
+        if (field_text_walk(c, cx, cy, child_inherited, field, out_byte))
+            return TRUE;
+    if (box->inline_atomics)
+        for (guint i = 0; i < box->inline_atomics->len; i++) {
+            const ns_inline_atomic *atomic =
+                &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+            if (!atomic->box) continue;
+            double ax, ay;
+            inline_atomic_hit_point(box, atomic, cx, cy, &ax, &ay);
+            if (field_text_walk(atomic->box, ax, ay, child_inherited, field,
+                                out_byte))
+                return TRUE;
+        }
+    return FALSE;
+}
+
+gboolean
+ns_box_field_value_offset_at(const ns_box *root, const ns_node *field,
+                             double x, double y, gsize *out_byte)
+{
+    if (!root || !field || !out_byte) return FALSE;
+    return field_text_walk(root, x, y, NULL, field, out_byte);
 }
 
 ns_box *
