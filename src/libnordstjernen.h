@@ -79,7 +79,6 @@ int ns_browser_snap_document(ns_browser *browser, double viewport_w,
                              double viewport_h, int prev_x, int prev_y,
                              int *scroll_x, int *scroll_y);
 
-int ns_browser_set_viewport_width(ns_browser *browser, int css_width);
 int ns_browser_set_viewport(ns_browser *browser, int css_width,
                             double css_height);
 

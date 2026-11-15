@@ -41,7 +41,6 @@ typedef struct {
     InprocPrint *print;
 } InprocItem;
 
-static int      g_enabled;
 static gboolean g_engine_inited;
 static gboolean g_handling;
 static GQueue   g_pending = G_QUEUE_INIT;
@@ -228,13 +227,6 @@ inproc_print(void *conn, ns_print_setup *out_setup)
 void
 ns_rproc_single_process_enable(void)
 {
-    g_enabled = 1;
     ns_rproc_http_set_inproc(inproc_attach);
     ns_rproc_http_set_inproc_print(inproc_print);
-}
-
-int
-ns_rproc_single_process_enabled(void)
-{
-    return g_enabled;
 }

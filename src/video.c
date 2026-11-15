@@ -20,6 +20,9 @@
 #include "net.h"
 #include "video_decode.h"
 
+static gboolean ns_video_is_layered(const ns_video_cache *cache,
+                                    const ns_video *v);
+
 #define NS_VIDEO_AHEAD_MIN_S      0.12
 #define NS_VIDEO_AHEAD_MAX_S      1.50
 #define NS_VIDEO_STALL_DECAY_S    8.0
@@ -557,7 +560,7 @@ ns_video_emit_js(ns_video_cache *cache, ns_video *v, const char *kind, double va
         cache->js_cb(v->dom_node, kind, value, cache->js_user);
 }
 
-void
+static void
 ns_video_play(ns_video *v, gint64 now_us)
 {
     if (!v || !v->player) return;
@@ -567,7 +570,7 @@ ns_video_play(ns_video *v, gint64 now_us)
     v->playing = TRUE;
 }
 
-void
+static void
 ns_video_pause(ns_video *v, gint64 now_us)
 {
     if (!v || !v->player || !v->playing) return;
@@ -575,7 +578,7 @@ ns_video_pause(ns_video *v, gint64 now_us)
     v->playing = FALSE;
 }
 
-gboolean
+static gboolean
 ns_video_toggle(ns_video *v, gint64 now_us)
 {
     if (!v || !v->player) return FALSE;
@@ -2485,7 +2488,7 @@ ns_video_cache_layer_gen(const ns_video_cache *cache)
     return cache ? cache->layer_gen : 0;
 }
 
-gboolean
+static gboolean
 ns_video_is_layered(const ns_video_cache *cache, const ns_video *v)
 {
     return cache && v && cache->layer_gen != 0 &&

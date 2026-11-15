@@ -8,7 +8,6 @@ extern "C" {
 #endif
 
 void ns_rproc_single_process_enable(void);
-int  ns_rproc_single_process_enabled(void);
 
 #ifdef __cplusplus
 }

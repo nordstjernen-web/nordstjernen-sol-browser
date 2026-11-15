@@ -41,7 +41,6 @@ typedef void (*NsProcNotify)(NsProcView *view, NsProcEvent evt,
 char *ns_proc_renderer_path(void);
 char *ns_proc_url_origin(const char *url);
 char *ns_proc_url_host(const char *url);
-gboolean ns_proc_url_same_origin(const char *a, const char *b);
 void  ns_proc_single_tab_enable(void);
 gboolean ns_proc_single_tab(void);
 

@@ -24,6 +24,12 @@ static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
 #include "svg.h"
 #include "video.h"
 
+static NsPangoAttribute *ns_paint_font_features_attr_from_values(
+    int kerning, const char *ligatures, const char *numeric,
+    const char *settings);
+static NsPangoAttribute *ns_paint_font_variations_attr_from_values(
+    const char *settings);
+
 typedef struct rgba {
     double r, g, b, a;
 } rgba;
@@ -3707,7 +3713,7 @@ paint_font_variations_from_css(const char *settings)
     return g_string_free(out, FALSE);
 }
 
-NsPangoAttribute *
+static NsPangoAttribute *
 ns_paint_font_features_attr_from_values(int kerning, const char *ligatures,
                                         const char *numeric,
                                         const char *settings)
@@ -3730,7 +3736,7 @@ ns_paint_font_features_attr_from_values(int kerning, const char *ligatures,
     return a;
 }
 
-NsPangoAttribute *
+static NsPangoAttribute *
 ns_paint_font_variations_attr_from_values(const char *settings)
 {
     char *variations = paint_font_variations_from_css(settings);

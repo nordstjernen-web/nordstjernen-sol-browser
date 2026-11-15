@@ -219,10 +219,6 @@ typedef void (*ns_net_early_hints_fn)(const char *document_url,
                                       GPtrArray  *hints);
 void         ns_net_set_early_hints_handler(ns_net_early_hints_fn handler);
 
-ns_response *ns_net_fetch_blocking(const char   *url,
-                                   GCancellable *cancellable,
-                                   GError      **error);
-
 ns_response *ns_net_request_blocking(const char        *url,
                                      const char        *top_url,
                                      const char        *method,
@@ -233,7 +229,6 @@ ns_response *ns_net_request_blocking(const char        *url,
                                      GCancellable      *cancellable,
                                      GError           **error);
 
-char    *ns_net_hsts_upgrade(const char *url);
 gboolean ns_net_hsts_should_upgrade(const char *host);
 char    *ns_net_https_first_upgrade(const char *url);
 gboolean ns_net_http_fallback_needs_consent(const char *url, const char *https_error);
@@ -289,10 +284,8 @@ char *ns_net_cookies_json_for_webdriver(const char *url);
 gboolean ns_net_cookie_set_for_webdriver(const char *url, const char *set_cookie);
 void  ns_net_cookie_store_from_js(const char *url, const char *top_url,
                                   const char *cookie);
-void  ns_net_cookies_clear(void);
 void  ns_net_curl_apply_cookies(void *curl_handle, const char *url,
                                 const char *origin, const char *top_url);
-void  ns_net_site_storage_clear(void);
 
 gboolean ns_net_history_clear_pending(void);
 
@@ -329,17 +322,11 @@ void  ns_net_policy_set(gboolean offline, gboolean block_file,
                         const char *deny_hosts);
 gboolean ns_net_policy_allows(const char *url);
 const char *ns_net_policy_message(void);
-const char *ns_net_proxy_override(void);
-const char *ns_net_http_proxy(void);
-const char *ns_net_https_proxy(void);
-const char *ns_net_no_proxy(void);
-const char *ns_net_ca_bundle_path(void);
 
 
 char *ns_multipart_boundary(void);
 void  ns_multipart_quote_field(GString *out, const char *s);
 
-void  ns_form_urlencoded_append(GString *out, const char *s);
 void  ns_form_set_submission_charset(const char *charset);
 void  ns_form_urlencoded_append_pair(GString *out, gboolean *first,
                                      const char *name, const char *value);

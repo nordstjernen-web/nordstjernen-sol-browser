@@ -343,13 +343,6 @@ stage_feed(ns_content_decoder *dec, ns_decode_stage *st, const guint8 *data,
 }
 
 ns_content_decoder *
-ns_content_decoder_new(const char *content_encoding)
-{
-    return ns_content_decoder_new_with_dictionary(content_encoding, NULL, 0,
-                                                  NULL);
-}
-
-ns_content_decoder *
 ns_content_decoder_new_with_dictionary(const char *content_encoding,
                                        const guint8 *dictionary,
                                        gsize dictionary_len,

@@ -41,7 +41,7 @@ ns_dt_civil_from_days(long z, int *y, int *m, int *d)
     *d = (int)dd;
 }
 
-int
+static int
 ns_dt_days_in_month(int y, int m)
 {
     static const int dim[] = { 31,28,31,30,31,30,31,31,30,31,30,31 };

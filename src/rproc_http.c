@@ -1088,7 +1088,7 @@ resolve_permission(ns_rproc_http *r, const char *path, const char *origin,
     return request_ok(r, path, json);
 }
 
-int
+static int
 ns_rproc_http_hello(ns_rproc_http *r, ns_rproc_http_engine *out)
 {
     if (!r || !out) return -1;

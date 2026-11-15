@@ -19,7 +19,6 @@ void ns_security_deny_capture_devices(void);
 gboolean ns_security_capture_devices_allowed(void);
 gboolean ns_security_refuse_root(void);
 gboolean ns_security_require_landlock(void);
-int ns_security_landlock_abi(void);
 
 typedef struct {
     int      landlock_abi;

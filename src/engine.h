@@ -37,9 +37,6 @@ ns_response *ns_engine_navigate_post_blocking(
     const void *body, gsize body_len,
     const char *content_type, gboolean user_activated, GError **error);
 
-void ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
-                                   GPtrArray *out, GPtrArray *out_docs,
-                                   GHashTable *css_cache);
 
 char *ns_engine_linked_css_text(const char *url);
 gboolean ns_engine_linked_css_known(const char *url);

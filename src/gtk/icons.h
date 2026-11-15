@@ -56,7 +56,6 @@ ns_icon_install_window_icon(const char *name)
 
 #else
 
-GdkPaintable *ns_icon_lookup(const char *name);
 
 GtkWidget *ns_icon_image_new(const char *name);
 

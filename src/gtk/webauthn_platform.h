@@ -41,7 +41,6 @@ void     ns_webauthn_platform_cancel(NsWebAuthnCall *call);
 void     ns_webauthn_call_fail(NsWebAuthnCall *call, const char *error,
                                const char *message);
 GBytes  *ns_webauthn_b64url_decode(const char *text);
-char    *ns_webauthn_b64url_encode(const guint8 *data, gsize len);
 
 G_END_DECLS
 

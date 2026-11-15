@@ -160,7 +160,7 @@ ns_session_close(void)
     g_clear_pointer(&g_owner, g_free);
 }
 
-void
+static void
 ns_session_tab_free(ns_session_tab *tab)
 {
     if (!tab) return;

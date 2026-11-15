@@ -105,7 +105,7 @@ sbg_api_key(void)
     return NS_SAFE_BROWSING_API_KEY;
 }
 
-gboolean
+static gboolean
 ns_sbg_have_key(void)
 {
     const char *key = sbg_api_key();

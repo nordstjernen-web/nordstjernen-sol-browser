@@ -286,16 +286,23 @@ network.
 | libseccomp | — (Linux only) | renderer syscall sandbox |
 | GStreamer | ≥ 1.20 (Linux; optional on the BSDs) | H.264/AAC, and VP9/AV1/HEVC in hardware through VA-API |
 
-**Optional**, auto-detected or selected at build time: SDL2 (audio output and
-microphone capture, `-Daudio`; without it the build is silent), FFmpeg libav\*
-on macOS and the BSDs, GStreamer on the BSDs (`-Dgstreamer`), the
-memory-safe Rust IPC parser (`-Dipc_rust`), vorbisfile/opusfile (Ogg audio without
-FFmpeg), brotli (`br` content encoding and WOFF2 fonts), zstd (`zstd` content
-encoding), pdfjs-dist (the PDF viewer, fetched by a meson wrap; `-Dpdfjs`),
-libavif (`-Davif`), libjxl (`-Djxl`),
-Enchant (spell checking), FreeType (WOFF/WOFF2 unpacking), wgpu-native where
-it publishes no release (the BSDs, musl, Windows on Arm; WebGPU is not built
-for Android).
+**Optional libraries**, auto-detected or selected at build time:
+
+| Library | Build switch | Role |
+|---------|--------------|------|
+| SDL2 | `-Daudio` | audio output and microphone capture; without it the build is silent |
+| FFmpeg libav\* | `-Dlibav` (macOS and the BSDs) | inline WebM/Ogg where it is not required |
+| GStreamer | `-Dgstreamer` (the BSDs) | H.264/AAC where it is not required |
+| vorbisfile, opusfile | auto | Ogg Vorbis/Opus audio without FFmpeg |
+| brotli | auto | `br` content encoding and WOFF2 fonts |
+| zstd | auto | `zstd` content encoding |
+| FreeType | auto | WOFF/WOFF2 unpacking |
+| libavif | `-Davif` | AVIF images |
+| libjxl | `-Djxl` | JPEG XL images |
+| Enchant | `-Denchant` | spell checking of editable text |
+| pdfjs-dist | `-Dpdfjs` (fetched by a meson wrap) | the PDF viewer |
+| wgpu-native | `-Dwebgpu` (the BSDs, musl, Windows on Arm) | WebGPU where wgpu-native publishes no release; not built for Android |
+| Rust IPC parser | `-Dipc_rust` | memory-safe parser for the renderer IPC framing |
 
 ## License
 

@@ -551,7 +551,7 @@ ns_run_proc_gui(int argc, char **argv, const char *url,
         g_free(abs_path);
         if (file_url) start = file_url;
     }
-    int status = ns_procapp_run(start, url && *url, instance_id, recover,
+    int status = ns_procapp_run(start, instance_id, recover,
                                 private_mode);
     g_free(file_url);
     g_free(g_self_exe);

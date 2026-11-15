@@ -55,7 +55,7 @@ ns_webauthn_b64url_decode(const char *text)
     return g_bytes_new_take(data, len);
 }
 
-char *
+static char *
 ns_webauthn_b64url_encode(const guint8 *data, gsize len)
 {
     if (!len) return g_strdup("");

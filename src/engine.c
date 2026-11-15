@@ -1727,7 +1727,7 @@ engine_collect_stylesheets(ns_node *doc, const char *page_url, ns_js *js,
     ns_css_style_element_cache_end();
 }
 
-void
+static void
 ns_engine_collect_stylesheets(ns_node *doc, const char *page_url,
                               GPtrArray *out, GPtrArray *out_docs,
                               GHashTable *css_cache)

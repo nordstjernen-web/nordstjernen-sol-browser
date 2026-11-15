@@ -19,6 +19,8 @@
 #include "net.h"
 #include "paint.h"
 
+static double ns_text_indent_px(const ns_style *s, double basis);
+
 #define length_or ns_css_length_or
 
 static void hit_enter_box(const ns_box *b, double *x, double *y);
@@ -82,7 +84,7 @@ ns_inline_text_indent_px(const ns_box *run, const ns_style *s, double basis)
     return run && run->inline_split_tail ? 0 : ns_text_indent_px(s, basis);
 }
 
-double
+static double
 ns_text_indent_px(const ns_style *s, double basis)
 {
     const ns_css_value *v = s ? s->values[NS_CSS_TEXT_INDENT] : NULL;
@@ -2752,7 +2754,7 @@ ns_control_css_extra_w(const ns_node *dom, const ns_style *s)
     return p.left + p.right + b.left + b.right;
 }
 
-double
+static double
 ns_control_css_extra_h(const ns_node *dom, const ns_style *s)
 {
     if (!s || control_is_border_box(dom, s)) return 0;
@@ -21774,7 +21776,7 @@ sticky_inset(const ns_css_value *v, double basis, gboolean *set, double *out)
     *set = isfinite(*out);
 }
 
-void
+static void
 ns_box_sticky_offset_in(const ns_box *b, double sp_x0, double sp_y0,
                         double sp_x1, double sp_y1,
                         double *out_dx, double *out_dy)
@@ -22500,7 +22502,7 @@ image_map_area_in(const ns_node *n, double x, double y, double width,
     return NULL;
 }
 
-const ns_box *
+static const ns_box *
 ns_box_hit_test_local(const ns_box *root, double x, double y,
                       double *local_x, double *local_y)
 {

@@ -415,7 +415,7 @@ add_gpu_devices(int rfd, guint64 fs_read)
     g_dir_close(dev);
 }
 
-int
+static int
 ns_security_landlock_abi(void)
 {
     int abi = landlock_create_ruleset_(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION);
@@ -1379,12 +1379,6 @@ ns_security_seccomp_init(void)
 #endif
 
 #ifndef __linux__
-int
-ns_security_landlock_abi(void)
-{
-    return -1;
-}
-
 gboolean
 ns_security_require_landlock(void)
 {

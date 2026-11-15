@@ -148,7 +148,6 @@ ns_debug_log_emit_v(ns_dlog_level level, const char *category,
 {
     if (!g_dlog_inited) ns_debug_log_init();
     ns_dlog_entry *e = g_new0(ns_dlog_entry, 1);
-    e->monotonic_us = g_get_monotonic_time();
     e->level = level;
     e->category = g_strdup(category ? category : "");
     e->message = fmt ? g_strdup_vprintf(fmt, ap) : g_strdup("");

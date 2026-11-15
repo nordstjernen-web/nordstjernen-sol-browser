@@ -4110,7 +4110,6 @@ on_bookmarks_clicked(GtkButton *button, gpointer user_data)
 
 typedef struct {
     char    *url;
-    gboolean explicit_url;
     char    *instance_id;
     gboolean recover;
     gboolean private_mode;
@@ -4393,8 +4392,8 @@ procapp_clear_http_caches(gboolean at_exit)
 }
 
 int
-ns_procapp_run(const char *startup_url, gboolean explicit_url,
-               const char *instance_id, gboolean recover,
+ns_procapp_run(const char *startup_url, const char *instance_id,
+               gboolean recover,
                gboolean private_mode)
 {
     procapp_clear_http_caches(FALSE);
@@ -4403,7 +4402,6 @@ ns_procapp_run(const char *startup_url, gboolean explicit_url,
     ns_perm_init(!private_mode);
     ProcAppCtx ctx = {
         .url = g_strdup(startup_url),
-        .explicit_url = explicit_url,
         .instance_id = g_strdup(instance_id),
         .recover = recover,
         .private_mode = private_mode,

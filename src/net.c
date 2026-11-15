@@ -1167,7 +1167,7 @@ ns_net_hsts_should_upgrade(const char *host)
     return hit;
 }
 
-char *
+static char *
 ns_net_hsts_upgrade(const char *url)
 {
     if (!url) return NULL;
@@ -1288,13 +1288,13 @@ ns_net_cookie_dir(void)
     return g_cookie_dir;
 }
 
-void
+static void
 ns_net_cookies_clear(void)
 {
     ns_cookie_store_clear();
 }
 
-void
+static void
 ns_net_site_storage_clear(void)
 {
     char *base = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
@@ -2278,39 +2278,6 @@ ns_net_address_guard_message(const ns_net_address_guard *guard)
     if (guard->by_policy) return ns_net_policy_message();
     return "blocked: a page from a more public network may not reach "
            "a private or local network address";
-}
-
-const char *
-ns_net_proxy_override(void)
-{
-    return g_proxy_override;
-}
-
-const char *
-ns_net_http_proxy(void)
-{
-    const ns_config *cfg = ns_config_get();
-    return cfg ? cfg->http_proxy : NULL;
-}
-
-const char *
-ns_net_https_proxy(void)
-{
-    const ns_config *cfg = ns_config_get();
-    return cfg ? cfg->https_proxy : NULL;
-}
-
-const char *
-ns_net_no_proxy(void)
-{
-    const ns_config *cfg = ns_config_get();
-    return cfg ? cfg->no_proxy : NULL;
-}
-
-const char *
-ns_net_ca_bundle_path(void)
-{
-    return g_ca_bundle;
 }
 
 void
@@ -8715,13 +8682,6 @@ ns_net_request_blocking(const char        *url,
 }
 
 ns_response *
-ns_net_fetch_blocking(const char *url, GCancellable *cancellable, GError **error)
-{
-    return ns_net_request_blocking(url, NULL, "GET", NULL, 0, NULL, NULL,
-                                   cancellable, error);
-}
-
-ns_response *
 ns_net_fetch_finish(GAsyncResult *result, GError **error)
 {
     g_return_val_if_fail(g_task_is_valid(result, NULL), NULL);
@@ -8774,7 +8734,7 @@ ns_form_set_submission_charset(const char *charset)
         g_free(first);
 }
 
-void
+static void
 ns_form_urlencoded_append(GString *out, const char *s)
 {
     if (!out || !s) return;

@@ -29,19 +29,12 @@ typedef enum ns_color_scheme_pref {
     NS_COLOR_SCHEME_PREF_DARK,
 } ns_color_scheme_pref;
 
-typedef enum ns_reduced_motion_pref {
-    NS_REDUCED_MOTION_PREF_AUTO = 0,
-    NS_REDUCED_MOTION_PREF_NO_PREFERENCE,
-    NS_REDUCED_MOTION_PREF_REDUCE,
-} ns_reduced_motion_pref;
-
 typedef struct ns_config {
     char  *home_url;
     char  *user_agent;
     char  *compat_mode;
     char  *accept_language;
     char  *search_engine;
-    char  *ai_model_mirror;
     char  *http_proxy;
     char  *https_proxy;
     char  *no_proxy;
@@ -50,7 +43,6 @@ typedef struct ns_config {
     ns_referer_policy      referer_policy;
     ns_cookie_policy       cookie_policy;
     ns_color_scheme_pref   color_scheme;
-    ns_reduced_motion_pref reduced_motion;
     gboolean do_not_track;
     gboolean safe_browsing;
     gboolean global_privacy_control;
@@ -63,8 +55,6 @@ typedef struct ns_config {
     gboolean javascript_enabled;
     gboolean webgl_enabled;
     gboolean webgpu_enabled;
-    gboolean camera_enabled;
-    gboolean microphone_enabled;
     gboolean local_storage_enabled;
     gboolean cache_enabled;
     gboolean tls_allow_insecure_override;
@@ -75,9 +65,6 @@ typedef struct ns_config {
     int      js_eval_budget_ms;
     int      js_memory_cap_mb;
     int      max_redirects;
-    int      window_width_px;
-    int      window_height_px;
-    int      layout_viewport_px;
 } ns_config;
 
 void             ns_config_init(void);

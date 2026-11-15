@@ -274,7 +274,6 @@ void        ns_node_arm_spellcheck(ns_node *n);
 gboolean    ns_node_spellcheck_armed(const ns_node *n);
 const char *ns_node_editable_value(const ns_node *n);
 const char *ns_input_used_value(const ns_node *n);
-const char *ns_media_type_support(const char *type);
 const char *ns_media_select_source(const ns_node *media);
 char       *ns_textarea_default_value_dup(const ns_node *n);
 char       *ns_textarea_value_dup(const ns_node *n);
