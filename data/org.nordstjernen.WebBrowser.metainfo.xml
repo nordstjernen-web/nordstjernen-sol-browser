@@ -60,6 +60,17 @@
   </branding>
 
   <releases>
+    <release version="1.0.48" date="2026-11-15">
+      <description>
+        <p>PDF viewer, JavaScript engine and memory release.</p>
+        <ul>
+          <li>Local PDF files open in the viewer, and Japanese, Chinese and Korean text in PDFs renders using PDF.js's own CMaps and fonts.</li>
+          <li>Text fields place the caret where they are clicked and allow selecting text inside them.</li>
+          <li>The browser follows the system's reduce-motion setting, and about:start and about:nordstjernen follow the system colour scheme.</li>
+          <li>Fixes to postMessage, iframe scripts and realms, regular expressions, WeakMap collection and memory released when frames are removed.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.47" date="2026-11-14">
       <description>
         <p>Security, web platform and engine release.</p>
