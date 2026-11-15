@@ -1167,7 +1167,7 @@ ns_net_hsts_should_upgrade(const char *host)
     return hit;
 }
 
-char *
+static char *
 ns_net_hsts_upgrade(const char *url)
 {
     if (!url) return NULL;
@@ -1288,13 +1288,13 @@ ns_net_cookie_dir(void)
     return g_cookie_dir;
 }
 
-void
+static void
 ns_net_cookies_clear(void)
 {
     ns_cookie_store_clear();
 }
 
-void
+static void
 ns_net_site_storage_clear(void)
 {
     char *base = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
@@ -8734,7 +8734,7 @@ ns_form_set_submission_charset(const char *charset)
         g_free(first);
 }
 
-void
+static void
 ns_form_urlencoded_append(GString *out, const char *s)
 {
     if (!out || !s) return;

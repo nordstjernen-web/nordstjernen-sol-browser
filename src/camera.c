@@ -9,6 +9,9 @@
 #include "net.h"
 #include "security.h"
 
+static ns_camera *ns_camera_open(const char *device);
+static void ns_camera_close(ns_camera *cam);
+
 static GMutex      g_camera_lock;
 static GHashTable *g_camera_decisions;
 static char *g_camera_pending;
@@ -226,7 +229,7 @@ ns_camera_unmap(ns_camera *cam)
     cam->n_bufs = 0;
 }
 
-ns_camera *
+static ns_camera *
 ns_camera_open(const char *device)
 {
     if (!device || !*device) device = "/dev/video0";
@@ -375,7 +378,7 @@ ns_camera_next_frame(ns_camera *cam)
 
 const char *ns_camera_device(const ns_camera *cam) { return cam ? cam->device : NULL; }
 
-void
+static void
 ns_camera_close(ns_camera *cam)
 {
     if (!cam) return;
@@ -427,10 +430,10 @@ ns_camera_enumerate(void)
 
 struct ns_camera { int unused; };
 
-ns_camera  *ns_camera_open(const char *device) { (void)device; return NULL; }
+static ns_camera *ns_camera_open(const char *device) { (void)device; return NULL; }
 ns_texture *ns_camera_next_frame(ns_camera *cam) { (void)cam; return NULL; }
 const char *ns_camera_device(const ns_camera *cam) { (void)cam; return NULL; }
-void        ns_camera_close(ns_camera *cam) { (void)cam; }
+static void ns_camera_close(ns_camera *cam) { (void)cam; }
 GPtrArray  *ns_camera_enumerate(void) { return g_ptr_array_new(); }
 
 #endif

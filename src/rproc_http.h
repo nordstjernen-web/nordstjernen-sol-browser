@@ -90,7 +90,6 @@ typedef struct ns_rproc_http_engine {
     char version[64];
 } ns_rproc_http_engine;
 
-int ns_rproc_http_hello(ns_rproc_http *r, ns_rproc_http_engine *out);
 
 char **ns_rproc_child_environ(void);
 ns_rproc_http *ns_rproc_http_spawn(const char *renderer_path, int max_width,

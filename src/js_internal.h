@@ -471,28 +471,12 @@ double ns_webaudio_schedule_floor(ns_js *js, JSContext *ctx,
                                   JSValueConst audio_ctx);
 void     ns_webaudio_rt_free(ns_js *js);
 void ns_js_promise_reject(JSContext *ctx, JSValue resolvers[2], const char *message);
-JSValue ns_make_element(JSContext *ctx, const ns_node *cnode);
 JSValue ns_js_realm_event(JSContext *ctx, JSValueConst target, const char *type);
 const ns_node *ns_unwrap_element(JSValueConst val);
 
-void
-ns_path2d_finalizer(JSRuntime *rt, JSValue val);
-void
-ns_image_bitmap_finalizer(JSRuntime *rt, JSValue val);
-void
-ns_canvas_state_free(gpointer data);
 JSValue
 ns_image_bitmap_close(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv);
-JSValue
-ns_image_bitmap_make(JSContext *ctx, cairo_surface_t *surf, int w, int h,
-                     gboolean origin_clean);
-cairo_surface_t *
-ns_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
-                               int *out_w, int *out_h);
-cairo_surface_t *
-ns_image_bitmap_crop(cairo_surface_t *src, int sw, int sh,
-                     int sx, int sy, int rw, int rh);
 gboolean
 ns_image_bitmap_is(JSValueConst v);
 JSValue
@@ -513,46 +497,15 @@ ns_dommatrix_make(JSContext *ctx, double a, double b, double c, double d,
                   double e, double f);
 JSValue
 ns_canvas_throw_dom(JSContext *ctx, const char *name, const char *msg);
-int
-ns_canvas_dim_from_attr(const ns_node *el, const char *name, int defv);
 gboolean
 ns_canvas_parse_color(const char *s, double *r, double *g, double *b, double *a);
 gboolean ns_canvas_color_is_literal(const char *s);
 ns_canvas_state *
 ns_canvas_state_for(ns_js *js, const ns_node *el);
 void ns_canvas_state_forget_node(ns_js *js, const ns_node *n);
-ns_canvas_state *
-ns_ctx_state(JSContext *ctx, JSValueConst this_val);
-cairo_pattern_t *
-ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj, gboolean *origin_clean);
 gboolean
 ns_js_resource_origin_clean(ns_js *js, JSContext *ctx, const char *url,
                             const char *cors_allow_origin);
-double
-ns_ctx_global_alpha(JSContext *ctx, JSValueConst this_val);
-cairo_operator_t
-ns_ctx_parse_composite(const char *s);
-void
-ns_ctx_apply_composite(JSContext *ctx, JSValueConst this_val, cairo_t *cr);
-gboolean
-ns_ctx_image_smoothing(JSContext *ctx, JSValueConst this_val);
-void
-ns_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st);
-gboolean
-ns_ctx_has_shadow(const ns_canvas_state *st);
-void
-ns_box_blur_argb(uint8_t *data, int w, int h, int stride, int radius);
-void
-ns_ctx_with_shadow(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st,
-                   ns_ctx_drawfn draw, void *ud);
-void
-ns_ctx_set_fill_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st);
-void
-ns_ctx_set_stroke_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st);
-void
-ns_draw_fillrect(cairo_t *cr, void *vud);
-void
-ns_draw_strokerect(cairo_t *cr, void *vud);
 JSValue
 ns_ctx_fillRect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue
@@ -573,19 +526,6 @@ JSValue
 ns_ctx_rect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 gboolean
 ns_value_is_path2d(JSValueConst v);
-void
-ns_replay_path2d(cairo_t *target, JSValueConst path_v);
-cairo_fill_rule_t
-ns_parse_fill_rule(const char *s);
-cairo_path_t *
-ns_ctx_prepare_path_and_rule(JSContext *ctx, cairo_t *cr,
-                             int argc, JSValueConst *argv);
-void
-ns_ctx_restore_path(cairo_t *cr, cairo_path_t *saved);
-void
-ns_draw_fillpath(cairo_t *cr, void *vud);
-void
-ns_draw_strokepath(cairo_t *cr, void *vud);
 JSValue
 ns_ctx_fill(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue
@@ -600,15 +540,6 @@ JSValue
 ns_ctx_scale(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue
 ns_ctx_rotate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
-NsPangoFontDescription *
-ns_canvas_font_desc(const char *css_font);
-gboolean
-ns_ctx_direction_is_rtl(JSContext *ctx, JSValueConst this_val);
-void
-ns_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
-                  ns_canvas_state *st, const char *text,
-                  double x, double y, double max_width,
-                  gboolean stroke);
 JSValue
 ns_ctx_fillText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue
@@ -628,8 +559,6 @@ ns_ctx_ellipse(JSContext *ctx, JSValueConst this_val,
 JSValue
 ns_ctx_clip(JSContext *ctx, JSValueConst this_val,
             int argc, JSValueConst *argv);
-gboolean
-ns_matrix_from_obj(JSContext *ctx, JSValueConst v, cairo_matrix_t *m);
 JSValue
 ns_ctx_setTransform(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv);
@@ -648,9 +577,6 @@ ns_ctx_getLineDash(JSContext *ctx, JSValueConst this_val,
 JSValue
 ns_ctx_gradient_addColorStop(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv);
-cairo_surface_t *
-ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h,
-                        gboolean *origin_clean);
 JSValue
 ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv);
@@ -678,12 +604,6 @@ ns_ctx_putImageData(JSContext *ctx, JSValueConst this_val,
 JSValue
 ns_ctx_strokeText(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv);
-void
-ns_round_rect_subpath(cairo_t *cr, double x, double y, double w, double h,
-                      double rtl, double rtr, double rbr, double rbl);
-gboolean
-ns_extract_radii(JSContext *ctx, JSValueConst v,
-                 double *rtl, double *rtr, double *rbr, double *rbl);
 JSValue
 ns_ctx_roundRect(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv);
@@ -699,8 +619,6 @@ ns_ctx_isPointInPath(JSContext *ctx, JSValueConst this_val,
 JSValue
 ns_ctx_isPointInStroke(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv);
-JSValue
-ns_path2d_get_cr(JSContext *ctx, JSValueConst this_val, cairo_t **out);
 JSValue
 ns_path2d_moveTo(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv);
@@ -734,17 +652,6 @@ ns_path2d_roundRect(JSContext *ctx, JSValueConst this_val,
 JSValue
 ns_path2d_addPath(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv);
-const char *
-ns_svg_skip_ws(const char *p);
-gboolean
-ns_svg_read_number(const char **pp, double *out);
-void
-ns_path2d_arc_svg(cairo_t *cr, double x1, double y1,
-                  double rx, double ry, double phi_deg,
-                  gboolean large_arc, gboolean sweep,
-                  double x2, double y2);
-void
-ns_path2d_parse_svg(cairo_t *cr, const char *d);
 JSValue
 ns_path2d_ctor(JSContext *ctx, JSValueConst this_val,
                int argc, JSValueConst *argv);
@@ -783,7 +690,6 @@ enum {
 };
 void ns_canvas_register_classes(JSRuntime *rt);
 gpointer ns_hidden_ptr(JSValueConst v);
-void ns_hidden_set_ptr(JSValueConst v, gpointer ptr);
 JSValue ns_hidden_new(JSContext *realm, int kind, JSValueConst proto);
 gboolean ns_hidden_is(JSValueConst v, int kind);
 JSValue ns_hget(JSContext *ctx, JSValueConst obj, const char *name);
@@ -799,8 +705,6 @@ JSValue ns_api_proto_of_ctor(JSContext *ctx, JSValueConst new_target,
 JSValue ns_api_throw_new_required(JSContext *ctx, const char *iface);
 JSValue ns_api_interface(JSContext *ctx, JSValueConst global, const char *name,
                          JSValue ctor, const char *parent);
-char *ns_canvas_color_string(const char *css);
-char *ns_canvas_font_string(const char *css);
 void ns_ctx2d_init_state(JSContext *ctx, JSValueConst obj);
 JSValue ns_ctx2d_new(JSContext *ctx, const ns_node *el, JSValueConst canvas_obj,
                      gboolean offscreen, JSValue attrs);
@@ -808,16 +712,9 @@ JSValue ns_gradient_new(JSContext *ctx, JSContext *realm, const char *type);
 JSValue ns_pattern_new(JSContext *ctx, JSContext *realm, JSValueConst source,
                        const char *repetition);
 JSValue ns_textmetrics_new(JSContext *ctx, JSContext *realm, const double v[10]);
-JSValue ns_imagedata_wrap(JSContext *ctx, JSContext *realm, JSValueConst proto,
-                          int w, int h, JSValue data, const char *color_space);
 JSValue ns_imagedata_new(JSContext *ctx, JSContext *realm, int w, int h,
                          const uint8_t *rgba);
-JSValue ns_imagedata_construct(JSContext *ctx, JSValueConst new_target, int argc,
-                               JSValueConst *argv);
 const ns_node *ns_offscreen_node(JSValueConst obj);
-void ns_offscreen_sync_size(JSContext *ctx, JSValueConst obj);
-JSValue ns_offscreen_construct(JSContext *ctx, JSValueConst new_target, int argc,
-                               JSValueConst *argv);
 void ns_canvas_install(JSContext *ctx, JSValueConst global, gboolean window);
 
 void ns_bind_fn_if_not_callable(JSContext *ctx, JSValueConst obj, const char *name,

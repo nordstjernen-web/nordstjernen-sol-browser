@@ -134,7 +134,6 @@ gsize    ns_video_cache_mse_bytes(ns_video_cache *cache, guint stream_id,
 gboolean ns_video_cache_has_pending(const ns_video_cache *cache);
 void     ns_video_cache_set_layer_gen(ns_video_cache *cache, guint gen);
 guint    ns_video_cache_layer_gen(const ns_video_cache *cache);
-gboolean ns_video_is_layered(const ns_video_cache *cache, const ns_video *v);
 gboolean ns_video_cache_layer_frames_pending(ns_video_cache *cache);
 guint    ns_video_layer_frames(const ns_video *v, ns_video_frame_ref *out,
                                guint max);
@@ -153,9 +152,6 @@ gboolean ns_video_cache_set_node_muted(ns_video_cache *cache,
 gboolean ns_video_cache_set_node_volume(ns_video_cache *cache,
                                         const void *dom_node, double volume);
 gboolean ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us);
-gboolean ns_video_toggle(ns_video *v, gint64 now_us);
-void     ns_video_play(ns_video *v, gint64 now_us);
-void     ns_video_pause(ns_video *v, gint64 now_us);
 void     ns_video_note_painted(ns_video *v);
 const char *ns_video_active_cue_text(const ns_video *v);
 

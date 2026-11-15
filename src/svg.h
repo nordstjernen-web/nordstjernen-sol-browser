@@ -41,7 +41,6 @@ typedef struct ns_svg_path_pt {
 
 GArray *ns_svg_path_polyline(const char *d);
 
-gboolean ns_svg_node_is_root(const ns_node *n);
 
 const ns_node *ns_svg_document_root(const ns_node *doc);
 

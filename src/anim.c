@@ -243,6 +243,7 @@ static gboolean advance_run(ns_anim *a, ns_anim_run *r, gint64 now_us);
 static void partial_free(gpointer data);
 static void chan_cancel(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, gint64 now_us);
 static double run_active_ms(const ns_anim_run *r);
+static void ns_anim_apply(ns_anim *a, GHashTable *styles);
 static gboolean advance_chan(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, gint64 now_us);
 static void run_emit_progress(ns_anim *a, ns_anim_state *s, ns_anim_run *r, gint64 now_us);
 static void run_emit_script(ns_anim *a, ns_anim_state *s, ns_anim_run *r,
@@ -334,7 +335,7 @@ state_active_count(const ns_anim_state *s)
     return n;
 }
 
-void
+static void
 ns_anim_prune(ns_anim *a, GHashTable *live)
 {
     if (!a || !live) return;
@@ -1392,7 +1393,7 @@ composite_onto(int prop, const ns_css_value *under, const ns_css_value *v, int c
     return out ? out : ns_css_value_dup(v);
 }
 
-void
+static void
 ns_anim_apply(ns_anim *a, GHashTable *styles)
 {
     if (!a || !styles) return;

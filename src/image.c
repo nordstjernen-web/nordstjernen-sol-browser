@@ -715,7 +715,7 @@ on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     ns_image_fire_pending(pending);
 }
 
-gboolean
+static gboolean
 ns_image_should_retry(const ns_image *img, gint64 now_us)
 {
     if (!img || !img->failed || img->attempts >= 3) return FALSE;
@@ -978,7 +978,7 @@ ns_image_cache_has_pending(const ns_image_cache *cache)
     return cache && cache->pending->len > 0;
 }
 
-ns_image *
+static ns_image *
 ns_image_cache_insert_loaded(ns_image_cache *cache, const char *url,
                              ns_texture *texture, int width, int height)
 {

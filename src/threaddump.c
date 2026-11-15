@@ -156,7 +156,8 @@ ns_thread_dump_text(int pid, const char *label)
     return b.p;
 }
 
-void
+#ifndef _WIN32
+static void
 ns_thread_dump_to_stderr(int pid, const char *label)
 {
     char *text = ns_thread_dump_text(pid, label);
@@ -167,7 +168,6 @@ ns_thread_dump_to_stderr(int pid, const char *label)
     fflush(stderr);
 }
 
-#ifndef _WIN32
 static int   g_sig_pipe[2] = { -1, -1 };
 static char *g_sig_label;
 

@@ -81,11 +81,6 @@ void            ns_image_cache_cancel_cb(ns_image_cache *cache,
 
 ns_image       *ns_image_cache_peek(ns_image_cache *cache, const char *url);
 
-ns_image       *ns_image_cache_insert_loaded(ns_image_cache *cache,
-                                             const char     *url,
-                                             ns_texture     *texture,
-                                             int             width,
-                                             int             height);
 
 ns_image       *ns_image_cache_insert_encoded(ns_image_cache *cache,
                                               const char     *url,
@@ -143,7 +138,6 @@ gboolean ns_image_cache_has_pending(const ns_image_cache *cache);
 void     ns_image_cache_begin_generation(ns_image_cache *cache);
 void     ns_image_cache_collect(ns_image_cache *cache);
 
-gboolean ns_image_should_retry(const ns_image *img, gint64 now_us);
 
 #ifdef NS_HAVE_AVIF
 ns_texture *ns_image_decode_avif(const guchar *data, gsize len,

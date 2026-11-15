@@ -3371,7 +3371,7 @@ svg_measure_node(svg_ctx *ctx, const ns_node *n, const svg_state *parent,
     ctx->nesting--;
 }
 
-gboolean
+static gboolean
 ns_svg_node_is_root(const ns_node *n)
 {
     return n && n->kind == NS_NODE_ELEMENT && n->name &&

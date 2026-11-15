@@ -180,8 +180,6 @@ char    *ns_js_base_url_for_document(ns_js *js, const ns_node *doc,
                                      const char *document_url);
 const char *ns_js_current_url(const ns_js *js);
 const char *ns_js_realm_storage_partition(const ns_js *js, struct JSContext *realm);
-void   ns_js_dispatch_hashchange(ns_js *js,
-                                 const char *old_url, const char *new_url);
 void   ns_js_free(ns_js *js);
 
 gboolean ns_js_in_pump(const ns_js *js);
@@ -195,8 +193,6 @@ guint64 ns_js_mutation_serial(const ns_js *js);
 char  *ns_js_eval_source(ns_js *js, const char *src, const char *origin);
 char  *ns_js_remote_call(ns_js *js, const char *request);
 char  *ns_js_webdriver_call(ns_js *js, const char *request);
-void   ns_js_drop_webdriver_helper(ns_js *js);
-void   ns_js_drop_remote_helper(ns_js *js);
 
 gboolean ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type,
                               gboolean *default_prevented);
@@ -217,7 +213,6 @@ gboolean ns_js_dispatch_submit_event(ns_js *js, const ns_node *form,
 void     ns_js_form_reset(ns_js *js, ns_node *form);
 gboolean ns_js_activate_summary(ns_js *js, const ns_node *el);
 
-void ns_js_dialog_close(ns_js *js, ns_node *dialog, const char *return_value);
 
 void           ns_js_set_focus(ns_js *js, const ns_node *el);
 void           ns_js_note_user_edit(ns_js *js, const ns_node *el,
@@ -231,7 +226,6 @@ const ns_node *ns_js_focused_node(const ns_js *js);
 void           ns_js_focus_from_pointer(ns_js *js, const ns_node *target);
 const ns_node *ns_js_sequential_focus_target(ns_js *js, gboolean backward);
 gboolean       ns_node_is_focusable(const ns_node *el);
-void           ns_js_refresh_top_layer(ns_js *js);
 gboolean       ns_js_process_close_request(ns_js *js);
 
 void ns_js_details_toggle_open(ns_js *js, ns_node *details, gboolean open);

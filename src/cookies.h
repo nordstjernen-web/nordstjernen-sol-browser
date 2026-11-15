@@ -9,7 +9,6 @@ G_BEGIN_DECLS
 
 void     ns_cookie_store_init(const char *dir, gboolean in_memory);
 void     ns_cookie_store_shutdown(void);
-void     ns_cookie_store_flush(void);
 void     ns_cookie_store_flush_soon(void);
 
 gboolean ns_cookie_store_set(const char *partition, const char *url,

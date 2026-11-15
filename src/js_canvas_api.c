@@ -10,6 +10,13 @@
 
 #include "css.h"
 
+static char *ns_canvas_font_string(const char *css);
+static void ns_offscreen_sync_size(JSContext *ctx, JSValueConst obj);
+static JSValue ns_imagedata_construct(JSContext *ctx, JSValueConst new_target,
+                                     int argc, JSValueConst *argv);
+static JSValue ns_offscreen_construct(JSContext *ctx, JSValueConst new_target,
+                                     int argc, JSValueConst *argv);
+
 static JSClassID ns_hidden_class_id;
 
 typedef struct ns_hidden {
@@ -76,7 +83,7 @@ ns_hidden_ptr(JSValueConst v)
     return h ? h->ptr : NULL;
 }
 
-void
+static void
 ns_hidden_set_ptr(JSValueConst v, gpointer ptr)
 {
     ns_hidden *h = JS_GetOpaque(v, ns_hidden_class_id);
@@ -644,7 +651,7 @@ ns_canvas_color_string_uncached(const char *css)
                              (guint8)round(b * 255), (guint8)round(a * 255));
 }
 
-char *
+static char *
 ns_canvas_color_string(const char *css)
 {
     if (!css) return NULL;
@@ -1073,7 +1080,7 @@ ns_textmetrics_new(JSContext *ctx, JSContext *realm, const double v[10])
     return obj;
 }
 
-JSValue
+static JSValue
 ns_imagedata_wrap(JSContext *ctx, JSContext *realm, JSValueConst proto, int w,
                   int h, JSValue data, const char *color_space)
 {
@@ -1224,7 +1231,7 @@ ns_imagedata_from_size(JSContext *ctx, JSValueConst proto, int argc, JSValueCons
     return ns_imagedata_wrap(ctx, ctx, proto, (int)sw, (int)sh, data, space);
 }
 
-JSValue
+static JSValue
 ns_imagedata_construct(JSContext *ctx, JSValueConst new_target, int argc,
                        JSValueConst *argv)
 {
@@ -1249,7 +1256,7 @@ ns_offscreen_node(JSValueConst obj)
     return ns_hidden_is(obj, NS_HK_OFFSCREEN) ? ns_hidden_ptr(obj) : NULL;
 }
 
-void
+static void
 ns_offscreen_sync_size(JSContext *ctx, JSValueConst obj)
 {
     ns_node *el = (ns_node *)ns_offscreen_node(obj);
@@ -1267,7 +1274,7 @@ ns_offscreen_sync_size(JSContext *ctx, JSValueConst obj)
     }
 }
 
-JSValue
+static JSValue
 ns_offscreen_construct(JSContext *ctx, JSValueConst new_target, int argc,
                        JSValueConst *argv)
 {
@@ -1454,7 +1461,7 @@ ns_font_append_family(GString *out, char **tokens)
     g_free(family);
 }
 
-char *
+static char *
 ns_canvas_font_string(const char *css)
 {
     char *canon = ns_css_font_shorthand_canonical(css);

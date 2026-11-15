@@ -816,7 +816,7 @@ ns_proc_url_host(const char *url)
     return out;
 }
 
-gboolean
+static gboolean
 ns_proc_url_same_origin(const char *a, const char *b)
 {
     char *oa = ns_proc_url_origin(a);

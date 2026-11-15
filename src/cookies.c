@@ -575,7 +575,7 @@ ns_cookie_store_init(const char *dir, gboolean in_memory)
     g_mutex_unlock(&S.lock);
 }
 
-void
+static void
 ns_cookie_store_flush(void)
 {
     g_mutex_lock(&S.lock);

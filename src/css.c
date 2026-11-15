@@ -19,6 +19,14 @@
 #include <math.h>
 #include <string.h>
 
+static char *ns_css_time_specified(const char *value);
+static ns_css_value *ns_css_value_interpolate(const ns_css_value *a,
+                                              const ns_css_value *b, double t);
+static char *ns_css_container_name_canonical(const char *text);
+static char *ns_css_value_serialize_specified(const ns_css_value *v);
+static char *ns_css_font_family_canonical(const char *text);
+static gboolean ns_css_timeline_parse(const char *item, ns_css_timeline *out);
+
 static double g_viewport_w = 1000;
 static double g_viewport_h = 800;
 static __thread double g_root_font_px = 16.0;
@@ -4372,7 +4380,7 @@ math_sum_canonical(const char *value)
     return math_sum_serialize(&sum);
 }
 
-char *
+static char *
 ns_css_math_canonical(const char *value)
 {
     if (!value) return NULL;
@@ -5366,7 +5374,7 @@ font_family_random_item_valid(const char *item, gsize ilen)
     return ok;
 }
 
-char *
+static char *
 ns_css_font_family_canonical(const char *text)
 {
     if (!text) return NULL;
@@ -7273,7 +7281,7 @@ static char *image_set_canonical(const char *text, gboolean computed);
 static gboolean text_starts_image_set(const char *p);
 static const char *cq_match_paren(const char *p, const char *end);
 
-char *
+static char *
 ns_css_image_value_canonical(const char *text)
 {
     if (!text) return NULL;
@@ -7701,7 +7709,7 @@ content_item_canonical(const content_tok *t, gboolean alt)
     return NULL;
 }
 
-char *
+static char *
 ns_css_content_canonical(const char *text)
 {
     if (!text) return NULL;
@@ -8028,7 +8036,7 @@ text_starts_image_set(const char *p)
            g_ascii_strncasecmp(p, "-webkit-image-set(", 18) == 0;
 }
 
-char *
+static char *
 ns_css_unicode_range_canonical(const char *text)
 {
     if (!text) return NULL;
@@ -9260,7 +9268,7 @@ keyword_index(const char *tok, const char *const *names, int n)
     return -1;
 }
 
-gboolean
+static gboolean
 ns_css_scroll_axis_parse(const char *item, ns_css_scroll_axis *out)
 {
     int i = keyword_index(item, kScrollAxisNames, G_N_ELEMENTS(kScrollAxisNames));
@@ -9325,7 +9333,7 @@ timeline_function_parse(const char *item, ns_css_timeline *t)
     return scroll_notation_parse(item, len, t);
 }
 
-gboolean
+static gboolean
 ns_css_timeline_parse(const char *item, ns_css_timeline *out)
 {
     ns_css_timeline t = { 0 };
@@ -9523,7 +9531,7 @@ parse_animation_duration(const char *t)
     return v;
 }
 
-char *
+static char *
 ns_css_ident_serialize(const char *name)
 {
     if (!name) return g_strdup("");
@@ -9920,7 +9928,7 @@ ns_css_anim_shorthand_serialize(const ns_css_anim_list *list, gboolean is_animat
     return g_string_free(out, FALSE);
 }
 
-char *
+static char *
 ns_css_animation_shorthand_canonical(const char *text, gboolean is_animation)
 {
     ns_css_value *v = parse_anim_value(text, is_animation);
@@ -10816,7 +10824,7 @@ display_parse(const char *lowered, ns_display *out)
     return TRUE;
 }
 
-char *
+static char *
 ns_css_display_serialize(ns_display d)
 {
     static const char *const internal_names[] = {
@@ -10856,7 +10864,7 @@ ns_css_display_serialize(ns_display d)
     return g_strdup_printf("run-in %s", inner_names[d.inner]);
 }
 
-ns_display
+static ns_display
 ns_css_display_from_keyword(const char *canonical)
 {
     ns_display d = { 0 };
@@ -10871,7 +10879,7 @@ ns_css_display_of(const ns_style *s)
     return s ? s->display : d;
 }
 
-ns_display
+static ns_display
 ns_css_display_blockified(ns_display d)
 {
     if (d.box != NS_DISPLAY_BOX_NORMAL) return d;
@@ -10914,7 +10922,7 @@ normalize_display_value(const char *text)
     return ok ? ns_css_display_serialize(d) : NULL;
 }
 
-char *
+static char *
 ns_css_display_canonical(const char *value)
 {
     if (!value) return NULL;
@@ -11036,7 +11044,7 @@ canonicalize_transform_arg(const char *arg, int type)
     return NULL;
 }
 
-char *
+static char *
 ns_css_transform_canonical(const char *value)
 {
     if (!value) return NULL;
@@ -11794,7 +11802,7 @@ css_time_list_serialize(const char *value, gboolean computed)
     return g_string_free(out, FALSE);
 }
 
-char *
+static char *
 ns_css_time_specified(const char *value)
 {
     return value ? css_time_list_serialize(value, FALSE) : NULL;
@@ -16257,7 +16265,7 @@ ns_css_prop_id(const char *name)
     return name ? prop_id(name) : -1;
 }
 
-gboolean
+static gboolean
 ns_css_declaration_valid(int prop, const char *text)
 {
     if (prop < 0 || !text || !*text) return TRUE;
@@ -17715,7 +17723,7 @@ bg_clip_canonical(const char *text)
     return r;
 }
 
-char *
+static char *
 ns_css_background_shorthand_serialize(const char *image, const char *position,
                                       const char *size, const char *repeat,
                                       const char *attachment,
@@ -22459,7 +22467,7 @@ cq_serialize(const cq_node *n, GString *out)
     }
 }
 
-char *
+static char *
 ns_css_container_name_canonical(const char *text)
 {
     char *tok[17] = {0};
@@ -22477,7 +22485,7 @@ ns_css_container_name_canonical(const char *text)
     return res;
 }
 
-char *
+static char *
 ns_css_container_shorthand_canonical(const char *text)
 {
     const char *slash = strchr(text, '/');
@@ -24788,7 +24796,7 @@ ns_css_stylesheet_free(ns_css_stylesheet *s)
     g_free(s);
 }
 
-void
+static void
 ns_css_stylesheet_force_layer(ns_css_stylesheet *s, const char *layer_name)
 {
     if (!s || !layer_name || !*layer_name) return;
@@ -29583,7 +29591,7 @@ interpolate_layers(const ns_css_value *a, const ns_css_value *b, double t)
     return head;
 }
 
-ns_css_value *
+static ns_css_value *
 ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t)
 {
     if (!a || !b) return NULL;
@@ -30367,7 +30375,7 @@ ns_css_value_serialize(const ns_css_value *v)
     return value_serialize_layers(v, FALSE);
 }
 
-char *
+static char *
 ns_css_value_serialize_specified(const ns_css_value *v)
 {
     return value_serialize_layers(v, TRUE);

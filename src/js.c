@@ -87,6 +87,12 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "js_internal.h"
 #include "font.h"
 
+static void ns_js_refresh_top_layer(ns_js *js);
+static void ns_js_dispatch_hashchange(ns_js *js, const char *old_url,
+                                      const char *new_url);
+static void ns_js_drop_remote_helper(ns_js *js);
+static void ns_js_drop_webdriver_helper(ns_js *js);
+
 #undef JS_CFUNC_DEF
 #define JS_CFUNC_DEF(name, length, func1) \
     { name, JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE, \
@@ -5545,7 +5551,7 @@ ns_page_document_object(ns_js *js)
     return doc;
 }
 
-JSValue
+static JSValue
 ns_make_element(JSContext *ctx, const ns_node *cnode)
 {
     if (!cnode) return JS_NULL;
@@ -14259,7 +14265,7 @@ ns_media_container_is_manifest(const char *container)
            strcmp(container, "application/dash+xml")         == 0;
 }
 
-const char *
+static const char *
 ns_media_type_support(const char *type)
 {
     if (!type || !*type) return "";
@@ -49971,7 +49977,7 @@ ns_dialog_set_modal(ns_js *js, ns_node *dialog, gboolean modal)
     js->mutated = TRUE;
 }
 
-void
+static void
 ns_js_refresh_top_layer(ns_js *js)
 {
     if (!js) return;
@@ -50455,7 +50461,7 @@ ns_js_process_close_request(ns_js *js)
     return TRUE;
 }
 
-void
+static void
 ns_js_dialog_close(ns_js *js, ns_node *dialog, const char *return_value)
 {
     if (!js || !js->ctx || !dialog) return;
@@ -76001,7 +76007,7 @@ ns_js_realm_storage_partition(const ns_js *js, struct JSContext *realm)
     return realm == main_ctx ? js->partition_key : NULL;
 }
 
-void
+static void
 ns_js_dispatch_hashchange(ns_js *js, const char *old_url, const char *new_url)
 {
     if (!js || !js->ctx) return;
@@ -76080,7 +76086,7 @@ ns_js_eval_source(ns_js *js, const char *src, const char *origin)
     return out;
 }
 
-void
+static void
 ns_js_drop_remote_helper(ns_js *js)
 {
     if (!js || !js->remote_ctx) return;
@@ -76182,7 +76188,7 @@ ns_js_remote_call(ns_js *js, const char *request)
     return out;
 }
 
-void
+static void
 ns_js_drop_webdriver_helper(ns_js *js)
 {
     if (!js || !js->webdriver_ctx) return;

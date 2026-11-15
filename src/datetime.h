@@ -12,7 +12,6 @@
 long ns_dt_floormod(long a, long b);
 long ns_dt_days_from_civil(int y, int m, int d);
 void ns_dt_civil_from_days(long z, int *y, int *m, int *d);
-int  ns_dt_days_in_month(int y, int m);
 int  ns_dt_iso_weeks_in_year(int y);
 long ns_dt_iso_week1_monday(int y);
 const char *ns_dt_rd_digits(const char *p, int min, int max, int *out);

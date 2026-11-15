@@ -29,7 +29,6 @@ void        ns_session_close(void);
 gboolean    ns_session_available(void);
 
 GPtrArray  *ns_session_take_tabs(gboolean own_only);
-void        ns_session_tab_free(ns_session_tab *tab);
 
 gint64      ns_session_tab_add(void);
 void        ns_session_tab_save(const ns_session_tab *tab);

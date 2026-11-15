@@ -170,7 +170,7 @@ ns_icon_new_from_resource(const char *name)
     return icon;
 }
 
-GdkPaintable *
+static GdkPaintable *
 ns_icon_lookup(const char *name)
 {
     if (!name || !*name)

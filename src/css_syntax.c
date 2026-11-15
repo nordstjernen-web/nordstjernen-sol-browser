@@ -142,7 +142,7 @@ css_component_new(ns_css_component_type type, gsize start)
     return component;
 }
 
-void
+static void
 ns_css_component_free(ns_css_component *component)
 {
     if (!component) return;
