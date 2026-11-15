@@ -97,20 +97,6 @@ parse_color_scheme(const char *v, ns_color_scheme_pref dflt)
     return (ns_color_scheme_pref)parse_enum(v, map, G_N_ELEMENTS(map), dflt);
 }
 
-static ns_reduced_motion_pref
-parse_reduced_motion(const char *v, ns_reduced_motion_pref dflt)
-{
-    static const ns_enum_choice map[] = {
-        { "auto",          NS_REDUCED_MOTION_PREF_AUTO },
-        { "system",        NS_REDUCED_MOTION_PREF_AUTO },
-        { "no-preference", NS_REDUCED_MOTION_PREF_NO_PREFERENCE },
-        { "off",           NS_REDUCED_MOTION_PREF_NO_PREFERENCE },
-        { "reduce",        NS_REDUCED_MOTION_PREF_REDUCE },
-        { "on",            NS_REDUCED_MOTION_PREF_REDUCE },
-    };
-    return (ns_reduced_motion_pref)parse_enum(v, map, G_N_ELEMENTS(map), dflt);
-}
-
 typedef enum cfg_kind {
     CFG_STRING,
     CFG_BOOL,
@@ -118,7 +104,6 @@ typedef enum cfg_kind {
     CFG_REFERER,
     CFG_COOKIE,
     CFG_COLOR_SCHEME,
-    CFG_REDUCED_MOTION,
 } cfg_kind;
 
 typedef struct cfg_field {
@@ -140,7 +125,6 @@ static const cfg_field cfg_fields[] = {
     FS(compat_mode,           "chrome"),
     FS(accept_language,       ""),
     FS(search_engine,         NS_DEFAULT_SEARCH_ENGINE),
-    FS(ai_model_mirror,       ""),
     FS(http_proxy,            ""),
     FS(https_proxy,           ""),
     FS(no_proxy,              ""),
@@ -149,7 +133,6 @@ static const cfg_field cfg_fields[] = {
     FE(referer_policy,        CFG_REFERER,      NS_REFERER_STRICT_ORIGIN_WHEN_CROSS),
     FE(cookie_policy,         CFG_COOKIE,       NS_COOKIE_FIRST_PARTY),
     FE(color_scheme,          CFG_COLOR_SCHEME,    NS_COLOR_SCHEME_PREF_AUTO),
-    FE(reduced_motion,        CFG_REDUCED_MOTION,  NS_REDUCED_MOTION_PREF_AUTO),
     FB(do_not_track,          FALSE),
     FB(safe_browsing,         TRUE),
     FB(global_privacy_control, FALSE),
@@ -162,8 +145,6 @@ static const cfg_field cfg_fields[] = {
     FB(javascript_enabled,    TRUE),
     FB(webgl_enabled,         TRUE),
     { "webgpu", CFG_BOOL, G_STRUCT_OFFSET(ns_config, webgpu_enabled), NULL, TRUE },
-    FB(camera_enabled,        FALSE),
-    FB(microphone_enabled,    FALSE),
     FB(local_storage_enabled, TRUE),
     FB(cache_enabled,         TRUE),
     FB(tls_allow_insecure_override, FALSE),
@@ -173,9 +154,6 @@ static const cfg_field cfg_fields[] = {
     FI(js_eval_budget_ms,     60000),
     FI(js_memory_cap_mb,      2048),
     FI(max_redirects,         NS_MAX_REDIRECTS),
-    FI(window_width_px,       1280),
-    FI(window_height_px,      800),
-    FI(layout_viewport_px,    1000),
 };
 
 #undef FS
@@ -196,7 +174,6 @@ apply_default(ns_config *c)
         case CFG_REFERER:     *(ns_referer_policy *)slot     = (ns_referer_policy)f->def_int; break;
         case CFG_COOKIE:      *(ns_cookie_policy *)slot      = (ns_cookie_policy)f->def_int; break;
         case CFG_COLOR_SCHEME:    *(ns_color_scheme_pref *)slot   = (ns_color_scheme_pref)f->def_int; break;
-        case CFG_REDUCED_MOTION:  *(ns_reduced_motion_pref *)slot = (ns_reduced_motion_pref)f->def_int; break;
         }
     }
 }
@@ -215,7 +192,6 @@ apply_pair(ns_config *c, const char *key, const char *value)
         case CFG_REFERER:      *(ns_referer_policy *)slot     = parse_referer_policy(value, *(ns_referer_policy *)slot); break;
         case CFG_COOKIE:       *(ns_cookie_policy *)slot      = parse_cookie_policy(value, *(ns_cookie_policy *)slot); break;
         case CFG_COLOR_SCHEME:   *(ns_color_scheme_pref *)slot   = parse_color_scheme(value, *(ns_color_scheme_pref *)slot); break;
-        case CFG_REDUCED_MOTION: *(ns_reduced_motion_pref *)slot = parse_reduced_motion(value, *(ns_reduced_motion_pref *)slot); break;
         }
         return;
     }
@@ -333,7 +309,6 @@ adopt_field(ns_config *dst, ns_config *src, const cfg_field *f)
     case CFG_REFERER:        *(ns_referer_policy *)to = *(ns_referer_policy *)from; break;
     case CFG_COOKIE:         *(ns_cookie_policy *)to = *(ns_cookie_policy *)from; break;
     case CFG_COLOR_SCHEME:   *(ns_color_scheme_pref *)to = *(ns_color_scheme_pref *)from; break;
-    case CFG_REDUCED_MOTION: *(ns_reduced_motion_pref *)to = *(ns_reduced_motion_pref *)from; break;
     }
 }
 
@@ -356,7 +331,6 @@ ns_config_shutdown(void)
     g_free(g_cfg.user_agent);
     g_free(g_cfg.accept_language);
     g_free(g_cfg.search_engine);
-    g_free(g_cfg.ai_model_mirror);
     g_free(g_cfg.http_proxy);
     g_free(g_cfg.https_proxy);
     g_free(g_cfg.no_proxy);
@@ -411,12 +385,6 @@ static const char *const color_scheme_names[] = {
     [NS_COLOR_SCHEME_PREF_DARK]  = "dark",
 };
 
-static const char *const reduced_motion_names[] = {
-    [NS_REDUCED_MOTION_PREF_AUTO]          = "auto",
-    [NS_REDUCED_MOTION_PREF_NO_PREFERENCE] = "no-preference",
-    [NS_REDUCED_MOTION_PREF_REDUCE]        = "reduce",
-};
-
 static const char *
 referer_policy_name(ns_referer_policy p)
 {
@@ -441,14 +409,6 @@ color_scheme_name(ns_color_scheme_pref p)
     return color_scheme_names[p];
 }
 
-static const char *
-reduced_motion_name(ns_reduced_motion_pref p)
-{
-    if ((unsigned)p >= G_N_ELEMENTS(reduced_motion_names) || !reduced_motion_names[p])
-        return "auto";
-    return reduced_motion_names[p];
-}
-
 static char *
 field_string(const ns_config *c, const cfg_field *f)
 {
@@ -470,8 +430,6 @@ field_string(const ns_config *c, const cfg_field *f)
         return g_strdup(cookie_policy_name(*(const ns_cookie_policy *)slot));
     case CFG_COLOR_SCHEME:
         return g_strdup(color_scheme_name(*(const ns_color_scheme_pref *)slot));
-    case CFG_REDUCED_MOTION:
-        return g_strdup(reduced_motion_name(*(const ns_reduced_motion_pref *)slot));
     }
     return g_strdup("");
 }
@@ -498,8 +456,7 @@ config_free_strings(ns_config *c)
 
 static const char *const unprompted_keys[] = {
     "speculative_preload", "async_image_decode", "images_enabled",
-    "cache_cap_mb", "window_width_px", "window_height_px",
-    "layout_viewport_px",
+    "cache_cap_mb",
 };
 
 static gboolean
@@ -694,9 +651,6 @@ ns_config_dump(void)
         g_string_append_printf(s, "accept_language       = (auto: %s)\n",
                                ns_net_default_accept_language());
     g_string_append_printf(s, "search_engine         = %s\n", c->search_engine);
-    if (c->ai_model_mirror && *c->ai_model_mirror)
-        g_string_append_printf(s, "ai_model_mirror       = %s\n",
-                               c->ai_model_mirror);
     g_string_append_printf(s, "gsk_renderer          = %s\n",
                            c->gsk_renderer && *c->gsk_renderer
                                ? c->gsk_renderer : "auto");
@@ -717,7 +671,6 @@ ns_config_dump(void)
     g_string_append_printf(s, "referer_policy        = %s\n", referer_policy_name(c->referer_policy));
     g_string_append_printf(s, "cookie_policy         = %s\n", cookie_policy_name(c->cookie_policy));
     g_string_append_printf(s, "color_scheme          = %s\n", color_scheme_name(c->color_scheme));
-    g_string_append_printf(s, "reduced_motion        = %s\n", reduced_motion_name(c->reduced_motion));
     g_string_append_printf(s, "do_not_track          = %s\n", c->do_not_track ? "true" : "false");
     g_string_append_printf(s, "safe_browsing         = %s\n", c->safe_browsing ? "true" : "false");
     g_string_append_printf(s, "global_privacy_control = %s\n", c->global_privacy_control ? "true" : "false");
@@ -730,8 +683,6 @@ ns_config_dump(void)
     g_string_append_printf(s, "javascript_enabled    = %s\n", c->javascript_enabled ? "true" : "false");
     g_string_append_printf(s, "webgl_enabled         = %s\n", c->webgl_enabled ? "true" : "false");
     g_string_append_printf(s, "webgpu                = %s\n", c->webgpu_enabled ? "true" : "false");
-    g_string_append_printf(s, "camera_enabled        = %s\n", c->camera_enabled ? "true" : "false");
-    g_string_append_printf(s, "microphone_enabled    = %s\n", c->microphone_enabled ? "true" : "false");
     g_string_append_printf(s, "local_storage_enabled = %s\n", c->local_storage_enabled ? "true" : "false");
     g_string_append_printf(s, "cache_enabled         = %s\n", c->cache_enabled ? "true" : "false");
     g_string_append_printf(s, "tls_allow_insecure_override = %s\n", c->tls_allow_insecure_override ? "true" : "false");
@@ -742,8 +693,5 @@ ns_config_dump(void)
     g_string_append_printf(s, "js_eval_budget_ms     = %d\n", c->js_eval_budget_ms);
     g_string_append_printf(s, "js_memory_cap_mb      = %d\n", c->js_memory_cap_mb);
     g_string_append_printf(s, "max_redirects         = %d\n", c->max_redirects);
-    g_string_append_printf(s, "window_width_px       = %d\n", c->window_width_px);
-    g_string_append_printf(s, "window_height_px      = %d\n", c->window_height_px);
-    g_string_append_printf(s, "layout_viewport_px    = %d\n", c->layout_viewport_px);
     return g_string_free(s, FALSE);
 }
