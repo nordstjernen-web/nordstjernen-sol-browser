@@ -3,6 +3,20 @@ Changelog:
 
 1.0.48-dev:
 ======
+* Canvas `fillRect()`, `strokeRect()` and `clearRect()` leave the current
+  path alone, as the HTML spec requires. They used to paint whatever path
+  the page had built in the rectangle's style and then discard it, so
+  `beginPath(); arc(); strokeRect(); fill()` outlined the arc and filled
+  nothing.
+* Dead code removed: twelve exported functions nothing called, seven
+  config keys nothing read (`ai_model_mirror`, `reduced_motion`,
+  `camera_enabled`, `microphone_enabled`, `window_width_px`,
+  `window_height_px`, `layout_viewport_px`), four struct fields that were
+  written but never read, and an unused icon macro. 109 functions that
+  only their own file calls are now `static`, so the compiler flags them
+  if they fall out of use.
+* README: the optional build dependencies are a table, with each
+  library's build switch and role.
 * Scripts in a document written into an `<iframe>` with
   `document.open()` / `document.write()` now run, in the frame's own
   realm, whether or not the page calls `document.close()`. Before, the
