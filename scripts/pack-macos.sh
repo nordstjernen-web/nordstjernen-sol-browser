@@ -220,6 +220,10 @@ FW="$STAGE/Contents/Frameworks"
 mkdir -p "$RES/share/nordstjernen/i18n"
 cp "$ROOT"/data/i18n/*.lang "$RES/share/nordstjernen/i18n/" 2>/dev/null || true
 cp "$ROOT/data/safebrowsing.list" "$RES/share/nordstjernen/" 2>/dev/null || true
+if [ -d "$BUILDDIR/src/pdfjs" ]; then
+    mkdir -p "$RES/share/nordstjernen/pdfjs"
+    cp "$BUILDDIR"/src/pdfjs/* "$RES/share/nordstjernen/pdfjs/"
+fi
 
 # Homebrew's "sdl2" is the sdl2-compat shim: the audio helper links
 # libSDL2-2.0.0.dylib, but that shim dlopen's the real SDL3 at runtime

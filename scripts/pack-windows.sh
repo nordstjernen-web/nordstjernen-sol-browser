@@ -236,6 +236,15 @@ mkdir -p "$APP/share/nordstjernen"
 cp "$ROOT/License.md" "$APP/share/nordstjernen/"
 cp "$ROOT/COPYING" "$APP/share/nordstjernen/"
 
+# Runtime data the engine looks up next to the binary: the UI translation
+# catalogues and the PDF.js files the build fetched (absent when -Dpdfjs=disabled).
+mkdir -p "$APP/share/nordstjernen/i18n"
+cp "$ROOT"/data/i18n/*.lang "$APP/share/nordstjernen/i18n/"
+if [ -d "$BUILDDIR/src/pdfjs" ]; then
+    mkdir -p "$APP/share/nordstjernen/pdfjs"
+    cp "$BUILDDIR"/src/pdfjs/* "$APP/share/nordstjernen/pdfjs/"
+fi
+
 # Third-party copyright + license notices required by the libraries we ship.
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$OUT/"
 

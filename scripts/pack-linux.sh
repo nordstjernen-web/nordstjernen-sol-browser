@@ -166,6 +166,15 @@ cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/"
 cp "$ROOT/License.md" "$STAGE/"
 cp "$ROOT/COPYING" "$STAGE/"
 
+# Runtime data the engine looks up next to the binary: the UI translation
+# catalogues and the PDF.js files the build fetched (absent when -Dpdfjs=disabled).
+mkdir -p "$STAGE/share/nordstjernen/i18n"
+cp "$ROOT"/data/i18n/*.lang "$STAGE/share/nordstjernen/i18n/"
+if [ -d "$BUILDDIR/src/pdfjs" ]; then
+    mkdir -p "$STAGE/share/nordstjernen/pdfjs"
+    cp "$BUILDDIR"/src/pdfjs/* "$STAGE/share/nordstjernen/pdfjs/"
+fi
+
 if [ "$WEBM" = 1 ]; then
     WEBM_REQ_NOTE='- FFmpeg libav* (libavformat / libavcodec / libavutil / libswscale /
   libswresample) — **inline WebM playback** (VP9/VP8 video + Opus/Vorbis
