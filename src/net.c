@@ -8,6 +8,7 @@
 #include "cache.h"
 #include "config.h"
 #include "content_decode.h"
+#include "about_page.h"
 #include "history.h"
 #include "csp.h"
 #include "connection_allowlist.h"
@@ -20,7 +21,6 @@
 #include "safebrowsing.h"
 #include "safebrowsing_google.h"
 #include "security.h"
-#include "about_logo_gif.h"
 #include "cookies.h"
 
 #include <curl/curl.h>
@@ -2967,84 +2967,6 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
     return bytes;
 }
 
-static char *
-about_read_first(const char *const *rel_paths, gsize *out_len)
-{
-    const char *exe = ns_app_self_exe();
-    char *exe_dir = exe ? g_path_get_dirname(exe) : g_strdup(".");
-    const char *user_data_dir = g_get_user_data_dir();
-    const char *const *system_data_dirs = g_get_system_data_dirs();
-    char *contents = NULL;
-    gsize len = 0;
-    for (int i = 0; rel_paths[i]; i++) {
-        char *path = g_build_filename(exe_dir, rel_paths[i], NULL);
-        gboolean ok = g_file_get_contents(path, &contents, &len, NULL);
-        g_free(path);
-        if (ok) break;
-        if (user_data_dir && *user_data_dir) {
-            path = g_build_filename(user_data_dir, rel_paths[i], NULL);
-            ok = g_file_get_contents(path, &contents, &len, NULL);
-            g_free(path);
-            if (ok) break;
-        }
-        for (int j = 0; system_data_dirs && system_data_dirs[j]; j++) {
-            path = g_build_filename(system_data_dirs[j], rel_paths[i], NULL);
-            ok = g_file_get_contents(path, &contents, &len, NULL);
-            g_free(path);
-            if (ok) break;
-        }
-        if (ok) break;
-    }
-    g_free(exe_dir);
-    if (out_len) *out_len = contents ? len : 0;
-    return contents;
-}
-
-static const char *
-about_logo_data_uri(void)
-{
-    static char *cached = NULL;
-    if (cached) return cached;
-
-    static const char *const gif_paths[] = {
-        "share/icons/hicolor/scalable/apps/nordstjernen.gif",
-        "../share/icons/hicolor/scalable/apps/nordstjernen.gif",
-        "../../data/icons/hicolor/scalable/apps/nordstjernen.gif",
-        "data/icons/hicolor/scalable/apps/nordstjernen.gif",
-        NULL,
-    };
-    gsize gif_len = 0;
-    char *gif = about_read_first(gif_paths, &gif_len);
-    if (gif) {
-        gchar *b64 = g_base64_encode((const guchar *)gif, gif_len);
-        g_free(gif);
-        cached = g_strconcat("data:image/gif;base64,", b64, NULL);
-        g_free(b64);
-        return cached;
-    }
-
-    cached = g_strconcat("data:image/gif;base64,", about_logo_gif_b64, NULL);
-    return cached;
-}
-
-static char *
-about_logo_markup(void)
-{
-    return g_strdup_printf("<img class=\"mark-img\" src=\"%s\" "
-                           "alt=\"Nordstjernen\" aria-hidden=\"true\">",
-                           about_logo_data_uri());
-}
-
-static char *
-about_substitute(const char *template_text,
-                 const char *placeholder, const char *value)
-{
-    char **parts = g_strsplit(template_text, placeholder, -1);
-    char *joined = g_strjoinv(value, parts);
-    g_strfreev(parts);
-    return joined;
-}
-
 static void
 diag_kv(GString *s, const char *key, const char *value)
 {
@@ -3433,7 +3355,7 @@ build_about_markdown_page(const char *const *paths, const char *title,
                           const char *back_href, const char *back_label,
                           const char *missing_file)
 {
-    char *text = about_read_first(paths, NULL);
+    char *text = ns_about_read_first(paths, NULL);
     if (!text) {
         return g_strdup_printf(
             "<!doctype html><meta charset=utf-8>"
@@ -4852,145 +4774,6 @@ synthesize_file_response(const char *url, const char *top_url,
     return TRUE;
 }
 
-static const char k_about_start_template[] =
-    "<!doctype html><html lang=\"en\"><head>"
-    "<meta charset=\"utf-8\">"
-    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-    "<meta name=\"color-scheme\" content=\"light dark\">"
-    "<title>New Tab</title>" NS_ABOUT_ICON_START
-    "<style>\n" NS_ABOUT_BASE_CSS
-    "html,body{height:100%}\n"
-    ".ntp{max-width:720px;min-height:100vh;margin:0 auto;"
-    "padding:48px 24px 10vh;display:flex;flex-direction:column;"
-    "align-items:center;justify-content:center}\n"
-    ".brand{display:flex;flex-direction:column;align-items:center;"
-    "gap:12px;margin-bottom:32px}\n"
-    ".mark-img{display:block;width:56px;height:56px;border-radius:15px;"
-    "box-shadow:0 8px 22px rgba(20,40,110,.24)}\n"
-    ".brand h1{margin:0;font-size:32px;font-weight:700;"
-    "letter-spacing:-.02em;line-height:1.1;text-align:center}\n"
-    ".brand h1 .ver{color:var(--faint);font-weight:500}\n"
-    "@media (prefers-color-scheme:dark){.mark-img{box-shadow:"
-    "0 0 0 1px rgba(255,255,255,.1),0 8px 24px rgba(0,0,0,.5)}}\n"
-
-    ".search{display:flex;align-items:center;gap:12px;width:100%;"
-    "height:58px;padding:0 7px 0 22px;border-radius:999px;"
-    "background:var(--card);border:1px solid var(--line);"
-    "box-shadow:var(--shadow)}\n"
-    ".search:focus-within{border-color:var(--accent);"
-    "box-shadow:0 0 0 4px var(--accent-soft),var(--shadow)}\n"
-    ".search svg{flex:0 0 auto;color:var(--faint)}\n"
-    ".search input{flex:1 1 auto;min-width:0;height:100%;border:0;"
-    "outline:0;background:transparent;color:var(--text);font:inherit;"
-    "font-size:17px}\n"
-    ".search button{flex:0 0 auto;display:flex;align-items:center;"
-    "justify-content:center;width:44px;height:44px;border:0;"
-    "border-radius:50%;background:var(--accent);color:var(--accent-ink);"
-    "cursor:pointer}\n"
-    ".search button svg{color:var(--accent-ink)}\n"
-    ".search:not(.typed) button{background:var(--field);"
-    "color:var(--muted)}\n"
-    ".search:not(.typed) button svg{color:var(--muted)}\n"
-    ".search button:hover{filter:brightness(1.08)}\n"
-    ".hint{min-height:18px;margin:10px 0 0;color:var(--faint);"
-    "font-size:13px;text-align:center}\n"
-    ".hint kbd{padding:1px 6px;border:1px solid var(--line);"
-    "border-radius:5px;font:inherit;font-size:12px;color:var(--muted)}\n"
-    ".sites{display:grid;grid-template-columns:repeat(4,124px);gap:6px 10px;"
-    "justify-content:center;margin-top:22px}\n"
-    ".site{display:flex;flex-direction:column;align-items:center;gap:9px;"
-    "min-width:0;padding:14px 6px 10px;border-radius:16px;color:var(--text)}\n"
-    ".site:hover{background:var(--field);text-decoration:none}\n"
-    ".av{display:flex;align-items:center;justify-content:center;"
-    "width:48px;height:48px;border-radius:14px;background:var(--accent-soft);"
-    "color:var(--accent);font-size:20px;font-weight:700;"
-    "text-transform:uppercase}\n"
-    NS_ABOUT_TINT_CSS
-    ".nm{max-width:100%;font-size:12.5px;color:var(--muted);"
-    "white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n"
-    ".links{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;"
-    "margin-top:28px}\n"
-    ".links a{display:flex;align-items:center;gap:7px;height:32px;"
-    "padding:0 12px;border-radius:999px;color:var(--muted);font-size:13px;"
-    "font-weight:600}\n"
-    ".links a:hover{background:var(--field);color:var(--text);"
-    "text-decoration:none}\n"
-    ".links svg{width:16px;height:16px;color:var(--accent)}\n"
-
-
-
-    "@media (max-width:560px){.ntp{padding-top:7vh}"
-    ".brand h1{font-size:26px}"
-    ".sites{grid-template-columns:repeat(4,minmax(0,1fr))}}\n"
-    "</style></head>"
-    "<body><main class=\"ntp\">"
-    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen Web Browser "
-    "<span class=\"ver\">" NS_VERSION "</span></h1></div>"
-    "<form class=\"search\" id=\"dsearch\" role=\"search\">"
-    "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
-    " stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\">"
-    "<circle cx=\"7\" cy=\"7\" r=\"4.6\"/><path d=\"M10.4 10.4 14 14\"/></svg>"
-    "<input id=\"sq\" name=\"q\" autocomplete=\"off\" dir=\"auto\""
-    " aria-label=\"Search the web or enter an address\""
-    " placeholder=\"Search with __ND_SEARCH_NAME__\">"
-    "<button type=\"submit\" aria-label=\"Search\">"
-    "<svg width=\"18\" height=\"18\" viewBox=\"0 0 16 16\" fill=\"none\""
-    " stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\""
-    " stroke-linejoin=\"round\"><path d=\"M3 8h9.5M8.5 4l4 4-4 4\"/></svg>"
-    "</button></form>"
-    "<p class=\"hint\" id=\"hint\" aria-live=\"polite\"></p>"
-    "__ND_TOP_SITES__"
-    "<nav class=\"links\">"
-    "<a href=\"about:history\">"
-    "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
-    " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\""
-    " stroke-linejoin=\"round\"><circle cx=\"8\" cy=\"8\" r=\"5.75\"/>"
-    "<path d=\"M8 4.75V8l2.25 1.5\"/></svg>History</a>"
-    "<a href=\"about:settings\">"
-    "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
-    " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\">"
-    "<path d=\"M2.75 4.5h6.5M12.25 4.5h1M2.75 11.5h1M6.75 11.5h6.5\"/>"
-    "<circle cx=\"10.75\" cy=\"4.5\" r=\"1.5\"/>"
-    "<circle cx=\"5.25\" cy=\"11.5\" r=\"1.5\"/></svg>Settings</a>"
-    "<a href=\"about:nordstjernen\">"
-    "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
-    " stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\">"
-    "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/><path d=\"M8 7.25v3.5\"/>"
-    "<circle cx=\"8\" cy=\"5.1\" r=\".4\" fill=\"currentColor\"/>"
-    "</svg>About</a>"
-    "</nav>"
-    "</main>"
-    "<script>\n"
-    "var searchUrl='__ND_SEARCH_URL__';\n"
-    "var dsearch=document.getElementById('dsearch');\n"
-    "var sq=document.getElementById('sq');\n"
-    "function addressFor(s){\n"
-    " if(/^(https?|file|about|view-source):/i.test(s)) return s;\n"
-    " if(!/\\s/.test(s)&&/^(localhost|[^\\s.\\/:]+(\\.[^\\s.\\/:]+)+)"
-    "(:\\d+)?(\\/.*)?$/i.test(s)) return 'https://'+s;\n"
-    " return null;}\n"
-    "var hint=document.getElementById('hint');\n"
-    "function showHint(){\n"
-    " var s=sq.value.trim(); hint.textContent='';\n"
-    " if(!s) return;\n"
-    " var a=addressFor(s);\n"
-    " hint.appendChild(document.createTextNode('Press '));\n"
-    " var k=document.createElement('kbd'); k.textContent='Enter';\n"
-    " hint.appendChild(k);\n"
-    " hint.appendChild(document.createTextNode(a\n"
-    "  ? ' to open '+a.replace(/^https:\\/\\//,'')\n"
-    "  : ' to search with __ND_SEARCH_NAME__'));}\n"
-    "sq.addEventListener('input',function(){showHint();"
-    "dsearch.classList.toggle('typed',sq.value.trim()!=='');});\n"
-    "dsearch.addEventListener('submit',function(e){e.preventDefault();\n"
-    " var s=sq.value.trim(); if(!s) return;\n"
-    " var a=addressFor(s); if(a){window.location.href=a;return;}\n"
-    " window.location.href=searchUrl.indexOf('%s')>=0\n"
-    "  ? searchUrl.replace('%s',encodeURIComponent(s))\n"
-    "  : searchUrl+encodeURIComponent(s);});\n"
-
-    "</script></body></html>";
-
 static const char k_about_nordstjernen_template[] =
     "<!doctype html><html lang=\"en\"><head>"
     "<meta charset=\"utf-8\">"
@@ -5590,64 +5373,27 @@ synthesize_about_response(const char *url, const char *top_url,
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
     } else if (g_str_equal(what, "start") || g_str_equal(what, "home") ||
                g_str_equal(what, "newtab")) {
-        ns_config_lock();
-        const ns_config *scfg = ns_config_get();
-        g_autofree char *engine_dup =
-            (scfg && scfg->search_engine && *scfg->search_engine)
-            ? g_strdup(scfg->search_engine)
-            : g_strdup(NS_DEFAULT_SEARCH_ENGINE);
-        ns_config_unlock();
-        const char *engine = engine_dup;
-        GString *esc_engine = g_string_new(NULL);
-        for (const char *p = engine; *p; p++) {
-            if (*p == '\'' || *p == '\\' || *p == '<' || *p == '"')
-                g_string_append_printf(esc_engine, "\\u%04x", (guchar)*p);
-            else
-                g_string_append_c(esc_engine, *p);
-        }
-        char *engine_name = ns_search_engine_name();
-        const char *search_name = engine_name ? engine_name : "the web";
-        char *with_search = about_substitute(k_about_start_template,
-                                             "__ND_SEARCH_URL__",
-                                             esc_engine->str);
-        char *esc_name = g_markup_escape_text(search_name, -1);
-        char *with_name = about_substitute(with_search,
-                                           "__ND_SEARCH_NAME__",
-                                           esc_name);
-        g_free(esc_name);
-        g_free(with_search);
-        g_string_free(esc_engine, TRUE);
-        g_free(engine_name);
-        char *logo_markup = about_logo_markup();
-        char *with_logo = about_substitute(with_name, "__ND_LOGO_MARK__",
-                                           logo_markup);
-        g_free(logo_markup);
-        g_free(with_name);
-        char *sites = ns_net_is_private() ? g_strdup("")
-                                          : ns_history_top_sites_html(8);
-        char *body = about_substitute(with_logo, "__ND_TOP_SITES__", sites);
-        g_free(sites);
-        g_free(with_logo);
+        char *body = ns_about_start_html(ns_net_is_private());
         g_byte_array_append(resp->body, (const guint8 *)body,
                             (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "nordstjernen") || g_str_equal(what, "about")) {
-        char *logo_markup = about_logo_markup();
-        char *with_logo = about_substitute(k_about_nordstjernen_template,
+        char *logo_markup = ns_about_logo_markup();
+        char *with_logo = ns_about_substitute(k_about_nordstjernen_template,
                                            "__ND_LOGO_MARK__", logo_markup);
         g_free(logo_markup);
         char *security = about_security_html();
-        char *with_security = about_substitute(with_logo, "__ND_SECURITY__",
+        char *with_security = ns_about_substitute(with_logo, "__ND_SECURITY__",
                                                security);
         g_free(security);
         g_free(with_logo);
         char *diag = about_diagnostics_html();
-        char *with_diag = about_substitute(with_security, "__ND_DIAG__",
+        char *with_diag = ns_about_substitute(with_security, "__ND_DIAG__",
                                            diag);
         g_free(diag);
         g_free(with_security);
         char *extensions = about_extensions_html();
-        char *body = about_substitute(with_diag, "__ND_EXTENSIONS__",
+        char *body = ns_about_substitute(with_diag, "__ND_EXTENSIONS__",
                                       extensions);
         g_free(extensions);
         g_free(with_diag);
