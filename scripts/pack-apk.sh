@@ -43,7 +43,7 @@ else
 fi
 log "version=$VERSION apkver=$APKVER arch=$ARCH"
 
-export PACKAGER="${PACKAGER:-Andreas Røsdal <andreas.rosdal@gmail.com>}"
+export PACKAGER="${PACKAGER:-${NS_PACKAGER:-Andreas Røsdal}}"
 ABUILD_HOME="$ROOT/dist/abuild-home"
 rm -rf "$ABUILD_HOME"
 mkdir -p "$ABUILD_HOME"
@@ -86,7 +86,7 @@ exit 0
 EOF
 
 cat > "$BUILDTOP/APKBUILD" <<APKBUILD_EOF
-# Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
+# Maintainer: ${PACKAGER}
 pkgname=nordstjernen
 pkgver=${APKVER}
 pkgrel=0

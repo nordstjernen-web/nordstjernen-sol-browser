@@ -151,7 +151,7 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 
 %changelog
-* $(LC_ALL=C date "+%a %b %d %Y") Andreas Røsdal <andreas.rosdal@gmail.com> - ${RPMVERSION}-1
+* $(LC_ALL=C date "+%a %b %d %Y") ${NS_PACKAGER:-Andreas Røsdal} - ${RPMVERSION}-1
 - Source RPM release of Nordstjernen ${VERSION}.
 SPEC_EOF
 

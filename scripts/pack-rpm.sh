@@ -77,6 +77,23 @@ if [ -x "$STAGE/nordstjernen-audio" ]; then
     AUDIO_FILES='%{_bindir}/nordstjernen-audio'
 fi
 
+DATA_SOURCE=""
+DATA_INSTALL=""
+DATA_FILES=""
+DATA_DIRS=""
+for d in i18n pdfjs; do
+    [ -d "$STAGE/share/nordstjernen/$d" ] && DATA_DIRS="$DATA_DIRS $d"
+done
+if [ -n "$DATA_DIRS" ]; then
+    tar -C "$STAGE/share/nordstjernen" -czf "$RPMTOP/SOURCES/nordstjernen-data.tar.gz" $DATA_DIRS
+    DATA_SOURCE="Source10:       nordstjernen-data.tar.gz"
+    DATA_INSTALL='tar -xzf %{SOURCE10} -C %{buildroot}%{_datadir}/nordstjernen'
+    for d in $DATA_DIRS; do
+        DATA_FILES="${DATA_FILES:+$DATA_FILES
+}%{_datadir}/nordstjernen/$d/"
+    done
+fi
+
 SPEC="$RPMTOP/SPECS/nordstjernen.spec"
 cat > "$SPEC" <<SPEC_EOF
 Name:           nordstjernen
@@ -98,6 +115,7 @@ Source8:        License.md
 Source9:        COPYING
 ${AUDIO_SOURCE}
 ${WGPU_SOURCE}
+${DATA_SOURCE}
 
 AutoReqProv:    yes
 ${WGPU_EXCLUDE}
@@ -139,6 +157,7 @@ install -m644 %{SOURCE8} %{buildroot}%{_datadir}/nordstjernen/
 install -m644 %{SOURCE9} %{buildroot}%{_datadir}/nordstjernen/
 ${AUDIO_INSTALL}
 ${WGPU_INSTALL}
+${DATA_INSTALL}
 
 %files
 %license %{_datadir}/nordstjernen/License.md
@@ -150,6 +169,7 @@ ${WGPU_INSTALL}
 %{_docdir}/nordstjernen/
 ${AUDIO_FILES}
 ${WGPU_FILES}
+${DATA_FILES}
 
 %post
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
@@ -177,7 +197,7 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 
 %changelog
-* $(date "+%a %b %d %Y") Andreas Røsdal <andreas.rosdal@gmail.com> - ${RPMVERSION}-1
+* $(date "+%a %b %d %Y") ${NS_PACKAGER:-Andreas Røsdal} - ${RPMVERSION}-1
 - Prebuilt binary repackaged as an RPM.
 SPEC_EOF
 

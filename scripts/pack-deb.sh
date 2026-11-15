@@ -73,6 +73,13 @@ install -m644 "$ROOT/COPYING" "$PKGROOT/usr/share/nordstjernen/COPYING"
 install -m644 "$ROOT/README.md" "$PKGROOT/usr/share/doc/nordstjernen/"
 install -m644 "$ROOT/THIRD-PARTY-LICENSES.md" "$PKGROOT/usr/share/doc/nordstjernen/"
 install -m644 "$ROOT/License.md" "$PKGROOT/usr/share/doc/nordstjernen/copyright"
+for d in i18n pdfjs; do
+    if [ -d "$STAGE/share/nordstjernen/$d" ]; then
+        cp -R "$STAGE/share/nordstjernen/$d" "$PKGROOT/usr/share/nordstjernen/"
+    fi
+done
+find "$PKGROOT/usr/share/nordstjernen" -type d -exec chmod 755 {} +
+find "$PKGROOT/usr/share/nordstjernen" -type f -exec chmod 644 {} +
 
 # Bundle the volatile image-codec libraries (libavif and the AV1
 # codecs it pulls in) under /usr/lib/nordstjernen with an $ORIGIN rpath.
@@ -219,7 +226,7 @@ cat > "$PKGROOT/DEBIAN/control" <<EOF
 Package: nordstjernen
 Version: ${VERSION}
 Architecture: ${DEBARCH}
-Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
+Maintainer: ${NS_PACKAGER:-Andreas Røsdal}
 Installed-Size: ${INSTALLED_KB}
 Depends: ${RUNTIME_DEPS}
 Section: web

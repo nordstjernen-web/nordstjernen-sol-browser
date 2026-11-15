@@ -3,6 +3,16 @@ Changelog:
 
 1.0.49-dev:
 ======
+* The .deb and .rpm packages include the PDF viewer and the UI
+  translations. They installed only the binaries, icons and
+  licence files, so PDF.js — which 1.0.48 moved out of the binary into
+  `share/nordstjernen/pdfjs` — and the `share/nordstjernen/i18n`
+  catalogues were missing: PDFs showed the "viewer unavailable" notice
+  and the UI stayed in English. The .zip, macOS and Windows packages were
+  not affected.
+* The .deb, .rpm, source RPM and Alpine packaging scripts take the
+  maintainer from `NS_PACKAGER` (for example `Name <address>`) instead of
+  a hard-coded address; unset, they name the maintainer without one.
 
 1.0.48:
 ======
