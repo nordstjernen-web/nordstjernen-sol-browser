@@ -3,6 +3,9 @@ Changelog:
 
 1.0.48-dev:
 ======
+* about:nordstjernen has a "Copy details" button that puts the version,
+  operating system, privacy, sandbox, Safe Browsing, library and feature
+  rows on the clipboard as plain text, ready to paste into a bug report.
 * about:nordstjernen is reorganised:
   - The header gives the version, build date, operating system and
     architecture on one line, next to a Settings button.
