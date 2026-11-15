@@ -29094,6 +29094,16 @@ ns_style_clone(const ns_style *src)
     return c;
 }
 
+int
+ns_style_line_clamp(const ns_style *s)
+{
+    if (!s || !s->clamps_lines) return 0;
+    const ns_css_value *clamp = s->values[NS_CSS_LINE_CLAMP];
+    if (!clamp || clamp->kind != NS_CSS_V_LENGTH || clamp->u.length.v < 1)
+        return 0;
+    return (int)clamp->u.length.v;
+}
+
 const char *
 ns_style_keyword(const ns_style *s, ns_css_prop p)
 {
@@ -33552,6 +33562,7 @@ legacy_webkit_box_display(ns_style *s, ns_display d)
     const ns_css_value *clamp = s->values[NS_CSS_LINE_CLAMP];
     if (clamp && clamp->kind == NS_CSS_V_LENGTH && clamp->u.length.v >= 1) {
         d.inner = NS_DISPLAY_INNER_FLOW_ROOT;
+        s->clamps_lines = TRUE;
         return d;
     }
     ns_css_value_free(s->values[NS_CSS_FLEX_DIRECTION]);
@@ -37514,6 +37525,7 @@ ns_style_clone_shared(const ns_style *s)
     ns_style *c = ns_style_alloc();
     c->share_id = s->share_id;
     c->display  = s->display;
+    c->clamps_lines = s->clamps_lines;
     c->explicit_inherit = s->explicit_inherit;
     c->env_dependent = s->env_dependent;
     c->currentcolor_bits = s->currentcolor_bits;

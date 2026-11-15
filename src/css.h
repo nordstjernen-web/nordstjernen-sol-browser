@@ -1174,6 +1174,7 @@ typedef struct ns_style {
     ns_css_value *values[NS_CSS_PROP_COUNT];
     ns_display display;
     guint8 specified_inline;
+    guint8 clamps_lines;
     gboolean scheme_dark;
     struct ns_style *before;
     struct ns_style *after;
@@ -1211,6 +1212,8 @@ const ns_style *ns_css_style_starting(const void *node);
 gboolean ns_css_highlight_colors(const ns_node *el, const char *name,
                                  const ns_css_value **background,
                                  const ns_css_value **color);
+
+int    ns_style_line_clamp(const ns_style *s);
 
 ns_display ns_css_display_of(const ns_style *s);
 

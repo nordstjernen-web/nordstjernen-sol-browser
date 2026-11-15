@@ -3,6 +3,12 @@ Changelog:
 
 1.0.48-dev:
 ======
+* `-webkit-line-clamp` cuts the text only in a vertical `-webkit-box`
+  (`display: -webkit-box` or `-webkit-inline-box` with
+  `-webkit-box-orient: vertical`), as in Chrome. Before, every block
+  with the property lost the lines past the clamp and got an ellipsis,
+  so a card title that sets the clamp on a plain block, a flex item or
+  a list item showed one line where Chrome shows all of them.
 * The desktop browser follows the system's "reduce motion" setting. When
   animations are switched off for GTK (`gtk-enable-animations`), pages
   see `prefers-reduced-motion: reduce`, in CSS and in `matchMedia()`.

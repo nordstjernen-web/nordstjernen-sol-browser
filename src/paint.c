@@ -4792,9 +4792,9 @@ inline_layout_begin(const ns_box *b, const ns_style *s,
     if (ns_paint_text_ellipsizes(s))
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
     {
-        const ns_css_value *lc = s ? s->values[NS_CSS_LINE_CLAMP] : NULL;
-        if (lc && lc->kind == NS_CSS_V_LENGTH && lc->u.length.v >= 1) {
-            ns_pango_layout_set_height(layout, -(int)lc->u.length.v);
+        int clamp = ns_style_line_clamp(s);
+        if (clamp) {
+            ns_pango_layout_set_height(layout, -clamp);
             ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
         }
     }
