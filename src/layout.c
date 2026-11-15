@@ -8485,9 +8485,9 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     if (ellip)
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
     {
-        const ns_css_value *lc = parent_style ? parent_style->values[NS_CSS_LINE_CLAMP] : NULL;
-        if (lc && lc->kind == NS_CSS_V_LENGTH && lc->u.length.v >= 1) {
-            ns_pango_layout_set_height(layout, -(int)lc->u.length.v);
+        int clamp = ns_style_line_clamp(parent_style);
+        if (clamp) {
+            ns_pango_layout_set_height(layout, -clamp);
             ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
         }
     }
@@ -8840,7 +8840,7 @@ inline_box_can_fragment_multicol(const ns_box *box, const ns_style *style,
         return FALSE;
     if (ns_paint_text_ellipsizes(style))
         return FALSE;
-    if (style && style->values[NS_CSS_LINE_CLAMP])
+    if (ns_style_line_clamp(style))
         return FALSE;
     if (fabs(ns_text_indent_px(style, basis)) > 0.01)
         return FALSE;
