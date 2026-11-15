@@ -18,7 +18,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HEADER = os.path.join(ROOT, 'src', 'ns_pango_names.h')
 SKIP_FILES = {'ns_pango.h', 'ns_pango_names.h'}
-FORK_ONLY = ('ns_pango_cache_', 'ns_pango_fc_font_map_add_fonts')
+FORK_ONLY = ('ns_pango_cache_', 'ns_pango_fc_font_map_add_fonts',
+             'NS_PANGO_BREAKS_')
 
 NAME = re.compile(r'\b(ns_pango_[a-z0-9_]+'
                   r'|NsPango[A-Za-z0-9_]+'

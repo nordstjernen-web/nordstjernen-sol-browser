@@ -576,6 +576,22 @@ NS_PANGO_AVAILABLE_IN_1_38
 NsPangoAttribute *        ns_pango_attr_foreground_alpha_new         (guint16                      alpha);
 NS_PANGO_AVAILABLE_IN_1_38
 NsPangoAttribute *        ns_pango_attr_background_alpha_new         (guint16                      alpha);
+/**
+ * NS_PANGO_BREAKS_ANYWHERE:
+ *
+ * A value for [func@Pango.attr_allow_breaks_new] that makes every
+ * character break in the range a line break, as CSS word-break: break-all.
+ */
+#define NS_PANGO_BREAKS_ANYWHERE 2
+
+/**
+ * NS_PANGO_BREAKS_WORDS:
+ *
+ * A value for [func@Pango.attr_allow_breaks_new] that keeps
+ * %NS_PANGO_WRAP_WORD_CHAR from breaking inside the words of the range.
+ */
+#define NS_PANGO_BREAKS_WORDS 3
+
 NS_PANGO_AVAILABLE_IN_1_44
 NsPangoAttribute *        ns_pango_attr_allow_breaks_new             (gboolean                     allow_breaks);
 

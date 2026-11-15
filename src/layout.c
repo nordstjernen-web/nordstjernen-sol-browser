@@ -8473,7 +8473,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         ns_pango_layout_set_width(layout, -1);
     else
         ns_pango_layout_set_width(layout, (int)(content_width * NS_PANGO_SCALE));
-    ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
+    ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for_box(box, parent_style));
     if (box->inline_atomics && box->inline_atomics->len > 0)
         ns_paint_apply_text_align(layout, parent_style);
     if (!(box->inline_atomics && box->inline_atomics->len > 0))
@@ -8492,6 +8492,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         }
     }
     NsPangoAttrList *i18n = ns_pango_attr_list_new();
+    ns_paint_apply_wrap_attrs(i18n, box, parent_style);
     ns_paint_apply_i18n(layout, i18n, box);
     ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
     ns_inline_apply_atomic_shapes(i18n, box);
@@ -8709,7 +8710,7 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
     if (!box->text || !*box->text) return NULL;
     NsPangoLayout *layout = make_pango_layout(parent_style);
     ns_pango_layout_set_width(layout, (int)(box->content_width * NS_PANGO_SCALE));
-    ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
+    ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for_box(box, parent_style));
     if (!(box->inline_atomics && box->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, parent_style);
     {
@@ -8720,6 +8721,7 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
     ns_paint_layout_set_inline_text(layout, box->text);
     NsPangoAttrList *i18n = ns_pango_attr_list_new();
+    ns_paint_apply_wrap_attrs(i18n, box, parent_style);
     ns_paint_apply_i18n(layout, i18n, box);
     ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
     ns_inline_apply_atomic_shapes(i18n, box);
@@ -8926,12 +8928,13 @@ inline_box_layout_for_multicol(const ns_box *box, double content_width,
 {
     NsPangoLayout *layout = make_pango_layout(parent_style);
     ns_pango_layout_set_width(layout, (int)(content_width * NS_PANGO_SCALE));
-    ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
+    ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for_box(box, parent_style));
     if (!(box->inline_atomics && box->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, parent_style);
     ns_pango_layout_set_text(layout, box->text, -1);
 
     NsPangoAttrList *i18n = ns_pango_attr_list_new();
+    ns_paint_apply_wrap_attrs(i18n, box, parent_style);
     ns_paint_apply_i18n(layout, i18n, box);
     ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
     ns_inline_apply_spacing(i18n, parent_style, box->text);
@@ -11396,6 +11399,38 @@ min_width_of(ns_box *box, const ns_style *parent_style)
     return w;
 }
 
+static int
+layout_widest_unbreakable_px(NsPangoLayout *layout, NsPangoWrapMode wrap)
+{
+    const char *text = ns_pango_layout_get_text(layout);
+    int n_attrs = 0;
+    const NsPangoLogAttr *attrs =
+        ns_pango_layout_get_log_attrs_readonly(layout, &n_attrs);
+    int widest = 0;
+    for (GSList *l = ns_pango_layout_get_lines_readonly(layout); l; l = l->next) {
+        NsPangoLayoutLine *line = l->data;
+        int unit = 0, spaces = 0;
+        for (GSList *r = line->runs; r; r = r->next) {
+            NsPangoGlyphItem *run = r->data;
+            int n = run->item->num_chars;
+            int *widths = g_new(int, n);
+            ns_pango_glyph_item_get_logical_widths(run, text, widths);
+            glong at = g_utf8_pointer_to_offset(text, text + run->item->offset);
+            for (int i = 0; i < n && at + i < n_attrs; i++) {
+                const NsPangoLogAttr *a = &attrs[at + i];
+                if (wrap == NS_PANGO_WRAP_CHAR ? a->is_char_break
+                                               : a->is_line_break)
+                    unit = spaces = 0;
+                unit += widths[i];
+                spaces = a->is_white ? spaces + widths[i] : 0;
+                if (unit - spaces > widest) widest = unit - spaces;
+            }
+            g_free(widths);
+        }
+    }
+    return (int)ceil((double)widest / NS_PANGO_SCALE);
+}
+
 static double
 measure_min_width(ns_box *box, const ns_style *parent_style)
 {
@@ -11420,7 +11455,14 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
                                      box->inline_min_cache_style,
                                      box->inline_min_cache_gen, parent_style))
             return box->inline_min_cache_width;
-        double fast = ns_inline_text_indent_px(box, parent_style, 0) > 0
+        NsPangoAttrList *i18n = ns_pango_attr_list_new();
+        gboolean ranges_differ = FALSE;
+        NsPangoWrapMode wrap = ns_paint_min_content_wrap(
+            i18n, box, parent_style, &ranges_differ);
+        gboolean indented = ns_inline_text_indent_px(box, parent_style, 0) > 0;
+        gboolean by_units = (wrap == NS_PANGO_WRAP_CHAR || ranges_differ) &&
+                            !indented;
+        double fast = wrap != NS_PANGO_WRAP_WORD || ranges_differ || indented
             ? -1 : measure_inline_ascii_min_width(box, parent_style);
         if (fast >= 0) {
             if (cacheable || pass_cacheable) {
@@ -11429,15 +11471,15 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
                 box->inline_min_cache_valid = TRUE;
                 box->inline_min_cache_gen = g_layout_generation;
             }
+            ns_pango_attr_list_unref(i18n);
             return fast;
         }
         NsPangoLayout *layout = make_pango_layout(parent_style);
-        ns_pango_layout_set_width(layout, 1);
-        ns_pango_layout_set_wrap(layout, NS_PANGO_WRAP_WORD);
+        ns_pango_layout_set_width(layout, by_units ? -1 : 1);
+        ns_pango_layout_set_wrap(layout, wrap);
         set_first_line_indent(layout, box, parent_style);
         GArray *saved = measure_inline_atomics_begin(box, parent_style, FALSE);
         ns_pango_layout_set_text(layout, box->text, -1);
-        NsPangoAttrList *i18n = ns_pango_attr_list_new();
         ns_paint_apply_i18n(layout, i18n, box);
         ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
         ns_inline_apply_atomic_shapes(i18n, box);
@@ -11446,7 +11488,10 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         ns_inline_layout_set_attrs(layout, i18n, box);
         ns_pango_attr_list_unref(i18n);
         int pw, ph;
-        text_measure_pixel_size(layout, &pw, &ph);
+        if (by_units)
+            pw = layout_widest_unbreakable_px(layout, wrap);
+        else
+            text_measure_pixel_size(layout, &pw, &ph);
         measure_inline_atomics_end(saved);
         g_object_unref(layout);
         if (cacheable || pass_cacheable) {

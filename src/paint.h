@@ -136,6 +136,14 @@ void ns_paint_apply_font_features(NsPangoAttrList *attrs, const ns_style *style,
                                   guint start, guint end);
 
 NsPangoWrapMode ns_paint_wrap_mode_for(const ns_style *style);
+NsPangoWrapMode ns_paint_wrap_mode_for_box(const ns_box *box,
+                                           const ns_style *style);
+void ns_paint_apply_wrap_attrs(NsPangoAttrList *attrs, const ns_box *box,
+                               const ns_style *style);
+NsPangoWrapMode ns_paint_min_content_wrap(NsPangoAttrList *attrs,
+                                          const ns_box *box,
+                                          const ns_style *style,
+                                          gboolean *ranges_differ);
 void ns_paint_i18n_memo_begin(void);
 void ns_paint_i18n_memo_end(void);
 gboolean ns_paint_text_ellipsizes(const ns_style *style);
