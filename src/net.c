@@ -2979,6 +2979,17 @@ diag_kv(GString *s, const char *key, const char *value)
 }
 
 static void
+diag_kv_long(GString *s, const char *key, const char *value)
+{
+    char *ev = g_markup_escape_text((value && *value) ? value : "Unknown",
+                                    -1);
+    g_string_append_printf(s,
+        "<div class=\"drow long\"><span class=\"dk\">%s</span>"
+        "<span class=\"dv\">%s</span></div>", key, ev);
+    g_free(ev);
+}
+
+static void
 diag_feature(GString *s, const char *key, gboolean on)
 {
     g_string_append_printf(s,
@@ -3042,11 +3053,6 @@ about_safe_browsing_rows(GString *s)
     ns_sb_stats st;
     ns_safebrowsing_get_stats(&st);
     gint64 now = g_get_real_time() / G_USEC_PER_SEC;
-    g_string_append(s, "</div></section>"
-                       "<h2 class=\"group-label\">Safe Browsing"
-                       "<a class=\"edit\" href=\"about:settings#privacy\">"
-                       "Change in Settings</a></h2>"
-                       "<section class=\"card\"><div class=\"diag\">");
     gboolean google = st.enabled && st.have_key;
     diag_state(s, "Google Safe Browsing", google,
                !st.enabled ? "Off in Settings"
@@ -3097,15 +3103,29 @@ about_safe_browsing_rows(GString *s)
     }
 }
 
-static char *
-about_security_html(void)
+static void
+about_privacy_rows(GString *s)
+{
+    const ns_config *cfg = ns_config_get();
+    diag_state(s, "Telemetry", TRUE, "None");
+    gboolean https_first = cfg && cfg->https_first;
+    diag_state(s, "HTTPS-First", https_first, https_first ? "On" : "Off");
+    gboolean strip = cfg && cfg->strip_tracking_params;
+    diag_state(s, "Strip tracking parameters", strip, strip ? "On" : "Off");
+    gboolean gpc = cfg && cfg->global_privacy_control;
+    diag_state(s, "Send Global Privacy Control", gpc, gpc ? "On" : "Off");
+    gboolean dnt = cfg && cfg->do_not_track;
+    diag_state(s, "Send \xe2\x80\x9c" "Do Not Track\xe2\x80\x9d", dnt,
+               dnt ? "On" : "Off");
+    gboolean js_on = !cfg || cfg->javascript_enabled;
+    diag_state(s, "JavaScript", js_on, js_on ? "On" : "Off");
+}
+
+static void
+about_sandbox_rows(GString *s)
 {
     ns_security_status st;
     ns_security_get_status(&st);
-    const ns_config *cfg = ns_config_get();
-    GString *s = g_string_new("<div class=\"diag\">");
-
-
 #if defined(__linux__)
     if (st.landlock_abi > 0) {
         char *abi = g_strdup_printf("Supported (ABI v%d)", st.landlock_abi);
@@ -3168,29 +3188,17 @@ about_security_html(void)
 #ifdef NS_IPC_RUST
     diag_state(s, "Memory-safe message parser", TRUE, "On");
 #endif
+}
 
-    g_string_append(s, "</div></section>"
-                       "<h2 class=\"group-label\">Privacy"
-                       "<a class=\"edit\" href=\"about:settings#privacy\">"
-                       "Change in Settings</a></h2>"
-                       "<section class=\"card\"><div class=\"diag\">");
-    gboolean dnt = cfg && cfg->do_not_track;
-    diag_state(s, "Send \xe2\x80\x9c" "Do Not Track\xe2\x80\x9d", dnt,
-               dnt ? "On" : "Off");
-    gboolean gpc = cfg && cfg->global_privacy_control;
-    diag_state(s, "Send Global Privacy Control", gpc, gpc ? "On" : "Off");
-    gboolean strip = cfg && cfg->strip_tracking_params;
-    diag_state(s, "Strip tracking parameters", strip, strip ? "On" : "Off");
-    gboolean https_first = cfg && cfg->https_first;
-    diag_state(s, "HTTPS-First", https_first, https_first ? "On" : "Off");
-    gboolean js_on = !cfg || cfg->javascript_enabled;
-    g_string_append_printf(s,
-        "<div class=\"drow\"><span class=\"dk\">JavaScript</span>"
-        "<span class=\"dv plain\">%s</span></div>", js_on ? "On" : "Off");
-    diag_state(s, "Telemetry", TRUE, "None");
-
+static char *
+about_security_html(void)
+{
+    GString *s = g_string_new("<div class=\"diag\"><h3>Privacy</h3>");
+    about_privacy_rows(s);
+    g_string_append(s, "<h3>Sandbox and hardening</h3>");
+    about_sandbox_rows(s);
+    g_string_append(s, "<h3>Safe Browsing</h3>");
     about_safe_browsing_rows(s);
-
     g_string_append(s, "</div>");
     return g_string_free(s, FALSE);
 }
@@ -3238,7 +3246,7 @@ about_extensions_html(void)
 }
 
 static char *
-about_diagnostics_html(void)
+about_os_name(void)
 {
     const char *platform =
 #if defined(G_OS_WIN32)
@@ -3250,7 +3258,15 @@ about_diagnostics_html(void)
 #else
         "Unknown";
 #endif
-    const char *arch =
+    char *os = g_get_os_info(G_OS_INFO_KEY_PRETTY_NAME);
+    if (!os) os = g_get_os_info(G_OS_INFO_KEY_NAME);
+    return os ? os : g_strdup(platform);
+}
+
+static const char *
+about_arch_name(void)
+{
+    return
 #if defined(__x86_64__) || defined(_M_X64)
         "x86-64";
 #elif defined(__aarch64__) || defined(_M_ARM64)
@@ -3262,28 +3278,40 @@ about_diagnostics_html(void)
 #else
         "unknown";
 #endif
+}
 
-    GString *s = g_string_new("<div class=\"diag\">");
-    char *os = g_get_os_info(G_OS_INFO_KEY_PRETTY_NAME);
-    if (!os) os = g_get_os_info(G_OS_INFO_KEY_NAME);
-    diag_kv(s, "Operating system", os ? os : platform);
-    if (os && g_strcmp0(os, platform) != 0)
-        diag_kv(s, "Platform", platform);
+static char *
+about_build_line(void)
+{
+    g_autofree char *os = about_os_name();
+    char *line = g_strdup_printf("Version " NS_VERSION " \xc2\xb7 built "
+                                 NS_BUILD_DATE " \xc2\xb7 %s, %s",
+                                 os, about_arch_name());
+    char *escaped = g_markup_escape_text(line, -1);
+    g_free(line);
+    return escaped;
+}
+
+static char *
+about_diagnostics_html(void)
+{
+    GString *s = g_string_new("<div class=\"diag\"><h3>System</h3>");
+    char *os = about_os_name();
+    diag_kv(s, "Operating system", os);
     g_free(os);
-    diag_kv(s, "Architecture", arch);
+    diag_kv(s, "Architecture", about_arch_name());
     char *cores = g_strdup_printf("%u", g_get_num_processors());
     diag_kv(s, "Logical CPUs", cores);
     g_free(cores);
 
-    g_string_append(s, "<h3>Version &amp; libraries</h3>");
-    diag_kv(s, "Nordstjernen", NS_VERSION " (built " NS_BUILD_DATE ")");
+    g_string_append(s, "<h3>Engine and libraries</h3>");
     {
         const ns_config *ua_cfg = ns_config_get();
         const char *ua = ua_cfg && ua_cfg->user_agent && *ua_cfg->user_agent
                        ? ua_cfg->user_agent
                        : ns_user_agent_for_mode(ua_cfg ? ua_cfg->compat_mode
                                                        : NULL);
-        diag_kv(s, "User agent", ua);
+        diag_kv_long(s, "User agent", ua);
     }
     diag_kv(s, "JavaScript engine", ns_js_engine_version());
     char *glibv = g_strdup_printf("%u.%u.%u", glib_major_version,
@@ -3302,7 +3330,7 @@ about_diagnostics_html(void)
     diag_kv(s, "Video (FFmpeg libav*)", av_version_info());
 #endif
     diag_kv(s, "TLS / crypto", OpenSSL_version(OPENSSL_VERSION));
-    diag_kv(s, "Networking", curl_version());
+    diag_kv_long(s, "Networking", curl_version());
 
     g_string_append(s, "<h3>Features</h3>");
 #ifdef NS_ENABLE_WEBGL
@@ -3311,11 +3339,14 @@ about_diagnostics_html(void)
     diag_feature(s, "WebGL (3D canvas)", FALSE);
 #endif
 #ifdef ND_HAVE_WEBGPU
-    diag_kv(s, "WebGPU",
-            g_getenv("NS_WEBGPU_ALLOW") ? "Enabled (--enable-webgpu)"
-            : ns_config_get() && ns_config_get()->webgpu_enabled
-                ? "Enabled (Settings)"
-                : "Built \xe2\x80\x94 enable it in Settings or with --enable-webgpu");
+    {
+        gboolean forced = g_getenv("NS_WEBGPU_ALLOW") != NULL;
+        gboolean on = forced ||
+            (ns_config_get() && ns_config_get()->webgpu_enabled);
+        diag_state(s, "WebGPU (experimental)", on,
+                   forced ? "On (--enable-webgpu)"
+                   : on ? "On" : "Off in Settings");
+    }
 #else
     diag_feature(s, "WebGPU (experimental)", FALSE);
 #endif
@@ -4789,10 +4820,8 @@ static const char k_about_nordstjernen_template[] =
     "0 0 0 1px rgba(255,255,255,.1),0 8px 24px rgba(0,0,0,.5)}}\n"
     ".head h1{margin:0;font-size:30px;font-weight:700;letter-spacing:-.02em;"
     "line-height:1.15}\n"
-    ".head p{margin:2px 0 0;color:var(--muted)}\n"
-    ".ver{display:inline-block;margin-left:10px;padding:3px 10px;"
-    "border-radius:999px;background:var(--accent-soft);color:var(--accent-text);"
-    "font-size:13px;font-weight:700;vertical-align:middle;letter-spacing:0}\n"
+    ".head p{margin:2px 0 0;color:var(--muted);font-size:14px}\n"
+    ".head .actions{margin-top:12px}\n"
     ".card{padding:20px;margin-bottom:26px}\n"
     ".card p{margin:0 0 10px;color:var(--muted);font-size:14px}\n"
     ".card p b{color:var(--text)}\n"
@@ -4806,64 +4835,61 @@ static const char k_about_nordstjernen_template[] =
     ".dk{color:var(--text);font-weight:500;flex:0 0 auto}\n"
     ".dv{color:var(--text);text-align:right;word-break:break-word;"
     "font-size:13px;font-variant-numeric:tabular-nums}\n"
-    ".dv.on,.dv.off,.dv.plain{min-width:72px;text-align:center;"
-    "font-family:var(--font);font-weight:600;font-size:12px;"
-    "padding:1px 10px;border-radius:999px}\n"
-    ".dv.on{color:var(--ok);background:rgba(19,128,74,.1)}\n"
+    ".dv.on{color:var(--ok);font-weight:600}\n"
     ".dv.on::before{content:\"\";display:inline-block;width:9px;"
-    "height:5px;margin:0 6px 2px 0;border-left:1.7px solid currentColor;"
+    "height:5px;margin:0 7px 3px 0;border-left:1.7px solid currentColor;"
     "border-bottom:1.7px solid currentColor;transform:rotate(-45deg)}\n"
-    ".dv.off{color:var(--muted);background:none;min-width:0;padding:0;"
-    "font-weight:400;font-size:13px}\n"
-    ".dv.plain{color:var(--muted);background:none;min-width:0;padding:0;"
-    "font-weight:400;font-size:13px}\n"
+    ".dv.off{color:var(--muted)}\n"
+    ".drow.long{flex-direction:column;gap:3px}\n"
+    ".drow.long .dv{text-align:left;font-family:var(--mono);font-size:12px;"
+    "color:var(--muted);overflow-wrap:anywhere}\n"
+    "details.tech{margin:0 0 26px}\n"
+    "details.tech > summary{margin:0 0 10px 12px;font-size:16px}\n"
+    "details.tech .card{margin-bottom:0}\n"
     ".group-label .edit{margin-right:20px;font-size:13px;"
     "font-weight:600;color:var(--accent-text)}\n"
     ".ext-id{display:block;color:var(--muted);font-weight:400;"
     "font-size:12.5px;overflow-wrap:anywhere}\n"
     ".card code{font-family:var(--mono);font-size:12.5px;"
     "overflow-wrap:anywhere}\n"
-    ".foot{display:flex;flex-wrap:wrap;justify-content:space-between;"
-    "gap:12px;margin-top:26px;color:var(--faint);font-size:13px}\n"
-    ".foot a{color:var(--muted);margin-left:14px}\n"
+    ".foot{display:flex;flex-wrap:wrap;justify-content:center;gap:18px;"
+    "margin-top:26px;font-size:13px}\n"
+    ".foot a{color:var(--muted)}\n"
     "@media (max-width:560px){.head{flex-direction:column;"
     "align-items:flex-start}.drow{font-size:12.5px}}\n"
     "</style></head>"
     "<body><main class=\"wrap\">"
     "<div class=\"head\">__ND_LOGO_MARK__<div>"
-    "<h1>Nordstjernen Web Browser<span class=\"ver\">" NS_VERSION "</span></h1>"
-    "<p>An independent web browser, built from scratch.</p></div></div>"
-    "<h2 class=\"group-label\">Security</h2>"
+    "<h1>Nordstjernen Web Browser</h1>"
+    "<p>__ND_BUILD__</p>"
+    "<div class=\"actions\">"
+    "<a class=\"btn\" href=\"about:settings\">Settings</a>"
+    "</div></div></div>"
+    "<h2 class=\"group-label\">Privacy &amp; security"
+    "<a class=\"edit\" href=\"about:settings#privacy\">Change in Settings</a>"
+    "</h2>"
     "<section class=\"card\">__ND_SECURITY__</section>"
-    "<h2 class=\"group-label\">System</h2>"
-    "<section class=\"card\">__ND_DIAG__</section>"
     "<h2 class=\"group-label\">Extensions</h2>"
     "<section class=\"card\">__ND_EXTENSIONS__</section>"
+    "<details class=\"tech\"><summary>Technical details</summary>"
+    "<section class=\"card\">__ND_DIAG__</section></details>"
     "<h2 class=\"group-label\">License</h2>"
     "<section class=\"card\">"
-    "<p>Nordstjernen is \xc2\xa9 2026 Andreas R\xc3\xb8sdal and dual-licensed: "
-    "you may use, modify and redistribute it under either the "
-    "<b>Nordstjernen Source License v1.0 (NSL-1.0)</b> or the "
-    "<b>GNU General Public License, version\xc2\xa0" "3 or later "
-    "(GPL-3.0-or-later)</b>, "
-    "at your option. It comes with ABSOLUTELY NO WARRANTY.</p>"
-    "<p>It bundles third-party open-source software under "
-    "the MIT, BSD, Apache\xc2\xa0" "2.0, LGPL, MPL and zlib licenses, "
-    "including QuickJS, Wuffs, GTK\xc2\xa0" "4, Cairo, "
-    "libcurl, OpenSSL, uchardet, libwebp, libpsl, SQLite and zlib. Each "
-    "component\xe2\x80\x99s copyright notice and full license text is "
-    "reproduced in the notices.</p>"
+    "<p>Nordstjernen is \xc2\xa9 2026 Andreas R\xc3\xb8sdal, free to use, "
+    "change and share under the <b>Nordstjernen Source License 1.0</b> or "
+    "the <b>GNU GPL, version\xc2\xa0" "3 or later</b>, at your option, and "
+    "comes with no warranty. The third-party software it includes is "
+    "listed, with its licenses, in the notices.</p>"
     "<div class=\"actions\">"
     "<a class=\"btn\" href=\"about:license\">Nordstjernen Source License</a>"
     "<a class=\"btn\" href=\"about:gpl\">GNU GPL v3</a>"
     "<a class=\"btn\" href=\"about:third-party\">Third-party notices</a>"
     "</div>"
     "</section>"
-    "<div class=\"foot\"><span>Nordstjernen Web Browser \xc2\xa9 2026 "
-    "Andreas R\xc3\xb8sdal</span><span>"
-    "<a href=\"https://nordstjernen.org/privacy\">Privacy</a>"
+    "<nav class=\"foot\" aria-label=\"Project\">"
+    "<a href=\"https://nordstjernen.org/privacy\">Privacy policy</a>"
     "<a href=\"https://nordstjernen.org\">nordstjernen.org</a>"
-    "</span></div>"
+    "</nav>"
     "</main></body></html>";
 
 #define SETTINGS_NAV_ICON(paths) \
@@ -5378,25 +5404,21 @@ synthesize_about_response(const char *url, const char *top_url,
                             (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "nordstjernen") || g_str_equal(what, "about")) {
-        char *logo_markup = ns_about_logo_markup();
-        char *with_logo = ns_about_substitute(k_about_nordstjernen_template,
-                                           "__ND_LOGO_MARK__", logo_markup);
-        g_free(logo_markup);
-        char *security = about_security_html();
-        char *with_security = ns_about_substitute(with_logo, "__ND_SECURITY__",
-                                               security);
-        g_free(security);
-        g_free(with_logo);
-        char *diag = about_diagnostics_html();
-        char *with_diag = ns_about_substitute(with_security, "__ND_DIAG__",
-                                           diag);
-        g_free(diag);
-        g_free(with_security);
-        char *extensions = about_extensions_html();
-        char *body = ns_about_substitute(with_diag, "__ND_EXTENSIONS__",
-                                      extensions);
-        g_free(extensions);
-        g_free(with_diag);
+        char *values[] = {
+            ns_about_logo_markup(), about_build_line(), about_security_html(),
+            about_extensions_html(), about_diagnostics_html(),
+        };
+        static const char *const keys[G_N_ELEMENTS(values)] = {
+            "__ND_LOGO_MARK__", "__ND_BUILD__", "__ND_SECURITY__",
+            "__ND_EXTENSIONS__", "__ND_DIAG__",
+        };
+        char *body = g_strdup(k_about_nordstjernen_template);
+        for (gsize i = 0; i < G_N_ELEMENTS(values); i++) {
+            char *next = ns_about_substitute(body, keys[i], values[i]);
+            g_free(body);
+            g_free(values[i]);
+            body = next;
+        }
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "mozilla")) {
