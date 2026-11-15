@@ -10,6 +10,11 @@ Changelog:
   instantly instead of smoothly, as it already did on Android.
   Open tabs pick up a change without a restart. Before, desktop pages
   always saw `no-preference`.
+* A flex item with `width: max-content` or `min-width: max-content`
+  keeps that width when its flex container is measured at min-content.
+  Before, the container counted the item at its narrowest wrap, so a
+  header group that had to shrink squeezed the item and wrapped its
+  text: the "Sign in" link in the AP News header stood on two lines.
 * about:start and about:nordstjernen follow the operating-system
   language: their headings, buttons, search hints and status words come
   from the UI catalogues, with translations into the 13 fuller ones
