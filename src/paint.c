@@ -12174,7 +12174,7 @@ canvas_default_color(const ns_box *root)
     const ns_box *html = root ? find_element_box_named(root, "html") : NULL;
     if (html && html->style && html->style->scheme_dark)
         return (rgba){ 18.0 / 255, 18.0 / 255, 18.0 / 255, 1 };
-    return (rgba){ 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
+    return (rgba){ 1, 1, 1, 1 };
 }
 
 static gboolean

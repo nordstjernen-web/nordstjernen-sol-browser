@@ -10043,13 +10043,14 @@ floats_inherit(GArray *floats, const inherited_floats *from, double inner_x,
 }
 
 static void
-floats_shift_placed(GArray *floats, double dy)
+floats_shift_placed(GArray *floats, const ns_box *container, double dy)
 {
     if (dy == 0) return;
     for (guint i = 0; i < floats->len; i++) {
         float_ref *f = &g_array_index(floats, float_ref, i);
         if (!f->box) continue;
-        shift_box_tree(f->box, 0, dy);
+        if (f->box->parent == container)
+            shift_box_tree(f->box, 0, dy);
         f->top += dy;
         f->bottom += dy;
     }
@@ -17279,6 +17280,33 @@ collapsed_blocks_move_to(ns_box *first, const ns_box *stop, double y)
     }
 }
 
+static double
+new_fc_definite_fit_width(const ns_box *c, double cw, gboolean rtl)
+{
+    const ns_css_value *wv = c->style ? c->style->values[NS_CSS_WIDTH] : NULL;
+    if (!wv || (wv->kind != NS_CSS_V_LENGTH && wv->kind != NS_CSS_V_CALC))
+        return -1;
+    double border_w = length_resolve(wv, cw, 0);
+    if (!flex_box_is_border_box(c))
+        border_w += c->padding.left + c->padding.right +
+                    c->border.left + c->border.right;
+    double start_margin = rtl ? c->margin.right : c->margin.left;
+    double end_margin = rtl ? c->margin.left : c->margin.right;
+    return border_w + start_margin + MIN(end_margin, 0);
+}
+
+static gboolean
+new_fc_fits_beside_floats(const ns_box *c, const GArray *floats,
+                          double y, double cw, gboolean rtl)
+{
+    double left_off = 0, right_off = 0;
+    floats_offsets_at(floats, y, &left_off, &right_off);
+    double avail = cw - left_off - right_off;
+    if (avail <= 0) return FALSE;
+    double need = new_fc_definite_fit_width(c, cw, rtl);
+    return need < 0 || need <= avail + NS_LAYOUT_UNIT;
+}
+
 static gboolean
 empty_block_collapses_through_at(const ns_box *box, int clear, int depth)
 {
@@ -17953,6 +17981,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     GArray *floats = g_array_new(FALSE, FALSE, sizeof(float_ref));
     if (g_inherited_floats.box == box)
         floats_inherit(floats, &g_inherited_floats, inner_x, cw, inner_y);
+    guint own_floats_from = floats->len;
     double inline_line_top = -1;
     ns_box *line_run = NULL;
     double line_run_avail = 0;
@@ -18092,12 +18121,18 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             double mt = c->margin.top;
             double gap = collapsed_margin(mt, prev_margin_bottom);
             double c_margin_above = gap;
+            gboolean container_rtl = keyword_is(
+                box->style ? box->style->values[NS_CSS_DIRECTION] : NULL, "rtl");
+            gboolean new_fc_after_adjoining_floats =
+                box_establishes_bfc(c) && floats->len > own_floats_from &&
+                !new_fc_fits_beside_floats(c, floats, cursor_y, cw, container_rtl);
             gboolean collapses_through_top =
-                collapse_top_with_parent && cursor_y == inner_y;
+                collapse_top_with_parent && cursor_y == inner_y &&
+                !new_fc_after_adjoining_floats;
             if (collapses_through_top) {
                 c_margin_above = collapsed_margin(outer_margin, gap);
                 gap = c_margin_above - outer_margin;
-                floats_shift_placed(floats, gap - float_shift);
+                floats_shift_placed(floats, box, gap - float_shift);
                 float_shift = gap;
                 top_through = gap;
             }
@@ -18116,8 +18151,14 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                                          !box_establishes_bfc(c);
             if (!lines_wrap_floats) {
                 floats_offsets_at(floats, cursor_y, &left_off, &right_off);
-                floats_advance_to_readable_width(floats, cw, &cursor_y,
-                                                 &left_off, &right_off);
+                double definite_fit_w = box_establishes_bfc(c)
+                    ? new_fc_definite_fit_width(c, cw, container_rtl) : -1;
+                if (definite_fit_w >= 0)
+                    floats_advance_to_fit(floats, cw, definite_fit_w, &cursor_y,
+                                          &left_off, &right_off);
+                else
+                    floats_advance_to_readable_width(floats, cw, &cursor_y,
+                                                     &left_off, &right_off);
             }
             double cw_avail = cw - left_off - right_off;
             if (cw_avail < 0) cw_avail = 0;
