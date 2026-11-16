@@ -3,6 +3,25 @@ Changelog:
 
 1.0.49-dev:
 ======
+* A float inside an inline element with padding, a border or a margin
+  (`<a style="padding:5px"><img style="float:left"></a>`) is placed at
+  the containing block's edge instead of being pushed right and down by
+  the inline's own box. An inline element turned into a block for its
+  block-level or floated content no longer applies its inline margins,
+  borders and padding as block edges.
+* A float wider than its containing block now respects floats outside
+  that block (CSS 2 9.5.1 rules 3 and 7): it no longer overlaps a float
+  on the other side, and it overflows its container only when no float
+  sits beside it on its own side, moving down past them instead.
+* A float in the middle of a paragraph no longer breaks the line. Text
+  after `Some text <img style="float:left"> more text` continued on a new
+  line below the float; it now continues on the same line, with the
+  space kept, as in other browsers.
+* A float that follows inline content is placed on the current line only
+  when it fits beside that line's content, and otherwise just below the
+  line, measured from the line's real top instead of one text line above
+  the paragraph's bottom. A float after a tall inline-block was placed
+  too low.
 * An element with both a CSS `filter` and `opacity`, a blend mode or a
   mask is filtered first and made translucent afterwards, the order the
   Filter Effects spec gives. The opacity used to be applied inside the
@@ -48,7 +67,10 @@ Changelog:
   placed beside floats whenever its border box fits there, measured with
   its inline-start margin and any negative end margin, instead of
   needing at least 120px of room. A narrow `overflow: hidden` box no
-  longer drops below a float it fits next to.
+  longer drops below a float it fits next to. Its start margin is
+  measured from the container edge and may overlap a float on that
+  side, so `margin-left: 40px` beside a 20px float places the box at
+  40px, not 60px.
 * Scaled images keep sharp, solid edges. A non-repeating background image
   and an `<img>` were painted with Cairo's EXTEND_NONE, so bilinear
   scaling blended their outermost pixels with transparency: an upscaled

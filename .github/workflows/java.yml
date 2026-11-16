@@ -42,6 +42,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: maven
+          cache-dependency-path: java/pom.xml
 
       - name: Install engine build dependencies
         run: |
@@ -121,7 +123,12 @@ jobs:
       - name: Build jar with Maven
         working-directory: java
         run: |
-          mvn -q -B package
+          for attempt in 1 2 3; do
+            mvn -q -B package && break
+            [ "$attempt" = 3 ] && exit 1
+            echo "Maven failed (attempt $attempt), retrying in $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
           JAR=$(ls target/nordstjernen-java-*.jar \
                 | grep -Ev -- '-(sources|javadoc)\.jar$' | head -1)
           unzip -l "$JAR" | grep -q 'org/nordstjernen/browser/Page.class'
