@@ -17953,6 +17953,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     GArray *floats = g_array_new(FALSE, FALSE, sizeof(float_ref));
     if (g_inherited_floats.box == box)
         floats_inherit(floats, &g_inherited_floats, inner_x, cw, inner_y);
+    guint own_floats_from = floats->len;
     double inline_line_top = -1;
     ns_box *line_run = NULL;
     double line_run_avail = 0;
@@ -18092,8 +18093,11 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             double mt = c->margin.top;
             double gap = collapsed_margin(mt, prev_margin_bottom);
             double c_margin_above = gap;
+            gboolean new_fc_after_adjoining_floats =
+                box_establishes_bfc(c) && floats->len > own_floats_from;
             gboolean collapses_through_top =
-                collapse_top_with_parent && cursor_y == inner_y;
+                collapse_top_with_parent && cursor_y == inner_y &&
+                !new_fc_after_adjoining_floats;
             if (collapses_through_top) {
                 c_margin_above = collapsed_margin(outer_margin, gap);
                 gap = c_margin_above - outer_margin;

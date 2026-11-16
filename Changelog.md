@@ -3,6 +3,20 @@ Changelog:
 
 1.0.49-dev:
 ======
+* The default page background is white (#FFFFFF), as in every other
+  browser, instead of #FEFEFE. A white element on an unstyled page
+  showed as a faint strip, and WPT reftests that draw white over the
+  canvas could never match their references: 23 more pass across
+  `css-flexbox`, `css-backgrounds`, `css-color`, `css-align` and
+  `CSS2/floats`, with no regressions.
+* A block that starts a new formatting context (`overflow: hidden`,
+  `display: flow-root`, ...) no longer drags earlier floats down with
+  its top margin. When floats placed at the very top of a block were
+  followed by such a box, its margin was collapsed through the parent
+  and every already placed float moved down with it, leaving a gap
+  above the float and pushing the new box below it. The parent's
+  position is now settled first and the margin applies to the new box
+  alone, as Blink and Gecko do.
 * Scaled images keep sharp, solid edges. A non-repeating background image
   and an `<img>` were painted with Cairo's EXTEND_NONE, so bilinear
   scaling blended their outermost pixels with transparency: an upscaled
