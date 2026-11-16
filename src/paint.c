@@ -11615,8 +11615,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     cairo_operator_t blend = blend_mode_operator(style);
     gboolean mask_grad = mask_layers_paintable(style);
     const char *filter_kw = box_filter_layer_keyword(b);
-    gboolean grouped = op < 0.999 || blend != CAIRO_OPERATOR_OVER ||
-                       mask_grad || filter_kw;
+    gboolean composited = op < 0.999 || blend != CAIRO_OPERATOR_OVER ||
+                          mask_grad;
+    gboolean grouped = composited || filter_kw;
     double sticky_dx = 0, sticky_dy = 0;
     compute_sticky_offset(b, cr, &sticky_dx, &sticky_dy);
     if (isnan(sticky_dx) || isnan(sticky_dy)) {
@@ -11680,10 +11681,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                 paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
             return;
         }
-        if (fs == FILTER_LAYER_OPEN) {
-            cr = fl.cr;
-            g_paint_no_cull++;
-        }
+        if (fs == FILTER_LAYER_OPEN) g_paint_no_cull++;
     }
     gboolean box_offscreen = FALSE;
     if (!has_transform && !has_sticky && !g_paint_no_cull) {
@@ -11716,13 +11714,15 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                          &backdrop);
 
     gboolean group_clipped = FALSE;
-    if (grouped) {
-        if (g_paint_collect_stats) g_paint_stats.grouped++;
+    gboolean group_pushed = grouped && (composited || !fl.cr);
+    if (grouped && g_paint_collect_stats) g_paint_stats.grouped++;
+    if (group_pushed) {
         if (!has_transform && !has_sticky && !filter_kw &&
             !paint_adopted_abs_boxes(NULL, b, NULL))
             group_clipped = paint_group_clip(cr, b);
         cairo_push_group(cr);
     }
+    if (fl.cr) cr = fl.cr;
     if (has_transform) {
         cairo_save(cr);
         if (tf_state == BOX_TF_INVALID) {
@@ -11731,14 +11731,14 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                            b->dom && b->dom->name ? b->dom->name : "?");
         } else if (tf_state == BOX_TF_DEGENERATE) {
             cairo_restore(cr);
-            if (grouped)
-                cairo_pattern_destroy(cairo_pop_group(cr));
-            if (group_clipped) cairo_restore(cr);
             if (fl.cr) {
                 g_paint_no_cull--;
                 cr = fl.outer;
                 filter_layer_discard(&fl);
             }
+            if (group_pushed)
+                cairo_pattern_destroy(cairo_pop_group(cr));
+            if (group_clipped) cairo_restore(cr);
             if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
             return;
         } else {
@@ -12083,8 +12083,22 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
 
     if (has_transform) cairo_restore(cr);
+    if (fl.cr) {
+        g_paint_no_cull--;
+        cr = fl.outer;
+        if (clip_after_filter) {
+            cairo_save(cr);
+            cairo_matrix_t outer_m;
+            cairo_get_matrix(cr, &outer_m);
+            if (have_box_tf) cairo_transform(cr, &box_tf);
+            apply_clip_path(cr, b);
+            cairo_set_matrix(cr, &outer_m);
+        }
+        filter_layer_end(&fl);
+        if (clip_after_filter) cairo_restore(cr);
+    }
 
-    if (grouped) {
+    if (group_pushed) {
         cairo_pop_group_to_source(cr);
         cairo_pattern_t *group_source =
             cairo_pattern_reference(cairo_get_source(cr));
@@ -12102,20 +12116,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (mp) cairo_pattern_destroy(mp);
         cairo_pattern_destroy(group_source);
         if (group_clipped) cairo_restore(cr);
-    }
-    if (fl.cr) {
-        g_paint_no_cull--;
-        cr = fl.outer;
-        if (clip_after_filter) {
-            cairo_save(cr);
-            cairo_matrix_t outer_m;
-            cairo_get_matrix(cr, &outer_m);
-            if (have_box_tf) cairo_transform(cr, &box_tf);
-            apply_clip_path(cr, b);
-            cairo_set_matrix(cr, &outer_m);
-        }
-        filter_layer_end(&fl);
-        if (clip_after_filter) cairo_restore(cr);
     }
     if (backdrop.surf) cairo_surface_destroy(backdrop.surf);
 
