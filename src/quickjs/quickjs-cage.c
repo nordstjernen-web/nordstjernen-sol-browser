@@ -164,7 +164,12 @@ static bool js_cage_os_reserve(size_t size, size_t guard)
 #ifdef MAP_NORESERVE
     flags |= MAP_NORESERVE;
 #endif
-    char *probe = mmap(NULL, total, PROT_NONE, flags, -1, 0);
+#ifdef PROT_MPROTECT
+    int prot = PROT_NONE | PROT_MPROTECT(PROT_READ | PROT_WRITE);
+#else
+    int prot = PROT_NONE;
+#endif
+    char *probe = mmap(NULL, total, prot, flags, -1, 0);
     if (probe == MAP_FAILED)
         return false;
     uintptr_t aligned = ((uintptr_t)probe + guard + size - 1) & ~(size - 1);
