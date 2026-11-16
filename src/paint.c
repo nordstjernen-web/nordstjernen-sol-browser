@@ -1375,7 +1375,7 @@ paint_bg_image_core(cairo_t *cr, ns_image *img,
     cairo_clip(cr);
     cairo_pattern_t *pat = cairo_pattern_create_for_surface(surf);
     cairo_pattern_set_extend(pat,
-        (tile_x || tile_y) ? CAIRO_EXTEND_REPEAT : CAIRO_EXTEND_NONE);
+        (tile_x || tile_y) ? CAIRO_EXTEND_REPEAT : CAIRO_EXTEND_PAD);
     if (pixelated)
         cairo_pattern_set_filter(pat, CAIRO_FILTER_NEAREST);
     cairo_matrix_t m;
@@ -8241,7 +8241,10 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex, GBytes *svg)
         (strcmp(ir->u.keyword, "pixelated") == 0 ||
          strcmp(ir->u.keyword, "crisp-edges") == 0))
         cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
-    cairo_paint(cr);
+    cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_PAD);
+    cairo_rectangle(cr, 0, 0, cairo_image_surface_get_width(surf),
+                    cairo_image_surface_get_height(surf));
+    cairo_fill(cr);
     return TRUE;
 }
 

@@ -3,6 +3,16 @@ Changelog:
 
 1.0.49-dev:
 ======
+* Scaled images keep sharp, solid edges. A non-repeating background image
+  and an `<img>` were painted with Cairo's EXTEND_NONE, so bilinear
+  scaling blended their outermost pixels with transparency: an upscaled
+  small image (a 1x1 swatch stretched by `background-size`, an icon
+  enlarged by `cover`) showed a soft halo and let the colour beneath bleed
+  through. Both paths now clamp to the edge like other browsers and fill
+  only the image's own rectangle. In WPT reftests this passes 38 more
+  `css/css-backgrounds` tests (224 to 262 of 579) and 17 more
+  `css/css-flexbox` tests (676 to 693 of 1029), with no regressions in
+  `css-color`, `css-align` or `CSS2/floats`.
 * Windows: sound plays in the Microsoft Store (MSIX) package instead of
   stopping with "Failed loading SDL3 library." MSYS2's SDL2.dll became
   sdl2-compat, which loads SDL3.dll at start-up rather than linking it,
