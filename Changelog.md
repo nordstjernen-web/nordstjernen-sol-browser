@@ -22,6 +22,16 @@ Changelog:
   line, measured from the line's real top instead of one text line above
   the paragraph's bottom. A float after a tall inline-block was placed
   too low.
+* An element with both a CSS `filter` and `opacity`, a blend mode or a
+  mask is filtered first and made translucent afterwards, the order the
+  Filter Effects spec gives. The opacity used to be applied inside the
+  filter layer, which a wide blur draws at a fraction of the resolution,
+  so a faint glow such as the `filter: blur(80px); opacity: 0.15` one
+  behind the logo on c3-lang.org was blurred from a few dozen alpha
+  levels and showed blocky steps. A filtered element without opacity, a
+  blend mode or a mask paints straight into its filter layer, without
+  an extra group.
+  (Backport of northstar-web-browser#277.)
 * A paragraph next to floats returns to its full width on the first line
   below them, wherever the float band ends; before, only a paragraph
   that started beside a float was split there. A line of inline-blocks
