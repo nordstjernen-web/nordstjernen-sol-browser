@@ -1,6 +1,9 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.50-dev:
+======
+
 1.0.49:
 ======
 * `fetch()` streams. The promise resolves as soon as the status and
