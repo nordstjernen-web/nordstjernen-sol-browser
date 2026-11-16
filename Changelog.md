@@ -3,6 +3,12 @@ Changelog:
 
 1.0.49-dev:
 ======
+* A paragraph next to floats returns to its full width on the first line
+  below them, wherever the float band ends; before, only a paragraph
+  that started beside a float was split there. A line of inline-blocks
+  that starts with an inline-block now goes beside a float when that
+  first inline-block fits, instead of dropping below the float whenever
+  any later item (margins included) was too wide.
 * Lines and boxes beside floats avoid every float over their whole
   height, not only at their top edge. A line of text or inline-blocks that
   started beside one float and ran into another float starting a little

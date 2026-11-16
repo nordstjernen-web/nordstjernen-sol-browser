@@ -890,26 +890,6 @@ inline_runs_join_splits(ns_box *box)
     }
 }
 
-static gsize
-inline_run_break_before(const ns_box *run, double band_height)
-{
-    NsPangoLayout *layout = ns_paint_build_inline_layout(NULL, run);
-    if (!layout) return 0;
-    gsize split = 0;
-    NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
-    do {
-        NsPangoRectangle logical;
-        ns_pango_layout_iter_get_line_extents(iter, NULL, &logical);
-        if ((double)logical.y / NS_PANGO_SCALE >= band_height - 0.5) {
-            split = (gsize)ns_pango_layout_iter_get_index(iter);
-            break;
-        }
-    } while (ns_pango_layout_iter_next_line(iter));
-    ns_pango_layout_iter_free(iter);
-    g_object_unref(layout);
-    return split;
-}
-
 static double
 inline_run_first_line_height(const ns_box *run)
 {
@@ -923,25 +903,6 @@ inline_run_first_line_height(const ns_box *run)
     return (double)logical.height / NS_PANGO_SCALE;
 }
 
-static gsize
-inline_run_break_before_line_crossing(const ns_box *run, double y)
-{
-    NsPangoLayout *layout = ns_paint_build_inline_layout(NULL, run);
-    if (!layout) return 0;
-    gsize split = 0;
-    NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
-    do {
-        NsPangoRectangle logical;
-        ns_pango_layout_iter_get_line_extents(iter, NULL, &logical);
-        if ((double)(logical.y + logical.height) / NS_PANGO_SCALE > y + 0.5) {
-            split = (gsize)ns_pango_layout_iter_get_index(iter);
-            break;
-        }
-    } while (ns_pango_layout_iter_next_line(iter));
-    ns_pango_layout_iter_free(iter);
-    g_object_unref(layout);
-    return split;
-}
 
 static void
 box_append_child(ns_box *parent, ns_box *child)
@@ -10089,16 +10050,17 @@ floats_shift_placed(GArray *floats, const ns_box *container, double dy)
     }
 }
 
-static double
-floats_band_bottom(const GArray *floats, double y)
+static ns_box *
+inline_run_leading_atomic_box(const ns_box *run)
 {
-    double bottom = -1;
-    for (guint i = 0; floats && i < floats->len; i++) {
-        const float_ref *f = &g_array_index(floats, float_ref, i);
-        if (y < f->top || y >= f->bottom) continue;
-        if (bottom < 0 || f->bottom < bottom) bottom = f->bottom;
-    }
-    return bottom;
+    if (!run || run->kind != NS_BOX_INLINE || !run->text ||
+        !run->inline_atomics || run->inline_atomics->len == 0)
+        return NULL;
+    const ns_inline_atomic *a =
+        &g_array_index(run->inline_atomics, ns_inline_atomic, 0);
+    for (gsize i = 0; i < a->byte_off && run->text[i]; i++)
+        if (!g_ascii_isspace(run->text[i])) return NULL;
+    return a->box;
 }
 
 static double
@@ -10129,8 +10091,14 @@ inline_run_first_word_width(ns_box *run, const ns_style *style)
     while (*p && g_ascii_isspace(*p)) p++;
     const char *end = p;
     while (*end && !g_ascii_isspace(*end)) end++;
-    if (end == p || (run->inline_atomics && run->inline_atomics->len > 0))
-        return min_width_of(run, style);
+    if (end == p || (run->inline_atomics && run->inline_atomics->len > 0)) {
+        ns_box *leading = inline_run_leading_atomic_box(run);
+        if (!leading) return min_width_of(run, style);
+        ns_edges margin, padding, border;
+        edges_from_style(leading->style, 0, &margin, &padding, &border);
+        return min_width_of(leading, style) + MAX(margin.left, 0) +
+               MAX(margin.right, 0);
+    }
     NsPangoLayout *layout = make_pango_layout(style);
     ns_pango_layout_set_width(layout, -1);
     ns_pango_layout_set_text(layout, p, (int)(end - p));
@@ -10220,18 +10188,6 @@ floats_advance_line_to_fit(const GArray *floats, double cw, double need,
         *y = next_y;
         moved = TRUE;
     }
-}
-
-static double
-floats_next_top_after(const GArray *floats, double y)
-{
-    double top = -1;
-    for (guint i = 0; floats && i < floats->len; i++) {
-        const float_ref *f = &g_array_index(floats, float_ref, i);
-        if (f->top > y + 0.5 && f->outer_w > 0 && (top < 0 || f->top < top))
-            top = f->top;
-    }
-    return top;
 }
 
 static gboolean
@@ -17382,6 +17338,31 @@ new_fc_fits_beside_floats(const ns_box *c, const GArray *floats,
     return need < 0 || need <= avail + NS_LAYOUT_UNIT;
 }
 
+static gsize
+inline_run_break_before_float_change(const ns_box *run, const GArray *floats,
+                                     double left_off, double right_off)
+{
+    NsPangoLayout *layout = ns_paint_build_inline_layout(NULL, run);
+    if (!layout) return 0;
+    gsize split = 0;
+    NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
+    while (ns_pango_layout_iter_next_line(iter)) {
+        NsPangoRectangle logical;
+        ns_pango_layout_iter_get_line_extents(iter, NULL, &logical);
+        double top = run->y + (double)logical.y / NS_PANGO_SCALE;
+        double bottom = top + MAX((double)logical.height / NS_PANGO_SCALE - 0.5, 0);
+        double l = 0, r = 0;
+        floats_offsets_over(floats, top, bottom, &l, &r);
+        if (fabs(l - left_off) > 0.5 || fabs(r - right_off) > 0.5) {
+            split = (gsize)ns_pango_layout_iter_get_index(iter);
+            break;
+        }
+    }
+    ns_pango_layout_iter_free(iter);
+    g_object_unref(layout);
+    return split;
+}
+
 static void
 inline_run_fit_first_line(ns_box *run, const GArray *floats, double inner_x,
                           double cw, double *line_y, double *left_off,
@@ -18371,18 +18352,9 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             cursor_y = line_y;
             prev_margin_bottom = 0;
-            if (c->kind == NS_BOX_INLINE && c->text && floats->len > 0) {
-                double band_bottom = cw_avail < cw
-                    ? floats_band_bottom(floats, cursor_y) : -1;
-                double next_top = wraps_around_floats
-                    ? floats_next_top_after(floats, cursor_y) : -1;
-                gsize split = 0;
-                if (next_top > 0 && (band_bottom <= cursor_y || next_top <= band_bottom) &&
-                    c->y + c->content_height > next_top + 0.5)
-                    split = inline_run_break_before_line_crossing(c, next_top - c->y);
-                else if (band_bottom > cursor_y &&
-                         c->y + c->content_height > band_bottom + 0.5)
-                    split = inline_run_break_before(c, band_bottom - c->y);
+            if (wraps_around_floats) {
+                gsize split = inline_run_break_before_float_change(
+                    c, floats, left_off, right_off);
                 if (split > 0 && split < strlen(c->text)) {
                     inline_run_split(c, split);
                     g_inline_atomic_cb_w = cw;
