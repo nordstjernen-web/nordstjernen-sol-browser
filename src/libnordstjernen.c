@@ -173,6 +173,7 @@ struct ns_browser {
 #define NS_LAYOUT_DAMP_US (700 * 1000)
 #define NS_LAYOUT_BACKGROUND_MIN_US (16 * 1000)
 #define NS_LAYOUT_BACKGROUND_MAX_US (120 * 1000)
+#define NS_LAYOUT_TRANSFORM_CATCHUP_US (1000 * 1000)
 #define NS_CARET_BLINK_US (530 * 1000)
 #define NS_CARET_BLINK_TIMEOUT_US (10 * G_USEC_PER_SEC)
 
@@ -262,8 +263,10 @@ browser_relayout(ns_browser *b)
     b->relaying = TRUE;
     b->cascade_dirty = FALSE;
     b->anim_paint_dirty = FALSE;
-    if (b->js)
+    if (b->js) {
         (void)ns_js_consume_mutated(b->js);
+        ns_js_clear_transform_patched(b->js);
+    }
     b->image_arrivals_since_layout = 0;
     GHashTable *scroll_save = ns_box_scroll_save(b->layout);
     ns_css_set_viewport((double)b->vw, b->vh);
@@ -405,6 +408,14 @@ browser_mutation_relayout_due(ns_browser *b)
     if (min_gap > NS_LAYOUT_BACKGROUND_MAX_US)
         min_gap = NS_LAYOUT_BACKGROUND_MAX_US;
     return g_get_monotonic_time() - b->last_layout_us >= min_gap;
+}
+
+static gboolean
+browser_transform_catchup_due(ns_browser *b)
+{
+    return b->js && b->layout && ns_js_transform_patched(b->js) &&
+           g_get_monotonic_time() - b->last_layout_us >=
+               NS_LAYOUT_TRANSFORM_CATCHUP_US;
 }
 
 static gboolean
@@ -898,6 +909,8 @@ settle_tick_cb(gpointer user_data)
     if (b->anim && b->js) ns_js_dispatch_anim_events(b->js, b->anim);
     if (b->js) ns_js_run_animation_frame(b->js);
     if (b->js && ns_js_consume_mutated(b->js))
+        b->dirty = TRUE;
+    if (browser_transform_catchup_due(b))
         b->dirty = TRUE;
     browser_sync_scroll_timelines(b);
     if (b->dirty && browser_mutation_relayout_due(b)) {
@@ -2496,6 +2509,8 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
     }
     changed |= browser_sync_scroll_timelines(browser);
     if (browser->js && ns_js_consume_mutated(browser->js))
+        browser->dirty = TRUE;
+    if (browser_transform_catchup_due(browser))
         browser->dirty = TRUE;
     if (browser->dirty && browser_mutation_relayout_due(browser)) {
         if (browser_relayout_from_mutation(browser)) {

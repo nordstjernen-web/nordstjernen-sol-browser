@@ -188,6 +188,8 @@ gboolean ns_js_page_busy(const ns_js *js);
 void     ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url);
 
 gboolean ns_js_consume_mutated(ns_js *js);
+gboolean ns_js_transform_patched(const ns_js *js);
+void     ns_js_clear_transform_patched(ns_js *js);
 guint64 ns_js_mutation_serial(const ns_js *js);
 
 char  *ns_js_eval_source(ns_js *js, const char *src, const char *origin);

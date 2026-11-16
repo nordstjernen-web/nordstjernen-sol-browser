@@ -32660,6 +32660,40 @@ ns_js_record_character_data(ns_js *js, ns_node *target, const char *old_value)
                        NULL, NULL, NULL, NULL, old_value);
 }
 
+static gboolean
+ns_js_patch_inline_transform(ns_js *js, ns_node *n, const char *name,
+                             const char *old_value, const char *new_value)
+{
+    if (!js->cssom_style_write || !old_value || !js->style_table ||
+        !js->layout_root || g_ascii_strcasecmp(name, "style") != 0 ||
+        n->kind != NS_NODE_ELEMENT || ns_node_is_element_named(n, "style"))
+        return FALSE;
+    const ns_node *root = ns_node_root(n);
+    if (!root || root->kind != NS_NODE_DOCUMENT ||
+        (root->flags & NS_NODE_FRAGMENT))
+        return FALSE;
+    ns_style *st = g_hash_table_lookup(js->style_table, n);
+    const ns_box *box = st ? ns_box_find_by_dom(js->layout_root, n) : NULL;
+    if (!box || box->style != st ||
+        !ns_css_style_apply_inline_transform(st, old_value, new_value))
+        return FALSE;
+    js->transform_patched = TRUE;
+    if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+    return TRUE;
+}
+
+gboolean
+ns_js_transform_patched(const ns_js *js)
+{
+    return js && js->transform_patched;
+}
+
+void
+ns_js_clear_transform_patched(ns_js *js)
+{
+    if (js) js->transform_patched = FALSE;
+}
+
 static void
 ns_js_set_attr_recorded_len(ns_js *js, ns_node *n, const char *name,
                             const char *value, gssize len)
@@ -32679,10 +32713,10 @@ ns_js_set_attr_recorded_len(ns_js *js, ns_node *n, const char *name,
     }
     ns_element_set_attr_len(n, name, new_value, (gssize)vlen);
     if (js) {
-        if (changed) {
-            if (ns_css_attr_may_affect_style(n, name))
-                ns_js_note_mutation(js, n);
-        }
+        if (changed &&
+            !ns_js_patch_inline_transform(js, n, name, old_copy, new_value) &&
+            ns_css_attr_may_affect_style(n, name))
+            ns_js_note_mutation(js, n);
         ns_js_record_attr_change(js, n, name, old_copy);
         ns_ce_attr_changed(js, n, name, old_copy, new_value);
     }

@@ -30043,6 +30043,73 @@ ns_css_declarations_free(GArray *decls)
     g_array_free(decls, TRUE);
 }
 
+static gboolean
+inline_transform_is_plain(const ns_css_value *v)
+{
+    if (!v || v->kind != NS_CSS_V_TRANSFORM || v->u.transform.n_ops <= 0)
+        return FALSE;
+    for (int i = 0; i < v->u.transform.n_ops; i++) {
+        const ns_css_transform_op *op = &v->u.transform.ops[i];
+        for (int k = 0; k < 3; k++)
+            if (op->em[k] != 0.0 || op->rem[k] != 0.0 || op->lh[k] != 0.0)
+                return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+style_has_transition(const ns_style *st)
+{
+    return st->values[NS_CSS_TRANSITION] ||
+           st->values[NS_CSS_TRANSITION_PROPERTY] ||
+           st->values[NS_CSS_TRANSITION_DURATION];
+}
+
+static const ns_css_decl *
+inline_only_transform_differs(const GArray *before, const GArray *after,
+                              const ns_css_decl **out_before)
+{
+    if (before->len != after->len) return NULL;
+    const ns_css_decl *changed = NULL;
+    for (guint i = 0; i < before->len; i++) {
+        const ns_css_decl *b = &g_array_index(before, ns_css_decl, i);
+        const ns_css_decl *a = &g_array_index(after, ns_css_decl, i);
+        if (a->prop != b->prop || a->important != b->important) return NULL;
+        if (a->prop == NS_CSS_TRANSFORM) {
+            if (changed || a->important) return NULL;
+            changed = a;
+            *out_before = b;
+        } else if (!ns_css_value_equal(a->value, b->value)) {
+            return NULL;
+        }
+    }
+    return changed;
+}
+
+gboolean
+ns_css_style_apply_inline_transform(ns_style *st, const char *old_text,
+                                    const char *new_text)
+{
+    if (!st || !old_text || !new_text ||
+        style_has_transition(st) || !inline_transform_is_plain(st->values[NS_CSS_TRANSFORM]))
+        return FALSE;
+    GArray *before = ns_css_parse_declarations(old_text);
+    GArray *after = ns_css_parse_declarations(new_text);
+    const ns_css_decl *was = NULL;
+    const ns_css_decl *now = inline_only_transform_differs(before, after, &was);
+    gboolean ok = now && inline_transform_is_plain(was->value) &&
+                  inline_transform_is_plain(now->value) &&
+                  ns_css_value_equal(st->values[NS_CSS_TRANSFORM], was->value);
+    if (ok) {
+        ns_css_value *prev = st->values[NS_CSS_TRANSFORM];
+        st->values[NS_CSS_TRANSFORM] = ns_css_value_dup(now->value);
+        ns_css_value_free(prev);
+    }
+    ns_css_declarations_free(before);
+    ns_css_declarations_free(after);
+    return ok;
+}
+
 static GHashTable *g_incr_exclude;
 
 const ns_css_value *
