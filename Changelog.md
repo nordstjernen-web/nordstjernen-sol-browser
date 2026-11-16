@@ -47,7 +47,10 @@ Changelog:
   placed beside floats whenever its border box fits there, measured with
   its inline-start margin and any negative end margin, instead of
   needing at least 120px of room. A narrow `overflow: hidden` box no
-  longer drops below a float it fits next to.
+  longer drops below a float it fits next to. Its start margin is
+  measured from the container edge and may overlap a float on that
+  side, so `margin-left: 40px` beside a 20px float places the box at
+  40px, not 60px.
 * Scaled images keep sharp, solid edges. A non-repeating background image
   and an `<img>` were painted with Cairo's EXTEND_NONE, so bilinear
   scaling blended their outermost pixels with transparency: an upscaled
