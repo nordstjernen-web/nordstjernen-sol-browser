@@ -13,6 +13,10 @@ Changelog:
 * The .deb, .rpm, source RPM and Alpine packaging scripts take the
   maintainer from `NS_PACKAGER` (for example `Name <address>`) instead of
   a hard-coded address; unset, they name the maintainer without one.
+* UI: the Nordstjernen "N" logo is back at the right end of the GTK
+  toolbar, after the menu button; clicking it opens nordstjernen.org.
+  1.0.45 removed it and left only the "Visit nordstjernen.org" menu item,
+  which stays.
 
 1.0.48:
 ======
