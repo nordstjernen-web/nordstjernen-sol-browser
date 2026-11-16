@@ -910,6 +910,39 @@ inline_run_break_before(const ns_box *run, double band_height)
     return split;
 }
 
+static double
+inline_run_first_line_height(const ns_box *run)
+{
+    NsPangoLayout *layout = ns_paint_build_inline_layout(NULL, run);
+    if (!layout) return run->content_height;
+    NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
+    NsPangoRectangle logical;
+    ns_pango_layout_iter_get_line_extents(iter, NULL, &logical);
+    ns_pango_layout_iter_free(iter);
+    g_object_unref(layout);
+    return (double)logical.height / NS_PANGO_SCALE;
+}
+
+static gsize
+inline_run_break_before_line_crossing(const ns_box *run, double y)
+{
+    NsPangoLayout *layout = ns_paint_build_inline_layout(NULL, run);
+    if (!layout) return 0;
+    gsize split = 0;
+    NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
+    do {
+        NsPangoRectangle logical;
+        ns_pango_layout_iter_get_line_extents(iter, NULL, &logical);
+        if ((double)(logical.y + logical.height) / NS_PANGO_SCALE > y + 0.5) {
+            split = (gsize)ns_pango_layout_iter_get_index(iter);
+            break;
+        }
+    } while (ns_pango_layout_iter_next_line(iter));
+    ns_pango_layout_iter_free(iter);
+    g_object_unref(layout);
+    return split;
+}
+
 static void
 box_append_child(ns_box *parent, ns_box *child)
 {
@@ -10160,6 +10193,48 @@ floats_advance_to_fit(const GArray *floats, double cw, double need,
 }
 
 static gboolean
+floats_advance_line_to_fit(const GArray *floats, double cw, double need,
+                           double line_h, double *y,
+                           double *left_out, double *right_out)
+{
+    gboolean moved = FALSE;
+    for (;;) {
+        double left = 0, right = 0;
+        floats_offsets_over(floats, *y, *y + line_h, &left, &right);
+        double next_y = *y;
+        gboolean advanced = FALSE;
+        if (cw - left - right + 0.5 < need) {
+            for (guint i = 0; i < floats->len; i++) {
+                const float_ref *f = &g_array_index(floats, float_ref, i);
+                if (f->bottom > *y && (!advanced || f->bottom < next_y)) {
+                    next_y = f->bottom;
+                    advanced = TRUE;
+                }
+            }
+        }
+        if (!advanced || next_y <= *y) {
+            *left_out = left;
+            *right_out = right;
+            return moved;
+        }
+        *y = next_y;
+        moved = TRUE;
+    }
+}
+
+static double
+floats_next_top_after(const GArray *floats, double y)
+{
+    double top = -1;
+    for (guint i = 0; floats && i < floats->len; i++) {
+        const float_ref *f = &g_array_index(floats, float_ref, i);
+        if (f->top > y + 0.5 && f->outer_w > 0 && (top < 0 || f->top < top))
+            top = f->top;
+    }
+    return top;
+}
+
+static gboolean
 replaced_size_keyword(const ns_css_value *v)
 {
     return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
@@ -17307,6 +17382,31 @@ new_fc_fits_beside_floats(const ns_box *c, const GArray *floats,
     return need < 0 || need <= avail + NS_LAYOUT_UNIT;
 }
 
+static void
+inline_run_fit_first_line(ns_box *run, const GArray *floats, double inner_x,
+                          double cw, double *line_y, double *left_off,
+                          double *right_off, double *cw_avail,
+                          const ns_style *inherited)
+{
+    for (int attempt = 0; attempt < 8; attempt++) {
+        double line_h = MAX(inline_run_first_line_height(run) - 0.5, 0);
+        double l = 0, r = 0;
+        floats_offsets_over(floats, *line_y, *line_y + line_h, &l, &r);
+        if (l <= *left_off + 0.5 && r <= *right_off + 0.5) return;
+        double need = inline_run_first_word_width(run, inherited);
+        if (cw - l - r + 0.5 < need)
+            floats_advance_line_to_fit(floats, cw, need, line_h, line_y, &l, &r);
+        *left_off = l;
+        *right_off = r;
+        *cw_avail = MAX(cw - l - r, 0);
+        run->x = inner_x + l;
+        run->y = *line_y;
+        g_inline_atomic_cb_w = cw;
+        layout_box(run, *cw_avail, inherited);
+        g_inline_atomic_cb_w = 0;
+    }
+}
+
 static gboolean
 empty_block_collapses_through_at(const ns_box *box, int clear, int depth)
 {
@@ -18149,10 +18249,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             gboolean lines_wrap_floats = c->kind == NS_BOX_BLOCK &&
                                          floats_max_bottom(floats) > cursor_y &&
                                          !box_establishes_bfc(c);
+            double definite_fit_w = !lines_wrap_floats && box_establishes_bfc(c)
+                ? new_fc_definite_fit_width(c, cw, container_rtl) : -1;
             if (!lines_wrap_floats) {
                 floats_offsets_at(floats, cursor_y, &left_off, &right_off);
-                double definite_fit_w = box_establishes_bfc(c)
-                    ? new_fc_definite_fit_width(c, cw, container_rtl) : -1;
                 if (definite_fit_w >= 0)
                     floats_advance_to_fit(floats, cw, definite_fit_w, &cursor_y,
                                           &left_off, &right_off);
@@ -18179,7 +18279,15 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                              c->border.top + c->border.bottom;
                 floats_offsets_over(floats, cursor_y, cursor_y + c_h,
                                     &span_l, &span_r);
-                if (span_l > left_off || span_r > right_off) {
+                if (definite_fit_w >= 0 &&
+                    cw - span_l - span_r + 0.5 < definite_fit_w) {
+                    floats_advance_line_to_fit(floats, cw, definite_fit_w, c_h,
+                                               &cursor_y, &left_off, &right_off);
+                    cw_avail = MAX(cw - left_off - right_off, 0);
+                    c->x = inner_x + left_off;
+                    c->y = cursor_y - mt;
+                    layout_box(c, cw_avail, child_inherited);
+                } else if (span_l > left_off || span_r > right_off) {
                     double retry = cw - MAX(span_l, left_off)
                                       - MAX(span_r, right_off);
                     if (retry > 0 && retry < cw_avail) {
@@ -18251,24 +18359,35 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 layout_box(c, cw_avail, child_inherited);
             }
             g_inline_atomic_cb_w = 0;
+            gboolean wraps_around_floats = c->kind == NS_BOX_INLINE && c->text &&
+                floats->len > 0 && !style_lines_never_wrap(box->style);
+            if (wraps_around_floats && !c->phantom_line)
+                inline_run_fit_first_line(c, floats, inner_x, cw, &line_y,
+                                          &left_off, &right_off, &cw_avail,
+                                          child_inherited);
             if (c->phantom_line) {
                 collect_escaping_floats(c, floats, 0);
                 continue;
             }
             cursor_y = line_y;
             prev_margin_bottom = 0;
-            if (c->kind == NS_BOX_INLINE && c->text && cw_avail < cw) {
-                double band_bottom = floats_band_bottom(floats, cursor_y);
-                if (band_bottom > cursor_y &&
-                    c->y + c->content_height > band_bottom + 0.5) {
-                    gsize split = inline_run_break_before(c,
-                                                          band_bottom - c->y);
-                    if (split > 0 && split < strlen(c->text)) {
-                        inline_run_split(c, split);
-                        g_inline_atomic_cb_w = cw;
-                        layout_box(c, cw_avail, child_inherited);
-                        g_inline_atomic_cb_w = 0;
-                    }
+            if (c->kind == NS_BOX_INLINE && c->text && floats->len > 0) {
+                double band_bottom = cw_avail < cw
+                    ? floats_band_bottom(floats, cursor_y) : -1;
+                double next_top = wraps_around_floats
+                    ? floats_next_top_after(floats, cursor_y) : -1;
+                gsize split = 0;
+                if (next_top > 0 && (band_bottom <= cursor_y || next_top <= band_bottom) &&
+                    c->y + c->content_height > next_top + 0.5)
+                    split = inline_run_break_before_line_crossing(c, next_top - c->y);
+                else if (band_bottom > cursor_y &&
+                         c->y + c->content_height > band_bottom + 0.5)
+                    split = inline_run_break_before(c, band_bottom - c->y);
+                if (split > 0 && split < strlen(c->text)) {
+                    inline_run_split(c, split);
+                    g_inline_atomic_cb_w = cw;
+                    layout_box(c, cw_avail, child_inherited);
+                    g_inline_atomic_cb_w = 0;
                 }
             }
             collect_escaping_floats(c, floats, 0);

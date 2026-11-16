@@ -3,6 +3,13 @@ Changelog:
 
 1.0.49-dev:
 ======
+* Lines and boxes beside floats avoid every float over their whole
+  height, not only at their top edge. A line of text or inline-blocks that
+  started beside one float and ran into another float starting a little
+  lower overlapped it, and a definite-width `overflow: hidden` box did the
+  same; both now move down to where they fit. A paragraph is split before
+  the first line that would cross the top of a float, and that line is
+  placed afresh.
 * The default page background is white (#FFFFFF), as in every other
   browser, instead of #FEFEFE. A white element on an unstyled page
   showed as a faint strip, and WPT reftests that draw white over the
