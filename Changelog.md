@@ -37,6 +37,10 @@ Changelog:
     "'environ' undeclared" and "unknown type name 'sighandler_t'".
     NetBSD, OpenBSD and DragonFly now get the same declarations, as the
     quickjs-ng engine already gave them.
+  - Bellard's QuickJS called `malloc_usable_size()` on every system it
+    did not recognise, and NetBSD's libc has no such function, so linking
+    `qjs-bellard` failed. Outside Linux, FreeBSD, macOS and Windows it
+    now counts 0 bytes for the allocator's slack, as quickjs-ng does.
 
 1.0.48:
 ======
