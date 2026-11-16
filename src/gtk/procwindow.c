@@ -378,7 +378,10 @@ install_chrome_css(void)
         ".ns-toolbar menubutton.ns-nav-button > button:checked {"
         "  background-color: alpha(currentColor, 0.14);"
         "}"
-
+        ".ns-toolbar button.ns-nav-button.ns-logo {"
+        "  margin-left: 4px;"
+        "  -gtk-icon-size: 22px;"
+        "}"
         ".ns-toolbar button.ns-nav-button:disabled {"
         "  background: none;"
         "  color: alpha(currentColor, 0.4);"
@@ -2682,12 +2685,25 @@ on_home_clicked(GtkButton *b, gpointer ud)
 }
 
 static void
+visit_website(ProcWindow *pw)
+{
+    NsProcView *v = current_view(pw);
+    if (v)
+        ns_proc_view_load(v, "https://nordstjernen.org");
+}
+
+static void
 act_website(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     (void)action; (void)parameter;
-    NsProcView *v = current_view(user_data);
-    if (v)
-        ns_proc_view_load(v, "https://nordstjernen.org");
+    visit_website(user_data);
+}
+
+static void
+on_logo_clicked(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    visit_website(ud);
 }
 
 static void
@@ -3853,6 +3869,10 @@ proc_window_new(GtkApplication *app)
     set_accessible_label(menu_button, ns_i18n("Menu"));
     g_object_unref(appmenu);
 
+    GtkWidget *logo = toolbar_button("nordstjernen",
+                                     ns_i18n("Visit nordstjernen.org"),
+                                     G_CALLBACK(on_logo_clicked), pw);
+    gtk_widget_add_css_class(logo, "ns-logo");
 
     gtk_box_append(GTK_BOX(pw->toolbar), pw->back);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->forward);
@@ -3864,6 +3884,7 @@ proc_window_new(GtkApplication *app)
     gtk_box_append(GTK_BOX(pw->toolbar), pw->bookmarks_button);
     gtk_box_append(GTK_BOX(pw->toolbar), downloads);
     gtk_box_append(GTK_BOX(pw->toolbar), menu_button);
+    gtk_box_append(GTK_BOX(pw->toolbar), logo);
     gtk_box_append(GTK_BOX(vbox), pw->toolbar);
 
     pw->notebook = gtk_notebook_new();
