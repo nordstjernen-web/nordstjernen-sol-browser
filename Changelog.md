@@ -3,6 +3,32 @@ Changelog:
 
 1.0.49:
 ======
+* `fetch()` streams. The promise resolves as soon as the status and
+  headers arrive, and `response.body` is a ReadableStream fed with each
+  chunk as it comes off the network; `text()`, `json()`, `arrayBuffer()`
+  and `clone()` read the same stream. Aborting the signal after the
+  response has resolved errors the body stream, and cancelling the stream
+  cancels the download. Before, `fetch()` resolved only once the whole
+  body had been downloaded, so a player that measures its own downloads
+  saw every request as one long wait: YouTube learned a 1.6-second
+  request latency on a 200 Mbit/s line and settled at 360p. It now
+  measures about 70 ms and picks 1080p. A request that would reuse a
+  preload or join an identical in-flight request still takes the
+  buffered path.
+* Media Source Extensions: a SourceBuffer accepts appends that split a
+  segment at any byte, as the specification requires. Appended bytes are
+  collected until a whole initialization segment (through `moov`, or the
+  WebM Segment header and Tracks) or media segment (through `mdat`, or a
+  whole Cluster) is present, and only then timed and handed to the
+  decoder. Players that append each chunk of a streamed response as it
+  arrives stalled within the first second, since every partial chunk was
+  probed as if it were a complete segment.
+* A `<link rel="stylesheet">` (or preload) inserted by script, or whose
+  `rel`, `href` or `as` changes, starts loading at once. Its load was
+  queued behind dynamically inserted scripts and could wait many seconds
+  for its `load` event even when the sheet was already applied. YouTube
+  waits for that event before moving its player into the page layout, so
+  the video sat on top of the recommendations for about 20 seconds.
 * Smoother video playback on script-heavy pages such as YouTube. A
   script that changes only the `transform` in an element's inline style
   (`el.style.transform = ...`, as a player's progress bar and scrubber do

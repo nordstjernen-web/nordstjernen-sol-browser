@@ -10058,7 +10058,16 @@ typedef struct ns_js_fetch_state {
     guint8        *fb_body;
     gsize          fb_body_len;
     char         **fb_headers;
+    gboolean       streamed;
+    gboolean       stream_done;
+    gboolean       stream_refused;
+    JSValue        stream_ctrl;
+    gsize          stream_sent;
+    GByteArray    *stream_pending;
 } ns_js_fetch_state;
+
+static void ns_fetch_stream_invoke(ns_js_fetch_state *st, const char *method,
+                                   JSValue arg);
 
 static ns_worker_host *ns_worker_host_ref(ns_worker_host *host);
 static void ns_worker_host_unref(ns_worker_host *host);
@@ -10088,7 +10097,9 @@ ns_js_fetch_state_free(ns_js_fetch_state *st)
         JS_FreeValue(st->ctx, st->promise);
         JS_FreeValue(st->ctx, st->resolve);
         JS_FreeValue(st->ctx, st->reject);
+        JS_FreeValue(st->ctx, st->stream_ctrl);
     }
+    if (st->stream_pending) g_byte_array_unref(st->stream_pending);
     if (st->js && st->js->fetch_states_by_id && st->id)
         g_hash_table_remove(st->js->fetch_states_by_id,
                             GUINT_TO_POINTER(st->id));
@@ -10162,6 +10173,18 @@ ns_fetch_on_signal_abort(JSContext *ctx, JSValueConst this_val,
     if (!js || !js->fetch_states_by_id) return JS_UNDEFINED;
     ns_js_fetch_state *st = g_hash_table_lookup(js->fetch_states_by_id,
                                                  GUINT_TO_POINTER((guint)id64));
+    if (st && st->streamed && !st->stream_done) {
+        st->aborted = TRUE;
+        st->stream_done = TRUE;
+        if (st->cancellable) g_cancellable_cancel(st->cancellable);
+        JSValue reason = JS_GetPropertyStr(ctx, st->signal, "reason");
+        if (JS_IsUndefined(reason) || JS_IsNull(reason)) {
+            JS_FreeValue(ctx, reason);
+            reason = ns_make_abort_error(ctx);
+        }
+        ns_fetch_stream_invoke(st, "error", reason);
+        return JS_UNDEFINED;
+    }
     if (!st || st->settled) return JS_UNDEFINED;
     st->aborted = TRUE;
     st->settled = TRUE;
@@ -10408,9 +10431,313 @@ ns_final_url_connect_blocked(ns_js *js, JSContext *realm,
     return mixed || csp;
 }
 
+static JSValue
+ns_fetch_response_object(ns_js_fetch_state *st, const ns_response *resp,
+                         gboolean allow, const char *origin_url)
+{
+    JSValue r = JS_NewObject(st->ctx);
+    ns_set_instance_proto(st->ctx, r, "Response");
+    JS_SetPropertyStr(st->ctx, r, "ok",
+        JS_NewBool(st->ctx, allow && resp->status >= 200 && resp->status < 300));
+    long status = allow ? resp->status : 0;
+    JS_SetPropertyStr(st->ctx, r, "status",
+        JS_NewInt32(st->ctx, (int)status));
+    JS_SetPropertyStr(st->ctx, r, "statusText",
+        JS_NewString(st->ctx, ns_http_status_text((int)status)));
+    JS_SetPropertyStr(st->ctx, r, "url",
+        JS_NewString(st->ctx, allow && resp->final_url
+                              ? resp->final_url : ""));
+    JS_SetPropertyStr(st->ctx, r, "type",
+        JS_NewString(st->ctx, !allow ? "opaque"
+            : ns_origin_matches(st->opaque_origin, origin_url,
+                                resp->final_url)
+                ? "basic" : "cors"));
+    JS_SetPropertyStr(st->ctx, r, "redirected",
+        JS_NewBool(st->ctx, allow && resp->redirect_count > 0));
+    JS_SetPropertyStr(st->ctx, r, "redirectCount",
+        JS_NewInt32(st->ctx, allow ? resp->redirect_count : 0));
+    JS_SetPropertyStr(st->ctx, r, "bodyUsed", JS_FALSE);
+    JSValue header_init = JS_NewObject(st->ctx);
+    if (allow) {
+        gboolean same_origin = ns_url_same_origin(
+            st->js ? st->js->current_url : NULL, resp->final_url);
+        g_autofree char *exposed = same_origin ? NULL
+            : ns_cors_exposed_raw_headers(resp->raw_headers);
+        g_autofree char *expose = same_origin ? NULL
+            : ns_net_raw_header_values(resp->raw_headers,
+                                       "Access-Control-Expose-Headers");
+        const char *raw = same_origin ? resp->raw_headers : exposed;
+        if (raw) ns_headers_init_add_raw(st->ctx, header_init, raw);
+        const struct { const char *name; const char *value; } known[] = {
+            { "content-type",                resp->content_type        },
+            { "content-disposition",         resp->content_disposition },
+            { "content-security-policy",     resp->csp_header          },
+            { "x-frame-options",             resp->xframe_options      },
+            { "access-control-allow-origin", resp->cors_allow_origin   },
+        };
+        for (gsize i = 0; i < G_N_ELEMENTS(known); i++) {
+            if (!known[i].value || !*known[i].value) continue;
+            if (ns_raw_headers_have(raw, known[i].name)) continue;
+            if (!same_origin &&
+                !ns_cors_header_exposed(known[i].name,
+                                        strlen(known[i].name), expose))
+                continue;
+            JS_SetPropertyStr(st->ctx, header_init, known[i].name,
+                              JS_NewString(st->ctx, known[i].value));
+        }
+    }
+    JSValue global = JS_GetGlobalObject(st->ctx);
+    JSValue hdr_ctor = JS_GetPropertyStr(st->ctx, global, "Headers");
+    JS_FreeValue(st->ctx, global);
+    if (JS_IsConstructor(st->ctx, hdr_ctor)) {
+        JSValueConst hargs[1] = { header_init };
+        JSValue h_obj = JS_CallConstructor(st->ctx, hdr_ctor, 1, hargs);
+        if (JS_IsException(h_obj)) {
+            JS_FreeValue(st->ctx, JS_GetException(st->ctx));
+            JS_SetPropertyStr(st->ctx, r, "headers", JS_NewObject(st->ctx));
+        } else {
+            JS_SetPropertyStr(st->ctx, r, "headers", h_obj);
+        }
+    } else {
+        JS_SetPropertyStr(st->ctx, r, "headers", JS_NewObject(st->ctx));
+    }
+    JS_FreeValue(st->ctx, hdr_ctor);
+    JS_FreeValue(st->ctx, header_init);
+    return r;
+}
+
+static void
+ns_fetch_add_resource_timing(ns_js_fetch_state *st, const ns_response *resp)
+{
+    if (!st->js || !st->requested_url) return;
+    gint64 end_us = g_get_monotonic_time();
+    gint64 start_us = st->fetch_start_ms > 0
+        ? st->js->time_origin_us + (gint64)(st->fetch_start_ms * 1000.0)
+        : end_us;
+    ns_perf_resource_info info = {
+        .timeline = st->timeline,
+        .document_url = ns_js_realm_document_url(st->js, st->timeline),
+        .cors_mode = !st->no_cors,
+    };
+    char *abs = st->origin_url
+        ? ns_url_resolve(st->origin_url, st->requested_url) : NULL;
+    ns_perf_add_resource_timed(st->js, &info,
+                               abs ? abs : st->requested_url, "fetch",
+                               start_us, end_us, resp);
+    g_free(abs);
+}
+
+static JSValue
+ns_fetch_stream_start(JSContext *ctx, JSValueConst this_val, int argc,
+                      JSValueConst *argv, int magic, JSValueConst *func_data)
+{
+    (void)this_val; (void)magic;
+    if (argc >= 1)
+        JS_SetPropertyStr(ctx, func_data[0], "controller",
+                          JS_DupValue(ctx, argv[0]));
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_fetch_stream_cancel(JSContext *ctx, JSValueConst this_val, int argc,
+                       JSValueConst *argv, int magic, JSValueConst *func_data)
+{
+    (void)this_val; (void)argc; (void)argv; (void)magic;
+    int64_t id64 = 0;
+    JS_ToInt64(ctx, &id64, func_data[0]);
+    ns_js *js = js_from_ctx(ctx);
+    ns_js_fetch_state *st = js && js->fetch_states_by_id
+        ? g_hash_table_lookup(js->fetch_states_by_id,
+                              GUINT_TO_POINTER((guint)id64))
+        : NULL;
+    if (st && st->streamed) {
+        st->stream_done = TRUE;
+        if (st->cancellable) g_cancellable_cancel(st->cancellable);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_fetch_body_stream_new(ns_js_fetch_state *st)
+{
+    JSContext *ctx = st->ctx;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "ReadableStream");
+    JS_FreeValue(ctx, global);
+    if (!JS_IsConstructor(ctx, ctor)) {
+        JS_FreeValue(ctx, ctor);
+        return JS_UNDEFINED;
+    }
+    JSValue holder = JS_NewObject(ctx);
+    JSValue id_v = JS_NewInt64(ctx, (int64_t)st->id);
+    JSValue source = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, source, "start",
+        JS_NewCFunctionData(ctx, ns_fetch_stream_start, 1, 0, 1, &holder));
+    JS_SetPropertyStr(ctx, source, "cancel",
+        JS_NewCFunctionData(ctx, ns_fetch_stream_cancel, 1, 0, 1, &id_v));
+    JSValueConst args[1] = { source };
+    JSValue stream = JS_CallConstructor(ctx, ctor, 1, args);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, source);
+    JS_FreeValue(ctx, id_v);
+    JSValue controller = JS_GetPropertyStr(ctx, holder, "controller");
+    JS_FreeValue(ctx, holder);
+    if (JS_IsException(stream) || !JS_IsObject(controller)) {
+        if (JS_IsException(stream)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, stream);
+        JS_FreeValue(ctx, controller);
+        return JS_UNDEFINED;
+    }
+    st->stream_ctrl = controller;
+    return stream;
+}
+
+static void
+ns_fetch_stream_invoke(ns_js_fetch_state *st, const char *method, JSValue arg)
+{
+    JSContext *ctx = st->ctx;
+    JSValue fn = JS_GetPropertyStr(ctx, st->stream_ctrl, method);
+    if (JS_IsFunction(ctx, fn)) {
+        JSValueConst args[1] = { arg };
+        JSValue r = JS_Call(ctx, fn, st->stream_ctrl,
+                            JS_IsUndefined(arg) ? 0 : 1, args);
+        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, r);
+    }
+    JS_FreeValue(ctx, fn);
+    JS_FreeValue(ctx, arg);
+}
+
+static void
+ns_fetch_stream_enqueue(ns_js_fetch_state *st, const guint8 *data, gsize len)
+{
+    if (!len || st->stream_done) return;
+    JSContext *ctx = st->ctx;
+    JSValue ab = JS_NewArrayBufferCopy(ctx, data, len);
+    if (JS_IsException(ab)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return;
+    }
+    JSValueConst targs[3] = { ab, JS_NewInt64(ctx, 0),
+                              JS_NewInt64(ctx, (int64_t)len) };
+    JSValue u8 = JS_NewTypedArray(ctx, 3, targs, JS_TYPED_ARRAY_UINT8);
+    JS_FreeValue(ctx, ab);
+    if (JS_IsException(u8)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return;
+    }
+    st->stream_sent += len;
+    ns_fetch_stream_invoke(st, "enqueue", u8);
+}
+
+static void
+ns_fetch_stream_flush_pending(ns_js_fetch_state *st)
+{
+    if (!st->stream_pending || st->stream_pending->len == 0) return;
+    ns_fetch_stream_enqueue(st, st->stream_pending->data,
+                            st->stream_pending->len);
+    g_byte_array_set_size(st->stream_pending, 0);
+}
+
+static gboolean
+ns_fetch_stream_resolve(ns_js_fetch_state *st, const char *hop_url,
+                        long status, const char *raw_headers)
+{
+    const char *origin_url = st->origin_url ? st->origin_url :
+                             (st->js ? st->js->current_url : NULL);
+    g_autofree char *allow_origin =
+        ns_net_raw_header_values(raw_headers, "Access-Control-Allow-Origin");
+    if (!cors_allows_credentialed(st->opaque_origin, origin_url, hop_url,
+                                  allow_origin, raw_headers,
+                                  st->credentials_included) ||
+        ns_final_url_connect_blocked(st->js, st->ctx, hop_url))
+        return FALSE;
+    JSValue stream = ns_fetch_body_stream_new(st);
+    if (JS_IsUndefined(stream)) return FALSE;
+    ns_response head = { 0 };
+    head.status = status;
+    head.final_url = (char *)hop_url;
+    head.raw_headers = (char *)raw_headers;
+    head.cors_allow_origin = allow_origin;
+    g_autofree char *requested = st->origin_url
+        ? ns_url_resolve(st->origin_url, st->requested_url) : NULL;
+    head.redirect_count = requested && g_strcmp0(requested, hop_url) != 0;
+    JSValue r = ns_fetch_response_object(st, &head, TRUE, origin_url);
+    JS_DefinePropertyValueStr(st->ctx, r, "_bodyStream", stream,
+                              JS_PROP_CONFIGURABLE);
+    ns_attach_body_consumers(st->ctx, r);
+    st->streamed = TRUE;
+    st->settled = TRUE;
+    JSValue call_ret = JS_Call(st->ctx, st->resolve, JS_UNDEFINED, 1, &r);
+    if (JS_IsException(call_ret)) JS_FreeValue(st->ctx, JS_GetException(st->ctx));
+    JS_FreeValue(st->ctx, call_ret);
+    JS_FreeValue(st->ctx, r);
+    return TRUE;
+}
+
+static void
+ns_fetch_on_chunk(gpointer user_data, const char *hop_url, long status,
+                  const char *raw_headers, const guint8 *data, gsize len)
+{
+    ns_js_fetch_state *st = user_data;
+    if (!st->ctx || !st->js || st->stream_done || st->stream_refused) return;
+    if (st->settled && !st->streamed) return;
+    if (!hop_url || !*hop_url) hop_url = st->requested_url;
+    if (!st->stream_pending) st->stream_pending = g_byte_array_new();
+    g_byte_array_append(st->stream_pending, data, (guint)len);
+    if (ns_js_page_tasks_held(st->js)) return;
+    ns_budget_guard bg = {0};
+    ns_js_budget_push(st->js, &bg);
+    if (!st->streamed &&
+        !ns_fetch_stream_resolve(st, hop_url, status, raw_headers)) {
+        st->stream_refused = TRUE;
+        g_clear_pointer(&st->stream_pending, g_byte_array_unref);
+    } else {
+        ns_fetch_stream_flush_pending(st);
+    }
+    ns_drain_mutations(st->js);
+    ns_js_budget_pop(st->js, &bg);
+}
+
+static void
+ns_fetch_stream_finish(ns_js_fetch_state *st, ns_response *resp, GError *err)
+{
+    ns_budget_guard bg = {0};
+    ns_js_budget_push(st->js, &bg);
+    if (st->js && st->js->pending_fetches)
+        g_ptr_array_remove_fast(st->js->pending_fetches, st);
+    ns_fetch_add_resource_timing(st, resp);
+    if (!st->stream_done) {
+        gboolean failed = !resp || resp->error || err ||
+                          !resp->body || resp->body->len < st->stream_sent;
+        if (failed) {
+            const char *msg = resp && resp->error ? resp->error
+                : err ? err->message : "network error while reading the body";
+            JS_ThrowTypeError(st->ctx, "%s", msg);
+            JSValue ex = JS_GetException(st->ctx);
+            ns_fetch_stream_invoke(st, "error", ex);
+        } else {
+            g_clear_pointer(&st->stream_pending, g_byte_array_unref);
+            ns_fetch_stream_enqueue(st, resp->body->data + st->stream_sent,
+                                    resp->body->len - st->stream_sent);
+            ns_fetch_stream_invoke(st, "close", JS_UNDEFINED);
+        }
+        st->stream_done = TRUE;
+    }
+    ns_response_free(resp);
+    g_clear_error(&err);
+    ns_drain_mutations(st->js);
+    ns_js_budget_pop(st->js, &bg);
+    ns_js_fetch_state_free(st);
+}
+
 static void
 ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
 {
+    if (st->ctx && st->streamed) {
+        ns_fetch_stream_finish(st, resp, err);
+        return;
+    }
     if (!st->ctx) {
         ns_response_free(resp);
         g_clear_error(&err);
@@ -10428,23 +10755,7 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
         ns_js_fetch_state_free(st);
         return;
     }
-    if (st->js && st->requested_url) {
-        gint64 end_us = g_get_monotonic_time();
-        gint64 start_us = st->fetch_start_ms > 0
-            ? st->js->time_origin_us + (gint64)(st->fetch_start_ms * 1000.0)
-            : end_us;
-        ns_perf_resource_info info = {
-            .timeline = st->timeline,
-            .document_url = ns_js_realm_document_url(st->js, st->timeline),
-            .cors_mode = !st->no_cors,
-        };
-        char *abs = st->origin_url
-            ? ns_url_resolve(st->origin_url, st->requested_url) : NULL;
-        ns_perf_add_resource_timed(st->js, &info,
-                                   abs ? abs : st->requested_url, "fetch",
-                                   start_us, end_us, resp);
-        g_free(abs);
-    }
+    ns_fetch_add_resource_timing(st, resp);
     if (resp && !resp->error &&
         ns_final_url_connect_blocked(st->js, st->ctx, resp->final_url))
         resp->error = g_strdup(
@@ -10484,28 +10795,7 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
             ns_js_fetch_state_free(st);
             return;
         }
-        JSValue r = JS_NewObject(st->ctx);
-        ns_set_instance_proto(st->ctx, r, "Response");
-        JS_SetPropertyStr(st->ctx, r, "ok",
-            JS_NewBool(st->ctx, allow && resp->status >= 200 && resp->status < 300));
-        long status = allow ? resp->status : 0;
-        JS_SetPropertyStr(st->ctx, r, "status",
-            JS_NewInt32(st->ctx, (int)status));
-        JS_SetPropertyStr(st->ctx, r, "statusText",
-            JS_NewString(st->ctx, ns_http_status_text((int)status)));
-        JS_SetPropertyStr(st->ctx, r, "url",
-            JS_NewString(st->ctx, allow && resp->final_url
-                                  ? resp->final_url : ""));
-        JS_SetPropertyStr(st->ctx, r, "type",
-            JS_NewString(st->ctx, !allow ? "opaque"
-                : ns_origin_matches(st->opaque_origin, origin_url,
-                                    resp->final_url)
-                    ? "basic" : "cors"));
-        JS_SetPropertyStr(st->ctx, r, "redirected",
-            JS_NewBool(st->ctx, allow && resp->redirect_count > 0));
-        JS_SetPropertyStr(st->ctx, r, "redirectCount",
-            JS_NewInt32(st->ctx, allow ? resp->redirect_count : 0));
-        JS_SetPropertyStr(st->ctx, r, "bodyUsed", JS_FALSE);
+        JSValue r = ns_fetch_response_object(st, resp, allow, origin_url);
         const char *body_data = "";
         gsize body_data_len = 0;
         if (allow && resp->body && resp->body->len > 0) {
@@ -10515,52 +10805,6 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
         JS_SetPropertyStr(st->ctx, r, "_bodyBuffer",
             JS_NewArrayBufferCopy(st->ctx,
                 (const uint8_t *)body_data, body_data_len));
-        JSValue header_init = JS_NewObject(st->ctx);
-        if (allow) {
-            gboolean same_origin = ns_url_same_origin(
-                st->js ? st->js->current_url : NULL, resp->final_url);
-            g_autofree char *exposed = same_origin ? NULL
-                : ns_cors_exposed_raw_headers(resp->raw_headers);
-            g_autofree char *expose = same_origin ? NULL
-                : ns_net_raw_header_values(resp->raw_headers,
-                                           "Access-Control-Expose-Headers");
-            const char *raw = same_origin ? resp->raw_headers : exposed;
-            if (raw) ns_headers_init_add_raw(st->ctx, header_init, raw);
-            const struct { const char *name; const char *value; } known[] = {
-                { "content-type",                resp->content_type        },
-                { "content-disposition",         resp->content_disposition },
-                { "content-security-policy",     resp->csp_header          },
-                { "x-frame-options",             resp->xframe_options      },
-                { "access-control-allow-origin", resp->cors_allow_origin   },
-            };
-            for (gsize i = 0; i < G_N_ELEMENTS(known); i++) {
-                if (!known[i].value || !*known[i].value) continue;
-                if (ns_raw_headers_have(raw, known[i].name)) continue;
-                if (!same_origin &&
-                    !ns_cors_header_exposed(known[i].name,
-                                            strlen(known[i].name), expose))
-                    continue;
-                JS_SetPropertyStr(st->ctx, header_init, known[i].name,
-                                  JS_NewString(st->ctx, known[i].value));
-            }
-        }
-        JSValue global = JS_GetGlobalObject(st->ctx);
-        JSValue hdr_ctor = JS_GetPropertyStr(st->ctx, global, "Headers");
-        JS_FreeValue(st->ctx, global);
-        if (JS_IsConstructor(st->ctx, hdr_ctor)) {
-            JSValueConst hargs[1] = { header_init };
-            JSValue h_obj = JS_CallConstructor(st->ctx, hdr_ctor, 1, hargs);
-            if (JS_IsException(h_obj)) {
-                JS_FreeValue(st->ctx, JS_GetException(st->ctx));
-                JS_SetPropertyStr(st->ctx, r, "headers", JS_NewObject(st->ctx));
-            } else {
-                JS_SetPropertyStr(st->ctx, r, "headers", h_obj);
-            }
-        } else {
-            JS_SetPropertyStr(st->ctx, r, "headers", JS_NewObject(st->ctx));
-        }
-        JS_FreeValue(st->ctx, hdr_ctor);
-        JS_FreeValue(st->ctx, header_init);
         ns_attach_body_consumers(st->ctx, r);
         JSValue call_ret = JS_Call(st->ctx, st->resolve, JS_UNDEFINED, 1, &r);
         if (JS_IsException(call_ret)) JS_FreeValue(st->ctx, JS_GetException(st->ctx));
@@ -11016,6 +11260,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     st->ctx = ctx;
     st->js = js_from_ctx(ctx);
     st->timeline = st->js ? st->js->ctx : ctx;
+    st->stream_ctrl = JS_UNDEFINED;
     st->promise = JS_DupValue(ctx, promise);
     st->resolve = resolving[0];
     st->reject  = resolving[1];
@@ -11173,11 +11418,29 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     if (omit_credentials)
         g_ptr_array_add(extras, g_strdup("X-ND-Credentials: omit"));
     g_ptr_array_add(extras, NULL);
-    ns_net_request_async(send_url, top, use_method,
-                         body, body_len,
-                         content_type,
-                         (const char *const *)extras->pdata,
-                         st->cancellable, ns_on_js_fetch_done, st);
+    gboolean stream_body = !st->no_cors && st->js &&
+        !(!body && !st->cancellable &&
+          ns_net_request_shared(send_url, top, use_method,
+                                (const char *const *)extras->pdata));
+    if (stream_body) {
+        if (!st->id) {
+            st->id = ++st->js->next_fetch_id;
+            g_hash_table_insert(st->js->fetch_states_by_id,
+                                GUINT_TO_POINTER(st->id), st);
+        }
+        if (!st->cancellable) st->cancellable = g_cancellable_new();
+        ns_net_request_async_streaming(send_url, top, use_method,
+                                       body, body_len, content_type,
+                                       (const char *const *)extras->pdata,
+                                       st->cancellable, ns_fetch_on_chunk, st,
+                                       ns_on_js_fetch_done, st);
+    } else {
+        ns_net_request_async(send_url, top, use_method,
+                             body, body_len,
+                             content_type,
+                             (const char *const *)extras->pdata,
+                             st->cancellable, ns_on_js_fetch_done, st);
+    }
     g_ptr_array_free(extras, TRUE);
     g_free(abs_url);
     JS_FreeCString(ctx, url);
@@ -32543,6 +32806,7 @@ static gboolean ns_node_in_active_document(ns_js *js, const ns_node *n);
 static void ns_js_schedule_deferred_script_root(ns_js *js, ns_node *root);
 static void ns_js_link_fetches_drop(ns_js *js, const ns_node *root);
 static void ns_js_link_disconnected(ns_js *js, ns_node *node);
+static void ns_js_start_link_loads(ns_js *js, ns_node *root);
 static void ns_js_link_fetches_detach(ns_js *js);
 static void ns_js_link_fetches_free(ns_js *js);
 static gboolean ns_js_subresource_loads_pending(const ns_js *js);
@@ -32587,8 +32851,7 @@ ns_js_link_attr_changed(ns_js *js, ns_node *link, const char *name,
         return;
     link->flags &= ~NS_NODE_LINK_LOAD_FIRED;
     ns_js_link_fetches_drop(js, link);
-    if (ns_link_load_pending(link))
-        ns_js_schedule_deferred_script_root(js, link);
+    ns_js_start_link_loads(js, link);
 }
 
 static void
@@ -72412,6 +72675,20 @@ ns_js_collect_pending_link_loads(ns_node *n, GPtrArray *out)
 }
 
 static void
+ns_js_start_link_loads(ns_js *js, ns_node *root)
+{
+    GPtrArray *links = g_ptr_array_new();
+    ns_js_collect_pending_link_loads(root, links);
+    if (links->len > 0) {
+        g_autofree char *origin = g_strdup(ns_js_node_doc_base(js, root));
+        for (guint i = 0; i < links->len && !js->halted; i++)
+            ns_js_load_link_element(js, g_ptr_array_index(links, i),
+                                    origin ? origin : "inline");
+    }
+    g_ptr_array_free(links, TRUE);
+}
+
+static void
 ns_js_fire_parsed_stylesheet_loads(ns_js *js, ns_node *doc)
 {
     GPtrArray *sheets = g_ptr_array_new();
@@ -72619,9 +72896,10 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     }
     if (js->js_image_loads && g_hash_table_size(js->js_image_loads) > 0)
         ns_js_rescan_subtree_images(js, root, 0);
+    if (!ns_js_root_connected(js, root)) return;
+    ns_js_start_link_loads(js, root);
     if (js->in_pump) return;
     if (js->ce_upgrading) return;
-    if (!ns_js_root_connected(js, root)) return;
     ns_js_schedule_static_iframes(js, root);
     GPtrArray *sheets = g_ptr_array_new();
     ns_js_collect_pending_link_loads(root, sheets);

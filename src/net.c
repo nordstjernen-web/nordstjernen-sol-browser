@@ -7971,6 +7971,25 @@ ns_fetch_claim_locked(const char *key, ns_response **preloaded,
     return NS_FETCH_LEAD;
 }
 
+gboolean
+ns_net_request_shared(const char        *url,
+                      const char        *top_url,
+                      const char        *method,
+                      const char *const *extra_headers)
+{
+    if (!url) return FALSE;
+    g_autofree char *key = ns_net_request_key(url, top_url, method,
+                                              extra_headers);
+    if (!key) return FALSE;
+    g_mutex_lock(&g_fetch_mutex);
+    gboolean shared =
+        (g_preload_store && g_hash_table_contains(g_preload_store, key)) ||
+        (g_preload_expected && g_hash_table_contains(g_preload_expected, key)) ||
+        (g_fetch_coalesce && g_hash_table_contains(g_fetch_coalesce, key));
+    g_mutex_unlock(&g_fetch_mutex);
+    return shared;
+}
+
 static ns_response *
 ns_fetch_join_async(const char *key, GAsyncReadyCallback callback,
                     gpointer user_data, gboolean *joined)
