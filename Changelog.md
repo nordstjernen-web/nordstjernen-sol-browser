@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.49-dev:
+1.0.49:
 ======
 * A float inside an inline element with padding, a border or a margin
   (`<a style="padding:5px"><img style="float:left"></a>`) is placed at

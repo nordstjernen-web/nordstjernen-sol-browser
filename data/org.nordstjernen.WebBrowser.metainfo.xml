@@ -60,6 +60,17 @@
   </branding>
 
   <releases>
+    <release version="1.0.49" date="2026-11-16">
+      <description>
+        <p>Layout, rendering, audio and packaging release.</p>
+        <ul>
+          <li>Floats are placed like other browsers: beside inline content without breaking the line, clear of other floats over their whole height, and next to narrow overflow-hidden boxes.</li>
+          <li>Scaled images keep sharp edges, filtered translucent elements no longer show blocky steps, and the default page background is pure white.</li>
+          <li>Audio uses SDL3, and sound plays again in the Microsoft Store package.</li>
+          <li>The .deb and .rpm packages include the PDF viewer and UI translations, the toolbar logo is back, and NetBSD builds and runs JavaScript again.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.48" date="2026-11-15">
       <description>
         <p>PDF viewer, JavaScript engine and memory release.</p>
