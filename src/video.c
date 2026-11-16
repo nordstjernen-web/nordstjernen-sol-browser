@@ -241,6 +241,8 @@ typedef struct ns_mse_stream {
     guint       next_serial;
     double      video_gen_start;
     double      audio_gen_start;
+    GByteArray *video_pending;
+    GByteArray *audio_pending;
 } ns_mse_stream;
 
 static gboolean
@@ -264,7 +266,205 @@ ns_mse_stream_free(gpointer p)
     if (s->audio_bytes) g_byte_array_free(s->audio_bytes, TRUE);
     if (s->video_chunks) g_array_free(s->video_chunks, TRUE);
     if (s->audio_chunks) g_array_free(s->audio_chunks, TRUE);
+    if (s->video_pending) g_byte_array_free(s->video_pending, TRUE);
+    if (s->audio_pending) g_byte_array_free(s->audio_pending, TRUE);
     g_free(s);
+}
+
+#define NS_MSE_EBML_HEADER  0x1A45DFA3u
+#define NS_MSE_EBML_SEGMENT 0x18538067u
+#define NS_MSE_EBML_CLUSTER 0x1F43B675u
+#define NS_MSE_EBML_CUES    0x1C53BB6Bu
+
+static gboolean
+ns_mse_box_header(const guint8 *d, gsize n, gsize off, guint64 *size,
+                  gsize *header_len)
+{
+    if (n - off < 8) return FALSE;
+    guint64 sz = ((guint64)d[off] << 24) | ((guint64)d[off + 1] << 16) |
+                 ((guint64)d[off + 2] << 8) | d[off + 3];
+    gsize hdr = 8;
+    if (sz == 1) {
+        if (n - off < 16) return FALSE;
+        sz = 0;
+        for (int i = 0; i < 8; i++) sz = (sz << 8) | d[off + 8 + i];
+        hdr = 16;
+    }
+    *size = sz;
+    *header_len = hdr;
+    return TRUE;
+}
+
+static gboolean
+ns_mse_box_type_plausible(const guint8 *t)
+{
+    for (int i = 0; i < 4; i++)
+        if (t[i] < 0x20 || t[i] > 0x7E) return FALSE;
+    return TRUE;
+}
+
+static gssize
+ns_mse_isobmff_unit(const guint8 *d, gsize n)
+{
+    gsize off = 0;
+    while (off < n) {
+        guint64 size = 0;
+        gsize hdr = 0;
+        if (!ns_mse_box_header(d, n, off, &size, &hdr)) return 0;
+        const guint8 *type = d + off + 4;
+        if (!ns_mse_box_type_plausible(type) || size == 0 || size < hdr)
+            return -1;
+        if (size > n - off) return 0;
+        off += (gsize)size;
+        if (memcmp(type, "moov", 4) == 0 || memcmp(type, "mdat", 4) == 0)
+            return (gssize)off;
+    }
+    return 0;
+}
+
+static gboolean
+ns_mse_ebml_id(const guint8 *d, gsize n, gsize off, guint32 *id, gsize *len)
+{
+    if (off >= n) return FALSE;
+    guint8 b = d[off];
+    gsize l = b & 0x80 ? 1 : b & 0x40 ? 2 : b & 0x20 ? 3 : b & 0x10 ? 4 : 0;
+    if (!l || n - off < l) return FALSE;
+    guint32 v = 0;
+    for (gsize i = 0; i < l; i++) v = (v << 8) | d[off + i];
+    *id = v;
+    *len = l;
+    return TRUE;
+}
+
+static gboolean
+ns_mse_ebml_size(const guint8 *d, gsize n, gsize off, guint64 *size,
+                 gboolean *unknown, gsize *len)
+{
+    if (off >= n || d[off] == 0) return FALSE;
+    guint8 b = d[off];
+    gsize l = 1;
+    while (l <= 8 && !(b & (0x80 >> (l - 1)))) l++;
+    if (l > 8 || n - off < l) return FALSE;
+    guint64 v = b & (0xFF >> l);
+    gboolean all_ones = v == (guint64)(0xFF >> l);
+    for (gsize i = 1; i < l; i++) {
+        v = (v << 8) | d[off + i];
+        if (d[off + i] != 0xFF) all_ones = FALSE;
+    }
+    *size = v;
+    *unknown = all_ones;
+    *len = l;
+    return TRUE;
+}
+
+static gboolean
+ns_mse_ebml_element(const guint8 *d, gsize n, gsize off, guint32 *id,
+                    gsize *header_len, guint64 *size, gboolean *unknown)
+{
+    gsize il = 0, sl = 0;
+    if (!ns_mse_ebml_id(d, n, off, id, &il)) return FALSE;
+    if (!ns_mse_ebml_size(d, n, off + il, size, unknown, &sl)) return FALSE;
+    *header_len = il + sl;
+    return TRUE;
+}
+
+static gboolean
+ns_mse_ebml_top_level(guint32 id)
+{
+    return id == NS_MSE_EBML_CLUSTER || id == NS_MSE_EBML_CUES ||
+           id == NS_MSE_EBML_HEADER || id == NS_MSE_EBML_SEGMENT;
+}
+
+#define NS_MSE_EBML_TRACKS  0x1654AE6Bu
+
+static gssize
+ns_mse_ebml_children_end(const guint8 *d, gsize n, gsize off,
+                         gboolean end_after_tracks)
+{
+    gboolean seen_tracks = FALSE;
+    while (off < n) {
+        guint32 id = 0;
+        gsize hdr = 0;
+        guint64 size = 0;
+        gboolean unknown = FALSE;
+        if (!ns_mse_ebml_element(d, n, off, &id, &hdr, &size, &unknown))
+            return 0;
+        if (ns_mse_ebml_top_level(id)) return (gssize)off;
+        if (unknown) return -1;
+        if (size > n - off - hdr) return 0;
+        off += hdr + (gsize)size;
+        if (id == NS_MSE_EBML_TRACKS) seen_tracks = TRUE;
+    }
+    return end_after_tracks && seen_tracks ? (gssize)off : 0;
+}
+
+static gssize
+ns_mse_webm_unit(const guint8 *d, gsize n)
+{
+    guint32 id = 0;
+    gsize hdr = 0;
+    guint64 size = 0;
+    gboolean unknown = FALSE;
+    if (!ns_mse_ebml_element(d, n, 0, &id, &hdr, &size, &unknown)) return 0;
+    if (id == NS_MSE_EBML_HEADER) {
+        if (unknown) return -1;
+        if (size > n - hdr) return 0;
+        gsize off = hdr + (gsize)size;
+        guint32 seg = 0;
+        gsize seg_hdr = 0;
+        guint64 seg_size = 0;
+        gboolean seg_unknown = FALSE;
+        if (!ns_mse_ebml_element(d, n, off, &seg, &seg_hdr, &seg_size,
+                                 &seg_unknown))
+            return 0;
+        if (seg != NS_MSE_EBML_SEGMENT) return (gssize)off;
+        return ns_mse_ebml_children_end(d, n, off + seg_hdr, TRUE);
+    }
+    if (!ns_mse_ebml_top_level(id) && !unknown) {
+        if (size > n - hdr) return 0;
+        return (gssize)(hdr + (gsize)size);
+    }
+    if (id == NS_MSE_EBML_CLUSTER && !unknown) {
+        if (size > n - hdr) return 0;
+        return (gssize)(hdr + (gsize)size);
+    }
+    if (id == NS_MSE_EBML_CLUSTER) {
+        gssize end = ns_mse_ebml_children_end(d, n, hdr, FALSE);
+        return end > 0 ? end : 0;
+    }
+    if (unknown) return -1;
+    if (size > n - hdr) return 0;
+    return (gssize)(hdr + (gsize)size);
+}
+
+static gsize
+ns_mse_next_unit(const GByteArray *pending, const GByteArray *init)
+{
+    const guint8 *d = pending->data;
+    gsize n = pending->len;
+    if (n == 0) return 0;
+    const guint8 *kind = init && init->len >= 4 ? init->data : d;
+    gsize kind_len = init && init->len >= 4 ? init->len : n;
+    static const char *const mp4_boxes[] = {
+        "ftyp", "styp", "moov", "moof", "mdat", "sidx", "emsg", "prft",
+        "free", "skip",
+    };
+    gboolean mp4 = FALSE;
+    for (gsize i = 0; kind_len >= 8 && i < G_N_ELEMENTS(mp4_boxes); i++)
+        if (memcmp(kind + 4, mp4_boxes[i], 4) == 0) mp4 = TRUE;
+    guint32 first_id = kind_len >= 4
+        ? ((guint32)kind[0] << 24) | ((guint32)kind[1] << 16) |
+          ((guint32)kind[2] << 8) | kind[3]
+        : 0;
+    gssize unit;
+    if (first_id == NS_MSE_EBML_HEADER || first_id == NS_MSE_EBML_CLUSTER)
+        unit = ns_mse_webm_unit(d, n);
+    else if (mp4)
+        unit = ns_mse_isobmff_unit(d, n);
+    else
+        unit = -1;
+    if (unit < 0) return n;
+    return (gsize)unit;
 }
 static gboolean
 ns_mse_chunk_ranged(const ns_mse_chunk *c)
@@ -1508,6 +1708,11 @@ ns_video_mse_sync(ns_video_cache *cache, ns_mse_stream *s, ns_video *v)
                                    s->video_gen_start);
 }
 
+static gboolean ns_video_mse_append_unit(ns_video_cache *cache,
+                                         ns_mse_stream *s, guint stream_id,
+                                         char kind, const guint8 *data,
+                                         gsize len);
+
 gboolean
 ns_video_cache_mse_append(ns_video_cache *cache, guint stream_id, char kind,
                           const guint8 *data, gsize len)
@@ -1524,6 +1729,38 @@ ns_video_cache_mse_append(ns_video_cache *cache, guint stream_id, char kind,
                             GUINT_TO_POINTER(stream_id), s);
     }
     s->eos = FALSE;
+    GByteArray **pending = kind == 'a' ? &s->audio_pending : &s->video_pending;
+    const GByteArray *init = kind == 'a' ? s->audio_init : s->video_init;
+    if (!*pending) *pending = g_byte_array_new();
+    if ((*pending)->len > 0 && ns_mse_bytes_are_init_segment(data, len))
+        g_byte_array_set_size(*pending, 0);
+    if ((*pending)->len + len > NS_VIDEO_MAX_BYTES) {
+        g_byte_array_set_size(*pending, 0);
+        return FALSE;
+    }
+    g_byte_array_append(*pending, data, (guint)len);
+    gboolean ok = TRUE;
+    for (;;) {
+        gsize unit = ns_mse_next_unit(*pending, init);
+        if (unit == 0) break;
+        guint8 *bytes = g_memdup2((*pending)->data, unit);
+        g_byte_array_remove_range(*pending, 0, (guint)unit);
+        ok = ns_video_mse_append_unit(cache, s, stream_id, kind, bytes, unit);
+        g_free(bytes);
+        init = kind == 'a' ? s->audio_init : s->video_init;
+        if (!ok) {
+            g_byte_array_set_size(*pending, 0);
+            break;
+        }
+    }
+    return ok;
+}
+
+static gboolean
+ns_video_mse_append_unit(ns_video_cache *cache, ns_mse_stream *s,
+                         guint stream_id, char kind, const guint8 *data,
+                         gsize len)
+{
     GByteArray **dst = kind == 'a' ? &s->audio_bytes : &s->video_bytes;
     GByteArray **init = kind == 'a' ? &s->audio_init : &s->video_init;
     GArray **chunks = kind == 'a' ? &s->audio_chunks : &s->video_chunks;

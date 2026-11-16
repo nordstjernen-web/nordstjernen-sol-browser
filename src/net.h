@@ -199,6 +199,11 @@ const char *ns_net_fetch_priority_hint(const char *fetchpriority);
 char **ns_net_headers_with_fetch_priority(const char *const *headers,
                                         const char *hint);
 
+gboolean ns_net_request_shared(const char        *url,
+                               const char        *top_url,
+                               const char        *method,
+                               const char *const *extra_headers);
+
 char *ns_net_request_key(const char        *url,
                          const char        *top_url,
                          const char        *method,
