@@ -3,6 +3,15 @@ Changelog:
 
 1.0.49-dev:
 ======
+* A float in the middle of a paragraph no longer breaks the line. Text
+  after `Some text <img style="float:left"> more text` continued on a new
+  line below the float; it now continues on the same line, with the
+  space kept, as in other browsers.
+* A float that follows inline content is placed on the current line only
+  when it fits beside that line's content, and otherwise just below the
+  line, measured from the line's real top instead of one text line above
+  the paragraph's bottom. A float after a tall inline-block was placed
+  too low.
 * A paragraph next to floats returns to its full width on the first line
   below them, wherever the float band ends; before, only a paragraph
   that started beside a float was split there. A line of inline-blocks

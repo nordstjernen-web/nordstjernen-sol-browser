@@ -81,6 +81,7 @@ length_resolve_nonnegative(const ns_css_value *v, double basis,
 double
 ns_inline_text_indent_px(const ns_box *run, const ns_style *s, double basis)
 {
+    if (run && run->line_continuation_x > 0) return run->line_continuation_x;
     return run && run->inline_split_tail ? 0 : ns_text_indent_px(s, basis);
 }
 
@@ -903,6 +904,25 @@ inline_run_first_line_height(const ns_box *run)
     return (double)logical.height / NS_PANGO_SCALE;
 }
 
+
+static gboolean
+inline_run_last_line(const ns_box *run, double *top, double *height,
+                     double *width)
+{
+    NsPangoLayout *layout = ns_paint_build_inline_layout(NULL, run);
+    if (!layout) return FALSE;
+    NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
+    NsPangoRectangle logical;
+    do {
+        ns_pango_layout_iter_get_line_extents(iter, NULL, &logical);
+    } while (ns_pango_layout_iter_next_line(iter));
+    ns_pango_layout_iter_free(iter);
+    g_object_unref(layout);
+    *top = (double)logical.y / NS_PANGO_SCALE;
+    *height = (double)logical.height / NS_PANGO_SCALE;
+    *width = (double)logical.width / NS_PANGO_SCALE;
+    return TRUE;
+}
 
 static void
 box_append_child(ns_box *parent, ns_box *child)
@@ -17363,6 +17383,53 @@ inline_run_break_before_float_change(const ns_box *run, const GArray *floats,
     return split;
 }
 
+static gboolean
+text_node_edge_is_space(const ns_node *n, gboolean at_end)
+{
+    if (!n || n->kind != NS_NODE_TEXT || !n->text || n->text_len == 0)
+        return FALSE;
+    return g_ascii_isspace(n->text[at_end ? n->text_len - 1 : 0]);
+}
+
+static gboolean
+float_has_adjacent_space(const ns_box *f)
+{
+    const ns_node *n = f ? f->dom : NULL;
+    if (!n) return FALSE;
+    return text_node_edge_is_space(n->prev_sibling, TRUE) ||
+           text_node_edge_is_space(n->next_sibling, FALSE);
+}
+
+static gboolean
+style_preserves_spaces(const ns_style *style)
+{
+    const ns_css_value *ws = style ? style->values[NS_CSS_WHITE_SPACE] : NULL;
+    return keyword_is(ws, "pre") || keyword_is(ws, "pre-wrap") ||
+           keyword_is(ws, "break-spaces");
+}
+
+static double
+space_width_px(const ns_style *style)
+{
+    NsPangoLayout *layout = make_pango_layout(style);
+    ns_pango_layout_set_text(layout, " ", 1);
+    ns_text_measure m;
+    text_measure(layout, &m);
+    g_object_unref(layout);
+    return (double)m.logical.width / NS_PANGO_SCALE;
+}
+
+static gboolean
+text_lines_can_continue(const ns_box *box, const ns_style *inherited)
+{
+    if (keyword_is(box->style ? box->style->values[NS_CSS_DIRECTION] : NULL,
+                   "rtl"))
+        return FALSE;
+    const ns_css_value *ta = inherited ? inherited->values[NS_CSS_TEXT_ALIGN] : NULL;
+    return !ta || keyword_is(ta, "left") || keyword_is(ta, "start") ||
+           keyword_is(ta, "auto");
+}
+
 static void
 inline_run_fit_first_line(ns_box *run, const GArray *floats, double inner_x,
                           double cw, double *line_y, double *left_off,
@@ -18064,6 +18131,12 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         floats_inherit(floats, &g_inherited_floats, inner_x, cw, inner_y);
     guint own_floats_from = floats->len;
     double inline_line_top = -1;
+    double inline_line_bottom = -1;
+    double inline_line_used_w = 0;
+    ns_box *continued_run = NULL;
+    gboolean floats_after_run = FALSE;
+    gboolean space_after_run = FALSE;
+    gboolean continues_lines = text_lines_can_continue(box, child_inherited);
     ns_box *line_run = NULL;
     double line_run_avail = 0;
     const ns_box *top_collapse_child = NULL;
@@ -18120,8 +18193,16 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 + c->border.left + c->border.right
                 + c->margin.left + c->margin.right;
             double float_y = cursor_y + prev_margin_bottom;
-            if (!clr && inline_line_top >= 0 && inline_line_top < cursor_y)
-                float_y = inline_line_top;
+            if (!clr && inline_line_top >= 0 && inline_line_top < cursor_y) {
+                double line_l = 0, line_r = 0;
+                floats_offsets_over(floats, inline_line_top,
+                                    MAX(inline_line_bottom - 0.5, inline_line_top),
+                                    &line_l, &line_r);
+                if (inline_line_used_w + avail <= cw - line_l - line_r + 0.5)
+                    float_y = inline_line_top;
+                else
+                    float_y = MAX(inline_line_bottom, inline_line_top);
+            }
             if (clr) {
                 double y_after_clear = floats_clear_y(floats, float_y, clr);
                 if (y_after_clear > float_y) float_y = y_after_clear;
@@ -18189,6 +18270,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 .outer_w = actual_outer,
             };
             g_array_append_val(floats, fr);
+            if (continued_run) {
+                floats_after_run = TRUE;
+                if (float_has_adjacent_space(c)) space_after_run = TRUE;
+            }
             if (line_run && c->y == line_run->y)
                 line_run_avail = inline_run_narrow_for_float(
                     line_run, floats, inner_x, cw, line_run_avail,
@@ -18316,8 +18401,36 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         } else {
             double line_y = cursor_y + prev_margin_bottom;
             double left_off = 0, right_off = 0;
-            floats_offsets_at(floats, line_y, &left_off, &right_off);
-            if (!style_lines_never_wrap(box->style) && left_off + right_off > 0)
+            c->line_continuation_x = 0;
+            gboolean continued = FALSE;
+            if (continued_run && floats_after_run && c->kind == NS_BOX_INLINE &&
+                c->text && inline_line_top >= 0) {
+                double l = 0, r = 0;
+                floats_offsets_over(floats, inline_line_top,
+                                    MAX(inline_line_bottom - 0.5, inline_line_top),
+                                    &l, &r);
+                double start_x = inner_x + l;
+                double end_x = continued_run->x + inline_line_used_w +
+                    (space_after_run && !style_preserves_spaces(child_inherited)
+                     ? space_width_px(child_inherited) : 0);
+                double indent = MAX(end_x - start_x, 0);
+                double room = cw - l - r - indent;
+                if (style_lines_never_wrap(box->style) ||
+                    room + 0.5 >= inline_run_first_word_width(c, child_inherited)) {
+                    line_y = inline_line_top;
+                    left_off = l;
+                    right_off = r;
+                    c->line_continuation_x = indent;
+                    continued = TRUE;
+                }
+            }
+            continued_run = NULL;
+            floats_after_run = FALSE;
+            space_after_run = FALSE;
+            if (!continued)
+                floats_offsets_at(floats, line_y, &left_off, &right_off);
+            if (!continued && !style_lines_never_wrap(box->style) &&
+                left_off + right_off > 0)
                 floats_advance_to_fit(floats, cw,
                                       inline_run_first_word_width(c, child_inherited),
                                       &line_y, &left_off, &right_off);
@@ -18364,8 +18477,18 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             collect_escaping_floats(c, floats, 0);
             double line_height = inline_line_height(child_inherited);
+            double last_top = MAX(0, c->content_height - line_height);
+            double last_h = MIN(line_height, c->content_height);
+            double last_w = c->content_width;
+            if (c->kind == NS_BOX_INLINE && c->text &&
+                inline_run_last_line(c, &last_top, &last_h, &last_w))
+                last_top = MIN(last_top, c->content_height);
             inline_line_top = inline_text_ends_with_break(c->text)
-                ? -1 : c->y + MAX(0, c->content_height - line_height);
+                ? -1 : c->y + last_top;
+            inline_line_bottom = c->y + MIN(last_top + last_h, c->content_height);
+            inline_line_used_w = last_w + (inline_line_top == c->y ? c->line_continuation_x : 0);
+            continued_run = continues_lines && inline_line_top >= 0 &&
+                            c->kind == NS_BOX_INLINE ? c : NULL;
             line_run = inline_line_top == c->y && c->text ? c : NULL;
             line_run_avail = cw_avail;
             cursor_y += c->content_height;
