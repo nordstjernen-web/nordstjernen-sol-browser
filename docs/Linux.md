@@ -83,7 +83,9 @@ HarfBuzz 8.3+, FriBiDi 1.0.6+ and fontconfig 2.15+. Ubuntu 25.04, Debian 13 and 
 42 are the oldest releases that ship all of them (Ubuntu 24.04's libcurl 8.5 has no
 WebSocket support);
 `-Dweb-text-lib=disabled` drops the text-stack floors by shaping through the
-system Pango.
+system Pango. `-Dprofile=claude` accepts libcurl 8.5 and a libcurl without
+ws/wss, for development builds on Ubuntu 24.04 (Claude's cloud containers).
+That build has no WebSocket, so never package it.
 
 web-text-lib, the Pango fork that shapes text, is vendored in-tree at
 `src/web-text-lib/` and builds with no network. On glibc

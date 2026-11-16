@@ -102,6 +102,13 @@ message('nordstjernen build profile: ' +
         (ns_is_release ? 'release (LTO + stripped + hardened)'
                        : 'development (debug symbols + frame pointer + hardened)'))
 
+ns_profile_claude = get_option('profile') == 'claude'
+ns_libcurl_min = ns_profile_claude ? '>=8.5' : '>=8.11'
+if ns_profile_claude
+  message('profile=claude: libcurl ' + ns_libcurl_min + ' accepted, ' +
+          'WebSocket optional at runtime; not for packaged builds')
+endif
+
 is_android = host_machine.system() == 'android'
 # is_mobile drops GTK 4, gdk-pixbuf, epoxy/WebGL and the desktop-only helper
 # executables, building only libnordstjernen.
@@ -128,7 +135,7 @@ use_web_text_lib = not is_mobile and get_option('web-text-lib').allowed()
 # web-text-lib enforces the text-stack floors from inside its own build, where a
 # too-old library surfaces as a bare version mismatch and only the first of
 # several is reported. Checking every hard floor here first names them all.
-ns_dependency_floors = [['libcurl', '>=8.11']]
+ns_dependency_floors = [['libcurl', ns_libcurl_min]]
 if use_web_text_lib
   ns_dependency_floors += [
     ['glib-2.0', '>=2.80'],
@@ -144,11 +151,15 @@ if not is_mobile and gtk_feature.enabled()
   ns_dependency_floors += [['gtk4', gtk4_min]]
 endif
 ns_unmet_floors = []
+ns_libcurl_floor_unmet = false
 foreach floor : ns_dependency_floors
   if not dependency(floor[0], version: floor[1], required: false).found()
     installed = dependency(floor[0], required: false)
     ns_unmet_floors += '  @0@ @1@ (@2@)'.format(floor[0], floor[1],
       installed.found() ? 'found ' + installed.version() : 'not found')
+    if floor[0] == 'libcurl'
+      ns_libcurl_floor_unmet = true
+    endif
   endif
 endforeach
 if ns_unmet_floors.length() > 0
@@ -157,9 +168,13 @@ if ns_unmet_floors.length() > 0
     ns_floor_hint = (' -Dweb-text-lib=disabled drops the text-stack floors by ' +
                      'shaping through the system Pango.')
   endif
+  if ns_libcurl_floor_unmet and not ns_profile_claude
+    ns_floor_hint += (' -Dprofile=claude accepts libcurl 8.5, without ' +
+                      'WebSocket, for development builds only.')
+  endif
   error('Nordstjernen needs newer system libraries than this machine has:\n' +
         '\n'.join(ns_unmet_floors) + '\n' +
-        'Ubuntu 24.04, Debian 13 and Fedora 40 are the oldest releases of ' +
+        'Ubuntu 25.04, Debian 13 and Fedora 42 are the oldest releases of ' +
         'their distributions that ship all of them.' + ns_floor_hint)
 endif
 
@@ -269,14 +284,18 @@ if not is_mobile and gtk_feature.allowed()
   endif
 endif
 gmodule = dependency('gmodule-2.0')
-libcurl = dependency('libcurl', version: '>=8.11')
+libcurl = dependency('libcurl', version: ns_libcurl_min)
 if cc.has_header_symbol('curl/curl.h', 'CURLOPT_PRIORITY_URGENCY', dependencies: libcurl)
   add_project_arguments('-DNS_CURL_HAVE_PRIORITY=1', language: 'c')
   message('libcurl: RFC 9218 request priorities')
 endif
 libcurl_protocols = libcurl.get_variable(pkgconfig: 'supported_protocols', default_value: '')
 if libcurl_protocols != '' and not libcurl_protocols.split().contains('WS')
-  error('libcurl @0@ is built without the ws/wss protocols; WebSocket needs a libcurl with WebSocket support.'.format(libcurl.version()))
+  if ns_profile_claude
+    warning('libcurl @0@ is built without the ws/wss protocols: the WebSocket constructor throws in this build.'.format(libcurl.version()))
+  else
+    error('libcurl @0@ is built without the ws/wss protocols; WebSocket needs a libcurl with WebSocket support. -Dprofile=claude builds without it for development only.'.format(libcurl.version()))
+  endif
 endif
 libcrypto = dependency('libcrypto')
 libm = cc.find_library('m', required: false)

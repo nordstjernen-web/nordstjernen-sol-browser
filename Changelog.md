@@ -17,6 +17,11 @@ Changelog:
   toolbar, after the menu button; clicking it opens nordstjernen.org.
   1.0.45 removed it and left only the "Visit nordstjernen.org" menu item,
   which stays.
+* Build: `-Dprofile=claude` is a development build profile for Claude's
+  cloud containers (Ubuntu 24.04). It lowers the libcurl floor from 8.11 to
+  8.5. A libcurl without the ws/wss protocols then gives a warning instead
+  of stopping `meson setup`, and that build has no WebSocket: the
+  constructor throws. The default profile and its floors are unchanged.
 
 1.0.48:
 ======
