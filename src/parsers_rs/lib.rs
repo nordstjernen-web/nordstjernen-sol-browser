@@ -52,8 +52,8 @@ unsafe extern "C" {
         system_id: *const c_char,
         system_len: usize,
     );
-    fn ns_h5_append(parent: *mut c_void, child: *mut c_void);
-    fn ns_h5_insert_before(sibling: *mut c_void, child: *mut c_void);
+    fn ns_h5_append(sink: *mut c_void, parent: *mut c_void, child: *mut c_void);
+    fn ns_h5_insert_before(sink: *mut c_void, sibling: *mut c_void, child: *mut c_void);
     fn ns_h5_append_text(sink: *mut c_void, parent: *mut c_void, text: *const c_char, len: usize);
     fn ns_h5_insert_text_before(
         sink: *mut c_void,
@@ -63,9 +63,9 @@ unsafe extern "C" {
     );
     fn ns_h5_parent(node: *mut c_void) -> *mut c_void;
     fn ns_h5_remove(node: *mut c_void);
-    fn ns_h5_reparent_children(from: *mut c_void, to: *mut c_void);
-    fn ns_h5_template_contents(template: *mut c_void) -> *mut c_void;
-    fn ns_h5_discard(node: *mut c_void);
+    fn ns_h5_reparent_children(sink: *mut c_void, from: *mut c_void, to: *mut c_void);
+    fn ns_h5_template_contents(sink: *mut c_void, template: *mut c_void) -> *mut c_void;
+    fn ns_h5_discard(sink: *mut c_void, node: *mut c_void);
 }
 
 unsafe fn input<'a>(data: *const c_char, len: usize) -> &'a [u8] {
@@ -205,7 +205,7 @@ impl Sink {
         self.detached
             .retain(|&node| unsafe { ns_h5_parent(node).is_null() });
         for &root in &self.detached {
-            unsafe { ns_h5_discard(root) };
+            unsafe { ns_h5_discard(self.context, root) };
         }
         self.detached.clear();
     }
@@ -324,11 +324,11 @@ impl TreeSink for Sink {
     }
 
     fn append(&mut self, parent: Handle, child: Handle) {
-        unsafe { ns_h5_append(parent.0, child.0) };
+        unsafe { ns_h5_append(self.context, parent.0, child.0) };
     }
 
     fn insert_before(&mut self, sibling: Handle, child: Handle) {
-        unsafe { ns_h5_insert_before(sibling.0, child.0) };
+        unsafe { ns_h5_insert_before(self.context, sibling.0, child.0) };
     }
 
     fn append_text(&mut self, parent: Handle, text: &[u8]) {
@@ -352,11 +352,11 @@ impl TreeSink for Sink {
     }
 
     fn reparent_children(&mut self, from: Handle, to: Handle) {
-        unsafe { ns_h5_reparent_children(from.0, to.0) };
+        unsafe { ns_h5_reparent_children(self.context, from.0, to.0) };
     }
 
     fn template_contents(&mut self, template: Handle) -> Handle {
-        Handle(unsafe { ns_h5_template_contents(template.0) })
+        Handle(unsafe { ns_h5_template_contents(self.context, template.0) })
     }
 
     fn add_missing_attributes(&mut self, element: Handle, attrs: Attrs<'_>) {
@@ -367,7 +367,7 @@ impl TreeSink for Sink {
 
     fn discard(&mut self, node: Handle) {
         self.forget_subtree(node.0);
-        unsafe { ns_h5_discard(node.0) };
+        unsafe { ns_h5_discard(self.context, node.0) };
     }
 }
 

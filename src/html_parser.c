@@ -25,9 +25,14 @@ enum {
 #define NS_H5_ARENA_CHUNK (64u * 1024u)
 
 struct ns_h5_sink {
-    GPtrArray *chunks;
-    char      *next;
-    size_t     left;
+    GPtrArray  *chunks;
+    char       *next;
+    size_t      left;
+    ns_node    *attr_element;
+    ns_attr    *attr_tail;
+    ns_node    *merge_element;
+    GHashTable *merge_names;
+    GHashTable *template_hosts;
 };
 
 static ns_h5_sink *
@@ -39,10 +44,21 @@ ns_h5_sink_new(void)
 }
 
 static void
+ns_h5_sink_finish(ns_h5_sink *sink)
+{
+    sink->attr_element = NULL;
+    sink->attr_tail = NULL;
+    sink->merge_element = NULL;
+    g_clear_pointer(&sink->merge_names, g_hash_table_destroy);
+    g_clear_pointer(&sink->template_hosts, g_hash_table_destroy);
+}
+
+static void
 ns_h5_sink_free(void *p)
 {
     ns_h5_sink *sink = p;
     if (!sink) return;
+    ns_h5_sink_finish(sink);
     g_ptr_array_free(sink->chunks, TRUE);
     g_free(sink);
 }
@@ -96,6 +112,32 @@ ns_h5_attr_namespace_uri(int namespace_id)
     }
 }
 
+static void
+ns_h5_append_attribute(ns_h5_sink *sink, ns_node *element,
+                       const char *name, const char *value)
+{
+    ns_attr *hint = sink->attr_element == element ? sink->attr_tail : NULL;
+    sink->attr_tail = ns_element_append_attr_borrow(element, hint, name, value);
+    sink->attr_element = element;
+}
+
+static void
+ns_h5_merge_attribute(ns_h5_sink *sink, ns_node *element,
+                      const char *name, const char *value)
+{
+    if (sink->merge_element != element) {
+        if (sink->merge_names)
+            g_hash_table_remove_all(sink->merge_names);
+        else
+            sink->merge_names = g_hash_table_new(g_str_hash, g_str_equal);
+        for (ns_attr *a = element->attrs; a; a = a->next)
+            if (a->name) g_hash_table_add(sink->merge_names, a->name);
+        sink->merge_element = element;
+    }
+    if (g_hash_table_add(sink->merge_names, (char *)name))
+        ns_h5_append_attribute(sink, element, name, value);
+}
+
 void
 ns_h5_attribute(ns_h5_sink *sink, ns_node *element,
                 const char *name, size_t name_len,
@@ -107,13 +149,12 @@ ns_h5_attribute(ns_h5_sink *sink, ns_node *element,
     const char *val = ns_h5_arena_copy(sink, value, value_len);
     if (ns_attr_name_is_internal(qname)) return;
     if (only_if_missing) {
-        if (!ns_element_get_attr(element, qname))
-            ns_element_set_attr(element, qname, val);
+        ns_h5_merge_attribute(sink, element, qname, val);
         return;
     }
     const char *uri = ns_h5_attr_namespace_uri(namespace_id);
     if (!uri) {
-        ns_element_append_attr_borrow(element, qname, val);
+        ns_h5_append_attribute(sink, element, qname, val);
         return;
     }
     g_autofree char *prefix = prefix_len ? g_strndup(qname, prefix_len) : NULL;
@@ -172,17 +213,45 @@ ns_h5_doctype(ns_h5_sink *sink, ns_node *document,
     ns_node_append_child(document, out);
 }
 
-void
-ns_h5_append(ns_node *parent, ns_node *child)
+static const ns_node *
+ns_h5_tree_parent(const ns_h5_sink *sink, const ns_node *node)
 {
+    if (node->parent) return node->parent;
+    if (!sink->template_hosts || !(node->flags & NS_NODE_TEMPLATE_CONTENT))
+        return NULL;
+    return g_hash_table_lookup(sink->template_hosts, node);
+}
+
+static gboolean
+ns_h5_is_inclusive_ancestor(const ns_h5_sink *sink, const ns_node *ancestor,
+                            const ns_node *node)
+{
+    for (const ns_node *n = node; n; n = ns_h5_tree_parent(sink, n))
+        if (n == ancestor) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_h5_can_adopt(const ns_h5_sink *sink, const ns_node *parent,
+                const ns_node *child)
+{
+    if (!child->first_child && !child->tpl_content) return parent != child;
+    return !ns_h5_is_inclusive_ancestor(sink, child, parent);
+}
+
+void
+ns_h5_append(ns_h5_sink *sink, ns_node *parent, ns_node *child)
+{
+    if (!ns_h5_can_adopt(sink, parent, child)) return;
     ns_node_append_child(parent, child);
 }
 
 void
-ns_h5_insert_before(ns_node *sibling, ns_node *child)
+ns_h5_insert_before(ns_h5_sink *sink, ns_node *sibling, ns_node *child)
 {
     ns_node *parent = sibling->parent;
-    if (!parent || sibling == child) return;
+    if (!parent || sibling == child || !ns_h5_can_adopt(sink, parent, child))
+        return;
     ns_node_remove(child);
     child->parent = parent;
     child->prev_sibling = sibling->prev_sibling;
@@ -252,7 +321,7 @@ ns_h5_insert_text_before(ns_h5_sink *sink, ns_node *sibling,
     if (prev && prev->kind == NS_NODE_TEXT)
         ns_h5_extend_text(prev, text, len);
     else
-        ns_h5_insert_before(sibling, ns_h5_text_node(sink, text, len));
+        ns_h5_insert_before(sink, sibling, ns_h5_text_node(sink, text, len));
 }
 
 ns_node *
@@ -268,21 +337,30 @@ ns_h5_remove(ns_node *node)
 }
 
 void
-ns_h5_reparent_children(ns_node *from, ns_node *to)
+ns_h5_reparent_children(ns_h5_sink *sink, ns_node *from, ns_node *to)
 {
+    if (ns_h5_is_inclusive_ancestor(sink, from, to)) return;
     while (from->first_child)
         ns_node_append_child(to, from->first_child);
 }
 
 ns_node *
-ns_h5_template_contents(ns_node *template_element)
+ns_h5_template_contents(ns_h5_sink *sink, ns_node *template_element)
 {
-    return ns_template_content_get(template_element);
+    gboolean fresh = template_element->tpl_content == NULL;
+    ns_node *content = ns_template_content_get(template_element);
+    if (fresh && content) {
+        if (!sink->template_hosts)
+            sink->template_hosts = g_hash_table_new(NULL, NULL);
+        g_hash_table_insert(sink->template_hosts, content, template_element);
+    }
+    return content;
 }
 
 void
-ns_h5_discard(ns_node *node)
+ns_h5_discard(ns_h5_sink *sink, ns_node *node)
 {
+    ns_h5_sink_finish(sink);
     ns_node_free(node);
 }
 
@@ -665,6 +743,7 @@ ns_html_parse_with_scripting(const char *input, gssize len,
     ns_h5_sink *sink = ns_h5_sink_new();
     ns_node_attach_backing(root, sink, ns_h5_sink_free);
     int quirks = ns_rs_html_parse_document(input, n, scripting, root, sink);
+    ns_h5_sink_finish(sink);
     if (quirks == 2)
         root->flags |= NS_NODE_QUIRKS;
     else if (quirks == 1)
@@ -751,6 +830,7 @@ parse_fragment_in_namespace(const char *context_tag, int context_ns,
     ns_node_attach_backing(out, sink, ns_h5_sink_free);
     ns_rs_html_parse_fragment(context, context ? strlen(context) : 0,
                               context_ns, input, n, scripting, out, sink);
+    ns_h5_sink_finish(sink);
     return out;
 }
 
