@@ -1410,6 +1410,8 @@ ns_css_value *ns_css_value_dup(const ns_css_value *v);
 void ns_css_value_free(ns_css_value *v);
 GArray *ns_css_parse_declarations(const char *text);
 void ns_css_declarations_free(GArray *decls);
+gboolean ns_css_style_apply_inline_transform(ns_style *st, const char *old_text,
+                                             const char *new_text);
 void ns_css_incremental_exclude(const void *node, gboolean exclude);
 char *ns_css_container_condition_canonical(const char *cond);
 double ns_css_gradient_angle(const ns_css_gradient *gr, double w, double h);

@@ -167,6 +167,7 @@ struct ns_js {
     ns_node       *current_script;
     char         *early_inject_src;
     gboolean      mutated;
+    gboolean      transform_patched;
     guint64       mutation_serial;
     GHashTable   *timers;
     GMainContext *main_context;
