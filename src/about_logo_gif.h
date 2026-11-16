@@ -6,7 +6,7 @@ static const char about_logo_gif_b64[] =
     "R0lGODlhgACAAPUMAAsTQxMcSwkQP0tUeBokVBAXRLa5uRoiTXVuZfj25v3yrevr44+FbiMtW62pmtLCh36Chuzr3Nvd45aV"
     "iuDf0v/4yvj35wYMNKiQW5Sas2JTObqodQcNOQUKLA4YTOjXlX2Do9TPx9PQtczS2KivxsLExcO8qKOsw+fYrcyyaggPPezs"
     "7BcgTQ0WSQQIJRMeUe7r1RsmWRYhU4yTrePk3PLtzevju/Tkp2RrjdrRm//kkgQHIQMGHP789QYLNP/JUiH/C05FVFNDQVBF"
-    "Mi4wAwEBAAAh/wtJbWFnZU1hZ2ljaw5nYW1tYT0wLjQ1NDU0NQAh+QQFBgAMACwAAAAAgACAAAAG/0CGcEgkuo6dpPLCbDqf"
+    "Mi4wAwEAAAAh/wtJbWFnZU1hZ2ljaw5nYW1tYT0wLjQ1NDU0NQAh+QQFBgAMACwAAAAAgACAAAAG/0CGcEgkuo6dpPLCbDqf"
     "To50Sq1KVdis1sqlQr9Opfh4LJrPZzJSvAQ/u1ytfE6He91QtlLtQvuHfC56HXhRdld0iYpyh4Vhg4F/ZoGCeo5NdotyApyd"
     "mltwFxyFg0mUkkKUg5eiXZqdAliwWrCcmqGseqd/qpaXrom1tioCAMbGncfCsYldrBe6kWi9vnjAc7XH2tvc3MSedVyXkNJF"
     "1NVgcdiw3e3uysW14VXj0XyTfOhMBQVv6rTJ3hkLEEDgu1mMxJEa06FcqnxsvvAzVGUdJ4PHCA4siHHbsDkK8ZBTYwSiGEf/"
