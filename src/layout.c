@@ -17945,13 +17945,37 @@ inline_text_ends_with_break(const char *text)
     return len >= 3 && memcmp(text + len - 3, "\xe2\x80\xa8", 3) == 0;
 }
 
+static gboolean
+box_is_promoted_inline(const ns_box *b)
+{
+    if (!b || b->kind != NS_BOX_BLOCK || !b->style || !b->dom) return FALSE;
+    ns_display d = ns_css_display_of(b->style);
+    return d.box == NS_DISPLAY_BOX_NORMAL && d.outer == NS_DISPLAY_OUTER_INLINE &&
+           d.inner == NS_DISPLAY_INNER_FLOW &&
+           d.internal == NS_DISPLAY_INTERNAL_NONE && !d.list_item &&
+           float_side_of(b->style) < 0 && !style_is_absolute_or_fixed(b->style);
+}
+
+static void
+box_edges_for_layout(const ns_box *b, double basis, ns_edges *margin,
+                     ns_edges *padding, ns_edges *border)
+{
+    if (box_is_promoted_inline(b)) {
+        memset(margin, 0, sizeof(*margin));
+        memset(padding, 0, sizeof(*padding));
+        memset(border, 0, sizeof(*border));
+        return;
+    }
+    edges_from_style(b->style, basis, margin, padding, border);
+}
+
 static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
     inline_runs_join_splits(box);
     double cb_pct_basis = box_cb_basis(box, parent_content_width);
-    edges_from_style(box->style, cb_pct_basis,
-                     &box->margin, &box->padding, &box->border);
+    box_edges_for_layout(box, cb_pct_basis,
+                         &box->margin, &box->padding, &box->border);
     box->margin_top_through = 0;
 
     const ns_css_value *wv  = box->style ? box->style->values[NS_CSS_WIDTH]     : NULL;
@@ -18359,8 +18383,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         }
         if (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE ||
             box_is_block_level_replaced(c)) {
-            edges_from_style(c->style, cw,
-                             &c->margin, &c->padding, &c->border);
+            box_edges_for_layout(c, cw, &c->margin, &c->padding, &c->border);
             double mt = c->margin.top;
             double gap = collapsed_margin(mt, prev_margin_bottom);
             double c_margin_above = gap;

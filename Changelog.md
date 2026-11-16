@@ -3,6 +3,12 @@ Changelog:
 
 1.0.49-dev:
 ======
+* A float inside an inline element with padding, a border or a margin
+  (`<a style="padding:5px"><img style="float:left"></a>`) is placed at
+  the containing block's edge instead of being pushed right and down by
+  the inline's own box. An inline element turned into a block for its
+  block-level or floated content no longer applies its inline margins,
+  borders and padding as block edges.
 * A float wider than its containing block now respects floats outside
   that block (CSS 2 9.5.1 rules 3 and 7): it no longer overlaps a float
   on the other side, and it overflows its container only when no float
