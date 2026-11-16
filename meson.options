@@ -1,5 +1,7 @@
 option('build_date', type: 'string', value: '',
        description: 'Build date stamp shown in the About dialog (defaults to the configure-time date).')
+option('profile', type: 'combo', choices: ['default', 'claude'], value: 'default',
+       description: 'Build profile. "default" enforces the release dependency floors. "claude" is for development builds in Claude cloud containers (Ubuntu 24.04): it accepts libcurl 8.5 instead of 8.11 and a libcurl without the ws/wss protocols, in which case the WebSocket constructor throws. Never ship a claude-profile build.')
 option('quickjs', type: 'combo', choices: ['quickjs', 'quickjs-ng'], value: 'quickjs',
        description: 'Which QuickJS the JavaScript binding runs on. "quickjs" (default) builds the in-tree fork of Fabrice Bellard\'s QuickJS in src/quickjs-bellard/, which carries the heap hardening and the browser hooks. "quickjs-ng" builds the in-tree quickjs-ng fork in src/quickjs/. See docs/quickjs.md.')
 option('gtk', type: 'feature', value: 'auto',

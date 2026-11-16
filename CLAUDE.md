@@ -368,6 +368,21 @@ sudo zypper install gcc rust pkgconf meson ninja gtk4-devel libepoxy-devel libcu
 `libseccomp` is required on Linux — `meson setup` fails without it.
 On macOS and Windows it is not used and the syscall filter is a no-op.
 
+### Building in a Claude cloud container
+
+Claude's cloud containers run Ubuntu 24.04, whose libcurl 8.5 is older
+than the 8.11 floor and has no ws/wss protocols, so a plain `meson setup`
+stops there. Configure with the `claude` profile instead:
+
+```sh
+meson setup builddir -Dprofile=claude
+```
+
+It accepts libcurl 8.5. If that libcurl has no ws/wss, setup prints a
+warning and the build has no WebSocket: the constructor throws.
+Everything else, including the other floors, stays the same. Use it only
+to compile and smoke-test, never for packages or releases.
+
 ### Fast iteration (recommended for AI/Claude loops)
 
 `ccache` is the single biggest build-time win and meson picks it up
