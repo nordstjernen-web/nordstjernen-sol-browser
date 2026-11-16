@@ -3,6 +3,16 @@ Changelog:
 
 1.0.50-dev:
 ======
+* The HTML parser stays fast on deeply nested markup. Since the switch to
+  the Rust parser, every block start tag, every reconstruction of
+  formatting elements and every run of foster-parented text searched the
+  whole stack of open elements, so 500 KB of nested `<div>` took 11
+  seconds to parse and any page or `innerHTML` string built that way
+  could hang its tab. The stack now counts its elements by tag and knows
+  which ones are still open, so those questions are answered without a
+  walk: the same input parses in 17 ms. A tag with tens of thousands of
+  attributes no longer costs seconds in the tokenizer's duplicate check
+  either. Parsed trees are unchanged.
 
 1.0.49:
 ======
