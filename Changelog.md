@@ -16,7 +16,16 @@ Changelog:
   and every already placed float moved down with it, leaving a gap
   above the float and pushing the new box below it. The parent's
   position is now settled first and the margin applies to the new box
-  alone, as Blink and Gecko do.
+  alone, as Blink and Gecko do, unless the box fits beside those floats.
+* A float inside an empty wrapper (`<div><div style="float:left">`) is
+  no longer moved twice when the following block's top margin collapses
+  through their parent. The float landed that margin too low a second
+  time, leaving a gap above it and making the container taller.
+* A block with a definite width that starts a new formatting context is
+  placed beside floats whenever its border box fits there, measured with
+  its inline-start margin and any negative end margin, instead of
+  needing at least 120px of room. A narrow `overflow: hidden` box no
+  longer drops below a float it fits next to.
 * Scaled images keep sharp, solid edges. A non-repeating background image
   and an `<img>` were painted with Cairo's EXTEND_NONE, so bilinear
   scaling blended their outermost pixels with transparency: an upscaled
