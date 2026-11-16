@@ -3,6 +3,15 @@ Changelog:
 
 1.0.49-dev:
 ======
+* Windows: sound plays in the Microsoft Store (MSIX) package instead of
+  stopping with "Failed loading SDL3 library." MSYS2's SDL2.dll is now
+  sdl2-compat, which loads SDL3.dll at run time rather than linking it,
+  so the packaging scripts never saw it and left it out of the bundle.
+  A packaged app does not search PATH, so the MSIX could not find it
+  anywhere. The zip and installer could miss it the same way on a
+  machine without MSYS2. The Windows bundle now ships SDL3.dll and its
+  dependencies next to SDL2.dll, as the macOS package already does, and
+  packaging fails if sdl2-compat is present but SDL3.dll is not.
 * The .deb and .rpm packages include the PDF viewer and the UI
   translations. They installed only the binaries, icons and
   licence files, so PDF.js — which 1.0.48 moved out of the binary into
