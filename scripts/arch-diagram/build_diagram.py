@@ -229,7 +229,7 @@ SHELL = [
 ]
 MEDIA = [
     Chip("nordstjernen-audio", "decodes MPEG-1/MP2 (pl_mpeg), MP3 (minimp3) and "
-         "Opus/Vorbis (libav); mixes and plays through SDL2"),
+         "Opus/Vorbis (libav); mixes and plays through SDL3"),
     Chip("nordstjernen-video", "operating-system H.264/AAC decode; frames handed "
          "back through a shared-memory ring"),
 ]
@@ -347,7 +347,7 @@ DEPENDENCIES = [
              "Vorbis in the audio helper"),
         Chip("GStreamer, Media Foundation, VideoToolbox", "operating-system H.264 "
              "and AAC decoders"),
-        Chip("SDL2", "audio output and microphone capture in the helpers"),
+        Chip("SDL3", "audio output and microphone capture in the helpers"),
         Chip("libepoxy + EGL", "OpenGL ES context for WebGL"),
         Chip("wgpu-native", "WebGPU backend (fetched at build time, never "
              "committed)"),

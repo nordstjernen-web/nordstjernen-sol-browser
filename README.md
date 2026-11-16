@@ -149,7 +149,7 @@ system.
   `blob:` streaming, HLS and DASH through a built-in MSE player, and WebVTT
   `<track default>` subtitles work. `<audio>` plays MP3 and, with libav, WebM,
   Ogg and Opus. All audio plays through a separate `nordstjernen-audio` helper
-  over SDL2. See [docs/media.md](docs/media.md).
+  over SDL3. See [docs/media.md](docs/media.md).
 - **Web Audio and capture** — `AudioContext`/`OfflineAudioContext` graphs are
   mixed in-engine by a simplified stereo renderer (no `AudioWorklet`);
   `getUserMedia` reaches the microphone and, on Linux, a V4L2 webcam, behind
@@ -290,7 +290,7 @@ network.
 
 | Library | Build switch | Role |
 |---------|--------------|------|
-| SDL2 | `-Daudio` | audio output and microphone capture; without it the build is silent |
+| SDL3 | `-Daudio` | audio output and microphone capture; without it the build is silent |
 | FFmpeg libav\* | `-Dlibav` (macOS and the BSDs) | inline WebM/Ogg where it is not required |
 | GStreamer | `-Dgstreamer` (the BSDs) | H.264/AAC where it is not required |
 | brotli | auto | `br` content encoding and WOFF2 fonts |

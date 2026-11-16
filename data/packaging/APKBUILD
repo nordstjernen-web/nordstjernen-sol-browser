@@ -32,7 +32,7 @@ makedepends="
 	gstreamer-dev
 	gst-plugins-base-dev
 	enchant2-dev
-	sdl2-dev
+	sdl3-dev
 	glslang-dev
 	"
 _pdfjs=pdfjs-dist-6.5.438.tgz

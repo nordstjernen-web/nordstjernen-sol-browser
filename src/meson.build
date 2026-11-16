@@ -363,21 +363,21 @@ if host_machine.system() == 'darwin'
   nordstjernen_deps += [dependency('appleframeworks', modules: ['OpenGL'])]
 endif
 
-sdl2_dep = dependency('sdl2', required: get_option('audio'))
-if not sdl2_dep.found() and not is_mobile and get_option('audio').auto()
-  warning('SDL2 not found: building WITHOUT audio, so pages and videos ' +
-          'play silently. Install the SDL2 development package ' +
-          '(libsdl2-dev, SDL2-devel, or sdl2-compat-devel on openSUSE ' +
-          'Tumbleweed) or pass -Daudio=disabled to silence this warning.')
+sdl3_dep = dependency('sdl3', version: '>=3.2.0', required: get_option('audio'))
+if not sdl3_dep.found() and not is_mobile and get_option('audio').auto()
+  warning('SDL3 not found: building WITHOUT audio, so pages and videos ' +
+          'play silently. Install the SDL3 (3.2 or newer) development ' +
+          'package (libsdl3-dev, SDL3-devel, sdl3-dev or sdl3) or pass ' +
+          '-Daudio=disabled to silence this warning.')
 endif
 ns_lib_c_args = []
 ns_sdl_deps = []
-if sdl2_dep.found()
-  ns_sdl_deps += [sdl2_dep.partial_dependency(compile_args: true,
+if sdl3_dep.found()
+  ns_sdl_deps += [sdl3_dep.partial_dependency(compile_args: true,
                                               includes: true)]
   ns_lib_c_args += ['-DNS_HAVE_SDL',
                     '-DNS_SDL_LIBDIR="@0@"'.format(
-                      sdl2_dep.get_variable(pkgconfig: 'libdir',
+                      sdl3_dep.get_variable(pkgconfig: 'libdir',
                                             default_value: ''))]
 endif
 
@@ -497,8 +497,8 @@ if not is_mobile
     install: true,
   )
 
-  sdl2_dep = dependency('sdl2', required: get_option('audio'))
-  if sdl2_dep.found()
+  sdl3_dep = dependency('sdl3', version: '>=3.2.0', required: get_option('audio'))
+  if sdl3_dep.found()
     libminimp3 = static_library(
       'minimp3',
       files('audio/minimp3_impl.c'),
@@ -507,7 +507,7 @@ if not is_mobile
       install: false,
     )
 
-    audio_deps = [dependency('libcurl'), sdl2_dep, libplmpeg]
+    audio_deps = [dependency('libcurl'), sdl3_dep, libplmpeg]
     if have_libav
       audio_deps += [libavformat, libavcodec, libavutil, libswresample]
     endif
@@ -539,7 +539,7 @@ if not is_mobile
       install: true,
     )
   else
-    message('SDL2 not found — audio playback helper (nordstjernen-audio) disabled')
+    message('SDL3 not found — audio playback helper (nordstjernen-audio) disabled')
   endif
 endif
 

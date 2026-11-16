@@ -554,7 +554,7 @@ emits on the `X-Audio` side-channel (see [media.md](media.md)):
 
 - **`nordstjernen-audio`** (`src/audio/main.c`) decodes to PCM in-tree —
   pl_mpeg (MPEG-1/MP2), minimp3 (MP3), and libav (Opus/Vorbis) — and
-  plays through SDL2. It speaks a one-command-per-line text protocol over
+  plays through SDL3. It speaks a one-command-per-line text protocol over
   stdin/stdout.
 - Video, MSE streams included, decodes inside the sandboxed renderer and
   is painted into the page like any other replaced element.

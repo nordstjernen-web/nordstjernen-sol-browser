@@ -46,7 +46,7 @@ BuildRequires:  pkgconfig(libswresample) >= 4
 BuildRequires:  pkgconfig(libswscale) >= 7
 BuildRequires:  pkgconfig(libwebp)
 BuildRequires:  pkgconfig(simde)
-BuildRequires:  pkgconfig(sdl2)
+BuildRequires:  pkgconfig(sdl3) >= 3.2.0
 BuildRequires:  glslang-devel
 BuildRequires:  pkgconfig(sqlite3)
 BuildRequires:  pkgconfig(uchardet)

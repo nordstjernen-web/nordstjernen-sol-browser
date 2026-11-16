@@ -18,7 +18,7 @@ Snaps give Nordstjernen a single, distro-agnostic binary that runs on
 any Ubuntu release (and most other Linux distributions) with automatic
 updates from the store and no dependency hunting. The snap ships its own
 copies of the non-platform libraries (libcurl, OpenSSL, uchardet, libpsl,
-SQLite, libseccomp, libwebp, SDL2, Enchant, FFmpeg's `libav*`) and pulls GTK 4, Pango, Cairo, and
+SQLite, libseccomp, libwebp, SDL3, Enchant, FFmpeg's `libav*`) and pulls GTK 4, Pango, Cairo, and
 GTK's stack from the shared **GNOME platform snap** via the `gnome`
 extension, so the package stays small.
 
@@ -127,7 +127,7 @@ into:
 | `browser-support` (`allow-sandbox: true`) | **The important one.** Each tab's engine runs in its own process locked down with Landlock + a seccomp allow-list (`src/security.c`). Under strict confinement the snap's own seccomp/AppArmor profile sits on top; `browser-support` with `allow-sandbox: true` permits the `seccomp`, `landlock_*`, and process-spawning syscalls the per-tab sandbox needs. Without it the browser still runs, but the in-tree sandbox degrades (it logs a warning and continues unconfined) — so this plug is what keeps Nordstjernen's defence-in-depth intact inside the snap. |
 | `network`, `network-bind` | libcurl networking and local IPC sockets between the shell and renderer processes. |
 | `opengl` | WebGL (enabled by default) and GTK's GL-accelerated rendering. |
-| `audio-playback` | the `nordstjernen-audio` helper, which plays MP2/MP3/Opus/Vorbis through SDL2 (PulseAudio/PipeWire). |
+| `audio-playback` | the `nordstjernen-audio` helper, which plays MP2/MP3/Opus/Vorbis through SDL3 (PulseAudio/PipeWire). |
 | `home`, `removable-media` | open/save files (downloads, local `file://` pages) the user explicitly chooses. |
 | `password-manager-service` | optional integration with the desktop secret store. |
 | `mount-observe` | lets the engine resolve mounted paths cleanly. |

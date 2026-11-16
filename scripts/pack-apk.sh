@@ -57,7 +57,7 @@ export REPODEST="$ROOT/dist/apkrepo"
 rm -rf "$REPODEST"
 
 # tracedeps is off, so resolve every shared library the staged binaries load to
-# the Alpine package that owns it; auto-detected features (SDL2 audio, libjxl,
+# the Alpine package that owns it; auto-detected features (SDL3 audio, libjxl,
 # GStreamer, enchant, …) then appear in depends= exactly when they were built.
 LIB_DEPS=$(for bin in nordstjernen nordstjernen-renderer nordstjernen-audio; do
         if [ -x "$STAGE/$bin" ]; then ldd "$STAGE/$bin" 2>/dev/null || true; fi

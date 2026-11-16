@@ -91,8 +91,8 @@ install -m755 "$BUILDDIR/src/gtk/nordstjernen" \
 # The GUI spawns one sandboxed renderer process per tab; ship it alongside.
 install -m755 "$BUILDDIR/src/nordstjernen-renderer" \
     "$STAGE/Contents/MacOS/nordstjernen-renderer"
-# The audio playback helper (MP2/MP3 + optional Opus/Vorbis decode, SDL2
-# output). Built only when SDL2 was present at configure time; ship it beside
+# The audio playback helper (MP2/MP3 + optional Opus/Vorbis decode, SDL3
+# output). Built only when SDL3 was present at configure time; ship it beside
 # the main binary so the shell can spawn it for <video>/<audio> sound.
 AUDIO_BIN="$BUILDDIR/src/nordstjernen-audio"
 if [ -f "$AUDIO_BIN" ]; then
@@ -225,27 +225,11 @@ if [ -d "$BUILDDIR/src/pdfjs" ]; then
     cp -R "$BUILDDIR"/src/pdfjs/. "$RES/share/nordstjernen/pdfjs/"
 fi
 
-# Homebrew's "sdl2" is the sdl2-compat shim: the audio helper links
-# libSDL2-2.0.0.dylib, but that shim dlopen's the real SDL3 at runtime
-# (it probes @loader_path/libSDL3.dylib first). dylibbundler cannot follow a
-# dlopen, so it bundles the shim but not SDL3 — and playback then dies with a
-# "Failed loading SDL3 library" popup. Ship SDL3 next to the shim.
-if [ -f "$FW/libSDL2-2.0.0.dylib" ]; then
-    sdl3_prefix=$(brew --prefix sdl3 2>/dev/null || true)
-    sdl3_lib=""
-    for cand in "$sdl3_prefix/lib/libSDL3.0.dylib" "$sdl3_prefix/lib/libSDL3.dylib"; do
-        [ -f "$cand" ] && { sdl3_lib="$cand"; break; }
-    done
-    [ -z "$sdl3_lib" ] && sdl3_lib=$(find "$(brew --prefix 2>/dev/null)" \
-        -name 'libSDL3.0.dylib' -print -quit 2>/dev/null || true)
-    if [ -n "$sdl3_lib" ] && [ -f "$sdl3_lib" ]; then
-        cp "$sdl3_lib" "$FW/libSDL3.dylib"
-        run_dylibbundler 120 dylibbundler -of -cd -b -x "$FW/libSDL3.dylib" \
-            -d "$FW/" -p "@executable_path/../Frameworks/" >/dev/null 2>&1 || true
-        dedup_frameworks_rpath "$FW/libSDL3.dylib"
-    else
-        echo "pack-macos.sh: warning: sdl2-compat bundled but real SDL3 not found; audio will fail" >&2
-    fi
+# The renderer opens SDL3 by name for microphone capture (src/mic.c), so the
+# copy dylibbundler made for the audio helper must keep its library name.
+if [ -f "$STAGE/Contents/MacOS/nordstjernen-audio" ] && [ ! -f "$FW/libSDL3.0.dylib" ]; then
+    echo "pack-macos.sh: the audio helper is bundled but Frameworks has no libSDL3.0.dylib" >&2
+    exit 1
 fi
 
 mkdir -p "$RES/share/icons"

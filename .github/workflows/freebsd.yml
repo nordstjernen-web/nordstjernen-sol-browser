@@ -36,7 +36,7 @@ jobs:
           prepare: |
             pkg install -y \
               meson ninja pkgconf rust bash zip ccache bzip2 git-lite \
-              gtk4 libepoxy curl uchardet webp libavif sdl2 glslang \
+              gtk4 libepoxy curl uchardet webp libavif sdl3 glslang \
               sqlite3 libpsl
             # FreeBSD's freetype2.pc lists 'bzip2' in Requires.private, but
             # neither the base system nor the bzip2 package ships a bzip2.pc,
