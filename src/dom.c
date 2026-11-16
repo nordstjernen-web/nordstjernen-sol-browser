@@ -1105,10 +1105,11 @@ ns_attr_presence_removed(ns_node *el, const char *name)
         el->flags |= ns_attr_presence_bit(a->name) & bit;
 }
 
-void
-ns_element_append_attr_borrow(ns_node *el, const char *name, const char *value)
+ns_attr *
+ns_element_append_attr_borrow(ns_node *el, ns_attr *tail_hint,
+                              const char *name, const char *value)
 {
-    if (!el || el->kind != NS_NODE_ELEMENT || !name) return;
+    if (!el || el->kind != NS_NODE_ELEMENT || !name) return NULL;
     if (el->class_set) ns_class_set_clear(el);
     el->attr_bloom = 0;
     el->attr_gen++;
@@ -1118,11 +1119,12 @@ ns_element_append_attr_borrow(ns_node *el, const char *name, const char *value)
     a->value = (char *)(value ? value : "");
     a->value_len = value ? (guint)strlen(value) : 0;
     a->flags = ns_str_is_ascii_lower(name) ? NS_ATTR_NAME_LOWER : 0;
-    ns_attr *tail = NULL;
-    for (ns_attr *cur = el->attrs; cur; cur = cur->next) tail = cur;
+    ns_attr *tail = tail_hint ? tail_hint : el->attrs;
+    while (tail && tail->next) tail = tail->next;
     if (tail) tail->next = a;
     else      el->attrs = a;
     el->flags |= ns_attr_presence_bit(a->name);
+    return a;
 }
 
 void

@@ -47,17 +47,18 @@ void     ns_h5_doctype(ns_h5_sink *sink, ns_node *document,
                        const char *name, size_t name_len,
                        const char *public_id, size_t public_len,
                        const char *system_id, size_t system_len);
-void     ns_h5_append(ns_node *parent, ns_node *child);
-void     ns_h5_insert_before(ns_node *sibling, ns_node *child);
+void     ns_h5_append(ns_h5_sink *sink, ns_node *parent, ns_node *child);
+void     ns_h5_insert_before(ns_h5_sink *sink, ns_node *sibling,
+                             ns_node *child);
 void     ns_h5_append_text(ns_h5_sink *sink, ns_node *parent,
                            const char *text, size_t len);
 void     ns_h5_insert_text_before(ns_h5_sink *sink, ns_node *sibling,
                                   const char *text, size_t len);
 ns_node *ns_h5_parent(ns_node *node);
 void     ns_h5_remove(ns_node *node);
-void     ns_h5_reparent_children(ns_node *from, ns_node *to);
-ns_node *ns_h5_template_contents(ns_node *template_element);
-void     ns_h5_discard(ns_node *node);
+void     ns_h5_reparent_children(ns_h5_sink *sink, ns_node *from, ns_node *to);
+ns_node *ns_h5_template_contents(ns_h5_sink *sink, ns_node *template_element);
+void     ns_h5_discard(ns_h5_sink *sink, ns_node *node);
 
 G_END_DECLS
 
