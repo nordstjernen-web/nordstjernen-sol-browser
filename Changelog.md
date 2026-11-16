@@ -22,6 +22,25 @@ Changelog:
   8.5. A libcurl without the ws/wss protocols then gives a warning instead
   of stopping `meson setup`, and that build has no WebSocket: the
   constructor throws. The default profile and its floors are unchanged.
+* NetBSD: JavaScript runs again, and the build completes.
+  - The JavaScript heap cage reserves its address range with no access
+    and opens pages as it needs them. NetBSD's PaX MPROTECT, on by
+    default, caps a mapping at the access it was created with, so
+    opening a page failed and no JavaScript runtime could start: since
+    1.0.46 pages had no script, and since 1.0.47 the build stopped with
+    "quickjs-bellard-bcgen: cannot create a context". On systems that
+    support it (NetBSD), the cage now asks for read and write access as
+    the most the range can have, through `PROT_MPROTECT`. Both engines
+    get the fix.
+  - Bellard's QuickJS `quickjs-libc.c` declared `environ` and the
+    `sighandler_t` type only on FreeBSD and macOS, so NetBSD stopped with
+    "'environ' undeclared" and "unknown type name 'sighandler_t'".
+    NetBSD, OpenBSD and DragonFly now get the same declarations, as the
+    quickjs-ng engine already gave them.
+  - Bellard's QuickJS called `malloc_usable_size()` on every system it
+    did not recognise, and NetBSD's libc has no such function, so linking
+    `qjs-bellard` failed. Outside Linux, FreeBSD, macOS and Windows it
+    now counts 0 bytes for the allocator's slack, as quickjs-ng does.
 
 1.0.48:
 ======
