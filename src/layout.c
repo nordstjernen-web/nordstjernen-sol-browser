@@ -9790,6 +9790,12 @@ typedef struct float_ref {
 } float_ref;
 
 static gboolean
+float_is_outside_band(const float_ref *f)
+{
+    return !f->box && f->outer_w <= 0;
+}
+
+static gboolean
 overflow_establishes_bfc(const ns_style *s)
 {
     if (!s) return FALSE;
@@ -9893,7 +9899,7 @@ floats_offsets_at(const GArray *floats, double y,
     if (floats) {
         for (guint i = 0; i < floats->len; i++) {
             const float_ref *f = &g_array_index(floats, float_ref, i);
-            if (y < f->top || y >= f->bottom) continue;
+            if (y < f->top || y >= f->bottom || float_is_outside_band(f)) continue;
             if (f->side == 0) l += f->outer_w;
             else              r += f->outer_w;
         }
@@ -9922,6 +9928,35 @@ floats_offsets_over(const GArray *floats, double top, double bottom,
     *right_out = r;
 }
 
+static gboolean
+float_fits_at(const GArray *floats, double y, double cw, double outer_w,
+              int side)
+{
+    double same = 0, other = 0, other_outside = 0;
+    gboolean has_other_outside = FALSE, has_same_outside = FALSE;
+    for (guint i = 0; i < floats->len; i++) {
+        const float_ref *f = &g_array_index(floats, float_ref, i);
+        if (y < f->top || y >= f->bottom) continue;
+        if (!float_is_outside_band(f)) {
+            if (f->side == side) same += f->outer_w;
+            else                 other += f->outer_w;
+        } else if (f->side == side) {
+            has_same_outside = TRUE;
+        } else {
+            double beyond = -f->outer_w;
+            if (!has_other_outside || beyond < other_outside)
+                other_outside = beyond;
+            has_other_outside = TRUE;
+        }
+    }
+    double end = same + outer_w;
+    if ((same > 0 || has_same_outside) && end > cw + NS_LAYOUT_UNIT)
+        return FALSE;
+    if (other > 0) return end <= cw - other + NS_LAYOUT_UNIT;
+    if (has_other_outside) return end <= cw + other_outside + NS_LAYOUT_UNIT;
+    return TRUE;
+}
+
 static double
 floats_clear_y(const GArray *floats, double y, int clear)
 {
@@ -9931,6 +9966,7 @@ floats_clear_y(const GArray *floats, double y, int clear)
         const float_ref *f = &g_array_index(floats, float_ref, i);
         if (clear == 1 && f->side != 0) continue;
         if (clear == 2 && f->side != 1) continue;
+        if (float_is_outside_band(f)) continue;
         if (f->bottom > out) out = f->bottom;
     }
     return out;
@@ -9943,7 +9979,7 @@ floats_max_bottom(const GArray *floats)
     if (!floats) return y;
     for (guint i = 0; i < floats->len; i++) {
         const float_ref *f = &g_array_index(floats, float_ref, i);
-        if (f->bottom > y) y = f->bottom;
+        if (!float_is_outside_band(f) && f->bottom > y) y = f->bottom;
     }
     return y;
 }
@@ -10044,11 +10080,11 @@ floats_inherit(GArray *floats, const inherited_floats *from, double inner_x,
         floats_offsets_at(src, top, &l, &r);
         double left_in = from->inner_x + l - inner_x;
         double right_in = inner_x + cw - (from->inner_x + from->cw - r);
-        if (l > 0 && left_in > 0) {
+        if (l > 0) {
             float_ref band = { NULL, 0, top, bottom, left_in };
             g_array_append_val(floats, band);
         }
-        if (r > 0 && right_in > 0) {
+        if (r > 0) {
             float_ref band = { NULL, 1, top, bottom, right_in };
             g_array_append_val(floats, band);
         }
@@ -18250,8 +18286,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             double left_off = 0, right_off = 0;
             floats_offsets_at(floats, float_y, &left_off, &right_off);
-            while ((avail > cw - left_off - right_off + NS_LAYOUT_UNIT) &&
-                   floats->len > 0) {
+            while (floats->len > 0 &&
+                   !float_fits_at(floats, float_y, cw, avail, fside)) {
                 double next_y = float_y;
                 gboolean advanced = FALSE;
                 for (guint i = 0; i < floats->len; i++) {

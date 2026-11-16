@@ -3,6 +3,10 @@ Changelog:
 
 1.0.49-dev:
 ======
+* A float wider than its containing block now respects floats outside
+  that block (CSS 2 9.5.1 rules 3 and 7): it no longer overlaps a float
+  on the other side, and it overflows its container only when no float
+  sits beside it on its own side, moving down past them instead.
 * A float in the middle of a paragraph no longer breaks the line. Text
   after `Some text <img style="float:left"> more text` continued on a new
   line below the float; it now continues on the same line, with the
