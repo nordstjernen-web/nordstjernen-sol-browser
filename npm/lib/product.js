@@ -71,7 +71,7 @@ module.exports = {
   optional: [
     { module: 'glslang', feature: 'WebGL', mesonOption: 'glslang',
       apt: 'glslang-dev', pacman: 'glslang', brew: 'glslang', msys: 'glslang' },
-    { module: 'sdl2', feature: 'audio playback', apt: 'libsdl2-dev', pacman: 'sdl2', brew: 'sdl2', msys: 'SDL2' },
+    { module: 'sdl3', minimum: '3.2.0', feature: 'audio playback', apt: 'libsdl3-dev', pacman: 'sdl3', brew: 'sdl3', msys: 'sdl3' },
     { module: 'gstreamer-1.0', minimum: '1.20', unix: true, feature: 'H.264 video and AAC audio', mesonOption: 'gstreamer',
       apt: 'libgstreamer1.0-dev', pacman: 'gstreamer' },
     { module: 'gstreamer-app-1.0', minimum: '1.20', unix: true, feature: 'H.264 video and AAC audio', mesonOption: 'gstreamer',

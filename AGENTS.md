@@ -30,7 +30,7 @@ nothing imported.
   `src/video_decode.c`); such `<video>` plays inline (`src/video.c`).
   Audio plays via the unsandboxed `nordstjernen-audio` helper
   (`src/audio/main.c`), which decodes MPEG-1/MP2 (pl_mpeg) and MP3
-  (vendored minimp3, `src/audio/minimp3.h`) and outputs through SDL2.
+  (vendored minimp3, `src/audio/minimp3.h`) and outputs through SDL3.
   MSE video frames decode in the sandboxed renderer, which keeps the
   appended segments in memory and plays the buffered range around the
   playhead (see `docs/media.md`).
@@ -229,7 +229,7 @@ System packages required on Debian/Ubuntu:
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build rustc \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev glslang-dev \
+    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl3-dev glslang-dev \
     libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
 ```
 
@@ -238,7 +238,7 @@ On Fedora/RHEL:
 ```sh
 sudo dnf install gcc rust pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
     openssl-devel uchardet-devel libpsl-devel sqlite-devel \
-    libseccomp-devel libwebp-devel SDL2-devel glslang-devel ffmpeg-devel
+    libseccomp-devel libwebp-devel SDL3-devel glslang-devel ffmpeg-devel
 ```
 
 (`ffmpeg-devel` comes from RPM Fusion.)
@@ -248,7 +248,7 @@ On openSUSE:
 ```sh
 sudo zypper install gcc rust pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
     libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libwebp-devel sdl2-compat-devel glslang-devel ffmpeg-devel
+    libseccomp-devel libwebp-devel SDL3-devel glslang-devel ffmpeg-devel
 ```
 
 (`ffmpeg-devel` comes from Packman.)

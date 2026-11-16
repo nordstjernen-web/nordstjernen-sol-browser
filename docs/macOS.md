@@ -98,7 +98,7 @@ Install [Homebrew](https://brew.sh) if you do not already have it, then:
 
 ```sh
 brew install meson ninja pkg-config rust gtk4 libepoxy curl \
-    uchardet libpsl sqlite webp sdl2 glslang
+    uchardet libpsl sqlite webp sdl3 glslang
 brew install ccache          # optional, speeds up rebuilds
 brew install dylibbundler    # needed only to package the .app / .dmg
 ```
@@ -371,7 +371,7 @@ Updates ship only through the store — no self-update.
   `@executable_path/../Frameworks`, so no `DYLD_LIBRARY_PATH` shim is
   needed and the whole `.app` can be code-signed. The renderer
   (`nordstjernen-renderer`) and the audio helper (`nordstjernen-audio`,
-  present whenever SDL2 was found at build time) ship beside it and are
+  present whenever SDL3 was found at build time) ship beside it and are
   run through `dylibbundler` (and the same rpath-dedup and inside-out
   code-signing) too. Beyond the dylibs, the bundle carries
   the data GTK 4 reads at runtime so the `.dmg` works on a Mac with no

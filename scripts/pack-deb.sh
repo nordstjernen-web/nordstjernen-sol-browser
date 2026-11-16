@@ -51,8 +51,8 @@ install -dm755 "$PKGROOT/usr/share/doc/nordstjernen"
 
 install -m755 "$STAGE/nordstjernen" "$PKGROOT/usr/bin/nordstjernen"
 install -m755 "$STAGE/nordstjernen-renderer" "$PKGROOT/usr/bin/nordstjernen-renderer"
-# Audio playback helper, when SDL2 was available at build time. It is added to
-# the dpkg-shlibdeps scan below so its libSDL2 dependency lands in Depends.
+# Audio playback helper, when SDL3 was available at build time. It is added to
+# the dpkg-shlibdeps scan below so its libSDL3 dependency lands in Depends.
 if [ -x "$STAGE/nordstjernen-audio" ]; then
     install -m755 "$STAGE/nordstjernen-audio" "$PKGROOT/usr/bin/nordstjernen-audio"
 fi

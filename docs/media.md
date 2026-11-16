@@ -150,7 +150,7 @@ device and plays the PCM it reads from a pipe. The helper decodes to PCM — pl_
 the MPEG-1/MP2 track, [minimp3](https://github.com/lieff/minimp3) (CC0, vendored)
 for standalone `.mp3` files, libav for Opus/Vorbis (WebM/Ogg), and the
 operating system's AAC decoder for MP4 audio — and plays it
-through [SDL2](https://www.libsdl.org/)'s audio device (WASAPI on Windows,
+through [SDL3](https://www.libsdl.org/)'s audio device (WASAPI on Windows,
 CoreAudio on macOS, ALSA/PulseAudio on Linux), mixing and resampling the streams
 itself. The inline player drives the helper — `open`/`play`/`pause`/`seek`/
 `stop`/`loop`/`volume` commands ride the render response's `X-Audio`

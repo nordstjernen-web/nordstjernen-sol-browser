@@ -4,14 +4,25 @@ Changelog:
 1.0.49-dev:
 ======
 * Windows: sound plays in the Microsoft Store (MSIX) package instead of
-  stopping with "Failed loading SDL3 library." MSYS2's SDL2.dll is now
-  sdl2-compat, which loads SDL3.dll at run time rather than linking it,
+  stopping with "Failed loading SDL3 library." MSYS2's SDL2.dll became
+  sdl2-compat, which loads SDL3.dll at start-up rather than linking it,
   so the packaging scripts never saw it and left it out of the bundle.
   A packaged app does not search PATH, so the MSIX could not find it
-  anywhere. The zip and installer could miss it the same way on a
-  machine without MSYS2. The Windows bundle now ships SDL3.dll and its
-  dependencies next to SDL2.dll, as the macOS package already does, and
-  packaging fails if sdl2-compat is present but SDL3.dll is not.
+  anywhere; the zip and installer missed it the same way on a machine
+  without MSYS2. The audio helper and microphone capture now use SDL3
+  directly (below), so SDL3.dll is an ordinary dependency, and the
+  Windows CI starts the packaged bundle, audio helper included, with
+  only the system folders on PATH.
+* Audio: the `nordstjernen-audio` helper and microphone capture use SDL3
+  instead of SDL2. Homebrew, MSYS2 and most current Linux distributions
+  already ran SDL2 as sdl2-compat over SDL3, loading both libraries; now
+  only SDL3 is loaded, and the macOS package no longer needs SDL3 copied
+  in beside the shim. Building the helper needs SDL3 3.2 or newer
+  (`libsdl3-dev`, `SDL3-devel`, `sdl3-dev`, `sdl3`), which Debian 13,
+  Ubuntu 25.04, Fedora 43, Alpine 3.22, Arch, openSUSE Tumbleweed,
+  FreeBSD, NetBSD, Homebrew and MSYS2 provide; older systems build
+  without audio. The system volume mixer lists the helper as
+  "Nordstjernen Web Browser".
 * The .deb and .rpm packages include the PDF viewer and the UI
   translations. They installed only the binaries, icons and
   licence files, so PDF.js — which 1.0.48 moved out of the binary into

@@ -51,7 +51,7 @@ Update Changelog.md
   via the unsandboxed `nordstjernen-audio` helper (`src/audio/main.c`),
   which decodes in-tree — pl_mpeg for the MPEG-1/MP2 track, the vendored
   CC0 [minimp3](https://github.com/lieff/minimp3) (`src/audio/minimp3.h`)
-  for standalone `.mp3` files — and outputs through SDL2's audio device
+  for standalone `.mp3` files — and outputs through SDL3's audio device
   (WASAPI/CoreAudio/ALSA), mixing and resampling the streams itself. The
   renderer emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume`
   commands that ride the render-response `X-Audio` side-channel to the
@@ -317,7 +317,7 @@ System packages required on Debian/Ubuntu:
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build rustc \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev glslang-dev \
+    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl3-dev glslang-dev \
     libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
 ```
 
@@ -350,7 +350,7 @@ On Fedora/RHEL:
 ```sh
 sudo dnf install gcc rust pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
     openssl-devel uchardet-devel libpsl-devel sqlite-devel \
-    libseccomp-devel libwebp-devel SDL2-devel glslang-devel ffmpeg-devel
+    libseccomp-devel libwebp-devel SDL3-devel glslang-devel ffmpeg-devel
 ```
 
 (`ffmpeg-devel` comes from RPM Fusion.)
@@ -360,7 +360,7 @@ On openSUSE:
 ```sh
 sudo zypper install gcc rust pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
     libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libwebp-devel sdl2-compat-devel glslang-devel ffmpeg-devel
+    libseccomp-devel libwebp-devel SDL3-devel glslang-devel ffmpeg-devel
 ```
 
 (`ffmpeg-devel` comes from Packman.)
@@ -382,6 +382,11 @@ It accepts libcurl 8.5. If that libcurl has no ws/wss, setup prints a
 warning and the build has no WebSocket: the constructor throws.
 Everything else, including the other floors, stays the same. Use it only
 to compile and smoke-test, never for packages or releases.
+
+Ubuntu 24.04 has no SDL3 package, so leave `libsdl3-dev` out of the apt
+command above: setup then warns and builds without the audio helper. To
+build it, compile SDL 3.2 or newer from source with CMake and put its
+`lib/pkgconfig` on `PKG_CONFIG_PATH`.
 
 ### Fast iteration (recommended for AI/Claude loops)
 

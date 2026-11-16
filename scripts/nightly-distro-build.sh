@@ -20,7 +20,7 @@ install_apt() {
         build-essential clang rustc pkg-config ninja-build git zip unzip curl \
         python3-pip dpkg-dev patchelf ca-certificates \
         libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev libpsl-dev \
-        libsqlite3-dev libseccomp-dev libwebp-dev libavif-dev libsdl2-dev glslang-dev
+        libsqlite3-dev libseccomp-dev libwebp-dev libavif-dev libsdl3-dev glslang-dev
     apt-get install -y --no-install-recommends \
         libfontconfig-dev libpango1.0-dev libavif-dev || true
     # FFmpeg libav* backs the inline WebM path (VP9/VP8 video + Opus/Vorbis
@@ -53,12 +53,12 @@ install_zypper() {
         rpm-build patchelf ca-certificates \
         gtk4-devel libepoxy-devel libcurl-devel libopenssl-devel libuchardet-devel libpsl-devel \
         sqlite3-devel libseccomp-devel libwebp-devel libavif-devel glslang-devel
-    # SDL2 backs the auto-detected audio helper; keep it out of the required
+    # SDL3 backs the auto-detected audio helper; keep it out of the required
     # set so an unavailable/mid-sync package degrades to no audio, not a failed
     # nightly. Its own line, not part of the optional group.
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
-        'pkgconfig(sdl2)' \
-        || echo "nightly-distro-build(opensuse): SDL2 unavailable; audio helper skipped" >&2
+        'pkgconfig(sdl3)' \
+        || echo "nightly-distro-build(opensuse): SDL3 unavailable; audio helper skipped" >&2
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
         fontconfig-devel pango-devel libavif-devel || true
     # FFmpeg libav* (inline WebM: VP9/VP8 + Opus/Vorbis). meson requires it on
@@ -75,7 +75,7 @@ install_dnf() {
         gcc clang rust pkgconf-pkg-config meson ninja-build git zip unzip curl \
         gawk findutils diffutils which rpm-build patchelf ca-certificates \
         gtk4-devel libepoxy-devel libcurl-devel openssl-devel uchardet-devel libpsl-devel \
-        sqlite-devel libseccomp-devel libwebp-devel libavif-devel SDL2-devel glslang-devel
+        sqlite-devel libseccomp-devel libwebp-devel libavif-devel SDL3-devel glslang-devel
     # Fedora's FFmpeg is ffmpeg-free, which carries no H.264/AAC decoder, so
     # GStreamer is what plays MP4 there.
     dnf install -y --setopt=install_weak_deps=False \
@@ -95,7 +95,7 @@ install_apk() {
     apk add --no-cache \
         build-base clang rust curl pkgconf meson ninja git zip alpine-sdk \
         linux-headers gtk4.0-dev libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev \
-        libseccomp-dev libwebp-dev sdl2-dev glslang-dev
+        libseccomp-dev libwebp-dev sdl3-dev glslang-dev
     apk add --no-cache \
         fontconfig-dev freetype-dev pango-dev brotli-dev libavif-dev libjxl-dev \
         gstreamer-dev gst-plugins-base-dev enchant2-dev || true

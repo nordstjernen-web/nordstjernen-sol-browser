@@ -73,8 +73,8 @@ strip --strip-all "$BUILDDIR/src/gtk/nordstjernen"
 # The GUI is a thin shell that spawns one sandboxed nordstjernen-renderer
 # process per tab; it must ship alongside the main binary.
 strip --strip-all "$BUILDDIR/src/nordstjernen-renderer"
-# The audio playback helper (MP2/MP3 decode + SDL2 output). Built only when
-# SDL2 was present at configure time (meson 'audio' feature is auto); ship it
+# The audio playback helper (MP2/MP3 decode + SDL3 output). Built only when
+# SDL3 was present at configure time (meson 'audio' feature is auto); ship it
 # beside the main binary so the shell can spawn it for <video>/<audio> sound.
 AUDIO_BIN="$BUILDDIR/src/nordstjernen-audio"
 if [ -f "$AUDIO_BIN" ]; then
@@ -104,7 +104,7 @@ fi
 if [ "$LIBC" = musl ]; then
     LIBC_REQ='- musl libc (Alpine 3.19+ era and later)'
     RUNTIME_INSTALL='    sudo apk add gtk4.0 libcurl uchardet libavif libwebp \
-        libseccomp libpsl sqlite-libs ca-certificates font-dejavu sdl2 ffmpeg-libs # Alpine (musl)'
+        libseccomp libpsl sqlite-libs ca-certificates font-dejavu sdl3 ffmpeg-libs # Alpine (musl)'
 else
     # Don't guess the glibc floor — read it from the binary we just built.
     GLIBC_MIN=$(objdump -T "$BUILDDIR/src/gtk/nordstjernen" 2>/dev/null \
@@ -112,11 +112,11 @@ else
         | tail -1 | cut -d_ -f2)
     LIBC_REQ="- glibc ${GLIBC_MIN:-2.38}+ (the build container's generation; check with: ldd --version)"
     RUNTIME_INSTALL='    sudo apt   install libgtk-4-1 libcurl4 libuchardet0 libwebp7 \
-        libavif16 libpsl5 libseccomp2 libsqlite3-0 libsdl2-2.0-0   # Debian/Ubuntu
+        libavif16 libpsl5 libseccomp2 libsqlite3-0 libsdl3-0   # Debian/Ubuntu
     sudo dnf   install gtk4 libcurl libuchardet libwebp \
-        libavif libpsl libseccomp sqlite-libs SDL2                     # Fedora/RHEL
+        libavif libpsl libseccomp sqlite-libs SDL3                     # Fedora/RHEL
     sudo zypper install libgtk-4-1 libcurl4 libuchardet0 libwebp7 \
-        libavif16 libpsl5 libseccomp2 libsqlite3-0 libSDL2-2_0-0   # openSUSE'
+        libavif16 libpsl5 libseccomp2 libsqlite3-0 libSDL3-0   # openSUSE'
 fi
 
 rm -rf "$STAGE"

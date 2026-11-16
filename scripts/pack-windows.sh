@@ -81,10 +81,10 @@ cp "$BIN_SRC" "$APP/$BROWSER_EXE"
 # The browser spawns one sandboxed renderer process per tab; ship it next to
 # the browser exe so it is discovered without NS_RENDERER.
 cp "$RENDERER_SRC" "$APP/nordstjernen-renderer.exe"
-# Audio playback helper (MP2/MP3 decode + SDL2 output). Built whenever SDL2
+# Audio playback helper (MP2/MP3 decode + SDL3 output). Built whenever SDL3
 # was present at configure time; ship it beside the browser exe so the shell
 # finds it (ns_proc_audio_helper_path) and seed the DLL chase below with it so
-# SDL2.dll and its transitive deps are bundled (nothing else links SDL2).
+# SDL3.dll and its transitive deps are bundled (nothing else links SDL3).
 if [ -x "$AUDIO_SRC" ]; then
     cp "$AUDIO_SRC" "$APP/nordstjernen-audio.exe"
 else
@@ -142,27 +142,9 @@ if [ -d "$MINGW_PREFIX/lib/gdk-pixbuf-2.0" ]; then
     cp -r "$MINGW_PREFIX/lib/gdk-pixbuf-2.0" "$APP/lib/"
 fi
 
-# DLLs a bundled DLL opens with LoadLibrary instead of importing, so they
-# never show up in its import table. MSYS2's SDL2.dll is sdl2-compat, the
-# shim pack-macos.sh ships SDL3 for: it calls LoadLibraryA("SDL3.dll") when
-# the audio helper starts SDL. A plain-SDL2 build has no such string and
-# needs nothing extra. LoadLibrary looks in the exe's folder (app/), and in
-# PATH only for unpackaged processes, so a bundle missing SDL3.dll may still
-# play sound on a machine with MSYS2 on PATH. The MSIX package never
-# searches PATH, and playback fails with "Failed loading SDL3 library."
-runtime_loaded_dlls() {
-    case "$(basename "$1" | tr '[:upper:]' '[:lower:]')" in
-        sdl2.dll)
-            if grep -qaF 'SDL3.dll' "$1"; then echo SDL3.dll; fi ;;
-    esac
-}
-
 # Transitively resolve DLL dependencies starting from the exe and every
 # pixbuf loader DLL. objdump reports import names; we look them up in the
 # mingw bin dir and skip anything that resolves to a Windows system DLL.
-# Runtime-loaded DLLs (above) join the same walk so their own imports are
-# bundled too; unlike imports, a missing one is an error rather than a
-# system DLL.
 declare -A seen
 queue=("$APP/$BROWSER_EXE" "$APP/nordstjernen-renderer.exe")
 [ -f "$APP/nordstjernen-audio.exe" ] && queue+=("$APP/nordstjernen-audio.exe")
@@ -173,16 +155,6 @@ while [ ${#queue[@]} -gt 0 ]; do
     cur=${queue[0]}
     queue=("${queue[@]:1}")
     deps=$(objdump -p "$cur" 2>/dev/null | awk '/DLL Name:/ {print $3}') || true
-    runtime_deps=$(runtime_loaded_dlls "$cur")
-    for dep in $runtime_deps; do
-        if [ ! -f "$MINGW_PREFIX/bin/$dep" ] &&
-           [ -z "$(find "$MINGW_PREFIX/bin" -maxdepth 1 -iname "$dep" -print -quit 2>/dev/null)" ]; then
-            printf 'pack-windows: %s loads %s at runtime, but %s/bin has no %s\n' \
-                "$(basename "$cur")" "$dep" "$MINGW_PREFIX" "$dep" >&2
-            exit 1
-        fi
-    done
-    deps="$deps $runtime_deps"
     for dep in $deps; do
         key=$(printf '%s' "$dep" | tr '[:upper:]' '[:lower:]')
         if [ -n "${seen[$key]:-}" ]; then continue; fi

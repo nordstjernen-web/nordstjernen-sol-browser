@@ -17,20 +17,20 @@ On Fedora / RHEL:
 
     sudo dnf install gcc rust pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
         openssl-devel uchardet-devel libpsl-devel sqlite-devel libseccomp-devel \
-        libwebp-devel SDL2-devel glslang-devel
+        libwebp-devel SDL3-devel glslang-devel
 
 On openSUSE:
 
     sudo zypper install gcc rust pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
         libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel libseccomp-devel \
-        libwebp-devel sdl2-compat-devel glslang-devel
+        libwebp-devel SDL3-devel glslang-devel
 
 GStreamer is required on Linux too (H.264/AAC, and VP9/AV1/HEVC in hardware):
 `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian/Ubuntu,
 `gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora,
 `gstreamer-devel gstreamer-plugins-base-devel` on openSUSE. At runtime install
 `gstreamer-plugins-bad` and the GPU's VA-API driver (`intel-media-driver` on
-Intel) for hardware decoding. Without SDL2 the build has no audio; meson warns.
+Intel) for hardware decoding. Without SDL3 the build has no audio; meson warns.
 
 Rust is a required build toolchain (`rustc` 1.91 or newer): meson compiles
 the in-tree HTML and URL parsers (`src/html5_rs/`, `src/url_rs/`) with plain
@@ -40,13 +40,13 @@ Debian/Ubuntu and `rust` on Fedora, openSUSE, Arch, Alpine and FreeBSD.
 On Arch Linux (packaging and the AUR: `Arch.md`):
 
     sudo pacman -S --needed base-devel rust meson gtk4 libepoxy curl uchardet \
-        libpsl sqlite libseccomp libwebp sdl2 glslang ffmpeg
+        libpsl sqlite libseccomp libwebp sdl3 glslang ffmpeg
 
 On Alpine (musl libc):
 
     sudo apk add build-base linux-headers pkgconf rust meson ninja gtk4.0-dev \
         libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev \
-        libseccomp-dev libwebp-dev sdl2-dev glslang-dev
+        libseccomp-dev libwebp-dev sdl3-dev glslang-dev
 
 Alpine builds against musl rather than glibc, so the resulting binary
 is not interchangeable with the glibc portable zip — run a musl build
@@ -138,7 +138,7 @@ release tree in `release-build/`, or `$BUILDDIR`):
     dist/nordstjernen-<version>-linux-<arch>/          # unpacked bundle
 
 The zip contains the `nordstjernen` shell, the sandboxed
-`nordstjernen-renderer`, the `nordstjernen-audio` helper (when SDL2 was
+`nordstjernen-renderer`, the `nordstjernen-audio` helper (when SDL3 was
 found), the application icons, the desktop entry, `README.md`,
 `THIRD-PARTY-LICENSES.md`, `License.md`, `COPYING`, and a generated
 `INSTALL.md` listing the runtime requirements. When WebGPU is built,
@@ -155,7 +155,7 @@ host at runtime; fully-static GTK isn't practical. Runtime requirements:
 - GTK 4.14+ with gio, gobject, pango, cairo
 - libepoxy (usually pulled in by GTK 4; WebGL dispatch)
 - libcurl 8.11+ with a TLS backend and the ws/wss protocols; OpenSSL 3 (libcrypto)
-- libuchardet, libwebp, libpsl, libseccomp, libsqlite3, SDL2, glslang
+- libuchardet, libwebp, libpsl, libseccomp, libsqlite3, SDL3, glslang
   (where the distribution ships it as a shared library)
 - FFmpeg 6.0+ runtime libraries (libavformat, libavcodec, libavutil,
   libswscale, libswresample)

@@ -19,7 +19,7 @@ option('gstreamer', type: 'feature', value: 'auto',
 option('glslang', type: 'feature', value: 'auto',
        description: 'Validate every WebGL shader with the Khronos glslang front end before it reaches the GPU driver (glslang-dev / glslang-devel / glslang). Auto: required on desktop, where WebGL is built only with it; -Dglslang=disabled drops WebGL entirely rather than building it without the validator.')
 option('audio', type: 'feature', value: 'auto',
-       description: 'Build the nordstjernen-audio playback helper (SDL2 output + minimp3/pl_mpeg decode). Auto-detects SDL2; disable for engine-only or JNI builds without SDL2.')
+       description: 'Build the nordstjernen-audio playback helper (SDL3 output + minimp3/pl_mpeg decode). Auto-detects SDL3 3.2 or newer; disable for engine-only or JNI builds without SDL.')
 option('libav', type: 'feature', value: 'auto',
        description: 'Inline WebM (VP9/VP8 video, Opus/Vorbis audio) and MP4 demuxing over FFmpeg\'s libav* libraries. Auto: required on Linux and Windows, used on macOS when present. Disable for a headless or embedding runtime that renders pages and plays no video; such a build carries no FFmpeg dependency.')
 option('pdfjs', type: 'feature', value: 'auto',

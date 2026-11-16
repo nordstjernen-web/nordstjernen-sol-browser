@@ -34,7 +34,7 @@ depends=(
   libthai
   libwebp
   openssl
-  sdl2
+  sdl3
   sqlite
   uchardet
   zlib

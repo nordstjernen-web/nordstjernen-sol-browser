@@ -44,7 +44,7 @@ pacman -Sy --noconfirm --needed \
     mingw-w64-ucrt-x86_64-libpsl \
     mingw-w64-ucrt-x86_64-sqlite3 \
     mingw-w64-ucrt-x86_64-libwebp \
-    mingw-w64-ucrt-x86_64-SDL2 \
+    mingw-w64-ucrt-x86_64-sdl3 \
     mingw-w64-ucrt-x86_64-glslang \
     mingw-w64-ucrt-x86_64-ffmpeg
 ```
@@ -115,7 +115,7 @@ Build artifacts:
 - `builddir/src/nordstjernen-renderer.exe` — the out-of-process,
   sandboxed renderer the shell spawns per tab. Ship it next to
   `nordstjernen.exe` (the packaging scripts do).
-- `builddir/src/nordstjernen-audio.exe` — the SDL2 audio helper.
+- `builddir/src/nordstjernen-audio.exe` — the SDL3 audio helper.
 - `builddir/src/nordstjernen-launcher.exe` — the small Win32 launcher
   that `scripts/pack-windows.sh` installs as the bundle's
   `nordstjernen.exe`.

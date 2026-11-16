@@ -108,7 +108,7 @@ Everything else builds from the declared `BuildRequires`:
     gcc rust meson ninja pkgconfig hicolor-icon-theme glslang-devel
     pkgconfig(gtk4) pkgconfig(epoxy) pkgconfig(libcurl) pkgconfig(libcrypto)
     pkgconfig(uchardet) pkgconfig(libpsl) pkgconfig(sqlite3)
-    pkgconfig(libwebp) pkgconfig(libavif) pkgconfig(libjxl) pkgconfig(sdl2)
+    pkgconfig(libwebp) pkgconfig(libavif) pkgconfig(libjxl) pkgconfig(sdl3)
     pkgconfig(gstreamer-1.0) pkgconfig(gstreamer-app-1.0)
     pkgconfig(gstreamer-video-1.0) pkgconfig(simde)
     pkgconfig(libavcodec) pkgconfig(libavformat) pkgconfig(libavutil)
