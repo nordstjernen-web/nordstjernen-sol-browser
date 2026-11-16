@@ -3,6 +3,10 @@ Changelog:
 
 1.0.49:
 ======
+* The animated logo on about:start and about:nordstjernen loops forever
+  instead of stopping after its first repeat. The GIF's NETSCAPE2.0
+  loop count was 1; it is now 0, and `scripts/build-logo-gif.sh`
+  generates it that way.
 * A float inside an inline element with padding, a border or a margin
   (`<a style="padding:5px"><img style="float:left"></a>`) is placed at
   the containing block's edge instead of being pushed right and down by
