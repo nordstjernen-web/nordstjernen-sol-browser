@@ -22,6 +22,12 @@ Changelog:
   8.5. A libcurl without the ws/wss protocols then gives a warning instead
   of stopping `meson setup`, and that build has no WebSocket: the
   constructor throws. The default profile and its floors are unchanged.
+* Build: the NetBSD build compiles again. The default QuickJS engine's
+  `quickjs-libc.c` declared `environ` and the `sighandler_t` type only on
+  FreeBSD and macOS, so on NetBSD it stopped with "'environ' undeclared"
+  and "unknown type name 'sighandler_t'". NetBSD, OpenBSD and DragonFly
+  now get the same declarations, as the quickjs-ng engine already gave
+  them.
 
 1.0.48:
 ======
