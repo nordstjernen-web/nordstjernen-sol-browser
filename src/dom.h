@@ -76,7 +76,6 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_NODE_STYLE_ATTR_TRUSTED (1u << 27)
 #define NS_NODE_ATTR_MAYBE_ID  (1u << 22)
 #define NS_NODE_ATTR_MAYBE_SHADOW (1u << 23)
-#define NS_NODE_TEXT_HASHED    (1u << 24)
 #define NS_NODE_JS_ARMED       (1u << 28)
 #define NS_NODE_MATHML_NS      (1u << 16)
 
@@ -108,7 +107,10 @@ struct ns_node {
     void *js_wrapper;
     ns_node_rare *rare;
 
-    guint64 attr_bloom;
+    union {
+        guint64 attr_bloom;
+        guint64 text_hash;
+    };
 
     guint32 text_len;
     guint32 attr_gen;

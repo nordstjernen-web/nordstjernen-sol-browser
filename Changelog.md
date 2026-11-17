@@ -3,6 +3,12 @@ Changelog:
 
 1.0.50-dev:
 ======
+* A text node keeps the hash of its text, which the stylesheet cache uses
+  to recognize a `<style>` element it has seen, in the eight bytes an
+  element uses for its attribute filter, instead of in a hash table shared
+  by the whole process behind a lock. The hash is now also forgotten when
+  the parser appends to a text node, which it was not before. Pages,
+  layout and the time a page takes are unchanged.
 * Elements know their tag as a number. The HTML parser hands each element
   the id it already computed for its name, and code that asked whether a
   node is, say, a `<div>` by comparing strings (475 places) compares that

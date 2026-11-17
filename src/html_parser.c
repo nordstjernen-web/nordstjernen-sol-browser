@@ -492,6 +492,7 @@ ns_h5_extend_text(ns_node *node, const char *text, size_t len)
     memcpy(node->text + old_len, text, add);
     node->text[new_len] = '\0';
     node->text_len = (guint32)new_len;
+    node->text_hash = 0;
 }
 
 static ns_node *

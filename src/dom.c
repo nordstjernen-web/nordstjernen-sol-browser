@@ -988,9 +988,6 @@ ns_node_set_name_owned(ns_node *n, char *name)
     n->flags |= NS_NODE_OWN_NAME;
 }
 
-G_LOCK_DEFINE_STATIC(node_text_hashes);
-static GHashTable *g_node_text_hashes;
-
 static guint64
 node_text_hash_compute(const char *s, gsize n)
 {
@@ -1010,35 +1007,20 @@ node_text_hash_compute(const char *s, gsize n)
 static void
 node_text_hash_forget(ns_node *n)
 {
-    if (!(n->flags & NS_NODE_TEXT_HASHED)) return;
-    n->flags &= ~NS_NODE_TEXT_HASHED;
-    G_LOCK(node_text_hashes);
-    if (g_node_text_hashes) g_hash_table_remove(g_node_text_hashes, n);
-    G_UNLOCK(node_text_hashes);
+    if (n->kind != NS_NODE_ELEMENT) n->text_hash = 0;
 }
 
 guint64
 ns_node_text_hash(ns_node *n)
 {
     if (!n || !n->text) return 0;
-    if (n->flags & NS_NODE_TEXT_HASHED) {
-        G_LOCK(node_text_hashes);
-        const guint64 *cached = g_node_text_hashes
-            ? g_hash_table_lookup(g_node_text_hashes, n) : NULL;
-        guint64 h = cached ? *cached : 0;
-        G_UNLOCK(node_text_hashes);
-        if (cached) return h;
+    if (n->kind == NS_NODE_ELEMENT)
+        return node_text_hash_compute(n->text, n->text_len);
+    if (!n->text_hash) {
+        guint64 h = node_text_hash_compute(n->text, n->text_len);
+        n->text_hash = h ? h : 1;
     }
-    guint64 h = node_text_hash_compute(n->text, n->text_len);
-    G_LOCK(node_text_hashes);
-    if (!g_node_text_hashes)
-        g_node_text_hashes = g_hash_table_new_full(g_direct_hash,
-                                                   g_direct_equal, NULL,
-                                                   g_free);
-    g_hash_table_replace(g_node_text_hashes, n, g_memdup2(&h, sizeof h));
-    G_UNLOCK(node_text_hashes);
-    n->flags |= NS_NODE_TEXT_HASHED;
-    return h;
+    return n->text_hash;
 }
 
 void
@@ -1304,7 +1286,6 @@ ns_node_free(ns_node *node)
         if ((cur->flags & NS_NODE_JS_ARMED) && g_js_invalidator)
             g_js_invalidator(cur);
         ns_css_forget_node(cur);
-        node_text_hash_forget(cur);
         if (cur->flags & NS_NODE_OWN_NAME) g_free(cur->name);
         if (cur->flags & NS_NODE_OWN_TEXT) g_free(cur->text);
         ns_class_set_clear(cur);
