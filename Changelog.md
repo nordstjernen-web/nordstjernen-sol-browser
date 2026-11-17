@@ -3,6 +3,52 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Inline-blocks, images and other atomic inlines sit where the text
+  layout puts them in a right-to-left line. They were drawn one box
+  width too far to the start side, so an icon in an Arabic or Hebrew
+  line overlapped its neighbour or stuck out of its container, and a
+  line holding only such boxes took its alignment from whichever
+  paragraph was laid out before it: the first one on a `dir=rtl` page
+  was left-aligned, and a left-to-right one after it could be
+  right-aligned.
+* `@counter-style` rules are implemented. A list or a `counter()` /
+  `counters()` function that names a custom counter style uses it: the
+  `cyclic`, `fixed`, `symbolic`, `alphabetic`, `numeric`, `additive` and
+  `extends` systems, with `symbols`, `additive-symbols`, `prefix`,
+  `suffix`, `negative`, `range`, `pad` and `fallback`. Such a list used to
+  be numbered `1.`, `2.` as if the style were `decimal`. Image symbols
+  are not supported, and `extends` of a built-in style counts in decimal.
+* `text-align-last` applies to a block whose text fits on one line, which
+  is then its last line: `text-align-last: center` or `right` on a
+  single-line heading, button or table cell now aligns it. It was read
+  only together with `text-align: justify`. A block that wraps to
+  several lines still aligns all of them by `text-align` unless it is
+  justified.
+* `@supports font-tech(...)` and `@supports font-format(...)` are
+  evaluated: `font-format()` is true for `woff2`, `woff`, `opentype`,
+  `truetype` and `collection`, `font-tech()` for `variations`,
+  `features-opentype`, `color-colrv0`, `color-cbdt` and `color-sbix`.
+  Every function in a supports condition used to be false, so a
+  stylesheet that offered a variable font behind
+  `@supports font-tech(variations)` fell back to the static one.
+  `CSS.supports('selector(:host(...))')` and `:host-context()` are true,
+  matching what shadow-tree stylesheets already do.
+* `CSSKeyframesRule` and `CSSKeyframeRule` are real objects. A
+  `@keyframes` rule has `name`, `cssRules`, `length`, `appendRule()`,
+  `deleteRule()` and `findRule()`, and each keyframe has `keyText` and a
+  live `style`; the rule was an opaque block of text before, with `name`
+  and `cssRules` undefined, so scripts that inspect or patch animations
+  threw. Keyframe selectors serialize as percentages (`from` is `0%`),
+  and an edit reaches animations started afterwards. `@layer a, b;` is a
+  `CSSLayerStatementRule` with `nameList`, and `CSSImportRule.layerName`
+  reports the layer of `@import url(x.css) layer(base)`.
+* `MediaList` splits its queries on commas. `rule.media.mediaText` for
+  `@media screen, print` read `screen,, print` and `media[0]` was
+  `screen,`, because a second helper of the same name, which splits on
+  white space, replaced the comma splitter. The same mix-up broke the
+  selector lists of nested rules and `@scope`. `appendMedium`,
+  `deleteMedium` and assigning `CSSMediaRule.media` now change the rule's
+  condition and restyle the page.
 * `float: inline-start` / `inline-end` and `clear: inline-start` /
   `inline-end` are supported: they resolve to left or right from the
   containing block's `direction`. They were rejected before, so a float

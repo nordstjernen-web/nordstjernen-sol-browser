@@ -16,7 +16,11 @@ Snapshot: **1.0.23**, 2026-08-08. The paged-media and scroll-snap rows
 were revised against the engine for this release; the remaining rows
 carry forward from the 1.0.21 pass. The `@property`, `color-mix()`,
 transition/animation and design-constraint rows were re-checked against
-the 1.0.31-dev source.
+the 1.0.31-dev source. The `env()`, flow-relative property, sticky,
+`float`, `text-align-last`, `@counter-style`, `@supports` function and
+`@keyframes` / `MediaList` object-model rows were revised for 1.0.50-dev
+after a check against CSS Snapshot 2026 (see
+[Checked against CSS Snapshot 2026](#checked-against-css-snapshot-2026)).
 
 **Legend:** ✅ implemented · 🟡 partial / approximated · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -56,6 +60,7 @@ the 1.0.31-dev source.
 
 | Topic | Status | Notes |
 |-------|:--:|------|
+| `env()` | ✅ | substituted in any declaration value: `safe-area-inset-*` / `safe-area-max-inset-*` are `0px`, other names take their fallback, and an `env()` with neither drops the declaration |
 | `px`, `%`, `em`, `rem` | ✅ | `em`/`rem` resolved against a 16px root in the layout fast path |
 | Viewport units `vw`/`vh`/`vmin`/`vmax`, `sv*`/`lv*`/`dv*`, `vi`/`vb` | ✅ | |
 | Container units `cqw`/`cqh`/`cqi`/`cqb`/`cqmin`/`cqmax` | ✅ | resolved against the nearest container (`container-type`/`container-name`) |
@@ -96,7 +101,7 @@ the 1.0.31-dev source.
 | Topic | Status | Notes |
 |-------|:--:|------|
 | `position: static / relative / absolute / fixed` | ✅ | |
-| `position: sticky` | ✅ | verified: header pins within its scroll container |
+| `position: sticky` | ✅ | verified: header pins within its scroll container; a sticky box that is a direct child of the scroller stays stuck over the whole scroll range |
 | Anchor positioning (`anchor-name`, `position-anchor`, `anchor()`, `anchor-size()`, `position-area`, `anchor-center`) | 🟡 | absolutely and fixed positioned boxes resolve against the last matching anchor in tree order (`src/css_anchor.c`); `position-try-fallbacks` (flip tactics, `@position-try` rules, `position-area` options) and `position-try-order` pick the first option that fits; `position-visibility`, implicit anchors and vertical writing modes are not applied yet |
 | `top`/`right`/`bottom`/`left`, `inset` shorthand | ✅ | |
 | `z-index` & stacking contexts | ✅ | opacity/transform/filter establish contexts |
@@ -157,6 +162,7 @@ the 1.0.31-dev source.
 | Topic | Status | Notes |
 |-------|:--:|------|
 | `list-style-type` (disc/circle/square, decimal & leading-zero, lower/upper alpha/latin/roman, lower-greek, `none`) | ✅ | `format_ordered_label` in `src/paint.c` |
+| `@counter-style` | 🟡 | `src/css_counter_style.c`: `cyclic`/`fixed`/`symbolic`/`alphabetic`/`numeric`/`additive`/`extends` with `symbols`, `additive-symbols`, `prefix`, `suffix`, `negative`, `range`, `pad`, `fallback`, used by list markers and `counter()`/`counters()`; no image symbols, `extends` of a built-in style counts in decimal, and the registry is per process rather than per document |
 | `list-style-position` (`outside`/`inside`) | ✅ | |
 | `list-style-image` | ✅ | `url(...)` markers fetched through the page image pipeline and painted in place of the bullet (`paint_marker` in `src/paint.c`), scaled down to the line's font size when larger; falls back to the generated marker until the image loads |
 | `list-style` shorthand | ✅ | type/position/`url()`/`none` |
@@ -194,7 +200,7 @@ the 1.0.31-dev source.
 | `word-break` / `overflow-wrap` / `text-wrap`(`-mode`) / `hyphens` | ✅ | wrapping keywords mapped; `hyphens:auto` enables Pango inserted hyphens using the element language, while `manual`/`none` keep automatic insertion disabled |
 | `font-variant: small-caps`, `font-variant-ligatures`, `font-feature-settings`, `font-variation-settings` | ✅ | common/discretionary/historical/contextual ligature keywords, quoted four-character feature tags, and variable-font axes map to Pango OpenType settings |
 | `font-size-adjust` | 🟡 | parsed with metric keywords, `from-font` and `calc()`; inherited, computed (from-font resolves through font metrics), interpolated and composited as a number; not yet applied when sizing glyphs |
-| `text-align-last`, `text-justify` | 🟡 | last-line alignment of justified text (including `justify` via Pango's justify-last-line) and `text-justify: none`; the last line of non-justified text keeps the `text-align` alignment |
+| `text-align-last`, `text-justify` | 🟡 | last-line alignment of justified text (including `justify` via Pango's justify-last-line), `text-justify: none`, and a block whose text fits on one line takes `text-align-last`; the last line of a multi-line, non-justified block keeps the `text-align` alignment |
 | `contain: size`/`inline-size`/`strict`, `contain-intrinsic-size` | ✅ | size containment sizes the box as if empty or from `contain-intrinsic-*` (`auto` treated as its length; no last-remembered size) |
 | `direction` / `unicode-bidi`, `:dir()` | 🟡 | base direction drives Pango + `text-align:start/end`; full bidi override partial |
 | `writing-mode` (vertical-rl/lr, sideways) | 🟡 | vertical inline runs are measured and painted in right-to-left or left-to-right columns; `text-orientation:upright` stacks glyphs and `mixed`/`sideways` rotate the run. Orthogonal-flow box layout and full vertical line breaking remain limited; invalid values are rejected |
@@ -270,7 +276,7 @@ the 1.0.31-dev source.
 |-------|:--:|------|
 | `@starting-style` | ✅ | top level and nested; supplies the before-change style for an element's first style and for leaving `display: none`. Its rules appear flattened in `cssRules`; there is no `CSSStartingStyleRule` |
 | `@media` (width/height/orientation/aspect-ratio/resolution, range syntax, `prefers-*`, color-gamut, etc.) | ✅ | broad MQ4/5 feature coverage |
-| `@supports` (incl. `selector()`) | ✅ | evaluated |
+| `@supports` (incl. `selector()`, `font-tech()`, `font-format()`) | ✅ | evaluated; the font functions answer for what the FreeType/HarfBuzz stack loads |
 | `@font-face` | ✅ | |
 | `@keyframes` | 🟡 | see animation |
 | `@property` | ✅ | `initial-value` + `inherits` honoured; `syntax` parsed and enforced (see Syntax & cascade) |
@@ -296,18 +302,39 @@ same task.
 | Topic | Status | Notes |
 |-------|:--:|------|
 | `document.styleSheets` | ✅ | live `StyleSheetList` of `CSSStyleSheet` for `<style>` / `<link rel=stylesheet>`; the same object is returned across reads, and `style.sheet` is that same object (`[SameObject]`) |
+| `CSSKeyframesRule` / `CSSKeyframeRule` | ✅ | `name`, `cssRules`, `length`, `appendRule` / `deleteRule` / `findRule`; each keyframe has `keyText` (serialized as percentages) and a live `style`; edits reach animations started afterwards, not ones already running |
+| `CSSLayerStatementRule` · `CSSImportRule.layerName` | ✅ | `nameList` for `@layer a, b;` |
 | `StyleSheet.media` | ✅ | a live `MediaList` whose `appendMedium` / `deleteMedium` write back to the owner node's `media` attribute |
 | `sheet.cssRules` / `.rules` | ✅ | a stable `CSSRuleList` of real rule objects parsed from the owner node, with `.item()` and indexed access |
 | `CSSRule` / `CSSStyleRule` types | ✅ | proper prototype chain (`CSSStyleRule` → `CSSRule`) and `type` constants (`STYLE_RULE`=1, `MEDIA_RULE`=4, …); read-only `type` / `parentRule` / `parentStyleSheet` |
 | `CSSStyleRule.style` | ✅ | a live `CSSStyleDeclaration` (`[SameObject]`, `[PutForwards=cssText]`); `cssText` serializes the declaration block canonically |
 | `CSSStyleRule.selectorText` | 🟡 | getter + validating setter (invalid selectors rejected, re-cascades on change); the selector text is kept largely verbatim |
 | `insertRule` / `deleteRule` (sheet + grouping) | ✅ | index validation (`IndexSizeError`), parse errors (`SyntaxError`), `@import`/`@namespace` constraints; mutates the live `CSSRuleList` in place |
-| `CSSGroupingRule` / `CSSMediaRule` / `CSSSupportsRule` | ✅ | nested `cssRules`; `CSSMediaRule` serializes its media query list (lower-cased types/features, leading `all and` dropped) |
+| `CSSGroupingRule` / `CSSMediaRule` / `CSSSupportsRule` | ✅ | nested `cssRules`; `CSSMediaRule` serializes its media query list (lower-cased types/features, leading `all and` dropped), and `media.appendMedium` / `deleteMedium` / assignment change the rule's condition |
 | `CSSStyleDeclaration` (`el.style`) | ✅ | `getPropertyValue` / `setProperty` / `removeProperty` / `getPropertyPriority`, indexed `item()` + `length`, `Symbol.iterator`, `cssText` round-trip |
 | `new CSSStyleSheet()` + `adoptedStyleSheets` | 🟡 | `replace` / `replaceSync` apply styles and `adoptedStyleSheets` works on documents and shadow roots; rule introspection on a *constructed* sheet is limited |
 | Full selector serialization | ❌ | the CSSOM "serialize a group of selectors" canonicalisation (e.g. `*\|div` → `div`, `:after` → `::after`) is not implemented |
 
 ---
+
+## Checked against CSS Snapshot 2026
+
+[CSS Snapshot 2026](https://www.w3.org/TR/css-2026/) was probed in
+1.0.50-dev with a page of 666 parsing and API checks run headless. 625
+pass. What that check found and is still open:
+
+| Topic | Status | Notes |
+|-------|:--:|------|
+| Flow-relative properties and `direction` | ✅ | the inline sides (`margin-inline-start`, `padding-inline-end`, `inset-inline-*`, `border-inline-*`, the shorthands, flow-relative radii) follow the element's `direction` in the cascade; `float` / `clear` take `inline-start` / `inline-end`. The block axis still maps to top/bottom in a vertical writing mode |
+| CSS Speech 1 | ❌ | no `speak`, `voice-*`, `pause`, `rest`, `cue` |
+| `text-box-trim` / `text-box-edge` | ❌ | |
+| `shape-outside` | ❌ | parsed, line boxes are not shortened |
+| `column-span: all` | ❌ | parsed, the element stays in its column |
+| `offset-path` (Motion Path 1) | ❌ | parsed, the box is not moved |
+| Ruby layout | ❌ | `<rt>` renders inline after its base |
+| `:state()` | ❌ | `ElementInternals.states` is a stub |
+| Parsed without effect | ❌ | `text-emphasis`, `box-decoration-break`, `text-combine-upright`, `text-orientation`, `mask-border`, `font-palette`, `font-size-adjust`, `font-synthesis`, `font-optical-sizing`, `hyphenate-character`, `line-break`, `image-orientation`, `margin-trim`, `display: run-in`, `view-transition-name` |
+| View Transitions 1 | 🟡 | `document.startViewTransition()` runs the callback and settles its promises; nothing is captured or cross-faded |
 
 ## Design constraints
 

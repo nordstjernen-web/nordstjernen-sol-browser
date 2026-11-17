@@ -9889,6 +9889,8 @@
         var CSSImportRule = ctorFor('CSSImportRule', CSSRule.prototype);
         var CSSNamespaceRule = ctorFor('CSSNamespaceRule', CSSRule.prototype);
         var CSSKeyframesRule = ctorFor('CSSKeyframesRule', CSSRule.prototype);
+        var CSSKeyframeRule = ctorFor('CSSKeyframeRule', CSSRule.prototype);
+        var CSSLayerStatementRule = ctorFor('CSSLayerStatementRule', CSSRule.prototype);
         var CSSCounterStyleRule = ctorFor('CSSCounterStyleRule', CSSRule.prototype);
         var CSSPropertyRule = ctorFor('CSSPropertyRule', CSSRule.prototype);
         var CSSLayerBlockRule = ctorFor('CSSLayerBlockRule', CSSGroupingRule.prototype);
@@ -10229,7 +10231,7 @@
             return selectorAnBValid(sel) && selectorParses(relative);
         }
         function scopeSelectorList(text) {
-            var parts = splitTopLevel(text, ',').map(function (p) {
+            var parts = splitTopLevelBy(text, ',').map(function (p) {
                 return p.replace(/^\s+|\s+$/g, '');
             });
             if (!parts.length) return null;
@@ -10348,7 +10350,7 @@
         method(CSSGroupingRule.prototype, 'deleteRule', function (index) {
             return deleteFrom(this, this.__rules, this.__ruleList, index);
         });
-        function splitTopLevel(text, sep) {
+        function splitTopLevelBy(text, sep) {
             var parts = [], depth = 0, start = 0;
             for (var i = 0; i < text.length; i++) {
                 var c = text.charAt(i);
@@ -10418,14 +10420,14 @@
             if (!text) return '';
             if (typeof global.__ndMediaListSerialize === 'function')
                 return global.__ndMediaListSerialize(String(text));
-            return splitTopLevel(text, ',').map(serializeMediaQuery)
+            return splitTopLevelBy(text, ',').map(serializeMediaQuery)
                        .filter(function (q) { return q !== ''; })
                        .join(', ');
         }
         function makeMediaListObject(text, onChange) {
             var serialized = serializeMediaList(text);
             var items = serialized === '' ? [] :
-                splitTopLevel(serialized, ',').map(function (q) {
+                splitTopLevelBy(serialized, ',').map(function (q) {
                     return q.replace(/^\s+|\s+$/g, '');
                 });
             var list = { length: 0 };
@@ -10444,7 +10446,7 @@
             };
             list.appendMedium = function (medium) {
                 var query = serializeMediaList(String(medium));
-                if (!query || splitTopLevel(query, ',').length !== 1) return;
+                if (!query || splitTopLevelBy(query, ',').length !== 1) return;
                 if (items.indexOf(query) >= 0) return;
                 items.push(query);
                 relist(true);
@@ -10489,8 +10491,17 @@
             },
             function () {});
         accessor(CSSMediaRule.prototype, 'media',
-            function () { return makeMediaListObject(this.__condition); },
-            function () {});
+            function () {
+                var rule = this;
+                return makeMediaListObject(rule.__condition, function (text) {
+                    rule.__condition = text;
+                    notify(rule);
+                });
+            },
+            function (v) {
+                this.__condition = serializeMediaList(String(v));
+                notify(this);
+            });
         function containerSplit(cond) {
             var s = String(cond || '');
             if (/^\(|^not\s|^not\(/i.test(s)) return ['', s];
@@ -11094,7 +11105,38 @@
             return out.join(' ');
         }
 
-        function serializeKeyframeList(block) {
+        function ruleStyleProxy(style, rule) {
+            if (typeof Proxy !== 'function') return null;
+            return new Proxy(style, {
+                get: function (target, key) {
+                    var value = Reflect.get(target, key, target);
+                    return typeof value === 'function'
+                        ? function () {
+                            return value.apply(target, arguments);
+                        } : value;
+                },
+                set: function (target, key, value) {
+                    Reflect.set(target, key, value, target);
+                    notify(rule);
+                    return true;
+                }
+            });
+        }
+        function keyframeSelectorText(text) {
+            var parts = splitTopLevelBy(String(text), ','), out = [];
+            for (var i = 0; i < parts.length; i++) {
+                var key = parts[i].replace(/^\s+|\s+$/g, '').toLowerCase();
+                if (key === 'from') key = '0%';
+                else if (key === 'to') key = '100%';
+                var m = /^([+-]?(?:\d+\.?\d*|\.\d+))%$/.exec(key);
+                if (!m) return null;
+                var pct = parseFloat(m[1]);
+                if (!(pct >= 0 && pct <= 100)) return null;
+                out.push(pct + '%');
+            }
+            return out.length ? out.join(', ') : null;
+        }
+        function splitKeyframeBlocks(block) {
             var s = String(block), out = [], head = '', i = 0;
             while (i < s.length) {
                 var c = s.charAt(i);
@@ -11108,9 +11150,10 @@
                         else if (d === '{') depth++;
                         else if (d === '}') depth--;
                     }
-                    var sel = head.replace(/[;\s]+/g, ' ').replace(/^ | $/g, '');
-                    var decls = serializeDeclBlock(s.slice(i + 1, j - 1));
-                    if (sel) out.push(sel + (decls ? ' { ' + decls + ' }' : ' { }'));
+                    out.push({
+                        selector: head.replace(/[;\s]+/g, ' ').replace(/^ | $/g, ''),
+                        decls: s.slice(i + 1, depth ? j : j - 1)
+                    });
                     head = '';
                     i = j;
                     continue;
@@ -11118,13 +11161,129 @@
                 head += c;
                 i++;
             }
-            return out.join(' ');
+            return out;
         }
+        function makeKeyframeRule(selector, decls, parent) {
+            var keyText = keyframeSelectorText(selector);
+            if (keyText === null) return null;
+            var frame = Object.create(CSSKeyframeRule.prototype);
+            frame.__parentStyleSheet = parent.__parentStyleSheet || null;
+            frame.__parentRule = parent;
+            frame.__type = 8;
+            frame.__keyText = keyText;
+            frame.__decls = serializeDeclBlock(decls);
+            return frame;
+        }
+        function keyframeRulesFromBlock(block, parent) {
+            var blocks = splitKeyframeBlocks(block), frames = [];
+            for (var i = 0; i < blocks.length; i++) {
+                var frame = makeKeyframeRule(blocks[i].selector, blocks[i].decls,
+                                             parent);
+                if (frame) frames.push(frame);
+            }
+            return frames;
+        }
+        accessor(CSSKeyframeRule.prototype, 'keyText',
+            function () { return this.__keyText; },
+            function (v) {
+                var keyText = keyframeSelectorText(v);
+                if (keyText === null)
+                    throw domError('SyntaxError', 'invalid keyframe selector');
+                this.__keyText = keyText;
+                notify(this);
+            });
+        accessor(CSSKeyframeRule.prototype, 'style',
+            function () {
+                if (!this.__holder) {
+                    var holder = document.createElement('span');
+                    try { holder.style.cssText = this.__decls; } catch (e) {}
+                    this.__holder = holder;
+                    try {
+                        Object.defineProperty(holder.style, '__ndOwnerRule', {
+                            value: this, configurable: true
+                        });
+                    } catch (e) {}
+                    this.__styleProxy = ruleStyleProxy(holder.style, this);
+                }
+                return this.__styleProxy || this.__holder.style;
+            },
+            function (v) {
+                this.style.cssText = (v == null) ? '' : String(v);
+            });
+        method(CSSKeyframeRule.prototype, '__cssText', function () {
+            var decls = this.__holder ? this.__holder.style.cssText : this.__decls;
+            return this.__keyText + (decls ? ' { ' + decls + ' }' : ' { }');
+        });
+        function keyframesFindIndex(rule, select) {
+            var keyText = keyframeSelectorText(select);
+            if (keyText === null) return -1;
+            for (var i = rule.__rules.length - 1; i >= 0; i--)
+                if (rule.__rules[i].__keyText === keyText) return i;
+            return -1;
+        }
+        accessor(CSSKeyframesRule.prototype, 'name',
+            function () { return this.__name || ''; },
+            function (v) {
+                v = String(v);
+                if (!identValid(v) ||
+                    /^(none|default|initial|inherit|unset|revert|revert-layer)$/i.test(v))
+                    return;
+                this.__name = v;
+                notify(this);
+            });
+        getter(CSSKeyframesRule.prototype, 'cssRules', function () {
+            return this.__ruleList;
+        });
+        getter(CSSKeyframesRule.prototype, 'length', function () {
+            return this.__rules.length;
+        });
+        method(CSSKeyframesRule.prototype, 'appendRule', function (text) {
+            var frames = keyframeRulesFromBlock(String(text), this);
+            if (frames.length !== 1) return;
+            this.__rules.push(frames[0]);
+            syncList(this.__ruleList, this.__rules);
+            notify(this);
+        });
+        method(CSSKeyframesRule.prototype, 'deleteRule', function (select) {
+            var at = keyframesFindIndex(this, String(select));
+            if (at < 0) return;
+            var gone = this.__rules.splice(at, 1)[0];
+            gone.__parentRule = null;
+            gone.__parentStyleSheet = null;
+            delete this.__ruleList[this.__rules.length];
+            syncList(this.__ruleList, this.__rules);
+            notify(this);
+        });
+        method(CSSKeyframesRule.prototype, 'findRule', function (select) {
+            var at = keyframesFindIndex(this, String(select));
+            return at < 0 ? null : this.__rules[at];
+        });
+        method(CSSKeyframesRule.prototype, '__cssText', function () {
+            var body = this.__rules.map(function (frame) {
+                return frame.__cssText();
+            }).join(' ');
+            return '@' + this.__at + ' ' + this.__name +
+                   (body ? ' { ' + body + ' }' : ' { }');
+        });
+        getter(CSSLayerStatementRule.prototype, 'nameList', function () {
+            return this.__nameList;
+        });
+        function importLayerName(prelude) {
+            var rest = String(prelude).replace(/^@import\s*/i, '')
+                .replace(/^(?:url\((?:"[^"]*"|'[^']*'|[^)]*)\)|"[^"]*"|'[^']*')\s*/i, '');
+            var named = /^layer\(\s*([^)]*?)\s*\)/i.exec(rest);
+            if (named) return named[1];
+            return /^layer(?![\w-])/i.test(rest) ? '' : null;
+        }
+        getter(CSSImportRule.prototype, 'layerName', function () {
+            return this.__layerName === undefined ? null : this.__layerName;
+        });
 
         function makeAtStatement(prelude, sheet, parentRule) {
             var kw = atKeyword(prelude);
             var StmtCtor = kw === 'import' ? CSSImportRule :
-                           kw === 'namespace' ? CSSNamespaceRule : CSSRule;
+                           kw === 'namespace' ? CSSNamespaceRule :
+                           kw === 'layer' ? CSSLayerStatementRule : CSSRule;
             var rule = Object.create(StmtCtor.prototype);
             rule.__parentStyleSheet = sheet || null;
             rule.__parentRule = parentRule || null;
@@ -11132,6 +11291,12 @@
             rule.__type = kw === 'import' ? 3 :
                           kw === 'namespace' ? 10 :
                           kw === 'charset' ? 2 : 0;
+            if (kw === 'import') rule.__layerName = importLayerName(prelude);
+            if (kw === 'layer') {
+                rule.__nameList = Object.freeze(
+                    splitTopLevelBy(prelude.replace(/^@layer\s*/i, ''), ',')
+                        .map(function (n) { return n.replace(/^\s+|\s+$/g, ''); }));
+            }
             var text = prelude + ';';
             rule.__cssText = function () { return text; };
             return rule;
@@ -11249,10 +11414,15 @@
                         ar.__selector = prelude.replace(/^@page\s*/i, '')
                                                .replace(/^\s+|\s+$/g, '');
                     }
+                } else if (atType === 7) {
+                    ar.__name = prelude.replace(/^@[\w-]+\s*/, '')
+                                       .replace(/^\s+|\s+$/g, '');
+                    ar.__rules = keyframeRulesFromBlock(block, ar);
+                    ar.__ruleList = makeList();
+                    syncList(ar.__ruleList, ar.__rules);
                 } else {
                     var head = prelude.replace(/\s+/g, ' ').replace(/^ | $/g, '');
-                    var body = atType === 7 ? serializeKeyframeList(block)
-                                            : serializeDeclBlock(block);
+                    var body = serializeDeclBlock(block);
                     var raw = head + (body ? ' { ' + body + ' }' : ' { }');
                     ar.__cssText = function () { return raw; };
                 }
@@ -11290,22 +11460,7 @@
                         }
                     });
             } catch (e) {}
-            if (typeof Proxy === 'function') {
-                r.__styleProxy = new Proxy(r.__style, {
-                    get: function (target, key) {
-                        var value = Reflect.get(target, key, target);
-                        return typeof value === 'function'
-                            ? function () {
-                                return value.apply(target, arguments);
-                            } : value;
-                    },
-                    set: function (target, key, value) {
-                        Reflect.set(target, key, value, target);
-                        notify(r);
-                        return true;
-                    }
-                });
-            }
+            r.__styleProxy = ruleStyleProxy(r.__style, r);
             return r;
         }
 
@@ -11392,7 +11547,7 @@
         }
 
         function nestedSelectorText(sel) {
-            var parts = splitTopLevel(sel, ',');
+            var parts = splitTopLevelBy(sel, ',');
             return parts.map(function (part) {
                 var t = part.replace(/^\s+|\s+$/g, '');
                 if (!t) return t;

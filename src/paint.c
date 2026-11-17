@@ -15,6 +15,7 @@ static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
 #include "anim.h"
 #include "css.h"
 #include "css_shape.h"
+#include "css_counter_style.h"
 #include "dom.h"
 #include "spellcheck.h"
 #include "font.h"
@@ -4305,11 +4306,33 @@ ns_paint_apply_justify(NsPangoLayout *layout, const ns_style *s, gboolean rtl)
 }
 
 void
+ns_paint_atomic_index_pos(NsPangoLayout *layout, int index,
+                          NsPangoRectangle *pos)
+{
+    ns_pango_layout_index_to_pos(layout, index, pos);
+    if (pos->width < 0) {
+        pos->x += pos->width;
+        pos->width = -pos->width;
+    }
+}
+
+static gboolean
+layout_is_one_last_line(NsPangoLayout *layout, const ns_style *s)
+{
+    const ns_css_value *last = s ? s->values[NS_CSS_TEXT_ALIGN_LAST] : NULL;
+    if (!last || keyword_is(last, "auto")) return FALSE;
+    const char *text = ns_pango_layout_get_text(layout);
+    return text && *text && ns_pango_layout_get_line_count(layout) == 1;
+}
+
+void
 ns_paint_apply_text_align(NsPangoLayout *layout, const ns_style *s)
 {
     const ns_css_value *ta = s ? s->values[NS_CSS_TEXT_ALIGN] : NULL;
     gboolean rtl = ns_pango_context_get_base_dir(
         ns_pango_layout_get_context(layout)) == NS_PANGO_DIRECTION_RTL;
+    if (!keyword_is(ta, "justify") && layout_is_one_last_line(layout, s))
+        ta = s->values[NS_CSS_TEXT_ALIGN_LAST];
     if (keyword_is(ta, "center"))
         ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_CENTER);
     else if (keyword_is(ta, "right") ||
@@ -6041,7 +6064,7 @@ paint_inline_atomic(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
 {
     if (!a->box) return;
     NsPangoRectangle pos;
-    ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+    ns_paint_atomic_index_pos(layout, (int)a->byte_off, &pos);
     double sx = text_x + (double)pos.x / NS_PANGO_SCALE;
     double sy = b->atomic_line_heights
         ? a->box->y - a->box->rel_dy
@@ -6733,7 +6756,7 @@ ns_paint_sync_inline_atomic_offsets(ns_box *root)
             ns_inline_atomic *atomic =
                 &g_array_index(root->inline_atomics, ns_inline_atomic, i);
             NsPangoRectangle pos;
-            ns_pango_layout_index_to_pos(layout, (int)atomic->byte_off, &pos);
+            ns_paint_atomic_index_pos(layout, (int)atomic->byte_off, &pos);
             atomic->owner_offset_x = text_x + (double)pos.x / NS_PANGO_SCALE;
             atomic->owner_offset_y = root->atomic_line_heights && atomic->box
                 ? atomic->box->y - atomic->box->rel_dy - root->y
@@ -9017,6 +9040,13 @@ marker_custom_text(const ns_node *li, const ns_style *li_style,
     return marker_resolve_content_text(raw, li, style_kw);
 }
 
+static char *
+marker_counter_style_text(const ns_node *li, const char *style_kw)
+{
+    if (!style_kw || !li) return NULL;
+    return ns_css_counter_style_marker(style_kw, list_item_ordinal(li));
+}
+
 static void
 paint_marker_label(cairo_t *cr, const char *label, double edge_x,
                    gboolean rtl, double baseline_y, double font_size)
@@ -9117,6 +9147,8 @@ ns_paint_li_marker_text(const ns_node *li, const ns_style *li_style,
     gboolean suppress_default = FALSE;
     char *custom = marker_custom_text(li, li_style, style_kw,
                                       &suppress_default);
+    if (!custom && !suppress_default)
+        custom = marker_counter_style_text(li, style_kw);
     if (custom || suppress_default) {
         g_strlcpy(out, custom ? custom : "", out_sz);
         g_free(custom);
@@ -9240,6 +9272,7 @@ paint_marker(cairo_t *cr, const ns_box *b)
     rgba color = rgba_of(cval, 0.1, 0.1, 0.1, 1);
     set_source_rgba(cr, color);
 
+    if (!custom) custom = marker_counter_style_text(b->dom, style_kw);
     if (custom) {
         paint_marker_label(cr, custom, edge_x, rtl, cy, font_size);
         g_free(custom);

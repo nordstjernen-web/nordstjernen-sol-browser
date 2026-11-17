@@ -6,6 +6,7 @@
 #include "css.h"
 #include "css_syntax.h"
 #include "css_color.h"
+#include "css_counter_style.h"
 #include "css_anchor.h"
 #include "css_shape.h"
 #include "css_filter.h"
@@ -3081,6 +3082,9 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                         cmp->never_match = TRUE;
                         if (!css_pseudo_class_is_standard(name_s, name_n))
                             g_sel_parse_error = TRUE;
+                        else if (css_name_is(name_s, name_n, "host") ||
+                                 css_name_is(name_s, name_n, "host-context"))
+                            cmp->known_unmatched = TRUE;
                     }
                 } else {
                     cmp->never_match = TRUE;
@@ -21716,6 +21720,35 @@ supports_function_start(const char *p, const char *end)
 }
 
 static gboolean
+supports_font_function(const char *name, const char *arg, const char *arg_end)
+{
+    static const char *const formats[] = {
+        "collection", "opentype", "truetype", "woff", "woff2",
+    };
+    static const char *const techs[] = {
+        "features-opentype", "variations", "color-colrv0", "color-cbdt",
+        "color-sbix",
+    };
+    const char *const *known;
+    gsize n_known;
+    if (g_ascii_strcasecmp(name, "font-format") == 0) {
+        known = formats;
+        n_known = G_N_ELEMENTS(formats);
+    } else if (g_ascii_strcasecmp(name, "font-tech") == 0) {
+        known = techs;
+        n_known = G_N_ELEMENTS(techs);
+    } else {
+        return FALSE;
+    }
+    char *keyword = css_trim_dup_range(arg, arg_end);
+    gboolean supported = FALSE;
+    for (gsize i = 0; i < n_known && !supported; i++)
+        supported = g_ascii_strcasecmp(keyword, known[i]) == 0;
+    g_free(keyword);
+    return supported;
+}
+
+static gboolean
 supports_term(const char **pp, const char *end, int depth)
 {
     if (depth > NS_CSS_MAX_AT_NESTING) { *pp = end; return FALSE; }
@@ -21742,13 +21775,14 @@ supports_term(const char **pp, const char *end, int depth)
     if (supports_function_start(p, end)) {
         const char *q = p;
         char *name = read_css_ident(&q, end);
-        g_free(name);
         q++;
         char term = 0;
         const char *close = css_scan_until(q, end, ")", &term);
         p = term == ')' ? close + 1 : close;
-        gboolean result = FALSE;
-        if (negate && term == ')') result = TRUE;
+        gboolean result = term == ')' &&
+                          supports_font_function(name, q, close);
+        g_free(name);
+        if (negate && term == ')') result = !result;
         *pp = p;
         return result;
     }
@@ -24122,6 +24156,32 @@ parse_rules_until(const char **pp, const char *end,
                                             prelude_start, prelude_end);
                     p = prelude_end + 1;
                 } else p = prelude_end;
+                g_free(at_name);
+                continue;
+            }
+            if (g_ascii_strcasecmp(at_name, "counter-style") == 0) {
+                char term = 0;
+                const char *name_start = p;
+                const char *name_end = css_scan_segment(p, end, &term);
+                p = name_end;
+                char *style_name = css_trim_dup_range(name_start, name_end);
+                if (term == '{') {
+                    const char *block_end = css_skip_to_block_end(p, end);
+                    const char *body_start = p + 1;
+                    const char *body_end = css_block_body_end(body_start,
+                                                              block_end);
+                    const char *ident_scan = style_name;
+                    char *ident = read_css_ident(
+                        &ident_scan, style_name + strlen(style_name));
+                    if (ident && *ident && !*ident_scan)
+                        ns_css_counter_style_register(
+                            ident, body_start, (gsize)(body_end - body_start));
+                    g_free(ident);
+                    p = block_end;
+                } else if (term == ';' && p < end) {
+                    p++;
+                }
+                g_free(style_name);
                 g_free(at_name);
                 continue;
             }
