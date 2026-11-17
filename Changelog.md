@@ -3,6 +3,8 @@ Changelog:
 
 1.0.50-dev:
 ======
+* The README introduces the browser as an independent web browser in C,
+  started in 2026, instead of as one "written from scratch".
 * The remaining `strcmp(node->name, "...")` tests against a tag name, 331
   of them, compare the tag id, and the tag id is now kept only on
   elements, so a doctype or processing instruction never matches one.
