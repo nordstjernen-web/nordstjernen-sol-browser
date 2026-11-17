@@ -15,6 +15,7 @@ static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
 #include "anim.h"
 #include "css.h"
 #include "css_shape.h"
+#include "css_counter_style.h"
 #include "dom.h"
 #include "spellcheck.h"
 #include "font.h"
@@ -9028,6 +9029,13 @@ marker_custom_text(const ns_node *li, const ns_style *li_style,
     return marker_resolve_content_text(raw, li, style_kw);
 }
 
+static char *
+marker_counter_style_text(const ns_node *li, const char *style_kw)
+{
+    if (!style_kw || !li) return NULL;
+    return ns_css_counter_style_marker(style_kw, list_item_ordinal(li));
+}
+
 static void
 paint_marker_label(cairo_t *cr, const char *label, double edge_x,
                    gboolean rtl, double baseline_y, double font_size)
@@ -9128,6 +9136,8 @@ ns_paint_li_marker_text(const ns_node *li, const ns_style *li_style,
     gboolean suppress_default = FALSE;
     char *custom = marker_custom_text(li, li_style, style_kw,
                                       &suppress_default);
+    if (!custom && !suppress_default)
+        custom = marker_counter_style_text(li, style_kw);
     if (custom || suppress_default) {
         g_strlcpy(out, custom ? custom : "", out_sz);
         g_free(custom);
@@ -9251,6 +9261,7 @@ paint_marker(cairo_t *cr, const ns_box *b)
     rgba color = rgba_of(cval, 0.1, 0.1, 0.1, 1);
     set_source_rgba(cr, color);
 
+    if (!custom) custom = marker_counter_style_text(b->dom, style_kw);
     if (custom) {
         paint_marker_label(cr, custom, edge_x, rtl, cy, font_size);
         g_free(custom);

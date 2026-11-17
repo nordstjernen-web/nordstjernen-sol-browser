@@ -6,6 +6,7 @@
 #include "css.h"
 #include "css_syntax.h"
 #include "css_color.h"
+#include "css_counter_style.h"
 #include "css_anchor.h"
 #include "css_shape.h"
 #include "css_filter.h"
@@ -24155,6 +24156,32 @@ parse_rules_until(const char **pp, const char *end,
                                             prelude_start, prelude_end);
                     p = prelude_end + 1;
                 } else p = prelude_end;
+                g_free(at_name);
+                continue;
+            }
+            if (g_ascii_strcasecmp(at_name, "counter-style") == 0) {
+                char term = 0;
+                const char *name_start = p;
+                const char *name_end = css_scan_segment(p, end, &term);
+                p = name_end;
+                char *style_name = css_trim_dup_range(name_start, name_end);
+                if (term == '{') {
+                    const char *block_end = css_skip_to_block_end(p, end);
+                    const char *body_start = p + 1;
+                    const char *body_end = css_block_body_end(body_start,
+                                                              block_end);
+                    const char *ident_scan = style_name;
+                    char *ident = read_css_ident(
+                        &ident_scan, style_name + strlen(style_name));
+                    if (ident && *ident && !*ident_scan)
+                        ns_css_counter_style_register(
+                            ident, body_start, (gsize)(body_end - body_start));
+                    g_free(ident);
+                    p = block_end;
+                } else if (term == ';' && p < end) {
+                    p++;
+                }
+                g_free(style_name);
                 g_free(at_name);
                 continue;
             }

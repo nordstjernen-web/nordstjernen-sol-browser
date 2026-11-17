@@ -12,6 +12,7 @@
 
 #include "css.h"
 #include "css_anchor.h"
+#include "css_counter_style.h"
 #include "html.h"
 #include "image.h"
 #include "svg.h"
@@ -3285,6 +3286,8 @@ counter_apply_decl(GHashTable *counters, const char *decl, gboolean increment)
 static gchar *
 counter_format(gint v, const char *style)
 {
+    char *custom = style ? ns_css_counter_style_text(style, v) : NULL;
+    if (custom) return custom;
     if (!style || strcmp(style, "decimal") == 0)
         return g_strdup_printf("%d", v);
     if (strcmp(style, "decimal-leading-zero") == 0)

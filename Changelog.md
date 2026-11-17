@@ -3,6 +3,13 @@ Changelog:
 
 1.0.50-dev:
 ======
+* `@counter-style` rules are implemented. A list or a `counter()` /
+  `counters()` function that names a custom counter style uses it: the
+  `cyclic`, `fixed`, `symbolic`, `alphabetic`, `numeric`, `additive` and
+  `extends` systems, with `symbols`, `additive-symbols`, `prefix`,
+  `suffix`, `negative`, `range`, `pad` and `fallback`. Such a list used to
+  be numbered `1.`, `2.` as if the style were `decimal`. Image symbols
+  are not supported, and `extends` of a built-in style counts in decimal.
 * `text-align-last` applies to a block whose text fits on one line, which
   is then its last line: `text-align-last: center` or `right` on a
   single-line heading, button or table cell now aligns it. It was read
