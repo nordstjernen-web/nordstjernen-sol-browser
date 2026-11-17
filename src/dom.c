@@ -1103,11 +1103,11 @@ ns_node_take_strings(ns_node *root)
 {
     if (!root) return;
     ns_node_own_strings_deep(root);
-    if (!root->rare) return;
-    if (root->rare->backing && root->rare->backing_free)
-        root->rare->backing_free(root->rare->backing);
-    root->rare->backing = NULL;
-    root->rare->backing_free = NULL;
+    if (!root->extra) return;
+    if (root->extra->backing && root->extra->backing_free)
+        root->extra->backing_free(root->extra->backing);
+    root->extra->backing = NULL;
+    root->extra->backing_free = NULL;
 }
 
 static guint32
@@ -1160,11 +1160,11 @@ ns_node_attach_backing(ns_node *root, void *backing, void (*destroy)(void *))
         if (backing && destroy) destroy(backing);
         return;
     }
-    ns_node_rare *rare = ns_node_rare_get(root);
-    if (rare->backing && rare->backing_free)
-        rare->backing_free(rare->backing);
-    rare->backing = backing;
-    rare->backing_free = destroy;
+    ns_node_extra *extra = ns_node_extra_get(root);
+    if (extra->backing && extra->backing_free)
+        extra->backing_free(extra->backing);
+    extra->backing = backing;
+    extra->backing_free = destroy;
 }
 
 static void
@@ -1265,8 +1265,8 @@ ns_node_free(ns_node *node)
     while (stack->len > 0) {
         ns_node *cur = g_ptr_array_index(stack, stack->len - 1);
         if (ns_node_tpl_content(cur)) {
-            ns_node *tc = cur->rare->tpl_content;
-            cur->rare->tpl_content = NULL;
+            ns_node *tc = cur->extra->tpl_content;
+            cur->extra->tpl_content = NULL;
             g_ptr_array_add(stack, tc);
             continue;
         }
@@ -1290,42 +1290,42 @@ ns_node_free(ns_node *node)
         if (cur->flags & NS_NODE_OWN_TEXT) g_free(cur->text);
         ns_class_set_clear(cur);
         ns_attr_free(cur->attrs);
-        ns_node_rare *rare = g_steal_pointer(&cur->rare);
-        if (rare) {
-            if (rare->backing && rare->backing_free)
-                rare->backing_free(rare->backing);
-            if (rare->id_index) {
-                g_hash_table_destroy(rare->id_index);
+        ns_node_extra *extra = g_steal_pointer(&cur->extra);
+        if (extra) {
+            if (extra->backing && extra->backing_free)
+                extra->backing_free(extra->backing);
+            if (extra->id_index) {
+                g_hash_table_destroy(extra->id_index);
                 ns_id_index_state_forget(cur);
             }
-            if (rare->class_index) g_hash_table_destroy(rare->class_index);
-            if (rare->tag_index) g_hash_table_destroy(rare->tag_index);
-            g_free(rare);
+            if (extra->class_index) g_hash_table_destroy(extra->class_index);
+            if (extra->tag_index) g_hash_table_destroy(extra->tag_index);
+            g_free(extra);
         }
         g_free(cur);
     }
     g_ptr_array_free(stack, TRUE);
 }
 
-ns_node_rare *
-ns_node_rare_get(ns_node *n)
+ns_node_extra *
+ns_node_extra_get(ns_node *n)
 {
-    if (!n->rare) n->rare = g_new0(ns_node_rare, 1);
-    return n->rare;
+    if (!n->extra) n->extra = g_new0(ns_node_extra, 1);
+    return n->extra;
 }
 
 void
 ns_node_set_tpl_content(ns_node *n, ns_node *content)
 {
-    if (content || n->rare) ns_node_rare_get(n)->tpl_content = content;
+    if (content || n->extra) ns_node_extra_get(n)->tpl_content = content;
 }
 
 void
 ns_node_set_source_position(ns_node *n, int line, int col)
 {
-    ns_node_rare *rare = ns_node_rare_get(n);
-    rare->src_line = line;
-    rare->src_col = col;
+    ns_node_extra *extra = ns_node_extra_get(n);
+    extra->src_line = line;
+    extra->src_col = col;
 }
 
 void
@@ -1684,7 +1684,7 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
             if (cc) ns_node_append_child(out, cc);
         }
         if (ns_node_tpl_content(src))
-            ns_node_rare_get(out)->tpl_content = ns_node_clone_depth(src->rare->tpl_content, TRUE,
+            ns_node_extra_get(out)->tpl_content = ns_node_clone_depth(src->extra->tpl_content, TRUE,
                                                    depth + 1);
     }
     return out;
@@ -1704,9 +1704,9 @@ ns_template_content_get(ns_node *tpl)
         ns_node *frag = ns_node_new_document();
         if (!frag) return NULL;
         frag->flags |= NS_NODE_FRAGMENT | NS_NODE_TEMPLATE_CONTENT;
-        ns_node_rare_get(tpl)->tpl_content = frag;
+        ns_node_extra_get(tpl)->tpl_content = frag;
     }
-    return tpl->rare->tpl_content;
+    return tpl->extra->tpl_content;
 }
 
 guint64
@@ -1938,7 +1938,7 @@ ns_doc_id_index_build(ns_node *doc)
     if (ns_node_id_index(doc)) {
         g_hash_table_remove_all(ns_node_id_index(doc));
     } else {
-        ns_node_rare_get(doc)->id_index = g_hash_table_new_full(g_str_hash, g_str_equal,
+        ns_node_extra_get(doc)->id_index = g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
     }
     ns_doc_index_walk(doc, doc, TRUE, ns_doc_id_index_add_node);
@@ -2280,7 +2280,7 @@ ns_doc_class_index_build(ns_node *doc)
     if (ns_node_class_index(doc)) {
         g_hash_table_remove_all(ns_node_class_index(doc));
     } else {
-        ns_node_rare_get(doc)->class_index = g_hash_table_new_full(g_str_hash, g_str_equal,
+        ns_node_extra_get(doc)->class_index = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                  g_free, ns_doc_index_bucket_free);
     }
     g_doc_index_building = TRUE;
@@ -2369,7 +2369,7 @@ ns_doc_tag_index_build(ns_node *doc)
     if (ns_node_tag_index(doc)) {
         g_hash_table_remove_all(ns_node_tag_index(doc));
     } else {
-        ns_node_rare_get(doc)->tag_index = g_hash_table_new_full(g_str_hash, g_str_equal,
+        ns_node_extra_get(doc)->tag_index = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                g_free, ns_doc_index_bucket_free);
     }
     g_doc_index_building = TRUE;

@@ -295,11 +295,11 @@ rejection, so `getElementById` and selector matching don't rescan the
 tree.
 
 A node is 112 bytes. Fields that only a few nodes use live in an
-`ns_node_rare` that is allocated on first use: a document root's indexes
+`ns_node_extra` that is allocated on first use: a document root's indexes
 and parser string arena, a `<template>`'s content fragment and a
 `<script>`'s source position. Read them through the inline accessors in
 `src/dom.h` (`ns_node_tpl_content`, `ns_node_id_index`, …), which return
-NULL or 0 when the node has none; set them with `ns_node_rare_get` or
+NULL or 0 when the node has none; set them with `ns_node_extra_get` or
 the setters next to it. A node that the JS binding tracks carries the
 `NS_NODE_JS_ARMED` flag instead of a function pointer, and
 `ns_node_free` calls the one invalidator the binding registered with
