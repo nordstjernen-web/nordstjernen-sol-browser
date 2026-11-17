@@ -17432,6 +17432,25 @@ new_fc_fits_beside_floats(const ns_box *c, const GArray *floats,
                                          &border_x);
 }
 
+static gboolean
+floats_reach_below(const GArray *floats, double y)
+{
+    for (guint i = 0; floats && i < floats->len; i++) {
+        const float_ref *f = &g_array_index(floats, float_ref, i);
+        if (f->bottom > y && !float_is_outside_band(f)) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+box_floats_in_block(const ns_box *c)
+{
+    return c && float_side_of(c->style) >= 0 &&
+           (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE ||
+            c->kind == NS_BOX_IMAGE || c->kind == NS_BOX_VIDEO ||
+            c->kind == NS_BOX_SVG);
+}
+
 static gsize
 inline_run_break_before_float_change(const ns_box *run, const GArray *floats,
                                      double left_off, double right_off)
@@ -18243,9 +18262,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         c->x = inner_x;
         int fside = float_side_of(c->style);
         int clr = clear_kind_of(c->style);
-        if (fside >= 0 && (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE ||
-                           c->kind == NS_BOX_IMAGE || c->kind == NS_BOX_VIDEO ||
-                           c->kind == NS_BOX_SVG)) {
+        if (box_floats_in_block(c)) {
             edges_from_style(c->style, cw,
                              &c->margin, &c->padding, &c->border);
             double float_max_w = cw;
@@ -18561,7 +18578,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             g_inline_atomic_cb_w = 0;
             gboolean wraps_around_floats = c->kind == NS_BOX_INLINE && c->text &&
-                floats->len > 0 && !style_lines_never_wrap(box->style);
+                !style_lines_never_wrap(box->style) &&
+                floats_reach_below(floats, line_y);
             if (wraps_around_floats && !c->phantom_line)
                 inline_run_fit_first_line(c, floats, inner_x, cw, &line_y,
                                           &left_off, &right_off, &cw_avail,
@@ -18588,6 +18606,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             double last_h = MIN(line_height, c->content_height);
             double last_w = c->content_width;
             if (c->kind == NS_BOX_INLINE && c->text &&
+                box_floats_in_block(c->next_sibling) &&
                 inline_run_last_line(c, &last_top, &last_h, &last_w))
                 last_top = MIN(last_top, c->content_height);
             inline_line_top = inline_text_ends_with_break(c->text)

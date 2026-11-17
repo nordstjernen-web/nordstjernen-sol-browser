@@ -8,6 +8,17 @@ Changelog:
   descriptions (deb, rpm, Arch, npm, pip), the AppStream metainfo, the
   Windows Store text and the docs drop the phrase too and say "written
   in C".
+* Text layout no longer builds a paragraph's lines a second and third
+  time when no float can touch it. Since 1.0.49 every inline run was laid
+  out again to find its last line, in case a float followed it, and again
+  to look for floats changing beside its lines whenever the block held
+  any float at all, even one that ended far above. The last line is now
+  measured only when the next box is a float, and the float checks run
+  only when a float reaches below the top of the run. Layout is
+  unchanged. Speedometer 3.1 in the GTK window on Windows goes from 3.87
+  back to 4.55 (1.0.48 scores 4.52 on the same machine): NewsSite-Next
+  and NewsSite-Nuxt take 855 ms instead of 1536 ms and Editor-TipTap
+  133 ms instead of 295 ms.
 * The remaining `strcmp(node->name, "...")` tests against a tag name, 331
   of them, compare the tag id, and the tag id is now kept only on
   elements, so a doctype or processing instruction never matches one.
