@@ -2951,6 +2951,10 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                                 g_ascii_strncasecmp(name_s, "-moz-placeholder", 16) == 0)) {
                         sel->pseudo_element = NS_CSS_PE_PLACEHOLDER;
                         sel->spec_c += 1;
+                    } else if (css_name_is(name_s, name_n, "-webkit-progress-value") ||
+                               css_name_is(name_s, name_n, "-moz-progress-bar")) {
+                        sel->pseudo_element = NS_CSS_PE_PROGRESS_VALUE;
+                        sel->spec_c += 1;
                     } else {
                         cmp->never_match = TRUE;
                         if (name_s[0] != '-'
@@ -29045,6 +29049,7 @@ ns_style_free(ns_style *s)
     ns_style_free(s->marker);
     ns_style_free(s->backdrop);
     ns_style_free(s->file_selector_button);
+    ns_style_free(s->progress_value);
     ns_style_free(s->hidden_before);
     ns_style_free(s->hidden_after);
     if (s->vars) ns_var_map_unref(s->vars);
@@ -29086,6 +29091,7 @@ ns_style_clone(const ns_style *src)
     ns_style **pseudos[] = {
         &c->before, &c->after, &c->first_letter, &c->first_line, &c->placeholder,
         &c->selection, &c->marker, &c->backdrop, &c->file_selector_button,
+        &c->progress_value,
         &c->hidden_before, &c->hidden_after,
     };
     for (gsize i = 0; i < G_N_ELEMENTS(pseudos); i++)
@@ -30666,7 +30672,7 @@ match_cmp(gconstpointer a_, gconstpointer b_)
     return a->decl_order < b->decl_order ? -1 : 1;
 }
 
-#define CSS_GATHER_DESTS_MAX (NS_CSS_PE_FILE_SELECTOR_BUTTON + 1)
+#define CSS_GATHER_DESTS_MAX (NS_CSS_PE_PROGRESS_VALUE + 1)
 
 typedef struct css_rule_match_accum {
     guint epoch;
@@ -37612,6 +37618,7 @@ ns_style_clone_shared(const ns_style *s)
     c->backdrop     = ns_style_clone_shared(s->backdrop);
     c->file_selector_button = ns_style_clone_shared(
         s->file_selector_button);
+    c->progress_value = ns_style_clone_shared(s->progress_value);
     c->hidden_before = ns_style_clone_shared(s->hidden_before);
     c->hidden_after  = ns_style_clone_shared(s->hidden_after);
     c->vars = ns_style_vars_clone(s->vars);
@@ -38311,7 +38318,7 @@ cascade_walk(ns_node *node,
         guint font_metric_reads_before = g_font_metric_reads;
         static GArray *sc_matches, *sc_var, *sc_pending;
         static GPtrArray *sc_owned;
-        static GArray *sc_pe_m[9], *sc_pe_v[9], *sc_pe_p[9];
+        static GArray *sc_pe_m[10], *sc_pe_v[10], *sc_pe_p[10];
         if (!sc_matches) {
             sc_matches  = g_array_new(FALSE, FALSE, sizeof(match_entry));
             sc_var      = g_array_new(FALSE, FALSE, sizeof(var_match));
@@ -38335,14 +38342,14 @@ cascade_walk(ns_node *node,
             const ns_css_stylesheet *rs = g_ptr_array_index(reslot_sheets, i);
             if (rs) pe_mask |= rs->pseudo_mask;
         }
-        ns_pe_gather pe_g[9];
+        ns_pe_gather pe_g[10];
         int n_pe = 0;
-        gather_dest dests[10];
+        gather_dest dests[11];
         dests[0].pe = NS_CSS_PE_NONE;
         dests[0].out = matches;
         dests[0].var_out = var_matches;
         dests[0].pending_out = pending_matches;
-        for (int pi = 0; pe_mask && pi < 9; pi++) {
+        for (int pi = 0; pe_mask && pi < 10; pi++) {
             ns_css_pseudo_element pe = (pi == 0) ? NS_CSS_PE_BEFORE :
                                        (pi == 1) ? NS_CSS_PE_AFTER :
                                        (pi == 2) ? NS_CSS_PE_FIRST_LETTER :
@@ -38351,7 +38358,8 @@ cascade_walk(ns_node *node,
                                        (pi == 5) ? NS_CSS_PE_MARKER :
                                        (pi == 6) ? NS_CSS_PE_BACKDROP :
                                        (pi == 7) ? NS_CSS_PE_PLACEHOLDER :
-                                                   NS_CSS_PE_FILE_SELECTOR_BUTTON;
+                                       (pi == 8) ? NS_CSS_PE_FILE_SELECTOR_BUTTON :
+                                                   NS_CSS_PE_PROGRESS_VALUE;
             if (!(pe_mask & (1u << pe))) continue;
             ns_pe_gather *pg = &pe_g[n_pe];
             pg->pe = pe;
@@ -38607,6 +38615,8 @@ cascade_walk(ns_node *node,
                     else if (pe == NS_CSS_PE_MARKER)       s->marker       = ps;
                     else if (pe == NS_CSS_PE_BACKDROP)     s->backdrop     = ps;
                     else if (pe == NS_CSS_PE_PLACEHOLDER)  s->placeholder  = ps;
+                    else if (pe == NS_CSS_PE_PROGRESS_VALUE)
+                        s->progress_value = ps;
                     else s->file_selector_button = ps;
                 } else {
                     ns_style_free(ps);

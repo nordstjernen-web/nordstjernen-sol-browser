@@ -3641,6 +3641,30 @@ meter_state_for(const ns_node *n)
     return st;
 }
 
+static void
+meter_quality_rgb(int quality, guint8 *r, guint8 *g, guint8 *b)
+{
+    if (quality == 0) { *r = 0x2e; *g = 0x9d; *b = 0x54; }
+    else if (quality == 1) { *r = 0xd0; *g = 0xa4; *b = 0x1f; }
+    else { *r = 0xc4; *g = 0x43; *b = 0x3c; }
+}
+
+ns_gauge_kind
+ns_layout_gauge_state(const ns_node *n, double *frac, guint8 rgb[3])
+{
+    if (ns_node_is_tag(n, NS_TAG_PROGRESS)) {
+        *frac = progress_state_for(n).frac;
+        return NS_GAUGE_PROGRESS;
+    }
+    if (ns_node_is_tag(n, NS_TAG_METER)) {
+        ns_meter_state st = meter_state_for(n);
+        *frac = st.frac;
+        meter_quality_rgb(st.quality, &rgb[0], &rgb[1], &rgb[2]);
+        return NS_GAUGE_METER;
+    }
+    return NS_GAUGE_NONE;
+}
+
 static char *
 quotes_string_for(const ns_style *s, int depth, gboolean closing)
 {
@@ -4043,9 +4067,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         if (is_meter) {
             ns_meter_state st = meter_state_for(n);
             frac = st.frac;
-            if (st.quality == 0) { r = 0x2e; g = 0x9d; b = 0x54; }
-            else if (st.quality == 1) { r = 0xd0; g = 0xa4; b = 0x1f; }
-            else { r = 0xc4; g = 0x43; b = 0x3c; }
+            meter_quality_rgb(st.quality, &r, &g, &b);
             alpha = 255;
         } else {
             ns_progress_state st = progress_state_for(n);

@@ -568,7 +568,8 @@ render_style_equal(const ns_style *a, const ns_style *b)
            render_style_equal(a->marker, b->marker) &&
            render_style_equal(a->backdrop, b->backdrop) &&
            render_style_equal(a->file_selector_button,
-                              b->file_selector_button);
+                              b->file_selector_button) &&
+           render_style_equal(a->progress_value, b->progress_value);
 }
 
 static gboolean

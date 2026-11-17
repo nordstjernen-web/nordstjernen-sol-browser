@@ -261,6 +261,14 @@ gboolean ns_inline_shift_bounds(const ns_box *box, double *x0, double *y0,
 gboolean ns_inline_unshift_point(const ns_box *box, struct _PangoLayout *layout,
                                  double *x, double *y);
 char *ns_layout_select_srcset(const char *srcset, const char *sizes);
+typedef enum ns_gauge_kind {
+    NS_GAUGE_NONE,
+    NS_GAUGE_PROGRESS,
+    NS_GAUGE_METER,
+} ns_gauge_kind;
+
+ns_gauge_kind ns_layout_gauge_state(const ns_node *n, double *frac,
+                                    guint8 rgb[3]);
 double ns_inline_text_indent_px(const ns_box *run, const ns_style *s,
                                 double basis);
 double ns_control_dim_px(const ns_css_value *v, double font_size, double basis);
