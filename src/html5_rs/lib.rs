@@ -16,6 +16,7 @@ mod tree;
 use core::ffi::CStr;
 
 pub use tags::{AttrNs, Tag};
+pub use tree::Parser;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ns {
@@ -35,6 +36,13 @@ pub enum QuirksMode {
 pub struct Position {
     pub line: u32,
     pub column: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Positions {
+    All,
+    Scripts,
+    None,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -112,6 +120,9 @@ pub trait TreeSink {
     type Handle: Copy + Eq;
 
     fn document(&self) -> Self::Handle;
+    fn positions(&self) -> Positions {
+        Positions::All
+    }
     fn create_element(
         &mut self,
         name: ElementName<'_>,
@@ -132,6 +143,74 @@ pub trait TreeSink {
     fn add_missing_attributes(&mut self, element: Self::Handle, attrs: Attrs<'_>);
     fn option_children_parsed(&mut self, _option: Self::Handle) {}
     fn discard(&mut self, _node: Self::Handle) {}
+}
+
+impl<T: TreeSink> TreeSink for &mut T {
+    type Handle = T::Handle;
+
+    fn document(&self) -> Self::Handle {
+        (**self).document()
+    }
+    fn positions(&self) -> Positions {
+        (**self).positions()
+    }
+    fn create_element(
+        &mut self,
+        name: ElementName<'_>,
+        attrs: Attrs<'_>,
+        position: Position,
+    ) -> Self::Handle {
+        (**self).create_element(name, attrs, position)
+    }
+    fn create_comment(&mut self, text: &[u8]) -> Self::Handle {
+        (**self).create_comment(text)
+    }
+    fn create_processing_instruction(&mut self, target: &[u8], data: &[u8]) -> Self::Handle {
+        (**self).create_processing_instruction(target, data)
+    }
+    fn append_doctype(&mut self, name: &[u8], public_id: &[u8], system_id: &[u8]) {
+        (**self).append_doctype(name, public_id, system_id);
+    }
+    fn append(&mut self, parent: Self::Handle, child: Self::Handle) {
+        (**self).append(parent, child);
+    }
+    fn insert_before(&mut self, sibling: Self::Handle, child: Self::Handle) {
+        (**self).insert_before(sibling, child);
+    }
+    fn append_text(&mut self, parent: Self::Handle, text: &[u8]) {
+        (**self).append_text(parent, text);
+    }
+    fn insert_text_before(&mut self, sibling: Self::Handle, text: &[u8]) {
+        (**self).insert_text_before(sibling, text);
+    }
+    fn parent(&self, node: Self::Handle) -> Option<Self::Handle> {
+        (**self).parent(node)
+    }
+    fn remove(&mut self, node: Self::Handle) {
+        (**self).remove(node);
+    }
+    fn reparent_children(&mut self, from: Self::Handle, to: Self::Handle) {
+        (**self).reparent_children(from, to);
+    }
+    fn template_contents(&mut self, template: Self::Handle) -> Self::Handle {
+        (**self).template_contents(template)
+    }
+    fn add_missing_attributes(&mut self, element: Self::Handle, attrs: Attrs<'_>) {
+        (**self).add_missing_attributes(element, attrs);
+    }
+    fn option_children_parsed(&mut self, option: Self::Handle) {
+        (**self).option_children_parsed(option);
+    }
+    fn discard(&mut self, node: Self::Handle) {
+        (**self).discard(node);
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Progress<H> {
+    NeedInput,
+    Script(H),
+    Done(QuirksMode),
 }
 
 #[derive(Clone, Copy, Debug)]

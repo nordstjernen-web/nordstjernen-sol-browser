@@ -7,7 +7,8 @@ use core::ptr;
 use core::slice;
 
 use ns_html5::{
-    AttrNs, Attribute, Attrs, Context, ElementName, LocalName, Ns, Position, QuirksMode, TreeSink,
+    AttrNs, Attribute, Attrs, Context, ElementName, LocalName, Ns, Parser, Position, Positions,
+    Progress, QuirksMode, TreeSink,
 };
 use ns_url::bytes;
 
@@ -269,6 +270,14 @@ impl TreeSink for Sink {
         self.document
     }
 
+    fn positions(&self) -> Positions {
+        if self.positions {
+            Positions::Scripts
+        } else {
+            Positions::None
+        }
+    }
+
     fn create_element(
         &mut self,
         name: ElementName<'_>,
@@ -401,11 +410,69 @@ pub unsafe extern "C" fn ns_rs_html_parse_document(
     let bytes = unsafe { input(data, len) };
     let quirks = ns_html5::parse_document(bytes, scripting != 0, &mut sink);
     sink.free_detached();
+    quirks_id(quirks)
+}
+
+fn quirks_id(quirks: QuirksMode) -> c_int {
     match quirks {
         QuirksMode::NoQuirks => 0,
         QuirksMode::LimitedQuirks => 1,
         QuirksMode::Quirks => 2,
     }
+}
+
+fn pump(parser: &mut Parser<Sink>) -> Option<QuirksMode> {
+    loop {
+        match parser.advance() {
+            Progress::NeedInput => return None,
+            Progress::Script(_) => parser.resume(),
+            Progress::Done(quirks) => return Some(quirks),
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ns_rs_html_stream_new(
+    scripting: c_int,
+    document: *mut c_void,
+    context: *mut c_void,
+) -> *mut c_void {
+    let sink = Sink::new(context, document, true);
+    Box::into_raw(Box::new(Parser::new(sink, scripting != 0, false))).cast::<c_void>()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ns_rs_html_stream_feed(
+    stream: *mut c_void,
+    data: *const c_char,
+    len: usize,
+) {
+    let Some(parser) = (unsafe { stream.cast::<Parser<Sink>>().as_mut() }) else {
+        return;
+    };
+    parser.feed(unsafe { input(data, len) });
+    pump(parser);
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ns_rs_html_stream_finish(stream: *mut c_void) -> c_int {
+    if stream.is_null() {
+        return 0;
+    }
+    let mut parser = unsafe { Box::from_raw(stream.cast::<Parser<Sink>>()) };
+    parser.finish();
+    let quirks = pump(&mut parser).unwrap_or(QuirksMode::NoQuirks);
+    parser.sink().free_detached();
+    quirks_id(quirks)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ns_rs_html_stream_free(stream: *mut c_void) {
+    if stream.is_null() {
+        return;
+    }
+    let mut parser = unsafe { Box::from_raw(stream.cast::<Parser<Sink>>()) };
+    parser.sink().free_detached();
 }
 
 #[unsafe(no_mangle)]

@@ -6,11 +6,15 @@ use crate::quirks::quirks_mode;
 use crate::stack::{Elem, Fmt, Formatting, OpenStack, Scope, UNNAMED};
 use crate::tags::{Tag, foreign_attr, svg_attr_name, svg_tag_name};
 use crate::tokenizer::{Attr, Doctype, Kind, State, TagToken, Tokenizer};
-use crate::{Attrs, Context, ElementName, LocalName, Ns, Position, QuirksMode, TreeSink};
+use crate::scan::find_any;
+use crate::{
+    Attrs, Context, ElementName, LocalName, Ns, Position, Progress, QuirksMode, TreeSink,
+};
 
 const NO_POSITION: Position = Position { line: 0, column: 0 };
 const REPLACEMENT: &[u8] = "\u{FFFD}".as_bytes();
 const DEEPEST_PARENT: usize = 509;
+const COMPACT_THRESHOLD: usize = 1 << 16;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Mode {
@@ -84,8 +88,8 @@ struct ContextElem {
     ns: Ns,
 }
 
-struct Builder<'s, S: TreeSink> {
-    sink: &'s mut S,
+struct Builder<S: TreeSink> {
+    sink: S,
     doc: S::Handle,
     mode: Mode,
     original_mode: Mode,
@@ -103,6 +107,7 @@ struct Builder<'s, S: TreeSink> {
     skip_newline: bool,
     next_state: Option<State>,
     fragment_root: Option<S::Handle>,
+    script_ready: Option<S::Handle>,
 }
 
 fn is_ws(c: u8) -> bool {
@@ -211,8 +216,8 @@ const BREAKOUT: &[Tag] = &[
 
 const HEADINGS: &[Tag] = &[Tag::H1, Tag::H2, Tag::H3, Tag::H4, Tag::H5, Tag::H6];
 
-impl<'s, S: TreeSink> Builder<'s, S> {
-    fn new(sink: &'s mut S, scripting: bool) -> Self {
+impl<S: TreeSink> Builder<S> {
+    fn new(sink: S, scripting: bool) -> Self {
         let doc = sink.document();
         Builder {
             sink,
@@ -233,6 +238,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             skip_newline: false,
             next_state: None,
             fragment_root: None,
+            script_ready: None,
         }
     }
 
@@ -1243,7 +1249,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
         }
         self.reconstruct_formatting();
         self.insert_text(text);
-        if !all_ws(text) {
+        if self.frameset_ok && !all_ws(text) {
             self.frameset_ok = false;
         }
     }
@@ -1756,7 +1762,11 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 Step::Again
             }
             Tok::End(_) => {
-                self.pop_open();
+                if let Some(elem) = self.pop_open()
+                    && elem.is(Tag::Script)
+                {
+                    self.script_ready = Some(elem.h);
+                }
                 self.mode = self.original_mode;
                 Step::Done
             }
@@ -1973,6 +1983,11 @@ impl<'s, S: TreeSink> Builder<'s, S> {
 
     fn in_column_group(&mut self, tok: &mut Tok<'_>) -> Step {
         match tok {
+            Tok::Chars(text) if !self.current_is(Tag::Colgroup) => {
+                let text: &[u8] = text;
+                self.frameset_ws(text);
+                return Step::Done;
+            }
             Tok::Chars(text) => {
                 let (ws, rest) = split_ws(text);
                 self.insert_text(ws);
@@ -2498,46 +2513,32 @@ impl<'s, S: TreeSink> Builder<'s, S> {
     }
 }
 
-fn normalize_newlines(input: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(input.len());
-    let mut i = 0;
-    while i < input.len() {
-        let c = input[i];
-        if c == b'\r' {
-            out.push(b'\n');
-            if input.get(i + 1) == Some(&b'\n') {
-                i += 1;
-            }
-        } else {
-            out.push(c);
-        }
-        i += 1;
+fn append_normalized(out: &mut Vec<u8>, input: &[u8], after_cr: &mut bool) {
+    let mut rest = input;
+    if *after_cr && rest.first() == Some(&b'\n') {
+        rest = &rest[1..];
     }
-    out
+    if !input.is_empty() {
+        *after_cr = false;
+    }
+    while let Some(i) = find_any(rest, [b'\r']) {
+        out.extend_from_slice(&rest[..i]);
+        out.push(b'\n');
+        rest = &rest[i + 1..];
+        match rest.first() {
+            Some(&b'\n') => rest = &rest[1..],
+            Some(_) => {}
+            None => *after_cr = true,
+        }
+    }
+    out.extend_from_slice(rest);
 }
 
-pub fn run<S: TreeSink>(
-    input: &[u8],
-    scripting: bool,
-    context: Option<Context<'_>>,
-    sink: &mut S,
-) -> QuirksMode {
-    let normalized;
-    let input = if input.contains(&b'\r') {
-        normalized = normalize_newlines(input);
-        &normalized[..]
-    } else {
-        input
-    };
-    let mut tokenizer = Tokenizer::new(input);
-    let mut builder = Builder::new(sink, scripting);
-    let fragment = context.is_some();
-    if let Some(context) = context
-        && let Some(state) = builder.start_fragment(context)
-    {
-        tokenizer.state = state;
-    }
-    tokenizer.allow_cdata = builder.adjusted_current_foreign();
+fn drive<S: TreeSink>(
+    tokenizer: &mut Tokenizer<'_>,
+    builder: &mut Builder<S>,
+    pause_at_scripts: bool,
+) -> Progress<S::Handle> {
     loop {
         let kind = tokenizer.next_token();
         {
@@ -2549,6 +2550,7 @@ pub fn run<S: TreeSink>(
                 Kind::Pi => Tok::Pi(&tokenizer.pi_target, &tokenizer.comment),
                 Kind::Doctype => Tok::Doctype(&tokenizer.doctype),
                 Kind::Eof => Tok::Eof,
+                Kind::NeedInput => return Progress::NeedInput,
             };
             builder.process(&mut tok);
         }
@@ -2557,9 +2559,41 @@ pub fn run<S: TreeSink>(
         }
         tokenizer.allow_cdata = builder.adjusted_current_foreign();
         if kind == Kind::Eof {
-            break;
+            return Progress::Done(builder.quirks);
+        }
+        if let Some(script) = builder.script_ready.take()
+            && pause_at_scripts
+        {
+            return Progress::Script(script);
         }
     }
+}
+
+pub fn run<S: TreeSink>(
+    input: &[u8],
+    scripting: bool,
+    context: Option<Context<'_>>,
+    sink: &mut S,
+) -> QuirksMode {
+    let mut normalized = Vec::new();
+    let input = if input.contains(&b'\r') {
+        normalized.reserve(input.len());
+        append_normalized(&mut normalized, input, &mut false);
+        &normalized[..]
+    } else {
+        input
+    };
+    let mut tokenizer = Tokenizer::new(input);
+    tokenizer.positions = sink.positions();
+    let mut builder = Builder::new(sink, scripting);
+    let fragment = context.is_some();
+    if let Some(context) = context
+        && let Some(state) = builder.start_fragment(context)
+    {
+        tokenizer.state = state;
+    }
+    tokenizer.allow_cdata = builder.adjusted_current_foreign();
+    drive(&mut tokenizer, &mut builder, false);
     if fragment && let Some(root) = builder.fragment_root {
         let doc = builder.doc;
         builder.sink.reparent_children(root, doc);
@@ -2567,4 +2601,115 @@ pub fn run<S: TreeSink>(
         builder.sink.discard(root);
     }
     builder.quirks
+}
+
+pub struct Parser<S: TreeSink> {
+    buffer: Vec<u8>,
+    tokenizer: Option<Tokenizer<'static>>,
+    builder: Builder<S>,
+    pause_at_scripts: bool,
+    ended: bool,
+    feed_after_cr: bool,
+    write_after_cr: bool,
+    insertion_points: Vec<usize>,
+    outcome: Option<QuirksMode>,
+}
+
+impl<S: TreeSink> Parser<S> {
+    pub fn new(sink: S, scripting: bool, pause_at_scripts: bool) -> Self {
+        let mut tokenizer = Tokenizer::new(&[]);
+        tokenizer.positions = sink.positions();
+        Parser {
+            buffer: Vec::new(),
+            tokenizer: Some(tokenizer),
+            builder: Builder::new(sink, scripting),
+            pause_at_scripts,
+            ended: false,
+            feed_after_cr: false,
+            write_after_cr: false,
+            insertion_points: Vec::new(),
+            outcome: None,
+        }
+    }
+
+    pub fn sink(&mut self) -> &mut S {
+        &mut self.builder.sink
+    }
+
+    pub fn feed(&mut self, input: &[u8]) {
+        if self.ended {
+            return;
+        }
+        self.compact();
+        append_normalized(&mut self.buffer, input, &mut self.feed_after_cr);
+    }
+
+    pub fn finish(&mut self) {
+        self.ended = true;
+    }
+
+    pub fn advance(&mut self) -> Progress<S::Handle> {
+        if let Some(quirks) = self.outcome {
+            return Progress::Done(quirks);
+        }
+        if !self.insertion_points.is_empty() {
+            return Progress::NeedInput;
+        }
+        let end = self.buffer.len();
+        self.tokenize_to(end, !self.ended)
+    }
+
+    pub fn write(&mut self, input: &[u8]) -> Progress<S::Handle> {
+        let Some(&at) = self.insertion_points.last() else {
+            return Progress::NeedInput;
+        };
+        let mut written = Vec::new();
+        append_normalized(&mut written, input, &mut self.write_after_cr);
+        let added = written.len();
+        self.buffer.splice(at..at, written);
+        for point in &mut self.insertion_points {
+            if *point >= at {
+                *point += added;
+            }
+        }
+        self.tokenize_to(at + added, true)
+    }
+
+    pub fn resume(&mut self) {
+        self.insertion_points.pop();
+        if self.insertion_points.is_empty() {
+            self.write_after_cr = false;
+        }
+    }
+
+    fn compact(&mut self) {
+        let Some(tokenizer) = self.tokenizer.as_mut() else {
+            return;
+        };
+        if !self.insertion_points.is_empty()
+            || tokenizer.consumed() < COMPACT_THRESHOLD
+            || tokenizer.holds_input_text()
+        {
+            return;
+        }
+        let dropped = tokenizer.forget_consumed(&self.buffer);
+        self.buffer.drain(..dropped);
+    }
+
+    fn tokenize_to(&mut self, end: usize, partial: bool) -> Progress<S::Handle> {
+        let Some(parked) = self.tokenizer.take() else {
+            return Progress::NeedInput;
+        };
+        let mut tokenizer = parked.rebind(&self.buffer[..end]);
+        tokenizer.partial = partial;
+        let progress = drive(&mut tokenizer, &mut self.builder, self.pause_at_scripts);
+        let consumed = tokenizer.consumed();
+        self.tokenizer = Some(tokenizer.rebind(&[]));
+        match progress {
+            Progress::Script(_) => self.insertion_points.push(consumed),
+            Progress::Done(quirks) => self.outcome = Some(quirks),
+            Progress::NeedInput => {}
+        }
+        progress
+    }
 }

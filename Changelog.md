@@ -3,6 +3,20 @@ Changelog:
 
 1.0.50-dev:
 ======
+* The HTML parser takes its input in pieces. The Rust crate gains a
+  `Parser` that is fed chunks and resumed: the tokenizer suspends wherever
+  more input could still change the token it is reading (inside a tag, a
+  character reference, a `</script` that may or may not close the script)
+  and continues from there, and it can stop at each `</script>` so an
+  embedder can run the script and insert what `document.write` produced at
+  the insertion point. The tree is the same however the input is cut:
+  all 3,890 tree-construction tests in web-platform-tests that run without
+  script give the same result fed whole, one byte at a time or in random
+  chunks, as do over three million generated documents. C code reaches it
+  through `ns_html_stream_new` / `ns_html_stream_feed` /
+  `ns_html_stream_finish`; `NS_HTML_PARSE_CHUNK=N` sends every document
+  parse through it in N-byte chunks. Page loads still parse the whole
+  decoded body in one call, and `document.write` keeps its own code path.
 * Security: a page could hang its tab with a few hundred kilobytes of
   markup. Each time the adoption agency moved a node that had children,
   the tree sink walked every ancestor of the new parent to rule out a
@@ -13,6 +27,27 @@ Changelog:
   builder no longer nests elements deeper than the DOM's depth limit of
   512: past it, new elements become children of the element at the limit,
   as in Blink and Gecko. The two inputs now parse in 7 ms and 30 ms.
+* `<!DOCTYPE>` with no name gives a doctype whose `name` is the empty
+  string instead of `html`; whitespace between `</head>` and `<body>`
+  stays in the tree as a text node, as the Standard asks, instead of being
+  removed after the parse; and characters after a `<col>` inside a
+  `<template>` keep their whitespace when the rest is dropped.
+* Parsing and freeing a typical page takes 2 to 8% fewer instructions
+  (Wikipedia, BBC News, Hacker News, MDN, NRK, the Rust `Vec`
+  documentation): the tokenizer works out a line and column only for
+  `<script>` start tags, the one place they are used, copies tag and
+  attribute names a run at a time, and resolves `&amp;`, `&lt;`, `&gt;`,
+  `&quot;`, `&nbsp;` and `&apos;` without the entity table. A document
+  with carriage returns is normalized run by run instead of byte by byte.
+* The media-metadata pass after a parse runs when the page carries the
+  metadata it reads (an `og:video` or `twitter:player` meta, a JSON-LD
+  script that mentions `VideoObject`, a `VideoObject` microdata item) or a
+  `<video>`, instead of when some element has `player` as its id or in its
+  class, and it looks for the element to annotate only once it has found a
+  video. An element marked up as a schema.org `VideoObject` is preferred
+  over the `player` id and class.
+* Text of more than 4 GB between two tags is split over several text
+  nodes instead of being dropped.
 * Build: the Rust floor rises from 1.91 to 1.100, and the HTML parser
   uses what the newer compiler offers: `if let` guards in the tree
   builder and the script-data tokenizer states, `array_windows` for the
