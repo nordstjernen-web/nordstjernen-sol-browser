@@ -35,6 +35,8 @@ struct ns_h5_sink {
     GHashTable *template_hosts;
     ns_node    *fresh_selectedcontent;
     GHashTable *selects;
+    gboolean    declarative_shadow;
+    gboolean    media_candidate;
 };
 
 typedef struct {
@@ -103,10 +105,12 @@ ns_h5_element(ns_h5_sink *sink, const char *name, size_t len, int borrowed,
     ns_node *el = ns_node_new_element(NULL);
     ns_node_set_name_borrow(el, borrowed ? name
                                          : ns_h5_arena_copy(sink, name, len));
-    if (line > 0 && g_ascii_strcasecmp(el->name, "script") == 0) {
+    if (line > 0 && len == 6 && memcmp(name, "script", 6) == 0) {
         el->src_line = line;
         el->src_col = column;
     }
+    if (len == 5 && memcmp(name, "video", 5) == 0)
+        sink->media_candidate = TRUE;
     if (len == 15 && memcmp(name, "selectedcontent", 15) == 0)
         sink->fresh_selectedcontent = el;
     return el;
@@ -149,6 +153,16 @@ ns_h5_merge_attribute(ns_h5_sink *sink, ns_node *element,
         ns_h5_append_attribute(sink, element, name, value);
 }
 
+static void
+ns_h5_note_attribute(ns_h5_sink *sink, const char *name, const char *value)
+{
+    if (strcmp(name, "shadowrootmode") == 0 || strcmp(name, "shadowroot") == 0)
+        sink->declarative_shadow = TRUE;
+    else if ((strcmp(name, "id") == 0 && strcmp(value, "player") == 0) ||
+             (strcmp(name, "class") == 0 && strstr(value, "player")))
+        sink->media_candidate = TRUE;
+}
+
 void
 ns_h5_attribute(ns_h5_sink *sink, ns_node *element,
                 const char *name, size_t name_len,
@@ -157,8 +171,9 @@ ns_h5_attribute(ns_h5_sink *sink, ns_node *element,
 {
     if (!element || element->kind != NS_NODE_ELEMENT || name_len == 0) return;
     const char *qname = ns_h5_arena_copy(sink, name, name_len);
-    const char *val = ns_h5_arena_copy(sink, value, value_len);
     if (ns_attr_name_is_internal(qname)) return;
+    const char *val = ns_h5_arena_copy(sink, value, value_len);
+    ns_h5_note_attribute(sink, qname, val);
     if (only_if_missing) {
         ns_h5_merge_attribute(sink, element, qname, val);
         return;
@@ -168,9 +183,10 @@ ns_h5_attribute(ns_h5_sink *sink, ns_node *element,
         ns_h5_append_attribute(sink, element, qname, val);
         return;
     }
-    g_autofree char *prefix = prefix_len ? g_strndup(qname, prefix_len) : NULL;
-    const char *local = prefix_len && prefix_len < name_len
-        ? qname + prefix_len + 1 : qname;
+    size_t qname_len = strlen(qname);
+    g_autofree char *prefix = prefix_len && prefix_len < qname_len
+        ? g_strndup(qname, prefix_len) : NULL;
+    const char *local = prefix ? qname + prefix_len + 1 : qname;
     ns_element_set_attr_ns(element, uri, prefix, local, qname, val);
 }
 
@@ -511,56 +527,56 @@ ns_valid_shadow_host(const char *name)
     return strchr(name, '-') != NULL;
 }
 
+static gboolean
+ns_dsd_attach(const ns_node *host, ns_node *c)
+{
+    if (c->kind != NS_NODE_ELEMENT || !c->name ||
+        g_ascii_strcasecmp(c->name, "template") != 0)
+        return FALSE;
+    const char *mode = ns_element_get_attr(c, "shadowrootmode");
+    if (!mode) mode = ns_element_get_attr(c, "shadowroot");
+    if (!mode || (g_ascii_strcasecmp(mode, "open") != 0 &&
+                  g_ascii_strcasecmp(mode, "closed") != 0))
+        return FALSE;
+    if (host->kind != NS_NODE_ELEMENT || !ns_valid_shadow_host(host->name))
+        return FALSE;
+    gboolean closed = g_ascii_strcasecmp(mode, "closed") == 0;
+    gboolean delegates =
+        ns_element_get_attr(c, "shadowrootdelegatesfocus") != NULL;
+    gboolean serializable =
+        ns_element_get_attr(c, "shadowrootserializable") != NULL;
+    gboolean clonable = ns_element_get_attr(c, "shadowrootclonable") != NULL;
+    ns_node_set_name_borrow(c, "div");
+    ns_element_remove_attr(c, "shadowrootmode");
+    ns_element_remove_attr(c, "shadowroot");
+    ns_element_remove_attr(c, "shadowrootdelegatesfocus");
+    ns_element_remove_attr(c, "shadowrootserializable");
+    ns_element_remove_attr(c, "shadowrootclonable");
+    if (c->tpl_content) {
+        ns_node *frag = c->tpl_content;
+        c->tpl_content = NULL;
+        while (frag->first_child)
+            ns_node_append_child(c, frag->first_child);
+        ns_node_free(frag);
+    }
+    ns_element_set_attr(c, NS_SHADOW_ATTR, closed ? "closed" : "open");
+    ns_element_set_attr(c, "data-nd-shadow-declarative", "1");
+    if (delegates)
+        ns_element_set_attr(c, "data-nd-shadow-delegates", "1");
+    if (serializable)
+        ns_element_set_attr(c, "data-nd-shadow-serializable", "1");
+    if (clonable)
+        ns_element_set_attr(c, "data-nd-shadow-clonable", "1");
+    return TRUE;
+}
+
 static void
 ns_dsd_convert(ns_node *n, int depth)
 {
     if (!n || depth >= 512) return;
-    gboolean host_ok = n->kind == NS_NODE_ELEMENT &&
-                       ns_valid_shadow_host(n->name);
     gboolean shadow_done = FALSE;
     for (ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (host_ok && !shadow_done && c->kind == NS_NODE_ELEMENT && c->name &&
-            g_ascii_strcasecmp(c->name, "template") == 0) {
-            const char *mode = ns_element_get_attr(c, "shadowrootmode");
-            if (!mode) mode = ns_element_get_attr(c, "shadowroot");
-            if (mode && (g_ascii_strcasecmp(mode, "open") == 0 ||
-                         g_ascii_strcasecmp(mode, "closed") == 0)) {
-                shadow_done = TRUE;
-                gboolean delegates =
-                    ns_element_get_attr(c, "shadowrootdelegatesfocus") != NULL;
-                gboolean serializable =
-                    ns_element_get_attr(c, "shadowrootserializable") != NULL;
-                gboolean clonable =
-                    ns_element_get_attr(c, "shadowrootclonable") != NULL;
-                ns_node_set_name_borrow(c, "div");
-                ns_element_remove_attr(c, "shadowrootmode");
-                ns_element_remove_attr(c, "shadowroot");
-                ns_element_remove_attr(c, "shadowrootdelegatesfocus");
-                ns_element_remove_attr(c, "shadowrootserializable");
-                ns_element_remove_attr(c, "shadowrootclonable");
-                if (c->tpl_content) {
-                    ns_node *frag = c->tpl_content;
-                    c->tpl_content = NULL;
-                    ns_node *ch = frag->first_child;
-                    while (ch) {
-                        ns_node *next = ch->next_sibling;
-                        ns_node_remove(ch);
-                        ns_node_append_child(c, ch);
-                        ch = next;
-                    }
-                    ns_node_free(frag);
-                }
-                ns_element_set_attr(c, NS_SHADOW_ATTR,
-                    g_ascii_strcasecmp(mode, "closed") == 0 ? "closed" : "open");
-                ns_element_set_attr(c, "data-nd-shadow-declarative", "1");
-                if (delegates)
-                    ns_element_set_attr(c, "data-nd-shadow-delegates", "1");
-                if (serializable)
-                    ns_element_set_attr(c, "data-nd-shadow-serializable", "1");
-                if (clonable)
-                    ns_element_set_attr(c, "data-nd-shadow-clonable", "1");
-            }
-        }
+        if (!shadow_done && ns_dsd_attach(n, c)) shadow_done = TRUE;
         ns_dsd_convert(c, depth + 1);
     }
     if (n->tpl_content)
@@ -657,51 +673,55 @@ document_media_target(const ns_node *root)
                                            0);
 }
 
-static ns_node *
-find_meta_property(ns_node *n, const char *prop, int depth)
+typedef struct {
+    GPtrArray *metas;
+    GPtrArray *video_jsonld;
+} ns_media_sources;
+
+static void
+media_sources_collect(const ns_node *n, ns_media_sources *out, int depth)
 {
-    if (!n || depth >= 512) return NULL;
-    if (n->kind == NS_NODE_ELEMENT && n->name && strcmp(n->name, "meta") == 0) {
+    if (!n || depth >= 512) return;
+    if (n->kind == NS_NODE_ELEMENT && n->name) {
+        if (strcmp(n->name, "meta") == 0) {
+            g_ptr_array_add(out->metas, (gpointer)n);
+        } else if (strcmp(n->name, "script") == 0) {
+            const char *type = ns_element_get_attr(n, "type");
+            if (type && g_ascii_strcasecmp(type, "application/ld+json") == 0) {
+                char *text = script_text(n);
+                if (strstr(text, "VideoObject"))
+                    g_ptr_array_add(out->video_jsonld, text);
+                else
+                    g_free(text);
+            }
+        }
+    }
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        media_sources_collect(c, out, depth + 1);
+}
+
+static char *
+meta_property_content(const ns_media_sources *sources, const char *prop)
+{
+    for (guint i = 0; i < sources->metas->len; i++) {
+        const ns_node *n = g_ptr_array_index(sources->metas, i);
         const char *p = ns_element_get_attr(n, "property");
         if (!p) p = ns_element_get_attr(n, "name");
         const char *c = ns_element_get_attr(n, "content");
         if (p && c && *c && g_ascii_strcasecmp(p, prop) == 0)
-            return n;
-    }
-    for (ns_node *c = n->first_child; c; c = c->next_sibling) {
-        ns_node *hit = find_meta_property(c, prop, depth + 1);
-        if (hit) return hit;
+            return g_strdup(c);
     }
     return NULL;
 }
 
 static char *
-meta_property_content(const ns_node *root, const char *prop)
+jsonld_videoobject_url(const ns_media_sources *sources, const char *key)
 {
-    ns_node *m = find_meta_property((ns_node *)root, prop, 0);
-    const char *c = m ? ns_element_get_attr(m, "content") : NULL;
-    return (c && *c) ? g_strdup(c) : NULL;
-}
-
-static char *
-jsonld_videoobject_url(const ns_node *n, const char *key, int depth)
-{
-    if (!n || depth >= 512) return NULL;
-    if (n->kind == NS_NODE_ELEMENT && n->name &&
-        strcmp(n->name, "script") == 0) {
-        const char *type = ns_element_get_attr(n, "type");
-        if (type && g_ascii_strcasecmp(type, "application/ld+json") == 0) {
-            g_autofree char *text = script_text(n);
-            if (text && strstr(text, "VideoObject")) {
-                char *v = json_first_url_for_key(text, key);
-                if (v && *v) return v;
-                g_free(v);
-            }
-        }
-    }
-    for (ns_node *c = n->first_child; c; c = c->next_sibling) {
-        char *hit = jsonld_videoobject_url(c, key, depth + 1);
-        if (hit) return hit;
+    for (guint i = 0; i < sources->video_jsonld->len; i++) {
+        char *v = json_first_url_for_key(
+            g_ptr_array_index(sources->video_jsonld, i), key);
+        if (v && *v) return v;
+        g_free(v);
     }
     return NULL;
 }
@@ -737,26 +757,34 @@ ns_media_extract_standard(const ns_node *root)
         ns_element_get_attr(target, NS_MEDIA_STREAM_ATTR))
         return;
 
-    char *direct = jsonld_videoobject_url(root, "\"contentUrl\"", 0);
+    ns_media_sources sources = {
+        .metas = g_ptr_array_new(),
+        .video_jsonld = g_ptr_array_new_with_free_func(g_free),
+    };
+    media_sources_collect(root, &sources, 0);
+    char *direct = jsonld_videoobject_url(&sources, "\"contentUrl\"");
     if (direct && !media_url_is_direct_playable(direct)) {
         g_free(direct);
         direct = NULL;
     }
-    char *og_video = meta_property_content(root, "og:video:secure_url");
+    char *og_video = meta_property_content(&sources, "og:video:secure_url");
     og_video = first_nonempty(og_video,
-                              meta_property_content(root, "og:video:url"));
+                              meta_property_content(&sources, "og:video:url"));
     og_video = first_nonempty(og_video,
-                              meta_property_content(root, "og:video"));
-    char *tw_player = meta_property_content(root, "twitter:player");
+                              meta_property_content(&sources, "og:video"));
+    char *tw_player = meta_property_content(&sources, "twitter:player");
 
-    char *poster = meta_property_content(root, "og:image:secure_url");
-    poster = first_nonempty(poster, meta_property_content(root, "og:image"));
+    char *poster = meta_property_content(&sources, "og:image:secure_url");
     poster = first_nonempty(poster,
-                            jsonld_videoobject_url(root, "\"thumbnailUrl\"", 0));
+                            meta_property_content(&sources, "og:image"));
     poster = first_nonempty(poster,
-                            meta_property_content(root, "twitter:image"));
+                            jsonld_videoobject_url(&sources, "\"thumbnailUrl\""));
+    poster = first_nonempty(poster,
+                            meta_property_content(&sources, "twitter:image"));
 
-    char *embed = jsonld_videoobject_url(root, "\"embedUrl\"", 0);
+    char *embed = jsonld_videoobject_url(&sources, "\"embedUrl\"");
+    g_ptr_array_free(sources.metas, TRUE);
+    g_ptr_array_free(sources.video_jsonld, TRUE);
     gboolean has_video = direct || og_video || tw_player || embed;
     if (has_video) {
         if (direct)
@@ -883,8 +911,8 @@ ns_html_parse_with_scripting(const char *input, gssize len,
         root->flags |= NS_NODE_LIMITED_QUIRKS;
     if (!scripting) root->flags |= NS_NODE_SCRIPTING_DISABLED;
     ns_prune_html_interelement_whitespace(root);
-    ns_dsd_convert(root, 0);
-    ns_media_extract_standard(root);
+    if (sink->declarative_shadow) ns_dsd_convert(root, 0);
+    if (sink->media_candidate) ns_media_extract_standard(root);
     return root;
 }
 
