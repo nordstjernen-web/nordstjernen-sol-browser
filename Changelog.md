@@ -3,6 +3,13 @@ Changelog:
 
 1.0.50-dev:
 ======
+* `env()` works wherever a value is allowed, not only inside `calc()`.
+  `env(safe-area-inset-top)` and the other `safe-area-inset-*` and
+  `safe-area-max-inset-*` variables are `0px`, any other name takes its
+  fallback, and a declaration whose `env()` has neither is dropped.
+  `padding: env(safe-area-inset-top, 20px)` was rejected as a whole
+  before, so pages written for notched phones lost that padding, and
+  `CSS.supports('padding-top', 'env(safe-area-inset-top)')` was false.
 * Security: the WebGL getters accept only the parameter names WebGL
   defines. `getTexParameter`, `getBufferParameter`,
   `getRenderbufferParameter`, `getFramebufferAttachmentParameter`,

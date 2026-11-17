@@ -16585,6 +16585,67 @@ substitute_var_fallbacks(const char *vtext, int depth)
     return g_string_free(out, FALSE);
 }
 
+static gboolean
+css_env_name_is_zero_inset(const char *name)
+{
+    static const char *const sides[] = { "top", "right", "bottom", "left" };
+    static const char *const prefixes[] = { "safe-area-inset-",
+                                            "safe-area-max-inset-" };
+    for (gsize i = 0; i < G_N_ELEMENTS(prefixes); i++) {
+        if (!g_str_has_prefix(name, prefixes[i])) continue;
+        const char *side = name + strlen(prefixes[i]);
+        for (gsize j = 0; j < G_N_ELEMENTS(sides); j++)
+            if (strcmp(side, sides[j]) == 0) return TRUE;
+    }
+    return FALSE;
+}
+
+static char *
+substitute_env_functions(const char *vtext, int depth)
+{
+    if (!vtext || depth > 16) return NULL;
+    GString *out = g_string_new(NULL);
+    const char *p = vtext;
+    const char *end = vtext + strlen(vtext);
+    while (p < end) {
+        const char *fn = css_find_function(p, end, "env");
+        if (!fn) {
+            g_string_append_len(out, p, (gssize)(end - p));
+            break;
+        }
+        g_string_append_len(out, p, (gssize)(fn - p));
+        const char *args_start = fn + 4;
+        char term = 0;
+        const char *args_end = css_scan_until(args_start, end, ")", &term);
+        if (term != ')') {
+            g_string_free(out, TRUE);
+            return NULL;
+        }
+        char comma_term = 0;
+        const char *comma = css_scan_until(args_start, args_end, ",",
+                                           &comma_term);
+        const char *name_end = comma_term == ',' ? comma : args_end;
+        char *name = css_trim_dup_range(args_start, name_end);
+        char *sub = NULL;
+        if (css_env_name_is_zero_inset(name)) {
+            sub = g_strdup("0px");
+        } else if (comma_term == ',') {
+            char *fallback = css_trim_dup_range(comma + 1, args_end);
+            sub = substitute_env_functions(fallback, depth + 1);
+            g_free(fallback);
+        }
+        g_free(name);
+        if (!sub) {
+            g_string_free(out, TRUE);
+            return NULL;
+        }
+        g_string_append(out, sub);
+        g_free(sub);
+        p = args_end + 1;
+    }
+    return g_string_free(out, FALSE);
+}
+
 static void pending_decl_clear(gpointer data);
 
 typedef enum ns_custom_prop_wide {
@@ -19190,6 +19251,18 @@ parse_declaration_block(const char **pp, const char *end,
             g_free(pname);
             if (p < end && *p == ';') p++;
             continue;
+        }
+
+        if (css_find_function(raw_vtext, raw_vtext + strlen(raw_vtext), "env")) {
+            char *without_env = substitute_env_functions(raw_vtext, 0);
+            if (!without_env) {
+                g_free(raw_vtext);
+                g_free(pname);
+                if (p < end && *p == ';') p++;
+                continue;
+            }
+            g_free(raw_vtext);
+            raw_vtext = without_env;
         }
 
         if (capture && pname[0] == '-' && pname[1] == '-' && pname[2]) {
