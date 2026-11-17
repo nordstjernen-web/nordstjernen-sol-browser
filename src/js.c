@@ -19585,6 +19585,31 @@ ns_computed_keyword_shorthand(JSContext *ctx, const ns_node *n, const char *name
     return out;
 }
 
+static gboolean g_computed_inline_side_mirrored;
+
+static char *
+ns_computed_rtl_inline_side(JSContext *ctx, const ns_node *n, const char *name)
+{
+    if (g_computed_inline_side_mirrored) return NULL;
+    const char *side = strstr(name, "-inline-start");
+    const char *other = "-inline-end";
+    if (!side) {
+        side = strstr(name, "-inline-end");
+        other = "-inline-start";
+    }
+    if (!side) return NULL;
+    g_computed_inline_side_mirrored = TRUE;
+    char *direction = ns_computed_lookup(ctx, n, "direction");
+    g_computed_inline_side_mirrored = FALSE;
+    gboolean rtl = direction && strcmp(direction, "rtl") == 0;
+    g_free(direction);
+    if (!rtl) return NULL;
+    gsize side_len = other[8] == 'e' ? strlen("-inline-start")
+                                     : strlen("-inline-end");
+    return g_strdup_printf("%.*s%s%s", (int)(side - name), name, other,
+                           side + side_len);
+}
+
 static char *
 ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
 {
@@ -19594,6 +19619,14 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (keyword_matched) return keyword_shorthand;
     if (strcmp(name, "css-float") == 0 || strcmp(name, "cssFloat") == 0)
         name = "float";
+    char *mirrored_name = ns_computed_rtl_inline_side(ctx, n, name);
+    if (mirrored_name) {
+        g_computed_inline_side_mirrored = TRUE;
+        char *mirrored = ns_computed_lookup(ctx, n, mirrored_name);
+        g_computed_inline_side_mirrored = FALSE;
+        g_free(mirrored_name);
+        return mirrored;
+    }
 
     if (strcmp(name, "font") == 0) {
         char *fstyle = ns_computed_lookup(ctx, n, "font-style");

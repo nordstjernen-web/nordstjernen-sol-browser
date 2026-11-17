@@ -3,6 +3,17 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Flow-relative properties follow `direction`. `margin-inline-start`,
+  `padding-inline-end`, `inset-inline-start`, `border-inline-start`, the
+  `margin-inline` / `padding-inline` / `inset-inline` / `border-inline`
+  shorthands, `scroll-margin-inline-*`, `scroll-padding-inline-*` and
+  `border-start-start-radius` and its siblings were mapped to the left or
+  right side when the stylesheet was parsed, so in a right-to-left
+  element they landed on the wrong side: a list in an Arabic or Hebrew
+  page was indented on the left. The cascade now resolves them against
+  the element's own `direction`, in cascade order with the physical
+  properties, and `getComputedStyle(el).marginInlineStart` reads the
+  matching side.
 * `env()` works wherever a value is allowed, not only inside `calc()`.
   `env(safe-area-inset-top)` and the other `safe-area-inset-*` and
   `safe-area-max-inset-*` variables are `0px`, any other name takes its

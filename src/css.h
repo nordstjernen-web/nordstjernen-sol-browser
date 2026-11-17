@@ -972,6 +972,7 @@ typedef struct ns_css_decl {
     ns_css_prop prop;
     ns_css_value *value;
     gboolean important;
+    gboolean flow_relative;
 } ns_css_decl;
 
 typedef struct ns_css_pending_decl {

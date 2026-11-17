@@ -19192,12 +19192,34 @@ webkit_prefixed_alias(const char *name)
     return FALSE;
 }
 
+static gboolean
+prop_name_is_inline_flow_relative(const char *pname)
+{
+    return strstr(pname, "-inline") != NULL ||
+           (g_str_has_prefix(pname, "border-") &&
+            g_str_has_suffix(pname, "-radius") &&
+            (strstr(pname, "-start-") || strstr(pname, "-end-")));
+}
+
+static void
+decls_mark_flow_relative(GArray *decls, guint from, gboolean flow_relative)
+{
+    if (!decls || !flow_relative) return;
+    for (guint i = from; i < decls->len; i++)
+        g_array_index(decls, ns_css_decl, i).flow_relative = TRUE;
+}
+
 static void
 parse_declaration_block(const char **pp, const char *end,
                         GArray *decls_out, ns_css_rule *capture)
 {
     const char *p = *pp;
+    guint flow_relative_from = decls_out ? decls_out->len : 0;
+    gboolean flow_relative = FALSE;
     while (p < end && *p != '}') {
+        decls_mark_flow_relative(decls_out, flow_relative_from, flow_relative);
+        flow_relative_from = decls_out ? decls_out->len : 0;
+        flow_relative = FALSE;
         p = css_skip_ws_comments(p, end);
         while (p < end && *p == ';') {
             p++;
@@ -19231,6 +19253,7 @@ parse_declaration_block(const char **pp, const char *end,
                 pname = plain;
             }
         }
+        flow_relative = prop_name_is_inline_flow_relative(pname);
         p = css_skip_ws_comments(p, end);
         if (p >= end || *p != ':') { g_free(pname);
             char term = 0;
@@ -20879,6 +20902,7 @@ parse_declaration_block(const char **pp, const char *end,
         if (p < end && *p == ';') p++;
     }
     if (p < end && *p == '}') p++;
+    decls_mark_flow_relative(decls_out, flow_relative_from, flow_relative);
     *pp = p;
 }
 
@@ -30556,6 +30580,7 @@ typedef struct match_entry {
     const ns_css_rule *rule;
     ns_css_value *value;
     ns_css_prop  prop;
+    gboolean     flow_relative;
 } match_entry;
 
 typedef struct var_match {
@@ -31224,6 +31249,7 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                     .rule = r,
                     .value = d->value,
                     .prop  = d->prop,
+                    .flow_relative = d->flow_relative,
                 };
                 g_array_append_val(dst->out, e);
             }
@@ -32558,6 +32584,7 @@ append_pending_decls(const pending_match *pm, const char *value_text,
             .rule = pm->rule,
             .value = d->value,
             .prop  = d->prop,
+            .flow_relative = d->flow_relative,
         };
         g_array_append_val(matches, me);
         if (per_element) g_ptr_array_add(owned_values, d->value);
@@ -33921,11 +33948,65 @@ document_meta_color_scheme(const ns_node *n, int depth)
     return NULL;
 }
 
+static ns_css_prop
+flow_relative_mirror(ns_css_prop prop)
+{
+    static const ns_css_prop pairs[][2] = {
+        { NS_CSS_MARGIN_LEFT, NS_CSS_MARGIN_RIGHT },
+        { NS_CSS_PADDING_LEFT, NS_CSS_PADDING_RIGHT },
+        { NS_CSS_LEFT, NS_CSS_RIGHT },
+        { NS_CSS_BORDER_LEFT_WIDTH, NS_CSS_BORDER_RIGHT_WIDTH },
+        { NS_CSS_BORDER_LEFT_STYLE, NS_CSS_BORDER_RIGHT_STYLE },
+        { NS_CSS_BORDER_LEFT_COLOR, NS_CSS_BORDER_RIGHT_COLOR },
+        { NS_CSS_SCROLL_MARGIN_LEFT, NS_CSS_SCROLL_MARGIN_RIGHT },
+        { NS_CSS_SCROLL_PADDING_LEFT, NS_CSS_SCROLL_PADDING_RIGHT },
+        { NS_CSS_BORDER_TOP_LEFT_RADIUS, NS_CSS_BORDER_TOP_RIGHT_RADIUS },
+        { NS_CSS_BORDER_BOTTOM_LEFT_RADIUS, NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(pairs); i++) {
+        if (prop == pairs[i][0]) return pairs[i][1];
+        if (prop == pairs[i][1]) return pairs[i][0];
+    }
+    return prop;
+}
+
+static gboolean
+cascaded_direction_is_rtl(const GArray *matches, const ns_style *parent_style)
+{
+    for (guint i = matches->len; i > 0; i--) {
+        const match_entry *m = &g_array_index(matches, match_entry, i - 1);
+        if (m->prop != NS_CSS_DIRECTION) continue;
+        if (ns_css_keyword_is(m->value, "rtl")) return TRUE;
+        if (ns_css_keyword_is(m->value, "ltr") || value_is_initial(m->value))
+            return FALSE;
+        if (value_is_revert(m->value) || value_is_revert_layer(m->value) ||
+            value_is_revert_rule(m->value))
+            continue;
+        break;
+    }
+    return parent_style &&
+           ns_css_keyword_is(parent_style->values[NS_CSS_DIRECTION], "rtl");
+}
+
+static void
+cascade_mirror_flow_relative(GArray *matches, const ns_style *parent_style)
+{
+    gboolean any = FALSE;
+    for (guint i = 0; i < matches->len && !any; i++)
+        any = g_array_index(matches, match_entry, i).flow_relative;
+    if (!any || !cascaded_direction_is_rtl(matches, parent_style)) return;
+    for (guint i = 0; i < matches->len; i++) {
+        match_entry *m = &g_array_index(matches, match_entry, i);
+        if (m->flow_relative) m->prop = flow_relative_mirror(m->prop);
+    }
+}
+
 static void
 cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             const ns_style *layout_parent, gboolean is_root, double root_px)
 {
     g_array_sort(matches, match_cmp);
+    cascade_mirror_flow_relative(matches, parent_style);
     for (guint i = 0; i < matches->len; i++) {
         match_entry *m = &g_array_index(matches, match_entry, i);
         if (value_is_revert(m->value) || value_is_revert_layer(m->value) ||
@@ -38496,6 +38577,7 @@ cascade_walk(ns_node *node,
                         .rule = r,
                         .value = d->value,
                         .prop  = d->prop,
+                        .flow_relative = d->flow_relative,
                     };
                     g_array_append_val(matches, e);
                 }
@@ -38559,6 +38641,7 @@ cascade_walk(ns_node *node,
                         .rule = r,
                         .value = d->value,
                         .prop  = d->prop,
+                        .flow_relative = d->flow_relative,
                     };
                     g_array_append_val(matches, e);
                 }
