@@ -75,6 +75,8 @@ jobs:
             # and break cairo's 'pixman-1 >= 0.40.0' requirement.
             export PKG_CONFIG_PATH="/usr/pkg/lib/pkgconfig:/usr/X11R7/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
             export CC="ccache cc"
+            sh scripts/ensure-rust.sh
+            export PATH="$HOME/.cargo/bin:$PATH"
             # WAMR's posix platform layer uses MAP_32BIT, which NetBSD does
             # not provide, so the WebAssembly engine is disabled here.
             meson setup builddir --buildtype=release -Db_ndebug=true \

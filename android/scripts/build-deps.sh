@@ -21,7 +21,7 @@
 #       pixman, libffi, pcre2, expat, zlib, libpng),
 #       libcurl, sqlite3, uchardet, libpsl, libwebp.
 #     All are plain C and cross-build with meson against the NDK.
-#   * rustc 1.91+ with the ABI's Android target installed
+#   * rustc 1.100+ with the ABI's Android target installed
 #     (rustup target add aarch64-linux-android x86_64-linux-android), for the
 #     in-tree HTML and URL parsers.
 #

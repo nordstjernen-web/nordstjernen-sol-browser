@@ -113,24 +113,8 @@ case "$DISTRO" in
     *) echo "unknown distro: $DISTRO" >&2; exit 2 ;;
 esac
 
-rust_new_enough() {
-    command -v rustc >/dev/null 2>&1 || return 1
-    local have
-    have=$(rustc --version | awk '{print $2}')
-    [ "$(printf '%s\n' 1.91.0 "$have" | sort -V | head -1)" = 1.91.0 ]
-}
-
-ensure_rust() {
-    rust_new_enough && return 0
-    echo "distro rustc is missing or older than 1.91; installing stable with rustup" >&2
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
-        RUSTUP_INIT_SKIP_PATH_CHECK=yes sh -s -- -y --profile minimal --default-toolchain stable
-    export PATH="$HOME/.cargo/bin:$PATH"
-    rust_new_enough
-}
-
-ensure_rust
-rustc --version
+sh "$(dirname "$0")/ensure-rust.sh"
+export PATH="$HOME/.cargo/bin:$PATH"
 
 git config --global --add safe.directory "$(pwd)" || true
 

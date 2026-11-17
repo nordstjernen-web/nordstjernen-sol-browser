@@ -250,7 +250,7 @@ Nordstjernen is an independent engine — no upstream browser code.
 
 The HTML5 parser (`src/html5_rs/`) and the WHATWG URL parser (`src/url_rs/`)
 are the project's own, in safe Rust with no crates, shared with Southstar.
-Building therefore needs `rustc` 1.91 or newer; meson compiles the crates
+Building therefore needs `rustc` 1.100 or newer; meson compiles the crates
 with plain `rustc`, no Cargo.
 
 **Vendored in-tree**, with no submodules:

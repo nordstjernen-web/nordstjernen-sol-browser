@@ -131,7 +131,7 @@ meson compile -C builddir
 QuickJS, WAMR, Wuffs, pl_mpeg, minimp3 and the web-text-lib
 text-layout fork (`src/web-text-lib/`) are vendored in-tree, so there are no
 submodules. The HTML and URL parsers (`src/html5_rs/`, `src/url_rs/`) are
-in-tree Rust, compiled by meson with plain `rustc` (1.91 or newer); no Cargo. The first `meson setup` does download one pinned subproject
+in-tree Rust, compiled by meson with plain `rustc` (1.100 or newer); no Cargo. The first `meson setup` does download one pinned subproject
 through its wrap: the wgpu-native release behind WebGPU
 (`subprojects/wgpu-native-macos-<arch>.wrap`, skipped when wgpu-native is
 found through pkg-config or `-Dwgpu_native_root`; see

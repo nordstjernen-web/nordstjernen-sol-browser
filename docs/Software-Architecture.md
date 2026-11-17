@@ -613,7 +613,7 @@ See [webgl.md](webgl.md), [webgpu.md](webgpu.md).
   automatically. The vendored QuickJS, WAMR, and web-text-lib trees are loaded
   via `subdir()` and expose declared dependencies directly, not as
   subprojects. The Rust parser crates (`src/html5_rs/`, `src/url_rs/`)
-  are compiled by meson with plain `rustc` (1.91 or newer, required);
+  are compiled by meson with plain `rustc` (1.100 or newer, required);
   no Cargo, no crates.
 - **Embedding:** the engine is exposed as a shared library
   `libnordstjernen` with a plain-C API (`src/libnordstjernen.h`,

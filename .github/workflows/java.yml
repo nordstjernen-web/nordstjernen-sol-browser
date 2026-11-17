@@ -55,6 +55,11 @@ jobs:
             libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
+      - name: Ensure the Rust toolchain meets the floor
+        run: |
+          sh scripts/ensure-rust.sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
         with:

@@ -125,7 +125,7 @@ HarfBuzz, FriBiDi and fontconfig development files.
 The in-tree engines (QuickJS, WAMR, web-text-lib) and vendored single-file
 libraries (Wuffs, pl_mpeg) build via meson `subdir()` / wraps — no `cmake`,
 no system copies. The in-tree Rust HTML and URL parsers are compiled with
-plain `rustc` (1.91 or newer) — no Cargo, no crates. `mpv` and `myspell-en_US` are `Recommends` (external
+plain `rustc` (1.100 or newer) — no Cargo, no crates. `mpv` and `myspell-en_US` are `Recommends` (external
 media playback and a spell-check dictionary).
 
 The package is tagged `License: LicenseRef-NSL-1.0 OR GPL-3.0-or-later`;
