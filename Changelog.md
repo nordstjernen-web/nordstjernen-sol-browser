@@ -12,8 +12,10 @@ Changelog:
   faster nor slower. Debian, Fedora 44, openSUSE Tumbleweed, Alpine 3.24,
   FreeBSD and NetBSD do not package Rust 1.100 yet, so
   `scripts/ensure-rust.sh` installs the stable toolchain with rustup
-  where the system `rustc` is too old; the CI workflows and the nightly
-  distribution builds call it. A package built with only the
+  where the system `rustc` is too old, or Alpine edge's `rust` package on
+  Alpine, where a browser built with rustup's musl toolchain does not
+  start its renderer; the CI workflows and the nightly distribution
+  builds call it. A package built with only the
   distribution's own compiler has to wait for 1.100 to arrive there.
 * A document whose doctype names HTML 4.01 Frameset or Transitional with
   an empty system identifier, as in `<!DOCTYPE HTML PUBLIC "-//W3C//DTD

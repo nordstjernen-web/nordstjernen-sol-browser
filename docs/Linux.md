@@ -38,7 +38,9 @@ the in-tree HTML and URL parsers (`src/html5_rs/`, `src/url_rs/`) with plain
 Debian/Ubuntu and `rust` on Fedora, openSUSE, Arch, Alpine and FreeBSD.
 Where the distribution's `rustc` is older than that, `scripts/ensure-rust.sh`
 installs the stable toolchain with rustup into `~/.cargo/bin`; put that
-directory first on `PATH` before running `meson setup`.
+directory first on `PATH` before running `meson setup`. On Alpine it
+installs the `rust` package from edge instead: rustup's musl toolchain
+builds a browser whose renderer fails at startup.
 
 On Arch Linux (packaging and the AUR: `Arch.md`):
 
