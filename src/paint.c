@@ -4305,6 +4305,17 @@ ns_paint_apply_justify(NsPangoLayout *layout, const ns_style *s, gboolean rtl)
         ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_LEFT);
 }
 
+void
+ns_paint_atomic_index_pos(NsPangoLayout *layout, int index,
+                          NsPangoRectangle *pos)
+{
+    ns_pango_layout_index_to_pos(layout, index, pos);
+    if (pos->width < 0) {
+        pos->x += pos->width;
+        pos->width = -pos->width;
+    }
+}
+
 static gboolean
 layout_is_one_last_line(NsPangoLayout *layout, const ns_style *s)
 {
@@ -6053,7 +6064,7 @@ paint_inline_atomic(cairo_t *cr, const ns_box *b, NsPangoLayout *layout,
 {
     if (!a->box) return;
     NsPangoRectangle pos;
-    ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+    ns_paint_atomic_index_pos(layout, (int)a->byte_off, &pos);
     double sx = text_x + (double)pos.x / NS_PANGO_SCALE;
     double sy = b->atomic_line_heights
         ? a->box->y - a->box->rel_dy
@@ -6745,7 +6756,7 @@ ns_paint_sync_inline_atomic_offsets(ns_box *root)
             ns_inline_atomic *atomic =
                 &g_array_index(root->inline_atomics, ns_inline_atomic, i);
             NsPangoRectangle pos;
-            ns_pango_layout_index_to_pos(layout, (int)atomic->byte_off, &pos);
+            ns_paint_atomic_index_pos(layout, (int)atomic->byte_off, &pos);
             atomic->owner_offset_x = text_x + (double)pos.x / NS_PANGO_SCALE;
             atomic->owner_offset_y = root->atomic_line_heights && atomic->box
                 ? atomic->box->y - atomic->box->rel_dy - root->y

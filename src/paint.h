@@ -123,6 +123,8 @@ void ns_paint_sync_inline_atomic_offsets(ns_box *root);
 void ns_paint_register_font_oracle(void);
 
 void ns_paint_apply_inline_font(NsPangoLayout *layout, const ns_style *style);
+void ns_paint_atomic_index_pos(NsPangoLayout *layout, int index,
+                               NsPangoRectangle *pos);
 void ns_paint_apply_text_align(NsPangoLayout *layout, const ns_style *s);
 NsPangoAttribute *ns_paint_inline_font_attr(const ns_inline_attr *r);
 gboolean ns_paint_inline_attr_nowrap(const ns_inline_attr *r);

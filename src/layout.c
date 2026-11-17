@@ -8542,8 +8542,6 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     else
         ns_pango_layout_set_width(layout, (int)(content_width * NS_PANGO_SCALE));
     ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for_box(box, parent_style));
-    if (box->inline_atomics && box->inline_atomics->len > 0)
-        ns_paint_apply_text_align(layout, parent_style);
     if (!(box->inline_atomics && box->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, parent_style);
     {
@@ -8570,6 +8568,8 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     ns_pango_attr_list_unref(i18n);
 
     ns_paint_layout_set_inline_text(layout, box->text);
+    if (box->inline_atomics && box->inline_atomics->len > 0)
+        ns_paint_apply_text_align(layout, parent_style);
     ns_paint_start_align_overflow(layout);
     gboolean want_line_heights =
         g_object_get_data(G_OBJECT(layout), NS_CSS_LINE_HEIGHT_KEY) != NULL;
@@ -8621,7 +8621,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             gconstpointer key = g_hash_table_lookup(g_abs_ph_set, a->box);
             if (!key) continue;
             NsPangoRectangle pos;
-            ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+            ns_paint_atomic_index_pos(layout, (int)a->byte_off, &pos);
             int line_index = 0;
             ns_pango_layout_index_to_line_x(layout, (int)a->byte_off, FALSE,
                                             &line_index, NULL);
@@ -8707,7 +8707,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
                 &g_array_index(box->inline_atomics, ns_inline_atomic, i);
             if (!a->box) continue;
             NsPangoRectangle pos;
-            ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+            ns_paint_atomic_index_pos(layout, (int)a->byte_off, &pos);
             int line = 0;
             ns_pango_layout_index_to_line_x(layout, (int)a->byte_off,
                                          FALSE, &line, NULL);
@@ -11308,7 +11308,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
                     box->inline_atomics, ns_inline_atomic, ai);
                 if (!a->box) continue;
                 NsPangoRectangle pos;
-                ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+                ns_paint_atomic_index_pos(layout, (int)a->byte_off, &pos);
                 double end = (double)(pos.x + pos.width) / NS_PANGO_SCALE;
                 if (pw < end) pw = ceil(end);
             }

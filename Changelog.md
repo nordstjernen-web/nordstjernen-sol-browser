@@ -3,6 +3,14 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Inline-blocks, images and other atomic inlines sit where the text
+  layout puts them in a right-to-left line. They were drawn one box
+  width too far to the start side, so an icon in an Arabic or Hebrew
+  line overlapped its neighbour or stuck out of its container, and a
+  line holding only such boxes took its alignment from whichever
+  paragraph was laid out before it: the first one on a `dir=rtl` page
+  was left-aligned, and a left-to-right one after it could be
+  right-aligned.
 * `@counter-style` rules are implemented. A list or a `counter()` /
   `counters()` function that names a custom counter style uses it: the
   `cyclic`, `fixed`, `symbolic`, `alphabetic`, `numeric`, `additive` and
