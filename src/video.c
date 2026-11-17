@@ -2093,7 +2093,7 @@ ns_video_pick_track(const ns_node *dom)
 {
     for (const ns_node *c = dom->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "track") != 0) continue;
+        if (!ns_node_is_tag(c, NS_TAG_TRACK)) continue;
         if (!ns_element_get_attr(c, "default")) continue;
         const char *kind = ns_element_get_attr(c, "kind");
         if (kind && *kind &&
@@ -2245,8 +2245,7 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
 static void
 ns_video_discover_element(ns_video_cache *cache, const ns_node *node)
 {
-    if (node->kind == NS_NODE_ELEMENT && node->name &&
-        strcmp(node->name, "video") == 0) {
+    if (node->kind == NS_NODE_ELEMENT && ns_node_is_tag(node, NS_TAG_VIDEO)) {
         const char *src = ns_element_get_attr(node, NS_MEDIA_SRC_ATTR);
         if (!src || !*src) src = ns_media_select_source(node);
         if (src && *src) {

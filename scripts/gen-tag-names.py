@@ -18,11 +18,11 @@ out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(root, "src/tag_names.h"
 text = open(src, encoding="utf-8").read()
 body = text[text.index("tags! {") + len("tags! {"):]
 body = body[:body.index("\n}")]
-names = re.findall(r'^\s*[A-Za-z0-9]+ = b"([a-z0-9-]+)" c"\1",$', body, re.M)
+names = re.findall(r'^\s*[A-Za-z0-9]+ = b"([A-Za-z0-9-]+)" c"\1",$', body, re.M)
 if len(names) != body.count(" = b\""):
     sys.exit("gen-tag-names: unexpected line in the tags! table")
 
-ident = lambda n: "NS_TAG_" + n.upper().replace("-", "_")
+ident = lambda n: "NS_TAG_" + re.sub(r"(?<=[a-z])(?=[A-Z])", "_", n).upper().replace("-", "_")
 order = sorted(range(len(names)), key=lambda i: names[i])
 
 lines = [

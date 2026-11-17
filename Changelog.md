@@ -3,6 +3,15 @@ Changelog:
 
 1.0.50-dev:
 ======
+* The remaining `strcmp(node->name, "...")` tests against a tag name, 331
+  of them, compare the tag id, and the tag id is now kept only on
+  elements, so a doctype or processing instruction never matches one.
+  The tag table gains the SVG element names the engine checks for and
+  the parser did not list: `clipPath`, `feBlend`, `feFlood`,
+  `feGaussianBlur`, `filter`, `foreignObject` (as SVG spells it; the
+  parser's lowercase entry stays), `linearGradient`, `marker`, `mask`,
+  `pattern`, `radialGradient` and `switch`. The same names are in
+  Southstar and Northstar.
 * A text node keeps the hash of its text, which the stylesheet cache uses
   to recognize a `<style>` element it has seen, in the eight bytes an
   element uses for its attribute filter, instead of in a hash table shared

@@ -849,8 +849,7 @@ xml_normalize_newlines(const char *input, gsize n)
 static gboolean
 xml_is_xhtml_template(const ns_node *n)
 {
-    return n->kind == NS_NODE_ELEMENT && n->name &&
-           strcmp(n->name, "template") == 0 &&
+    return n->kind == NS_NODE_ELEMENT && ns_node_is_tag(n, NS_TAG_TEMPLATE) &&
            !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS));
 }
 

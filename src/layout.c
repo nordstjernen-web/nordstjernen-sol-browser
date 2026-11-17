@@ -143,8 +143,8 @@ static gboolean
 box_is_doc_root(const ns_box *b)
 {
     return b && b->dom && b->dom->name &&
-           (strcmp(b->dom->name, "html") == 0 ||
-            strcmp(b->dom->name, "body") == 0);
+           (ns_node_is_tag(b->dom, NS_TAG_HTML) ||
+            ns_node_is_tag(b->dom, NS_TAG_BODY));
 }
 
 static double containing_block_definite_height(const ns_box *box);
@@ -161,8 +161,8 @@ box_viewport_height(const ns_box *box)
     for (const ns_box *p = box ? box->parent : NULL; p;
          inside = p, p = p->parent) {
         if (!p->dom || p->dom->kind != NS_NODE_ELEMENT || !p->dom->name ||
-            (strcmp(p->dom->name, "iframe") != 0 &&
-             strcmp(p->dom->name, "frame") != 0))
+            (!ns_node_is_tag(p->dom, NS_TAG_IFRAME) &&
+             !ns_node_is_tag(p->dom, NS_TAG_FRAME)))
             continue;
         double h = containing_block_definite_height(inside);
         if (h > 0) return h;
@@ -438,9 +438,9 @@ box_is_form_widget(const ns_box *box)
     if (!box || box->kind != NS_BOX_BLOCK || !box->dom ||
         box->dom->kind != NS_NODE_ELEMENT || !box->dom->name)
         return FALSE;
-    return strcmp(box->dom->name, "input") == 0 ||
-           strcmp(box->dom->name, "textarea") == 0 ||
-           strcmp(box->dom->name, "select") == 0;
+    return ns_node_is_tag(box->dom, NS_TAG_INPUT) ||
+           ns_node_is_tag(box->dom, NS_TAG_TEXTAREA) ||
+           ns_node_is_tag(box->dom, NS_TAG_SELECT);
 }
 
 static gboolean
@@ -1031,8 +1031,8 @@ box_clips_for_page_height(const ns_box *b)
 {
     if (!b->parent) return FALSE;
     if (b->dom && b->dom->name &&
-        (strcmp(b->dom->name, "html") == 0 ||
-         strcmp(b->dom->name, "body") == 0))
+        (ns_node_is_tag(b->dom, NS_TAG_HTML) ||
+         ns_node_is_tag(b->dom, NS_TAG_BODY)))
         return FALSE;
     return box_clips_children(b);
 }
@@ -1076,10 +1076,10 @@ static gboolean
 is_inline_level_replaced(const ns_node *n, GHashTable *styles)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
-    if (!(strcmp(n->name, "img") == 0 || strcmp(n->name, "svg") == 0 ||
-          strcmp(n->name, "audio") == 0 ||
-          strcmp(n->name, "video") == 0 || strcmp(n->name, "math") == 0 ||
-          strcmp(n->name, "canvas") == 0))
+    if (!(ns_node_is_tag(n, NS_TAG_IMG) || ns_node_is_tag(n, NS_TAG_SVG) ||
+          ns_node_is_tag(n, NS_TAG_AUDIO) ||
+          ns_node_is_tag(n, NS_TAG_VIDEO) || ns_node_is_tag(n, NS_TAG_MATH) ||
+          ns_node_is_tag(n, NS_TAG_CANVAS)))
         return FALSE;
     const ns_style *s = styles ? g_hash_table_lookup(styles, n) : NULL;
     return !ns_display_is_block_level(ns_css_display_of(s));
@@ -1119,15 +1119,15 @@ node_is_frame_fallback(const ns_node *n)
     if (!n || n->kind == NS_NODE_DOCUMENT) return FALSE;
     const ns_node *p = n->parent;
     return p && p->kind == NS_NODE_ELEMENT && p->name &&
-           (strcmp(p->name, "iframe") == 0 || strcmp(p->name, "frame") == 0);
+           (ns_node_is_tag(p, NS_TAG_IFRAME) || ns_node_is_tag(p, NS_TAG_FRAME));
 }
 
 static gboolean
 node_is_frame_element(const ns_node *n)
 {
     return n && n->kind == NS_NODE_ELEMENT && n->name &&
-           (strcmp(n->name, "iframe") == 0 || strcmp(n->name, "frame") == 0 ||
-            strcmp(n->name, "object") == 0 || ns_node_is_pdf_embed(n));
+           (ns_node_is_tag(n, NS_TAG_IFRAME) || ns_node_is_tag(n, NS_TAG_FRAME) ||
+            ns_node_is_tag(n, NS_TAG_OBJECT) || ns_node_is_pdf_embed(n));
 }
 
 static const ns_node *
@@ -1156,7 +1156,7 @@ child_makes_block_media(const ns_node *c, GHashTable *styles, int depth)
     if (node_has_media_metadata(c) ||
         (is_replaced_block_tag(c->name) &&
          !is_inline_level_replaced(c, styles)) ||
-        strcmp(c->name, "iframe") == 0)
+        ns_node_is_tag(c, NS_TAG_IFRAME))
         return TRUE;
     if (cs) {
         if (style_is_block_level(cs)) return TRUE;
@@ -1191,8 +1191,7 @@ contains_block_media_depth(const ns_node *n, GHashTable *styles, int depth)
     const ns_node *shadow_root = layout_shadow_root(n);
     const ns_node *first = shadow_root ? shadow_root->first_child : n->first_child;
     for (const ns_node *c = first; c; c = c->next_sibling) {
-        if (c->kind == NS_NODE_ELEMENT && c->name &&
-            strcmp(c->name, "slot") == 0) {
+        if (c->kind == NS_NODE_ELEMENT && ns_node_is_tag(c, NS_TAG_SLOT)) {
             if (slot_assigns_block_media(c, styles, depth + 1)) return TRUE;
             continue;
         }
@@ -1253,7 +1252,7 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     if (!n) return FALSE;
     if (n->kind == NS_NODE_TEXT) return TRUE;
     if (n->kind != NS_NODE_ELEMENT) return FALSE;
-    if (n->name && strcmp(n->name, "slot") == 0) return FALSE;
+    if (ns_node_is_tag(n, NS_TAG_SLOT)) return FALSE;
     if (node_has_media_metadata(n)) return FALSE;
     if (layout_shadow_root(n)) {
         const ns_style *hs = g_hash_table_lookup(styles, n);
@@ -1265,7 +1264,7 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
             return FALSE;
     }
     if (is_replaced_block_tag(n->name)) {
-        if (strcmp(n->name, "table") == 0) return FALSE;
+        if (ns_node_is_tag(n, NS_TAG_TABLE)) return FALSE;
         const ns_style *rs = g_hash_table_lookup(styles, n);
         if (rs && style_is_none(rs)) return FALSE;
         if (rs && style_is_absolute_or_fixed(rs))
@@ -1281,7 +1280,7 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     if (ns_display_is_flex_container(d) || ns_display_is_grid_container(d)) {
         if (d.outer == NS_DISPLAY_OUTER_INLINE) return TRUE;
     }
-    if (n->name && strcmp(n->name, "br") == 0)
+    if (ns_node_is_tag(n, NS_TAG_BR))
         return !clear_kind_of(s);
     if (!style_is_block(s) && contains_block_media(n, styles)) return FALSE;
     if (display_is_atomic_inline_container(d)) return TRUE;
@@ -1368,7 +1367,7 @@ is_table_row(const ns_node *n, GHashTable *styles)
     if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
     const ns_style *s = styles ? g_hash_table_lookup(styles, n) : NULL;
     if (s) return style_display_is_table_row(s);
-    return n->name && strcmp(n->name, "tr") == 0;
+    return ns_node_is_tag(n, NS_TAG_TR);
 }
 
 static gboolean
@@ -1377,7 +1376,7 @@ is_table_box(const ns_node *n, GHashTable *styles)
     if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
     const ns_style *s = styles ? g_hash_table_lookup(styles, n) : NULL;
     if (s) return style_display_is_table(s);
-    return n->name && strcmp(n->name, "table") == 0;
+    return ns_node_is_tag(n, NS_TAG_TABLE);
 }
 
 static gboolean
@@ -1455,7 +1454,7 @@ collect_rows_recurse(const ns_node *n, GHashTable *styles, GPtrArray *out, int d
             g_ptr_array_add(out, (gpointer)n);
             return;
         }
-        if (n != NULL && (strcmp(n->name, "table") == 0 ||
+        if (n != NULL && (ns_node_is_tag(n, NS_TAG_TABLE) ||
                           style_display_is_table_caption(g_hash_table_lookup(styles, n)) ||
                           style_display_is_table(g_hash_table_lookup(styles, n))))
             return;
@@ -1543,9 +1542,9 @@ button_has_replaced_child_depth(const ns_node *n, int depth)
     if (depth >= NS_LAYOUT_MAX_DEPTH) return FALSE;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind == NS_NODE_ELEMENT && c->name &&
-            (strcmp(c->name, "svg") == 0 || strcmp(c->name, "img") == 0 ||
-             strcmp(c->name, "audio") == 0 ||
-             strcmp(c->name, "video") == 0))
+            (ns_node_is_tag(c, NS_TAG_SVG) || ns_node_is_tag(c, NS_TAG_IMG) ||
+             ns_node_is_tag(c, NS_TAG_AUDIO) ||
+             ns_node_is_tag(c, NS_TAG_VIDEO)))
             return TRUE;
         if (c->kind == NS_NODE_ELEMENT &&
             button_has_replaced_child_depth(c, depth + 1))
@@ -2024,12 +2023,12 @@ collect_table_col_hints(ns_box *table, const ns_node *n, GHashTable *styles)
     if (!table || !n) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "col") == 0) {
+        if (ns_node_is_tag(c, NS_TAG_COL)) {
             int span = ns_parse_int(ns_element_get_attr(c, "span"), 1, 1, 1000);
             append_table_col_hint(table, c, styles, span, NULL);
             continue;
         }
-        if (strcmp(c->name, "colgroup") != 0) continue;
+        if (!ns_node_is_tag(c, NS_TAG_COLGROUP)) continue;
         const ns_style *group_style = styles ? g_hash_table_lookup(styles, c) : NULL;
         gboolean saw_col = FALSE;
         for (const ns_node *col = c->first_child; col; col = col->next_sibling) {
@@ -2766,9 +2765,9 @@ control_is_border_box(const ns_node *dom, const ns_style *s)
     if (s && keyword_is(s->values[NS_CSS_BOX_SIZING], "content-box"))
         return FALSE;
     if (!dom || !dom->name) return FALSE;
-    if (strcmp(dom->name, "button") == 0 || strcmp(dom->name, "select") == 0)
+    if (ns_node_is_tag(dom, NS_TAG_BUTTON) || ns_node_is_tag(dom, NS_TAG_SELECT))
         return TRUE;
-    if (strcmp(dom->name, "input") != 0) return FALSE;
+    if (!ns_node_is_tag(dom, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(dom, "type");
     if (!type || !*type) return FALSE;
     return g_ascii_strcasecmp(type, "submit") == 0 ||
@@ -2953,7 +2952,7 @@ emit_form_attr_sized(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize en
             bg_image_src = style_first_bg_url(s);
         }
     }
-    if (dom && dom->name && strcmp(dom->name, "textarea") == 0) {
+    if (dom && ns_node_is_tag(dom, NS_TAG_TEXTAREA)) {
         gboolean fit = style_field_sizing_content(s);
         if (bw <= 0) {
             const char *cols = ns_element_get_attr(dom, "cols");
@@ -3790,8 +3789,7 @@ static const ns_node *
 find_datalist_by_id(const ns_node *node, const char *id, int depth)
 {
     if (!node || !id || depth >= NS_LAYOUT_MAX_DEPTH) return NULL;
-    if (node->kind == NS_NODE_ELEMENT && node->name &&
-        strcmp(node->name, "datalist") == 0) {
+    if (node->kind == NS_NODE_ELEMENT && ns_node_is_tag(node, NS_TAG_DATALIST)) {
         const char *did = ns_element_id_attr(node);
         if (did && strcmp(did, id) == 0) return node;
     }
@@ -3854,7 +3852,7 @@ static void collect_walk(const ns_node *n, collector_ctx *ctx, int depth);
 static gboolean
 collect_walk_assigned(const ns_node *slot, collector_ctx *ctx, int depth)
 {
-    if (!slot || !slot->name || strcmp(slot->name, "slot") != 0) return FALSE;
+    if (!slot || !slot->name || !ns_node_is_tag(slot, NS_TAG_SLOT)) return FALSE;
     const ns_node *host = layout_slot_host(slot);
     const ns_node *sr = host ? layout_shadow_root(host) : NULL;
     if (!sr) return FALSE;
@@ -4028,16 +4026,16 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             collect_walk(c, ctx, depth + 1);
         return;
     }
-    if (strcmp(n->name, "br") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_BR)) {
         g_string_append(ctx->out, "\xe2\x80\xa8");
         return;
     }
-    if (strcmp(n->name, "wbr") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_WBR)) {
         g_string_append(ctx->out, "\xe2\x80\x8b");
         return;
     }
-    if (strcmp(n->name, "progress") == 0 || strcmp(n->name, "meter") == 0) {
-        gboolean is_meter = strcmp(n->name, "meter") == 0;
+    if (ns_node_is_tag(n, NS_TAG_PROGRESS) || ns_node_is_tag(n, NS_TAG_METER)) {
+        gboolean is_meter = ns_node_is_tag(n, NS_TAG_METER);
         gsize start = ctx->out->len;
         for (int i = 0; i < 12; i++) g_string_append(ctx->out, "\xc2\xa0");
         double frac = 0;
@@ -4063,7 +4061,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         g_array_append_val(ctx->attrs, attr);
         return;
     }
-    if (strcmp(n->name, "input") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_INPUT)) {
         const char *type = ns_element_get_attr(n, "type");
         gboolean is_password = type && g_ascii_strcasecmp(type, "password") == 0;
         gboolean is_text = !type || !*type ||
@@ -4313,7 +4311,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         }
         return;
     }
-    if (strcmp(n->name, "button") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_BUTTON)) {
         char *label = ns_node_collect_text(n);
         if (!label || !*label) {
             g_free(label);
@@ -4351,7 +4349,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         g_free(label);
         return;
     }
-    if (strcmp(n->name, "select") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_SELECT)) {
         gboolean multi = ns_element_get_attr(n, "multiple") != NULL;
         const char *size_attr = ns_element_get_attr(n, "size");
         int size_n = size_attr ? ns_parse_int(size_attr, 0, 0, 1000) : 0;
@@ -4362,7 +4360,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             gboolean first = TRUE;
             for (const ns_node *c = n->first_child; c && shown < cap; c = c->next_sibling) {
                 if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-                if (strcmp(c->name, "optgroup") == 0) {
+                if (ns_node_is_tag(c, NS_TAG_OPTGROUP)) {
                     const char *gl = ns_element_get_attr(c, "label");
                     if (gl && *gl) {
                         if (!first) g_string_append(ctx->out, "\xe2\x80\xa8");
@@ -4377,7 +4375,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                         first = FALSE;
                         shown++;
                     }
-                } else if (strcmp(c->name, "option") == 0) {
+                } else if (ns_node_is_tag(c, NS_TAG_OPTION)) {
                     emit_listbox_option(ctx, c, first);
                     first = FALSE;
                     shown++;
@@ -4413,9 +4411,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                 if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
                 const ns_node *opts[2] = { NULL, NULL };
                 const ns_node *grp = NULL;
-                if (strcmp(c->name, "option") == 0) {
+                if (ns_node_is_tag(c, NS_TAG_OPTION)) {
                     opts[0] = c;
-                } else if (strcmp(c->name, "optgroup") == 0) {
+                } else if (ns_node_is_tag(c, NS_TAG_OPTGROUP)) {
                     grp = c;
                 } else {
                     continue;
@@ -4437,9 +4435,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         }
         return;
     }
-    if (strcmp(n->name, "option") == 0 || strcmp(n->name, "optgroup") == 0)
+    if (ns_node_is_tag(n, NS_TAG_OPTION) || ns_node_is_tag(n, NS_TAG_OPTGROUP))
         return;
-    if (strcmp(n->name, "textarea") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_TEXTAREA)) {
         gsize start = ctx->out->len;
         gboolean focused = (n == g_focused_input_for_layout);
         if (n != g_form_control_inline)
@@ -4530,7 +4528,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     const char *prev_href   = ctx->active_href;
     const char *prev_target = ctx->active_target;
     const ns_node *prev_link_node = ctx->active_link_node;
-    if (strcmp(n->name, "a") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_A)) {
         const char *h = ns_element_get_attr(n, "href");
         if (h && *h) {
             ctx->active_href   = h;
@@ -4567,7 +4565,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         if (!bd_dir || !*bd_dir) bd_dir = ns_style_keyword(s, NS_CSS_DIRECTION);
         gboolean rtl = bd_dir && g_ascii_strcasecmp(bd_dir, "rtl") == 0;
         gboolean dir_auto = (bd_dir && g_ascii_strcasecmp(bd_dir, "auto") == 0) ||
-                            (strcmp(n->name, "bdi") == 0 &&
+                            (ns_node_is_tag(n, NS_TAG_BDI) &&
                              !ns_element_get_attr(n, "dir"));
         if (bidi_isolate || bidi_plaintext)
             g_string_append(ctx->out,
@@ -4635,7 +4633,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     const char *font_variations_self = font_variation_settings_from_style(s);
     gsize variations_start = ctx->out->len;
 
-    gboolean is_q = strcmp(n->name, "q") == 0;
+    gboolean is_q = ns_node_is_tag(n, NS_TAG_Q);
     if (is_q) {
         char *open_q = quotes_string_for(s, ctx->q_depth, FALSE);
         g_string_append(ctx->out, open_q);
@@ -4821,8 +4819,8 @@ white_space_mode(const ns_node *node, GHashTable *styles)
                     return NS_WS_COLLAPSE;
             }
         }
-        if (p->name && (strcmp(p->name, "pre") == 0 ||
-                        strcmp(p->name, "textarea") == 0))
+        if (p->name && (ns_node_is_tag(p, NS_TAG_PRE) ||
+                        ns_node_is_tag(p, NS_TAG_TEXTAREA)))
             return NS_WS_PRESERVE;
     }
     return NS_WS_COLLAPSE;
@@ -5479,7 +5477,7 @@ pick_picture_source_url(const ns_node *picture, const ns_node *img,
     for (const ns_node *c = picture->first_child; c && c != img;
          c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "source") != 0) continue;
+        if (!ns_node_is_tag(c, NS_TAG_SOURCE)) continue;
         const char *type = ns_element_get_attr(c, "type");
         if (type && !ns_pixbuf_likely_supports(type)) continue;
         const char *media = ns_element_get_attr(c, "media");
@@ -5976,7 +5974,7 @@ layout_find_slot(const ns_node *scope, const char *name, int depth)
          c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || ns_element_has_shadow_marker(c))
             continue;
-        if (c->name && strcmp(c->name, "slot") == 0) {
+        if (ns_node_is_tag(c, NS_TAG_SLOT)) {
             const char *slot_name = ns_element_get_attr(c, "name");
             if (g_strcmp0(slot_name ? slot_name : "", name) == 0) return c;
         }
@@ -6077,7 +6075,7 @@ collect_svg_foreign_objects(ns_box *svg_box, const ns_node *n,
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
         const ns_style *cs = g_hash_table_lookup(styles, c);
         if (cs && style_is_none(cs)) continue;
-        if (strcmp(c->name, "foreignObject") == 0) {
+        if (ns_node_is_tag(c, NS_TAG_FOREIGN_OBJECT)) {
             if (!g_abs_pending) continue;
             ns_box_media *m = ns_box_media_ensure(svg_box);
             if (!m->svg_foreign) m->svg_foreign = g_ptr_array_new();
@@ -6122,8 +6120,8 @@ collect_svg_images(ns_box *svg_box, const ns_node *n, GHashTable *styles,
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
         const ns_style *cs = styles ? g_hash_table_lookup(styles, c) : NULL;
         if (cs && style_is_none(cs)) continue;
-        if (strcmp(c->name, "foreignObject") == 0) continue;
-        if (strcmp(c->name, "image") == 0) {
+        if (ns_node_is_tag(c, NS_TAG_FOREIGN_OBJECT)) continue;
+        if (ns_node_is_tag(c, NS_TAG_IMAGE)) {
             const char *href = svg_image_external_href(c);
             if (!href) continue;
             ns_box_media *m = ns_box_media_ensure(svg_box);
@@ -6283,7 +6281,7 @@ static gboolean
 append_slot_assigned(ns_box *block, const ns_node *slot, GHashTable *styles,
                      gboolean blockify_children, ns_box **pending_before)
 {
-    if (!slot || !slot->name || strcmp(slot->name, "slot") != 0) return FALSE;
+    if (!slot || !slot->name || !ns_node_is_tag(slot, NS_TAG_SLOT)) return FALSE;
     const ns_node *host = layout_slot_host(slot);
     const ns_node *sr = host ? layout_shadow_root(host) : NULL;
     if (!sr) return FALSE;
@@ -6504,9 +6502,9 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         const char *saved_base = g_base_url_for_layout;
         if (n->parent && n->parent->kind == NS_NODE_ELEMENT &&
             n->parent->name &&
-            (strcmp(n->parent->name, "iframe") == 0 ||
-             strcmp(n->parent->name, "frame") == 0 ||
-             strcmp(n->parent->name, "object") == 0 ||
+            (ns_node_is_tag(n->parent, NS_TAG_IFRAME) ||
+             ns_node_is_tag(n->parent, NS_TAG_FRAME) ||
+             ns_node_is_tag(n->parent, NS_TAG_OBJECT) ||
              ns_node_is_pdf_embed(n->parent))) {
             const char *fu = ns_element_get_attr(n->parent,
                                                  "data-nd-frame-url");
@@ -6549,7 +6547,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         g_abs_force_build = FALSE;
     }
 
-    if (n->name && strcmp(n->name, "br") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_BR)) {
         if (!clear_kind_of(s)) return NULL;
         ns_box *clearance = box_new(NS_BOX_BLOCK);
         clearance->dom = n;
@@ -6557,41 +6555,41 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         return clearance;
     }
 
-    if (n->name && strcmp(n->name, "img") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_IMG)) {
         ns_box *ib = build_image_box(n);
         if (ib) ib->style = s;
         return ib;
     }
 
-    if (n->name && strcmp(n->name, "math") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_MATH)) {
         ns_box *mb = box_new(NS_BOX_MATH);
         mb->dom = n;
         mb->style = s;
         return mb;
     }
 
-    if (n->name && strcmp(n->name, "input") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_INPUT)) {
         if (s && (style_is_absolute_or_fixed(s) || style_is_block(s)))
             return build_form_control_block(n, s, styles);
         ns_box *ir = build_inline_run(n, n->next_sibling, styles);
         if (ir) return ir;
     }
 
-    if (n->name && strcmp(n->name, "textarea") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_TEXTAREA)) {
         if (s && (style_is_absolute_or_fixed(s) || style_is_block(s)))
             return build_form_control_block(n, s, styles);
         ns_box *ir = build_inline_run(n, n->next_sibling, styles);
         if (ir) return ir;
     }
 
-    if (n->name && strcmp(n->name, "select") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_SELECT)) {
         if (s && (style_is_absolute_or_fixed(s) || style_is_block(s)))
             return build_form_control_block(n, s, styles);
         ns_box *ir = build_inline_run(n, n->next_sibling, styles);
         if (ir) return ir;
     }
 
-    if (n->name && strcmp(n->name, "svg") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_SVG)) {
         ns_box *box = box_new(NS_BOX_SVG);
         box->dom = n;
         box->style = s;
@@ -6642,7 +6640,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         return box;
     }
 
-    if (n->name && strcmp(n->name, "canvas") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_CANVAS)) {
         ns_box *cb = box_new(NS_BOX_IMAGE);
         cb->dom = n;
         cb->style = s;
@@ -6656,13 +6654,13 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         return cb;
     }
 
-    if (n->name && strcmp(n->name, "audio") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_AUDIO)) {
         ns_box *ab = build_audio_box(n);
         if (ab) ab->style = s;
         return ab;
     }
 
-    if (n->name && strcmp(n->name, "video") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_VIDEO)) {
         ns_box *vb = build_video_box(n);
         if (vb) {
             vb->style = s;
@@ -6689,7 +6687,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
     if (is_table_box(n, styles))
         return build_table(n, styles);
 
-    if (n->name && strcmp(n->name, "slot") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_SLOT)) {
         const ns_node *host = layout_slot_host(n);
         const ns_node *sr = host ? layout_shadow_root(host) : NULL;
         const char *slot_name = ns_element_get_attr(n, "name");
@@ -6732,7 +6730,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
     collect_box_bg_image(block, s);
 
     gboolean details_collapsed = FALSE;
-    if (n->name && strcmp(n->name, "details") == 0 &&
+    if (ns_node_is_tag(n, NS_TAG_DETAILS) &&
         !ns_element_get_attr(n, "open"))
         details_collapsed = TRUE;
 
@@ -6774,7 +6772,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         }
         if (details_collapsed) {
             if (c->kind != NS_NODE_ELEMENT || !c->name ||
-                strcmp(c->name, "summary") != 0) {
+                !ns_node_is_tag(c, NS_TAG_SUMMARY)) {
                 c = c->next_sibling;
                 continue;
             }
@@ -6821,11 +6819,11 @@ build_block_impl(const ns_node *n, GHashTable *styles)
             if (style_is_block(cs) ||
                 contains_block_media(c, styles) ||
                 node_has_media_metadata(c) ||
-                (c->name && (strcmp(c->name, "img") == 0 ||
-                             strcmp(c->name, "svg") == 0 ||
-                             strcmp(c->name, "audio") == 0 ||
-                             strcmp(c->name, "video") == 0 ||
-                             strcmp(c->name, "table") == 0))) {
+                (c->name && (ns_node_is_tag(c, NS_TAG_IMG) ||
+                             ns_node_is_tag(c, NS_TAG_SVG) ||
+                             ns_node_is_tag(c, NS_TAG_AUDIO) ||
+                             ns_node_is_tag(c, NS_TAG_VIDEO) ||
+                             ns_node_is_tag(c, NS_TAG_TABLE)))) {
                 ns_box *child = build_block(c, styles);
                 if (child) box_append_child(block, child);
                 c = c->next_sibling;
@@ -6872,7 +6870,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
                 }
                 if (details_collapsed &&
                     (c->kind != NS_NODE_ELEMENT || !c->name ||
-                     strcmp(c->name, "summary") != 0)) break;
+                     !ns_node_is_tag(c, NS_TAG_SUMMARY))) break;
                 if (c->kind == NS_NODE_ELEMENT) {
                     const ns_style *cs = g_hash_table_lookup(styles, c);
                     if (style_is_contents(cs)) break;
@@ -7326,8 +7324,7 @@ apply_inline_layout_attrs(NsPangoAttrList *attrs, const ns_box *box)
         if ((r->kind == NS_INLINE_INPUT_FIELD ||
              r->kind == NS_INLINE_INPUT_FIELD_FOCUSED ||
              r->kind == NS_INLINE_BUTTON) &&
-            !(r->dom && r->dom->name &&
-              strcmp(r->dom->name, "textarea") == 0))
+            !(r->dom && ns_node_is_tag(r->dom, NS_TAG_TEXTAREA)))
             layout_attr_insert_range(attrs,
                 ns_pango_attr_allow_breaks_new(FALSE), r->start, r->len);
         layout_attr_insert_range(attrs, ns_paint_inline_font_attr(r),
@@ -7342,7 +7339,7 @@ field_attr_is_text_input(const ns_inline_attr *r)
         r->kind != NS_INLINE_INPUT_FIELD_FOCUSED)
         return FALSE;
     const ns_node *n = r->dom;
-    if (!n || !n->name || strcmp(n->name, "input") != 0) return FALSE;
+    if (!n || !n->name || !ns_node_is_tag(n, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(n, "type");
     return !type || !*type ||
         g_ascii_strcasecmp(type, "text") == 0 ||
@@ -7756,7 +7753,7 @@ inline_line_height(const ns_style *parent_style)
 static double
 inline_control_is_textarea(const ns_inline_attr *r)
 {
-    return r->dom && r->dom->name && strcmp(r->dom->name, "textarea") == 0;
+    return r->dom && ns_node_is_tag(r->dom, NS_TAG_TEXTAREA);
 }
 
 static double
@@ -9166,10 +9163,10 @@ static gboolean
 node_is_form_hit_target(const ns_node *n)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
-    return strcmp(n->name, "button") == 0 ||
-           strcmp(n->name, "input") == 0 ||
-           strcmp(n->name, "select") == 0 ||
-           strcmp(n->name, "textarea") == 0;
+    return ns_node_is_tag(n, NS_TAG_BUTTON) ||
+           ns_node_is_tag(n, NS_TAG_INPUT) ||
+           ns_node_is_tag(n, NS_TAG_SELECT) ||
+           ns_node_is_tag(n, NS_TAG_TEXTAREA);
 }
 
 static gboolean
@@ -11516,8 +11513,8 @@ box_is_compressible_control(const ns_box *box)
 {
     const ns_node *n = box->dom;
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
-    return strcmp(n->name, "input") == 0 || strcmp(n->name, "textarea") == 0 ||
-           strcmp(n->name, "select") == 0;
+    return ns_node_is_tag(n, NS_TAG_INPUT) || ns_node_is_tag(n, NS_TAG_TEXTAREA) ||
+           ns_node_is_tag(n, NS_TAG_SELECT);
 }
 
 static double measure_min_width(ns_box *box, const ns_style *parent_style);
@@ -12867,14 +12864,14 @@ flex_item_is_replaced_like(const ns_box *c)
         return TRUE;
     const ns_node *n = c->dom;
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
-    if (strcmp(n->name, "input") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_INPUT)) {
         const char *type = ns_element_get_attr(n, "type");
         return !type || (g_ascii_strcasecmp(type, "button") != 0 &&
                          g_ascii_strcasecmp(type, "submit") != 0 &&
                          g_ascii_strcasecmp(type, "reset") != 0);
     }
-    return strcmp(n->name, "select") == 0 || strcmp(n->name, "textarea") == 0 ||
-           strcmp(n->name, "meter") == 0 || strcmp(n->name, "progress") == 0;
+    return ns_node_is_tag(n, NS_TAG_SELECT) || ns_node_is_tag(n, NS_TAG_TEXTAREA) ||
+           ns_node_is_tag(n, NS_TAG_METER) || ns_node_is_tag(n, NS_TAG_PROGRESS);
 }
 
 static double
@@ -18804,8 +18801,7 @@ flex_done: ;
     }
     if (align_shift == 0) center_form_control_content(box, measured);
     if (align_shift == 0 &&
-        box->dom && box->dom->kind == NS_NODE_ELEMENT && box->dom->name &&
-        strcmp(box->dom->name, "button") == 0 &&
+        box->dom && box->dom->kind == NS_NODE_ELEMENT && ns_node_is_tag(box->dom, NS_TAG_BUTTON) &&
         !keyword_is(box->style ? box->style->values[NS_CSS_APPEARANCE] : NULL,
                     "none") &&
         box->content_height > measured + 0.5) {
@@ -18881,8 +18877,8 @@ record_frame_viewports_walk(const ns_box *b)
 {
     if (!b) return;
     if (b->dom && b->dom->kind == NS_NODE_ELEMENT && b->dom->name &&
-        (strcmp(b->dom->name, "iframe") == 0 ||
-         strcmp(b->dom->name, "frame") == 0)) {
+        (ns_node_is_tag(b->dom, NS_TAG_IFRAME) ||
+         ns_node_is_tag(b->dom, NS_TAG_FRAME))) {
         ns_frame_viewport *v = g_new0(ns_frame_viewport, 1);
         v->w = b->content_width > 0 ? b->content_width : 0;
         v->h = b->content_height > 0 ? b->content_height : 0;
@@ -18939,7 +18935,7 @@ static gboolean
 node_is_windowed_text_input(const ns_node *n)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
-    if (strcmp(n->name, "input") != 0) return FALSE;
+    if (!ns_node_is_tag(n, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(n, "type");
     return !type || !*type ||
         g_ascii_strcasecmp(type, "text") == 0 ||
@@ -19013,8 +19009,8 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     g_focused_is_contenteditable_for_layout =
         focused_input && focused_input->kind == NS_NODE_ELEMENT &&
         focused_input->name &&
-        strcmp(focused_input->name, "input") != 0 &&
-        strcmp(focused_input->name, "textarea") != 0 &&
+        !ns_node_is_tag(focused_input, NS_TAG_INPUT) &&
+        !ns_node_is_tag(focused_input, NS_TAG_TEXTAREA) &&
         ns_ce_attr_enables(ns_element_get_attr(focused_input,
                                                "contenteditable"));
     g_focused_caret_byte_for_layout = focused_caret_byte;
@@ -19080,7 +19076,7 @@ relative_pct_cb_height(const ns_box *box)
     if (!h) return -1;
     if (value_is_percent(h)) {
         double base;
-        if (p->dom && p->dom->name && strcmp(p->dom->name, "html") == 0)
+        if (p->dom && ns_node_is_tag(p->dom, NS_TAG_HTML))
             base = box_viewport_height(p);
         else
             base = relative_pct_cb_height(p);
@@ -20592,7 +20588,7 @@ static gboolean
 scroll_owned_by_viewport(const ns_box *b)
 {
     if (!box_is_doc_root(b)) return FALSE;
-    if (strcmp(b->dom->name, "html") == 0) return TRUE;
+    if (ns_node_is_tag(b->dom, NS_TAG_HTML)) return TRUE;
     const ns_box *p = b->parent;
     if (!p || !p->style) return TRUE;
     return !overflow_kw_clips(overflow_axis_keyword(p->style, NS_CSS_OVERFLOW_X)) &&

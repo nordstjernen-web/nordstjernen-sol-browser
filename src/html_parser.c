@@ -763,9 +763,9 @@ media_sources_collect(const ns_node *n, ns_media_sources *out, int depth)
 {
     if (!n || depth >= 512) return;
     if (n->kind == NS_NODE_ELEMENT && n->name) {
-        if (strcmp(n->name, "meta") == 0) {
+        if (ns_node_is_tag(n, NS_TAG_META)) {
             g_ptr_array_add(out->metas, (gpointer)n);
-        } else if (strcmp(n->name, "script") == 0) {
+        } else if (ns_node_is_tag(n, NS_TAG_SCRIPT)) {
             const char *type = ns_element_get_attr(n, "type");
             if (type && g_ascii_strcasecmp(type, "application/ld+json") == 0) {
                 char *text = script_text(n);

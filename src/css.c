@@ -25320,11 +25320,11 @@ static gboolean
 ns_el_is_read_write(const ns_node *el)
 {
     if (!el->name) return FALSE;
-    if (strcmp(el->name, "input") == 0)
+    if (ns_node_is_tag(el, NS_TAG_INPUT))
         return ns_input_type_supports_readonly(ns_element_get_attr(el, "type")) &&
                !ns_element_get_attr(el, "readonly") &&
                !ns_element_effectively_disabled(el);
-    if (strcmp(el->name, "textarea") == 0)
+    if (ns_node_is_tag(el, NS_TAG_TEXTAREA))
         return !ns_element_get_attr(el, "readonly") &&
                !ns_element_effectively_disabled(el);
     const char *ce = ns_element_get_attr(el, "contenteditable");
@@ -25340,12 +25340,12 @@ ns_el_placeholder_shown(const ns_node *el)
     if (!el->name) return FALSE;
     const char *ph = ns_element_get_attr(el, "placeholder");
     if (!ph) return FALSE;
-    if (strcmp(el->name, "input") == 0) {
+    if (ns_node_is_tag(el, NS_TAG_INPUT)) {
         if (!ns_input_is_text_entry(el)) return FALSE;
         const char *v = ns_element_get_attr(el, "value");
         return !v || !*v;
     }
-    if (strcmp(el->name, "textarea") == 0) {
+    if (ns_node_is_tag(el, NS_TAG_TEXTAREA)) {
         char *txt = ns_node_collect_text(el);
         gboolean empty = TRUE;
         if (txt) {
@@ -25922,7 +25922,7 @@ css_find_slot(const ns_node *scope, const char *name, int depth)
          c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || ns_element_has_shadow_marker(c))
             continue;
-        if (c->name && strcmp(c->name, "slot") == 0) {
+        if (ns_node_is_tag(c, NS_TAG_SLOT)) {
             const char *slot_name = ns_element_get_attr(c, "name");
             if (g_strcmp0(slot_name ? slot_name : "", name) == 0) return c;
         }
@@ -26078,10 +26078,10 @@ static gboolean
 ns_css_node_will_validate(const ns_node *el)
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !el->name) return FALSE;
-    gboolean is_input = strcmp(el->name, "input") == 0;
+    gboolean is_input = ns_node_is_tag(el, NS_TAG_INPUT);
     if (!is_input &&
-        strcmp(el->name, "textarea") != 0 &&
-        strcmp(el->name, "select") != 0)
+        !ns_node_is_tag(el, NS_TAG_TEXTAREA) &&
+        !ns_node_is_tag(el, NS_TAG_SELECT))
         return FALSE;
     if (ns_element_effectively_disabled(el)) return FALSE;
     if (ns_form_control_readonly_bars_validation(el)) return FALSE;
@@ -26099,9 +26099,9 @@ static char *
 ns_css_control_value_dup(const ns_node *el)
 {
     if (!el || !el->name) return g_strdup("");
-    if (strcmp(el->name, "textarea") == 0)
+    if (ns_node_is_tag(el, NS_TAG_TEXTAREA))
         return ns_node_collect_text(el);
-    if (strcmp(el->name, "select") == 0) {
+    if (ns_node_is_tag(el, NS_TAG_SELECT)) {
         const ns_node *opt = ns_element_get_attr(el, "multiple")
             ? ns_select_first_selected_option(el)
             : ns_select_chosen_option(el);
@@ -26120,7 +26120,7 @@ ns_css_control_is_valid(const ns_node *el)
     char *owned = ns_css_control_value_dup(el);
     const char *value = owned ? owned : "";
     gboolean valid = TRUE;
-    const char *type = el->name && strcmp(el->name, "input") == 0
+    const char *type = ns_node_is_tag(el, NS_TAG_INPUT)
         ? ns_element_get_attr(el, "type") : NULL;
     if (ns_form_control_supports_required(el) &&
         ns_element_get_attr(el, "required") &&
@@ -26147,7 +26147,7 @@ ns_css_control_is_valid(const ns_node *el)
             valid = FALSE;
     }
     if (valid && *value &&
-        el->name && strcmp(el->name, "input") == 0 &&
+        ns_node_is_tag(el, NS_TAG_INPUT) &&
         ns_input_type_supports_text_constraints(type) &&
         !ns_css_value_matches_pattern(value, ns_element_get_attr(el, "pattern")))
         valid = FALSE;
@@ -34307,15 +34307,15 @@ static char *
 presentational_hints_css(const ns_node *el)
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !el->name) return NULL;
-    gboolean any = strcmp(el->name, "td") == 0 || strcmp(el->name, "th") == 0 ||
-                   strcmp(el->name, "body") == 0 ||
-                   (strcmp(el->name, "img") == 0 &&
+    gboolean any = ns_node_is_tag(el, NS_TAG_TD) || ns_node_is_tag(el, NS_TAG_TH) ||
+                   ns_node_is_tag(el, NS_TAG_BODY) ||
+                   (ns_node_is_tag(el, NS_TAG_IMG) &&
                     ns_node_is_tag(el->parent, NS_TAG_PICTURE)) ||
-                   strcmp(el->name, "tr") == 0 ||
-                   strcmp(el->name, "thead") == 0 ||
-                   strcmp(el->name, "tbody") == 0 ||
-                   strcmp(el->name, "tfoot") == 0 ||
-                   strcmp(el->name, "colgroup") == 0;
+                   ns_node_is_tag(el, NS_TAG_TR) ||
+                   ns_node_is_tag(el, NS_TAG_THEAD) ||
+                   ns_node_is_tag(el, NS_TAG_TBODY) ||
+                   ns_node_is_tag(el, NS_TAG_TFOOT) ||
+                   ns_node_is_tag(el, NS_TAG_COLGROUP);
     for (const ns_attr *a = el->attrs; !any && a; a = a->next)
         if (is_presentational_attr_name(a->name)) any = TRUE;
     if (!any) return NULL;
@@ -37809,7 +37809,7 @@ element_cannot_be_unboxed(const ns_node *el)
 {
     if (el->kind != NS_NODE_ELEMENT || !el->name) return FALSE;
     if (el->flags & NS_NODE_SVG_NS)
-        return strcmp(el->name, "svg") == 0 && el->parent &&
+        return ns_node_is_tag(el, NS_TAG_SVG) && el->parent &&
                !(el->parent->flags & NS_NODE_SVG_NS);
     if (el->flags & NS_NODE_FOREIGN_NS) return FALSE;
     static const char *const unusual[] = {

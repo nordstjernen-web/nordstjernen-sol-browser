@@ -5155,7 +5155,7 @@ browser_edit_key(ns_browser *b, ns_node *node, const char *key, int mods)
     gsize sel_hi = b->sel_anchor_byte < b->caret_byte ? b->caret_byte
                                                       : b->sel_anchor_byte;
     gboolean has_sel = sel_lo != sel_hi;
-    gboolean multiline = (node->name && strcmp(node->name, "textarea") == 0) ||
+    gboolean multiline = (ns_node_is_tag(node, NS_TAG_TEXTAREA)) ||
                          ns_node_is_contenteditable_host(node);
 
     if (ctrl) {
