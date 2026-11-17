@@ -3,7 +3,7 @@
 pkgname=nordstjernen-browser
 pkgver=1.0.36
 pkgrel=1
-pkgdesc='Small web browser written from scratch in C, with a GTK 4 interface'
+pkgdesc='Small web browser written in C, with a GTK 4 interface'
 arch=(x86_64 aarch64)
 url='https://nordstjernen.org'
 license=('GPL-3.0-or-later OR LicenseRef-NSL-1.0')

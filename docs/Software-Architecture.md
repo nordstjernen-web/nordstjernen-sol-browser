@@ -27,7 +27,7 @@ and the version from the tree).
 
 ## 1. What Nordstjernen is
 
-Nordstjernen is a web browser **written from scratch in C**, using GTK 4
+Nordstjernen is a web browser **written in C**, using GTK 4
 for its desktop shell and libcurl for networking. It is an **independent
 engine**: there is no Gecko, WebKit, or Blink lineage, no forked layout
 or CSS code, nothing imported from another browser. The JavaScript engine
@@ -698,7 +698,7 @@ codebase. The table summarises; the notes explain.
 | Dimension | Nordstjernen | Firefox (Gecko) | Chrome (Blink) | Ladybird (LibWeb) |
 |-----------|--------------|-----------------|----------------|-------------------|
 | Language | C (HTML and URL parsers in Rust) | C++ and Rust | C++ (some Rust) | C++ (moving to Swift) |
-| Engine lineage | Independent, from scratch | Independent (Gecko) | Blink, forked from WebKit ← KHTML | Independent, from scratch |
+| Engine lineage | Independent | Independent (Gecko) | Blink, forked from WebKit ← KHTML | Independent |
 | CSS engine | Own (`src/css.c`) | Stylo (Rust, from Servo) | Blink style + LayoutNG | Own (LibWeb CSS) |
 | Layout | Own (`src/layout.c`) | Reflow frame tree | LayoutNG | Own (LibWeb) |
 | JS engine | QuickJS-ng (fork) | SpiderMonkey (own) | V8 (own) | LibJS (own) |

@@ -1,7 +1,7 @@
 # Nordstjernen — Claude operating guide
 
 Nordstjernen ("Nordstjernen Web Navigator") is a web
-browser written from scratch in **C**, using **GTK 4** for the UI and
+browser written in **C**, using **GTK 4** for the UI and
 **libcurl** for networking. Targets Linux, macOS, and Windows.
 
 See `README.md` for the product vision. Nordstjernen is a fresh

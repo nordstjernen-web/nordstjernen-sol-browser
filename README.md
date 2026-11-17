@@ -7,8 +7,8 @@ Nordstjernen web browser
 [![npm package](https://img.shields.io/npm/v/nordstjernen-browser?style=flat-square&logo=npm)](https://www.npmjs.com/package/nordstjernen-browser)
 [![PyPI package](https://img.shields.io/pypi/v/nordstjernen-browser?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/nordstjernen-browser/)
 
-Nordstjernen Sol is a web browser written from scratch in C, focused on
-modern HTML, CSS and JavaScript standards.
+Nordstjernen Sol is an independent web browser in C, started in 2026 and
+focused on modern HTML, CSS and JavaScript standards.
 
 **Windows:** install Nordstjernen Web Browser from the [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl).
 

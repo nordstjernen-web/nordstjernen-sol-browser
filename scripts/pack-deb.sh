@@ -235,7 +235,7 @@ Homepage: https://nordstjernen.org
 Description: Nordstjernen Web Browser — a small, hand-written web browser
  Nordstjernen is a small, free software web browser written in C with
  GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint and
- JavaScript glue are written from scratch — no third-party browser engine
+ JavaScript glue are the project's own — no third-party browser engine
  is used. SVG images are rendered in-engine.
 EOF
 

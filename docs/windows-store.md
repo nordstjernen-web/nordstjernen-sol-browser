@@ -288,7 +288,7 @@ inside the package), and uninstall from Start removes it cleanly.
 
 **Description:**
 
-> Nordstjernen is a web browser written from scratch — its own
+> Nordstjernen is a web browser with its own
 > HTML, CSS and JavaScript engine, not another Chromium shell. The
 > result is a browser that is small, fast to start, and simple
 > enough for one person to read and audit.

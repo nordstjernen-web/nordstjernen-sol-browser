@@ -3,6 +3,11 @@ Changelog:
 
 1.0.50-dev:
 ======
+* The README introduces the browser as an independent web browser in C,
+  started in 2026, instead of as one "written from scratch". The package
+  descriptions (deb, rpm, Arch, npm, pip), the AppStream metainfo, the
+  Windows Store text and the docs drop the phrase too and say "written
+  in C".
 * Text layout no longer builds a paragraph's lines a second and third
   time when no float can touch it. Since 1.0.49 every inline run was laid
   out again to find its last line, in case a float followed it, and again

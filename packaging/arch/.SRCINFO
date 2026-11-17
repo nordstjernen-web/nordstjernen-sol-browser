@@ -1,5 +1,5 @@
 pkgbase = nordstjernen-browser
-	pkgdesc = Small web browser written from scratch in C, with a GTK 4 interface
+	pkgdesc = Small web browser written in C, with a GTK 4 interface
 	pkgver = 1.0.36
 	pkgrel = 1
 	url = https://nordstjernen.org

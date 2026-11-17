@@ -20,7 +20,7 @@ and session state are opaque, and they distrust a browser they cannot build.
 The answer to "why not one of the many generated browsers" is concrete for
 this group and must stay true:
 
-1. **A readable, single-maintainer-scale engine** written from scratch,
+1. **A readable, single-maintainer-scale engine**
    with no upstream browser engine code, that one person can build, read and
    audit (see "Minimalism" in [README.md](../README.md)).
 2. **An inspectable process boundary.** The shell and the engine talk HTTP
