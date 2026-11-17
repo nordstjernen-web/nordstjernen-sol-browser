@@ -64,6 +64,11 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.ref || '' }}
 
+      - name: Ensure the Rust toolchain meets the floor
+        run: |
+          sh scripts/ensure-rust.sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - name: Install build dependencies (Homebrew)
         run: |
           brew install meson ninja pkg-config gtk4 libepoxy curl ccache \

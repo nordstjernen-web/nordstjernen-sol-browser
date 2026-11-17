@@ -37,7 +37,7 @@ jobs:
           # than let one bad CDN node fail the build.
           attempt=0
           until apk add --no-cache \
-            build-base clang rust ccache pkgconf meson ninja git cmake \
+            build-base clang rust curl ccache pkgconf meson ninja git cmake \
             gtk4.0-dev libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev libwebp-dev libavif-dev sdl3-dev glslang-dev \
             libseccomp-dev ffmpeg-dev libjxl-dev brotli-dev \
             gstreamer-dev gst-plugins-base-dev enchant2-dev \
@@ -57,6 +57,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Ensure the Rust toolchain meets the floor
+        run: |
+          sh scripts/ensure-rust.sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Restore ccache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

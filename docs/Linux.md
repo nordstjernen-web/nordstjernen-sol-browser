@@ -32,10 +32,13 @@ GStreamer is required on Linux too (H.264/AAC, and VP9/AV1/HEVC in hardware):
 `gstreamer-plugins-bad` and the GPU's VA-API driver (`intel-media-driver` on
 Intel) for hardware decoding. Without SDL3 the build has no audio; meson warns.
 
-Rust is a required build toolchain (`rustc` 1.91 or newer): meson compiles
+Rust is a required build toolchain (`rustc` 1.100 or newer): meson compiles
 the in-tree HTML and URL parsers (`src/html5_rs/`, `src/url_rs/`) with plain
 `rustc`, with no Cargo and no crates. The package is `rustc` on
 Debian/Ubuntu and `rust` on Fedora, openSUSE, Arch, Alpine and FreeBSD.
+Where the distribution's `rustc` is older than that, `scripts/ensure-rust.sh`
+installs the stable toolchain with rustup into `~/.cargo/bin`; put that
+directory first on `PATH` before running `meson setup`.
 
 On Arch Linux (packaging and the AUR: `Arch.md`):
 

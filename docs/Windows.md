@@ -100,7 +100,7 @@ The QuickJS JS engine (forked from
 [quickjs-ng](https://github.com/quickjs-ng/quickjs)) is vendored in-tree at
 `src/quickjs/`; the HTML and WHATWG URL parsers are the project's own
 Rust crates at `src/html5_rs/` and `src/url_rs/`, compiled by meson with
-plain `rustc` (1.91 or newer, no Cargo); and Wuffs and pl_mpeg
+plain `rustc` (1.100 or newer, no Cargo); and Wuffs and pl_mpeg
 ship as single-file sources under `subprojects/`; web-text-lib (the
 text-shaping Pango fork) is vendored in-tree at `src/web-text-lib/`. The
 first `meson setup` still needs the network for one subproject: it

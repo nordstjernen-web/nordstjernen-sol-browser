@@ -83,6 +83,11 @@ jobs:
           sudo rm -rf ~/apt-archives/partial ~/apt-archives/lock
           sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
 
+      - name: Ensure the Rust toolchain meets the floor
+        run: |
+          sh scripts/ensure-rust.sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - name: Restore ccache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

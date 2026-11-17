@@ -123,7 +123,7 @@ packages, are what the in-tree web-text-lib text stack builds against.
 `libseccomp-dev` is marked `[linux-any]` in `debian/control`; all Debian
 release architectures are Linux, so it always applies. `cmake` is **not**
 a build dependency: QuickJS, WAMR, and web-text-lib build in-tree
-via meson `subdir()` and there are no CMake subprojects. `rustc` (1.91 or
+via meson `subdir()` and there are no CMake subprojects. `rustc` (1.100 or
 newer) **is** one: meson compiles the in-tree Rust HTML and URL parsers
 (`src/html5_rs/`, `src/url_rs/`) with plain `rustc`, without Cargo or any
 crates.

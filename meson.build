@@ -522,8 +522,8 @@ if media_os_backend == 'none'
   add_project_arguments('-DNS_MEDIA_OS_NONE=1', language: 'c')
 endif
 add_languages('rust', native: false)
-if meson.get_compiler('rust').version().version_compare('<1.91')
-  error('Nordstjernen needs rustc 1.91 or newer for its HTML and URL parsers (found @0@).'.format(
+if meson.get_compiler('rust').version().version_compare('<1.100')
+  error('Nordstjernen needs rustc 1.100 or newer for its HTML and URL parsers (found @0@).'.format(
         meson.get_compiler('rust').version()))
 endif
 ns_ipc_rust = get_option('ipc_rust').enabled()
