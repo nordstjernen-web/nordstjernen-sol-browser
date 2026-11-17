@@ -87,17 +87,18 @@ pub fn quirks_mode(doctype: &Doctype) -> QuirksMode {
     let public = doctype.public_id.as_deref().map(<[u8]>::to_ascii_lowercase);
     let system = doctype.system_id.as_deref().map(<[u8]>::to_ascii_lowercase);
     let public_ref = public.as_deref().unwrap_or(b"");
+    let has_system_id = system.as_deref().is_some_and(|s| !s.is_empty());
     if doctype.force_quirks
         || doctype.name.as_deref() != Some(b"html")
         || QUIRKS_EXACT.contains(&public_ref)
         || system.as_deref() == Some(b"http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd")
         || starts_with_any(public_ref, &QUIRKS_PREFIXES)
-        || (system.is_none() && starts_with_any(public_ref, &HTML401))
+        || (!has_system_id && starts_with_any(public_ref, &HTML401))
     {
         return QuirksMode::Quirks;
     }
     if starts_with_any(public_ref, &XHTML10)
-        || (system.is_some() && starts_with_any(public_ref, &HTML401))
+        || (has_system_id && starts_with_any(public_ref, &HTML401))
     {
         return QuirksMode::LimitedQuirks;
     }
