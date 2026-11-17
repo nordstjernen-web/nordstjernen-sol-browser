@@ -2265,16 +2265,21 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     gsize raw_len = resp->body ? resp->body->len : 0;
     g_free(g_headless_doc_charset);
     g_headless_doc_charset = NULL;
-    gsize decoded_len = 0;
-    char *decoded = ns_html_decode_body_len(raw, raw_len,
-                                            resp->content_type,
-                                            &g_headless_doc_charset,
-                                            &decoded_len);
     const ns_config *parse_cfg = ns_config_get();
     gboolean scripting_on = !parse_cfg || parse_cfg->javascript_enabled;
-    ns_node *doc = ns_parse_document_for_type(
-        decoded ? decoded : "", decoded ? (gssize)decoded_len : 0,
-        resp->content_type, scripting_on);
+    char *decoded = NULL;
+    ns_node *doc = ns_html_take_loaded_document(resp, scripting_on);
+    if (doc) {
+        g_headless_doc_charset = g_strdup("UTF-8");
+    } else {
+        gsize decoded_len = 0;
+        decoded = ns_html_decode_body_len(raw, raw_len, resp->content_type,
+                                          &g_headless_doc_charset,
+                                          &decoded_len);
+        doc = ns_parse_document_for_type(
+            decoded ? decoded : "", decoded ? (gssize)decoded_len : 0,
+            resp->content_type, scripting_on);
+    }
     const char *page_url = resp->final_url ? resp->final_url : opts->url;
     g_timing.parse_us += g_get_monotonic_time() - phase_t0;
 

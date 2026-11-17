@@ -3,6 +3,18 @@ Changelog:
 
 1.0.50-dev:
 ======
+* A page's HTML is parsed while it downloads. A navigation feeds the
+  streaming parser each piece of the body as the network delivers it, so
+  the tree is finished when the last byte arrives instead of being built
+  afterwards: on a throttled load of a 1.5 MB Wikipedia article the 16 ms
+  of decoding and parsing that used to follow the download now happen
+  inside it. This covers `text/html` responses in UTF-8, declared or not;
+  a response in another charset, one with invalid UTF-8, and one served
+  from the cache or turned into a viewer page are parsed from the complete
+  body as before, and give the same tree.
+  Scripts still run once the document is complete and nothing is painted
+  earlier, so pages do not appear sooner yet. `NS_HTML_STREAM_LOAD=0`
+  turns it off.
 * The HTML parser takes its input in pieces. The Rust crate gains a
   `Parser` that is fed chunks and resumed: the tokenizer suspends wherever
   more input could still change the token it is reading (inside a tag, a

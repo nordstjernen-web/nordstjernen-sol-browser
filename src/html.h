@@ -72,6 +72,16 @@ char *ns_html_xml_document(const char *url, const char *xml, gsize len);
 struct ns_response;
 void  ns_html_prepare_document_response(struct ns_response *resp);
 
+typedef struct ns_html_load ns_html_load;
+
+ns_html_load *ns_html_load_new(gboolean scripting);
+void     ns_html_load_chunk(ns_html_load *load, const char *url,
+                            const char *raw_headers, const guint8 *data,
+                            gsize len);
+void     ns_html_load_finish(ns_html_load *load, struct ns_response *resp);
+ns_node *ns_html_take_loaded_document(struct ns_response *resp,
+                                      gboolean scripting);
+
 G_END_DECLS
 
 #endif

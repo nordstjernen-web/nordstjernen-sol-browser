@@ -885,6 +885,199 @@ html_content_type_starts(const char *content_type, const char *prefix)
 }
 
 static gboolean
+html_content_type_is_plain_html(const char *content_type)
+{
+    if (!html_content_type_starts(content_type, "text/html")) return FALSE;
+    char next = content_type[9];
+    return next == '\0' || next == ';' || g_ascii_isspace(next);
+}
+
+#define NS_HTML_LOAD_PRESCAN 1024
+
+typedef enum {
+    NS_HTML_LOAD_UNDECIDED,
+    NS_HTML_LOAD_STREAMING,
+    NS_HTML_LOAD_OFF,
+} ns_html_load_state;
+
+struct ns_html_load {
+    ns_html_load_state state;
+    gboolean        scripting;
+    char           *url;
+    char           *content_type;
+    GByteArray     *prescan;
+    ns_html_stream *stream;
+    guint8          carry[4];
+    gsize           carry_len;
+    gsize           seen;
+};
+
+static gboolean
+html_load_enabled(void)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = g_strcmp0(g_getenv("NS_HTML_STREAM_LOAD"), "0") != 0;
+    return enabled;
+}
+
+ns_html_load *
+ns_html_load_new(gboolean scripting)
+{
+    if (!html_load_enabled()) return NULL;
+    ns_html_load *load = g_new0(ns_html_load, 1);
+    load->scripting = scripting;
+    return load;
+}
+
+static void
+html_load_stop(ns_html_load *load)
+{
+    load->state = NS_HTML_LOAD_OFF;
+    load->carry_len = 0;
+    g_clear_pointer(&load->stream, ns_html_stream_cancel);
+    g_clear_pointer(&load->prescan, g_byte_array_unref);
+}
+
+static void
+html_load_restart(ns_html_load *load, const char *url, const char *raw_headers)
+{
+    html_load_stop(load);
+    g_free(load->url);
+    g_free(load->content_type);
+    load->url = g_strdup(url ? url : "");
+    load->content_type = ns_net_raw_header_values(raw_headers, "Content-Type");
+    load->seen = 0;
+    load->state = html_content_type_is_plain_html(load->content_type)
+        ? NS_HTML_LOAD_UNDECIDED : NS_HTML_LOAD_OFF;
+    if (load->state == NS_HTML_LOAD_UNDECIDED)
+        load->prescan = g_byte_array_new();
+}
+
+static void
+html_load_feed(ns_html_load *load, const guint8 *data, gsize len)
+{
+    g_autofree guint8 *joined = NULL;
+    if (load->carry_len > 0) {
+        joined = g_malloc(load->carry_len + len);
+        memcpy(joined, load->carry, load->carry_len);
+        memcpy(joined + load->carry_len, data, len);
+        data = joined;
+        len += load->carry_len;
+        load->carry_len = 0;
+    }
+    gsize valid = utf8_valid_span((const char *)data, len);
+    gsize rest = len - valid;
+    if (rest > 0) {
+        gboolean incomplete = rest < sizeof load->carry &&
+            g_utf8_get_char_validated((const char *)data + valid,
+                                      (gssize)rest) == (gunichar)-2;
+        if (!incomplete) {
+            html_load_stop(load);
+            return;
+        }
+        memcpy(load->carry, data + valid, rest);
+        load->carry_len = rest;
+    }
+    ns_html_stream_feed(load->stream, (const char *)data, valid);
+}
+
+static gboolean
+html_load_declares_other_charset(const ns_html_load *load)
+{
+    char *label = charset_value_in(load->content_type,
+                                   strlen(load->content_type));
+    if (!label)
+        label = charset_value_in((const char *)load->prescan->data,
+                                 MIN(load->prescan->len, NS_HTML_LOAD_PRESCAN));
+    if (!label) return FALSE;
+    char *name = charset_normalize(label);
+    gboolean other = g_ascii_strcasecmp(name, "UTF-8") != 0;
+    g_free(label);
+    g_free(name);
+    return other;
+}
+
+static void
+html_load_decide(ns_html_load *load)
+{
+    GByteArray *head = g_steal_pointer(&load->prescan);
+    const guint8 *data = head->data;
+    gsize len = head->len;
+    gboolean utf8_bom = len >= 3 && memcmp(data, "\xef\xbb\xbf", 3) == 0;
+    gboolean utf16_bom = len >= 2 && (memcmp(data, "\xff\xfe", 2) == 0 ||
+                                      memcmp(data, "\xfe\xff", 2) == 0);
+    load->prescan = head;
+    gboolean other = utf16_bom ||
+                     (!utf8_bom && html_load_declares_other_charset(load));
+    load->prescan = NULL;
+    if (other) {
+        html_load_stop(load);
+    } else {
+        load->state = NS_HTML_LOAD_STREAMING;
+        load->stream = ns_html_stream_new(load->scripting);
+        gsize skip = utf8_bom ? 3 : 0;
+        html_load_feed(load, data + skip, len - skip);
+    }
+    g_byte_array_unref(head);
+}
+
+void
+ns_html_load_chunk(ns_html_load *load, const char *url,
+                   const char *raw_headers, const guint8 *data, gsize len)
+{
+    if (!load) return;
+    if (!load->url || g_strcmp0(load->url, url ? url : "") != 0)
+        html_load_restart(load, url, raw_headers);
+    load->seen += len;
+    if (load->state == NS_HTML_LOAD_UNDECIDED) {
+        g_byte_array_append(load->prescan, data, (guint)len);
+        if (load->prescan->len >= NS_HTML_LOAD_PRESCAN)
+            html_load_decide(load);
+    } else if (load->state == NS_HTML_LOAD_STREAMING) {
+        html_load_feed(load, data, len);
+    }
+}
+
+void
+ns_html_load_finish(ns_html_load *load, ns_response *resp)
+{
+    if (!load) return;
+    gboolean whole = resp && !resp->error && resp->body &&
+                     resp->status >= 200 && resp->status < 300 &&
+                     load->seen == resp->body->len &&
+                     html_content_type_is_plain_html(resp->content_type) &&
+                     g_strcmp0(load->content_type, resp->content_type) == 0;
+    if (whole && load->state == NS_HTML_LOAD_UNDECIDED)
+        html_load_decide(load);
+    if (whole && load->state == NS_HTML_LOAD_STREAMING &&
+        load->carry_len == 0) {
+        resp->document = ns_html_stream_finish(g_steal_pointer(&load->stream));
+        resp->document_bytes = resp->body->len;
+        resp->document_free = (GDestroyNotify)ns_node_free;
+    }
+    html_load_stop(load);
+    g_free(load->url);
+    g_free(load->content_type);
+    g_free(load);
+}
+
+ns_node *
+ns_html_take_loaded_document(ns_response *resp, gboolean scripting)
+{
+    if (!resp || !resp->document) return NULL;
+    ns_node *doc = g_steal_pointer(&resp->document);
+    gboolean parsed_with_scripting =
+        !(doc->flags & NS_NODE_SCRIPTING_DISABLED);
+    if (resp->body && resp->body->len == resp->document_bytes &&
+        html_content_type_is_plain_html(resp->content_type) &&
+        parsed_with_scripting == !!scripting)
+        return doc;
+    ns_node_free(doc);
+    return NULL;
+}
+
+static gboolean
 html_content_type_is_html(const char *content_type)
 {
     return html_content_type_starts(content_type, "text/html") ||

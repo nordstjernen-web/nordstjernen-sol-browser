@@ -222,11 +222,28 @@ at each `</script>` so the embedder can run the script, hand back what it
 wrote with `write` (inserted at the insertion point and tokenized before
 the rest of the document) and continue with `resume`. On the C side
 `ns_html_stream_new` / `_feed` / `_finish` (`src/html.h`) build a document
-from chunks without pausing for scripts; page loads still hand the parser
-the whole decoded body, and script-created markup still goes through the
-`document.write` code in `src/js.c`. `NS_HTML_PARSE_CHUNK=N` in the
+from chunks without pausing for scripts. `NS_HTML_PARSE_CHUNK=N` in the
 environment routes every document parse through the streaming path in
 N-byte chunks, which is how that path is checked against real pages.
+
+A navigation parses its document while the body downloads. The blocking
+navigation fetch (`engine_request_blocking` in `src/engine.c`) asks the
+network layer for the body in chunks and hands each to an `ns_html_load`
+(`src/html.c`), which feeds an `ns_html_stream`. It streams `text/html`
+responses that are UTF-8: it looks at the `Content-Type` header, a byte
+order mark and the first 1024 bytes for a declared charset, as the decoder
+does, and checks the bytes as they arrive, carrying a multi-byte sequence
+that a chunk boundary splits; after a redirect it starts over with the new
+response. A response that declares another charset, or turns out not to be
+valid UTF-8, or comes from the cache or is rewritten into a viewer page, is
+parsed the old way from the complete body, which is kept in any case; the
+load sites take the streamed tree with
+`ns_html_take_loaded_document` only when it covers exactly the bytes of the
+final response. Scripts still run after the document is complete, and
+nothing is laid out or painted before then, so this moves the parse into
+the download rather than showing a page sooner. `NS_HTML_STREAM_LOAD=0`
+turns it off. Script-created markup still goes through the `document.write`
+code in `src/js.c`.
 
 The tree builder stops nesting at `NS_DOM_MAX_DEPTH`: once the stack of
 open elements is that tall, further elements become children of the
