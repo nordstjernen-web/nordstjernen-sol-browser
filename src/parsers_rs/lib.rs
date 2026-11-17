@@ -66,6 +66,9 @@ unsafe extern "C" {
     fn ns_h5_reparent_children(sink: *mut c_void, from: *mut c_void, to: *mut c_void);
     fn ns_h5_template_contents(sink: *mut c_void, template: *mut c_void) -> *mut c_void;
     fn ns_h5_discard(sink: *mut c_void, node: *mut c_void);
+    fn ns_h5_option_selectedcontent(sink: *mut c_void, option: *mut c_void) -> *mut c_void;
+    fn ns_h5_first_child(node: *mut c_void) -> *mut c_void;
+    fn ns_h5_copy_option(sink: *mut c_void, option: *mut c_void, selectedcontent: *mut c_void);
 }
 
 unsafe fn input<'a>(data: *const c_char, len: usize) -> &'a [u8] {
@@ -363,6 +366,21 @@ impl TreeSink for Sink {
         for attr in attrs {
             add_attribute(self.context, element, attr, true);
         }
+    }
+
+    fn option_children_parsed(&mut self, option: Handle) {
+        let selectedcontent = unsafe { ns_h5_option_selectedcontent(self.context, option.0) };
+        if selectedcontent.is_null() {
+            return;
+        }
+        loop {
+            let child = unsafe { ns_h5_first_child(selectedcontent) };
+            if child.is_null() {
+                break;
+            }
+            self.remove(Handle(child));
+        }
+        unsafe { ns_h5_copy_option(self.context, option.0, selectedcontent) };
     }
 
     fn discard(&mut self, node: Handle) {

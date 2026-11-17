@@ -3,6 +3,17 @@ Changelog:
 
 1.0.50-dev:
 ======
+* `<selectedcontent>` shows the selected option. When the parser closes
+  an `<option>` that its `<select>` has chosen, the select's first
+  `<selectedcontent>` receives a copy of the option's children, as the
+  HTML Standard's "children parsed" steps ask: the `<option selected>`
+  wins over the first option, a `multiple` or `size` select is left
+  alone, and `<script>`, `<iframe>`, `<frame>`, `<embed>` and `<object>`
+  are left out of the copy. A `<selectedcontent>` placed after the
+  options picks up the one already chosen. The four html5lib tests for it
+  pass, leaving only the processing-instruction cases lexbor also failed,
+  and the work stays linear on pages with thousands of options or
+  selectedcontent elements.
 * The HTML tokenizer scans text, attribute values, comments and raw text
   eight bytes at a time and counts newlines the same way, and the list of
   active formatting elements reuses the attribute lists it keeps instead

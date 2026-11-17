@@ -130,6 +130,7 @@ pub trait TreeSink {
     fn reparent_children(&mut self, from: Self::Handle, to: Self::Handle);
     fn template_contents(&mut self, template: Self::Handle) -> Self::Handle;
     fn add_missing_attributes(&mut self, element: Self::Handle, attrs: Attrs<'_>);
+    fn option_children_parsed(&mut self, _option: Self::Handle) {}
     fn discard(&mut self, _node: Self::Handle) {}
 }
 
