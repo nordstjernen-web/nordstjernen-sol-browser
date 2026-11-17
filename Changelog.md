@@ -3,6 +3,18 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Build: the Rust floor rises from 1.91 to 1.100, and the HTML parser
+  uses what the newer compiler offers: `if let` guards in the tree
+  builder and the script-data tokenizer states, `array_windows` for the
+  end of a CDATA section, `core::hint::cold_path` on the NUL-byte
+  branches and `Vec::extract_if` when several active formatting elements
+  are dropped at once. Parsed trees are unchanged and parsing is neither
+  faster nor slower. Debian, Fedora 44, openSUSE Tumbleweed, Alpine 3.24,
+  FreeBSD and NetBSD do not package Rust 1.100 yet, so
+  `scripts/ensure-rust.sh` installs the stable toolchain with rustup
+  where the system `rustc` is too old; the CI workflows and the nightly
+  distribution builds call it. A package built with only the
+  distribution's own compiler has to wait for 1.100 to arrive there.
 * A document whose doctype names HTML 4.01 Frameset or Transitional with
   an empty system identifier, as in `<!DOCTYPE HTML PUBLIC "-//W3C//DTD
   HTML 4.01 Transitional//EN" "">`, renders in quirks mode, the same as

@@ -2,6 +2,7 @@
 //! Copyright 2026 Andreas Røsdal
 //! SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
 
+use core::hint::cold_path;
 use std::collections::HashSet;
 
 use crate::charref;
@@ -259,6 +260,7 @@ impl<'a> Tokenizer<'a> {
 
     fn push_byte_at(&mut self, at: usize) {
         if self.input[at] == 0 {
+            cold_path();
             self.push_bytes(REPLACEMENT);
         } else {
             self.push_input(at, at + 1);
@@ -544,6 +546,7 @@ impl<'a> Tokenizer<'a> {
         match self.input[at] {
             b'&' => self.charref_into_text(at),
             0 => {
+                cold_path();
                 self.push_bytes(REPLACEMENT);
                 self.pos = at + 1;
             }
@@ -573,6 +576,7 @@ impl<'a> Tokenizer<'a> {
         let at = start + i;
         self.push_input(start, at);
         if self.input[at] == 0 {
+            cold_path();
             self.push_bytes(REPLACEMENT);
             self.pos = at + 1;
         } else {
@@ -591,6 +595,7 @@ impl<'a> Tokenizer<'a> {
         let at = start + i;
         self.push_input(start, at);
         if self.input[at] == 0 {
+            cold_path();
             self.push_bytes(REPLACEMENT);
             self.pos = at + 1;
         } else if self.input.get(at + 1) == Some(&b'!') {
@@ -620,16 +625,14 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn alpha_run_is_script(&self, at: usize) -> bool {
-        let run = self.input[at..]
-            .iter()
-            .take_while(|c| c.is_ascii_alphabetic())
-            .count();
-        run == 6
-            && self.input[at..at + 6].eq_ignore_ascii_case(b"script")
-            && self
-                .input
-                .get(at + 6)
-                .is_some_and(|&c| is_ws(c) || c == b'/' || c == b'>')
+        self.input[at..]
+            .split_first_chunk::<6>()
+            .is_some_and(|(name, rest)| {
+                name.eq_ignore_ascii_case(b"script")
+                    && rest
+                        .first()
+                        .is_some_and(|&c| is_ws(c) || c == b'/' || c == b'>')
+            })
     }
 
     fn script_escape(&mut self) -> Option<Kind> {
@@ -678,26 +681,24 @@ impl<'a> Tokenizer<'a> {
             }
             State::ScriptEscapedLt => {
                 let lt = at - 1;
-                if c == b'/' {
-                    if let Some(end) = self.appropriate_end_tag(at + 1) {
+                match c {
+                    b'/' if let Some(end) = self.appropriate_end_tag(at + 1) => {
                         self.begin_text_end_tag(end);
-                        return None;
                     }
-                    self.push_input(lt, at + 1);
-                    self.pos = at + 1;
-                    self.state = State::ScriptEscaped;
-                } else if c.is_ascii_alphabetic() {
-                    self.push_input(lt, at);
-                    self.state = if self.alpha_run_is_script(at) {
-                        self.push_input(at, at + 7);
+                    b'/' => {
+                        self.push_input(lt, at + 1);
+                        self.pos = at + 1;
+                        self.state = State::ScriptEscaped;
+                    }
+                    _ if self.alpha_run_is_script(at) => {
+                        self.push_input(lt, at + 7);
                         self.pos = at + 7;
-                        State::ScriptDoubleEscaped
-                    } else {
-                        State::ScriptEscaped
-                    };
-                } else {
-                    self.push_input(lt, at);
-                    self.state = State::ScriptEscaped;
+                        self.state = State::ScriptDoubleEscaped;
+                    }
+                    _ => {
+                        self.push_input(lt, at);
+                        self.state = State::ScriptEscaped;
+                    }
                 }
             }
             State::ScriptDoubleEscaped
@@ -810,7 +811,10 @@ impl<'a> Tokenizer<'a> {
                     return None;
                 }
                 b'>' => return self.emit_tag(),
-                0 => self.tag.name.extend_from_slice(REPLACEMENT),
+                0 => {
+                    cold_path();
+                    self.tag.name.extend_from_slice(REPLACEMENT);
+                }
                 _ => self.tag.name.push(c.to_ascii_lowercase()),
             }
         }
@@ -858,6 +862,7 @@ impl<'a> Tokenizer<'a> {
                     return None;
                 }
                 0 => {
+                    cold_path();
                     self.current_attr().name.extend_from_slice(REPLACEMENT);
                     self.pos += 1;
                 }
@@ -942,6 +947,7 @@ impl<'a> Tokenizer<'a> {
             match input[at] {
                 b'&' => self.charref_into_attr(at),
                 0 => {
+                    cold_path();
                     self.current_attr().value.extend_from_slice(REPLACEMENT);
                     self.pos = at + 1;
                 }
@@ -971,6 +977,7 @@ impl<'a> Tokenizer<'a> {
                     return self.emit_tag();
                 }
                 0 => {
+                    cold_path();
                     self.current_attr().value.extend_from_slice(REPLACEMENT);
                     self.pos += 1;
                 }
@@ -1447,7 +1454,10 @@ impl<'a> Tokenizer<'a> {
 
     fn cdata_section(&mut self) -> Option<Kind> {
         let start = self.pos;
-        match self.input[start..].windows(3).position(|w| w == b"]]>") {
+        let end = self.input[start..]
+            .array_windows()
+            .position(|w: &[u8; 3]| w == b"]]>");
+        match end {
             Some(i) => {
                 self.push_input(start, start + i);
                 self.pos = start + i + 3;

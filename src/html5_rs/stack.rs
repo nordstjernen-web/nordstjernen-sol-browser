@@ -716,15 +716,19 @@ impl<H> Formatting<H> {
         let Some(&first) = ascending.first() else {
             return;
         };
-        let tail: Vec<Fmt<H>> = self.entries.drain(first..).collect();
         let mut doomed = ascending.iter().peekable();
-        for (offset, entry) in tail.into_iter().enumerate() {
-            if doomed.next_if(|&&i| i == first + offset).is_some() {
-                self.account(&entry, false);
-                self.recycle(entry);
-            } else {
-                self.entries.push(entry);
-            }
+        let mut position = first;
+        let removed: Vec<Fmt<H>> = self
+            .entries
+            .extract_if(first.., |_| {
+                let hit = doomed.next_if(|&&i| i == position).is_some();
+                position += 1;
+                hit
+            })
+            .collect();
+        for entry in removed {
+            self.account(&entry, false);
+            self.recycle(entry);
         }
     }
 

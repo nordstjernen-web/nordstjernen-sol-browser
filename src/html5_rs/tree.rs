@@ -2439,17 +2439,12 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 self.insert_foreign(t, ns);
                 Step::Done
             }
-            Tok::End(t) => {
-                if self.open.len() <= 1 {
-                    return Step::Done;
-                }
-                if let Some(i) = self.open.foreign_end_target(t.tag(), &t.name) {
-                    self.truncate_open(i);
-                    return Step::Done;
-                }
-                self.by_mode(tok)
+            Tok::End(_) if self.open.len() <= 1 => Step::Done,
+            Tok::End(t) if let Some(i) = self.open.foreign_end_target(t.tag(), &t.name) => {
+                self.truncate_open(i);
+                Step::Done
             }
-            Tok::Eof => self.by_mode(tok),
+            Tok::End(_) | Tok::Eof => self.by_mode(tok),
         }
     }
 
