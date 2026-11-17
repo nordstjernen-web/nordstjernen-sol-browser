@@ -3,6 +3,12 @@ Changelog:
 
 1.0.50-dev:
 ======
+* A `<frameset>` after a `<template>` in the head replaces the body again,
+  as the HTML Standard now asks: inserting the body that the "after head"
+  insertion mode implies resets the frameset-ok flag to "ok", so the
+  template's "not ok" no longer carries over. The parser passes the three
+  new `template.dat` tests in web-platform-tests, and with them every
+  tree-construction test there that does not run script.
 * Parsing an HTML document no longer walks the finished tree for
   declarative shadow roots or media metadata when the parser saw no
   `shadowrootmode` attribute, no `<video>` and no `player` id or class,
