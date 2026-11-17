@@ -501,12 +501,15 @@ impl Level {
     }
 }
 
+const SPARE_ATTR_LISTS: usize = 64;
+
 pub(crate) struct Formatting<H> {
     entries: Vec<Fmt<H>>,
     levels: Vec<Level>,
     depth: usize,
     listed_serials: Vec<bool>,
     hasher: RandomState,
+    spare: Vec<Vec<Attr>>,
 }
 
 impl<H> Formatting<H> {
@@ -517,6 +520,47 @@ impl<H> Formatting<H> {
             depth: 0,
             listed_serials: Vec::new(),
             hasher: RandomState::new(),
+            spare: Vec::new(),
+        }
+    }
+
+    fn copy_attrs(&mut self, source: &[Attr]) -> Vec<Attr> {
+        let mut copy = self.spare.pop().unwrap_or_default();
+        copy.truncate(source.len());
+        for (i, attr) in source.iter().enumerate() {
+            match copy.get_mut(i) {
+                Some(slot) => {
+                    slot.name.clear();
+                    slot.name.extend_from_slice(&attr.name);
+                    slot.value.clear();
+                    slot.value.extend_from_slice(&attr.value);
+                    slot.ns = attr.ns;
+                    slot.prefix_len = attr.prefix_len;
+                }
+                None => copy.push(attr.clone()),
+            }
+        }
+        copy
+    }
+
+    fn recycle(&mut self, entry: Fmt<H>) {
+        if let Fmt::El { attrs, .. } = entry
+            && self.spare.len() < SPARE_ATTR_LISTS
+        {
+            self.spare.push(attrs);
+        }
+    }
+
+    pub(crate) fn take_attrs(&mut self, position: usize) -> Vec<Attr> {
+        match &mut self.entries[position] {
+            Fmt::El { attrs, .. } => core::mem::take(attrs),
+            Fmt::Marker => Vec::new(),
+        }
+    }
+
+    pub(crate) fn restore_attrs(&mut self, position: usize, restored: Vec<Attr>) {
+        if let Fmt::El { attrs, .. } = &mut self.entries[position] {
+            *attrs = restored;
         }
     }
 
@@ -629,11 +673,12 @@ impl<H> Formatting<H> {
         h: H,
         serial: usize,
         tag: Tag,
-        attrs: Vec<Attr>,
+        source: &[Attr],
         key: Option<u64>,
     ) {
         let keyed = formatting_slot(tag).is_some_and(|slot| self.levels[self.depth].is_keyed(slot));
-        let key = keyed.then(|| key.unwrap_or_else(|| self.key(tag, &attrs)));
+        let key = keyed.then(|| key.unwrap_or_else(|| self.key(tag, source)));
+        let attrs = self.copy_attrs(source);
         let entry = Fmt::El {
             h,
             serial,
@@ -662,13 +707,19 @@ impl<H> Formatting<H> {
                 return;
             }
             self.account(&entry, false);
+            self.recycle(entry);
         }
     }
 
-    pub(crate) fn remove(&mut self, position: usize) -> Fmt<H> {
+    pub(crate) fn take(&mut self, position: usize) -> Fmt<H> {
         let entry = self.entries.remove(position);
         self.account(&entry, false);
         entry
+    }
+
+    pub(crate) fn remove(&mut self, position: usize) {
+        let entry = self.take(position);
+        self.recycle(entry);
     }
 
     pub(crate) fn remove_all(&mut self, ascending: &[usize]) {
@@ -680,6 +731,7 @@ impl<H> Formatting<H> {
         for (offset, entry) in tail.into_iter().enumerate() {
             if doomed.next_if(|&&i| i == first + offset).is_some() {
                 self.account(&entry, false);
+                self.recycle(entry);
             } else {
                 self.entries.push(entry);
             }
