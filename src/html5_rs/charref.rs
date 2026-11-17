@@ -2,7 +2,7 @@
 //! Copyright 2026 Andreas Røsdal
 //! SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
 
-use crate::entities::{ENTITIES, LONGEST_NAME};
+use crate::entities::{BY_FIRST_BYTE, ENTITIES, LONGEST_NAME};
 
 const C1_REPLACEMENTS: [(u32, u32); 27] = [
     (0x80, 0x20AC),
@@ -46,33 +46,58 @@ pub fn lookup(name: &[u8]) -> Option<&'static str> {
         .map(|i| ENTITIES[i].1)
 }
 
-fn named(input: &[u8], pos: usize, in_attr: bool, out: &mut Vec<u8>) -> usize {
-    let rest = &input[pos..];
-    let mut alnum = 0;
+fn longest_match(rest: &[u8]) -> Option<(usize, &'static str)> {
+    let first = usize::from(*rest.first()?);
+    let mut lo = usize::from(*BY_FIRST_BYTE.get(first)?);
+    let mut hi = usize::from(*BY_FIRST_BYTE.get(first + 1)?);
+    let mut alnum = 1;
     while alnum < rest.len() && alnum < LONGEST_NAME && rest[alnum].is_ascii_alphanumeric() {
         alnum += 1;
     }
-    let candidate = if rest.get(alnum) == Some(&b';') {
+    let whole = if rest.get(alnum) == Some(&b';') {
         alnum + 1
     } else {
         alnum
     };
-    for len in (1..=candidate).rev() {
-        let Some(value) = lookup(&rest[..len]) else {
-            continue;
-        };
-        let terminated = rest[len - 1] == b';';
-        let next = rest.get(len).copied();
-        if in_attr && !terminated && next.is_some_and(|c| c == b'=' || c.is_ascii_alphanumeric()) {
-            out.push(b'&');
-            out.extend_from_slice(&rest[..len]);
-        } else {
-            out.extend_from_slice(value.as_bytes());
-        }
-        return pos + len;
+    if let Ok(i) = ENTITIES[lo..hi].binary_search_by(|(name, _)| (*name).cmp(&rest[..whole])) {
+        return Some((whole, ENTITIES[lo + i].1));
     }
-    out.push(b'&');
-    pos
+    let mut best = None;
+    for (depth, &c) in rest.iter().enumerate().take(whole).skip(1) {
+        if lo < hi && ENTITIES[lo].0.len() == depth {
+            best = Some((depth, ENTITIES[lo].1));
+            lo += 1;
+        }
+        let names = &ENTITIES[lo..hi];
+        let start = lo + names.partition_point(|(name, _)| name[depth] < c);
+        let end = lo + names.partition_point(|(name, _)| name[depth] <= c);
+        if start == end {
+            return best;
+        }
+        lo = start;
+        hi = end;
+    }
+    if lo < hi && ENTITIES[lo].0.len() == whole {
+        best = Some((whole, ENTITIES[lo].1));
+    }
+    best
+}
+
+fn named(input: &[u8], pos: usize, in_attr: bool, out: &mut Vec<u8>) -> usize {
+    let rest = &input[pos..];
+    let Some((len, value)) = longest_match(rest) else {
+        out.push(b'&');
+        return pos;
+    };
+    let terminated = rest[len - 1] == b';';
+    let next = rest.get(len).copied();
+    if in_attr && !terminated && next.is_some_and(|c| c == b'=' || c.is_ascii_alphanumeric()) {
+        out.push(b'&');
+        out.extend_from_slice(&rest[..len]);
+    } else {
+        out.extend_from_slice(value.as_bytes());
+    }
+    pos + len
 }
 
 fn numeric(input: &[u8], pos: usize, out: &mut Vec<u8>) -> usize {

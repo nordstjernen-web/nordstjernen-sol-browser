@@ -3,6 +3,10 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Named character references are found with one lookup among the names
+  that share their first letter, instead of a search of the whole table
+  for every prefix of the name: text full of entities parses 1.7 times
+  faster.
 * The HTML parser stays fast on deeply nested markup. Since the switch to
   the Rust parser, every block start tag, every reconstruction of
   formatting elements and every run of foster-parented text searched the
