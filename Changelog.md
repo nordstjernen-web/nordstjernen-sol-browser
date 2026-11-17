@@ -4,9 +4,9 @@ Changelog:
 1.0.50-dev:
 ======
 * The HTML parser has no quadratic paths left on deeply nested or
-  misnested markup. The fix above covered the ones the switch from lexbor
-  had brought in; a sweep of every tag against 24 kinds of deep stack
-  found more that were just as slow with lexbor: `<rt>` or `<option>` under a
+  misnested markup. The fix earlier in this release covered the ones the
+  switch from lexbor had brought in; a sweep of every tag against 24 kinds
+  of deep stack found more that were just as slow with lexbor: `<rt>` or `<option>` under a
   deeply buried `<ruby>` or `<select>`, repeated `</body>`, end tags for
   custom elements or inside deep SVG and MathML, thousands of distinct
   open formatting elements, `<a>` after them and an adoption agency run
