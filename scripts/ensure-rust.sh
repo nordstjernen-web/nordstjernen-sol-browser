@@ -1,5 +1,5 @@
 #!/bin/sh
-# Make sure rustc meets the floor meson.build sets, installing the stable toolchain with rustup into ~/.cargo/bin when the system one is older.
+# Make sure rustc meets the floor meson.build sets: when the system one is older, install the stable toolchain with rustup into ~/.cargo/bin, or on Alpine the rust package from edge.
 set -eu
 
 FLOOR_MINOR=100
@@ -13,8 +13,12 @@ new_enough() {
 }
 
 if ! new_enough; then
-    echo "rustc is missing or older than 1.$FLOOR_MINOR; installing stable with rustup" >&2
-    if command -v rustup >/dev/null 2>&1; then
+    echo "rustc is missing or older than 1.$FLOOR_MINOR; installing a newer one" >&2
+    if command -v apk >/dev/null 2>&1; then
+        edge=https://dl-cdn.alpinelinux.org/alpine/edge
+        apk add --no-cache --repository="$edge/main" --repository="$edge/community" \
+            "rust>=1.$FLOOR_MINOR"
+    elif command -v rustup >/dev/null 2>&1; then
         rustup toolchain install stable --profile minimal
         rustup default stable
     else
