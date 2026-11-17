@@ -2521,7 +2521,7 @@ fn append_normalized(out: &mut Vec<u8>, input: &[u8], after_cr: &mut bool) {
     if !input.is_empty() {
         *after_cr = false;
     }
-    while let Some(i) = find_any(rest, [b'\r']) {
+    while let Some(i) = find_any(rest, *b"\r") {
         out.extend_from_slice(&rest[..i]);
         out.push(b'\n');
         rest = &rest[i + 1..];
