@@ -3,6 +3,7 @@
 //! SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
 
 use crate::quirks::quirks_mode;
+use crate::stack::{Elem, Fmt, Formatting, OpenStack, Scope, UNNAMED};
 use crate::tags::{Tag, foreign_attr, svg_attr_name, svg_tag_name};
 use crate::tokenizer::{Attr, Doctype, Kind, State, TagToken, Tokenizer};
 use crate::{Attrs, Context, ElementName, LocalName, Ns, Position, QuirksMode, TreeSink};
@@ -35,14 +36,6 @@ enum Mode {
     AfterAfterFrameset,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Scope {
-    Default,
-    ListItem,
-    Button,
-    Table,
-}
-
 enum Step {
     Done,
     Again,
@@ -63,295 +56,6 @@ enum Tok<'t> {
     Eof,
 }
 
-struct Elem<H> {
-    h: H,
-    tag: Tag,
-    ns: Ns,
-    name: Option<Box<[u8]>>,
-    html_ip: bool,
-}
-
-impl<H> Elem<H> {
-    fn is(&self, tag: Tag) -> bool {
-        self.ns == Ns::Html && self.tag == tag
-    }
-
-    fn is_any(&self, tags: &[Tag]) -> bool {
-        self.ns == Ns::Html && tags.contains(&self.tag)
-    }
-
-    fn name_matches(&self, tag: Tag, name: &[u8]) -> bool {
-        self.tag == tag && (tag != Tag::Other || self.name.as_deref() == Some(name))
-    }
-
-    fn is_mathml_text_ip(&self) -> bool {
-        self.ns == Ns::MathMl
-            && matches!(self.tag, Tag::Mi | Tag::Mo | Tag::Mn | Tag::Ms | Tag::Mtext)
-    }
-
-    fn is_html_ip(&self) -> bool {
-        match self.ns {
-            Ns::MathMl => self.html_ip,
-            Ns::Svg => matches!(self.tag, Tag::ForeignObject | Tag::Desc | Tag::Title),
-            Ns::Html => false,
-        }
-    }
-
-    fn is_special(&self) -> bool {
-        match self.ns {
-            Ns::Html => matches!(
-                self.tag,
-                Tag::Address
-                    | Tag::Applet
-                    | Tag::Area
-                    | Tag::Article
-                    | Tag::Aside
-                    | Tag::Base
-                    | Tag::Basefont
-                    | Tag::Bgsound
-                    | Tag::Blockquote
-                    | Tag::Body
-                    | Tag::Br
-                    | Tag::Button
-                    | Tag::Caption
-                    | Tag::Center
-                    | Tag::Col
-                    | Tag::Colgroup
-                    | Tag::Dd
-                    | Tag::Details
-                    | Tag::Dir
-                    | Tag::Div
-                    | Tag::Dl
-                    | Tag::Dt
-                    | Tag::Embed
-                    | Tag::Fieldset
-                    | Tag::Figcaption
-                    | Tag::Figure
-                    | Tag::Footer
-                    | Tag::Form
-                    | Tag::Frame
-                    | Tag::Frameset
-                    | Tag::H1
-                    | Tag::H2
-                    | Tag::H3
-                    | Tag::H4
-                    | Tag::H5
-                    | Tag::H6
-                    | Tag::Head
-                    | Tag::Header
-                    | Tag::Hgroup
-                    | Tag::Hr
-                    | Tag::Html
-                    | Tag::Iframe
-                    | Tag::Image
-                    | Tag::Img
-                    | Tag::Input
-                    | Tag::Keygen
-                    | Tag::Li
-                    | Tag::Link
-                    | Tag::Listing
-                    | Tag::Main
-                    | Tag::Marquee
-                    | Tag::Menu
-                    | Tag::Meta
-                    | Tag::Nav
-                    | Tag::Noembed
-                    | Tag::Noframes
-                    | Tag::Noscript
-                    | Tag::Object
-                    | Tag::Ol
-                    | Tag::P
-                    | Tag::Param
-                    | Tag::Plaintext
-                    | Tag::Pre
-                    | Tag::Script
-                    | Tag::Search
-                    | Tag::Section
-                    | Tag::Select
-                    | Tag::Source
-                    | Tag::Style
-                    | Tag::Summary
-                    | Tag::Table
-                    | Tag::Tbody
-                    | Tag::Td
-                    | Tag::Template
-                    | Tag::Textarea
-                    | Tag::Tfoot
-                    | Tag::Th
-                    | Tag::Thead
-                    | Tag::Title
-                    | Tag::Tr
-                    | Tag::Track
-                    | Tag::Ul
-                    | Tag::Wbr
-                    | Tag::Xmp
-            ),
-            Ns::MathMl => matches!(
-                self.tag,
-                Tag::Mi | Tag::Mo | Tag::Mn | Tag::Ms | Tag::Mtext | Tag::AnnotationXml
-            ),
-            Ns::Svg => matches!(self.tag, Tag::ForeignObject | Tag::Desc | Tag::Title),
-        }
-    }
-
-    fn bounds(&self, scope: Scope) -> bool {
-        match scope {
-            Scope::Table => self.is_any(&[Tag::Html, Tag::Table, Tag::Template]),
-            _ => {
-                let base = match self.ns {
-                    Ns::Html => matches!(
-                        self.tag,
-                        Tag::Applet
-                            | Tag::Caption
-                            | Tag::Html
-                            | Tag::Table
-                            | Tag::Td
-                            | Tag::Th
-                            | Tag::Marquee
-                            | Tag::Object
-                            | Tag::Template
-                            | Tag::Select
-                    ),
-                    Ns::MathMl => matches!(
-                        self.tag,
-                        Tag::Mi | Tag::Mo | Tag::Mn | Tag::Ms | Tag::Mtext | Tag::AnnotationXml
-                    ),
-                    Ns::Svg => matches!(self.tag, Tag::ForeignObject | Tag::Desc | Tag::Title),
-                };
-                base || match scope {
-                    Scope::ListItem => self.is_any(&[Tag::Ol, Tag::Ul]),
-                    Scope::Button => self.is(Tag::Button),
-                    _ => false,
-                }
-            }
-        }
-    }
-}
-
-enum Fmt<H> {
-    Marker,
-    El {
-        h: H,
-        serial: usize,
-        tag: Tag,
-        attrs: Vec<Attr>,
-    },
-}
-
-impl<H: Copy + Eq> Fmt<H> {
-    fn handle(&self) -> Option<H> {
-        match self {
-            Fmt::Marker => None,
-            Fmt::El { h, .. } => Some(*h),
-        }
-    }
-}
-
-const TAG_COUNT: usize = Tag::Other as usize + 1;
-
-struct OpenStack<H> {
-    elems: Vec<Elem<H>>,
-    serials: Vec<usize>,
-    open_serials: Vec<bool>,
-    html_tags: [u32; TAG_COUNT],
-}
-
-impl<H> OpenStack<H> {
-    fn new() -> Self {
-        OpenStack {
-            elems: Vec::new(),
-            serials: Vec::new(),
-            open_serials: Vec::new(),
-            html_tags: [0; TAG_COUNT],
-        }
-    }
-
-    fn html_count(&self, tag: Tag) -> u32 {
-        self.html_tags[tag as usize]
-    }
-
-    fn has_html(&self, tag: Tag) -> bool {
-        self.html_count(tag) != 0
-    }
-
-    fn holds(&self, serial: usize) -> bool {
-        self.open_serials.get(serial).copied().unwrap_or(false)
-    }
-
-    fn top_serial(&self) -> usize {
-        self.serials.last().copied().unwrap_or(usize::MAX)
-    }
-
-    fn enter(&mut self, elem: &Elem<H>) -> usize {
-        if elem.ns == Ns::Html {
-            self.html_tags[elem.tag as usize] += 1;
-        }
-        self.open_serials.push(true);
-        self.open_serials.len() - 1
-    }
-
-    fn leave(&mut self, elem: &Elem<H>, serial: usize) {
-        if elem.ns == Ns::Html {
-            self.html_tags[elem.tag as usize] -= 1;
-        }
-        self.open_serials[serial] = false;
-    }
-
-    fn push(&mut self, elem: Elem<H>) {
-        let serial = self.enter(&elem);
-        self.serials.push(serial);
-        self.elems.push(elem);
-    }
-
-    fn pop(&mut self) -> Option<Elem<H>> {
-        let elem = self.elems.pop()?;
-        let serial = self.serials.pop()?;
-        self.leave(&elem, serial);
-        Some(elem)
-    }
-
-    fn truncate(&mut self, len: usize) {
-        while self.elems.len() > len {
-            self.pop();
-        }
-    }
-
-    fn clear(&mut self) {
-        self.truncate(0);
-    }
-
-    fn remove(&mut self, index: usize) -> Elem<H> {
-        let elem = self.elems.remove(index);
-        let serial = self.serials.remove(index);
-        self.leave(&elem, serial);
-        elem
-    }
-
-    fn insert(&mut self, index: usize, elem: Elem<H>) -> usize {
-        let serial = self.enter(&elem);
-        self.serials.insert(index, serial);
-        self.elems.insert(index, elem);
-        serial
-    }
-
-    fn replace_handle(&mut self, index: usize, h: H) -> usize {
-        self.open_serials[self.serials[index]] = false;
-        self.open_serials.push(true);
-        let serial = self.open_serials.len() - 1;
-        self.serials[index] = serial;
-        self.elems[index].h = h;
-        serial
-    }
-}
-
-impl<H> core::ops::Deref for OpenStack<H> {
-    type Target = [Elem<H>];
-
-    fn deref(&self) -> &[Elem<H>] {
-        &self.elems
-    }
-}
-
 const RESET_MODE_TAGS: &[Tag] = &[
     Tag::Td,
     Tag::Th,
@@ -364,7 +68,9 @@ const RESET_MODE_TAGS: &[Tag] = &[
     Tag::Table,
     Tag::Template,
     Tag::Head,
+    Tag::Body,
     Tag::Frameset,
+    Tag::Html,
 ];
 
 enum Bookmark<H> {
@@ -384,7 +90,7 @@ struct Builder<'s, S: TreeSink> {
     original_mode: Mode,
     template_modes: Vec<Mode>,
     open: OpenStack<S::Handle>,
-    afe: Vec<Fmt<S::Handle>>,
+    afe: Formatting<S::Handle>,
     head: Option<S::Handle>,
     form: Option<S::Handle>,
     scripting: bool,
@@ -514,7 +220,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             original_mode: Mode::Initial,
             template_modes: Vec::new(),
             open: OpenStack::new(),
-            afe: Vec::new(),
+            afe: Formatting::new(),
             head: None,
             form: None,
             scripting,
@@ -541,7 +247,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 h: (),
                 tag: ctx.tag,
                 ns: ctx.ns,
-                name: None,
+                name: UNNAMED,
                 html_ip: false,
             };
             return Some((
@@ -662,8 +368,8 @@ impl<'s, S: TreeSink> Builder<'s, S> {
         {
             return self.template_adjusted(index);
         }
-        let last_template = self.last_html(Tag::Template);
-        let last_table = self.last_html(Tag::Table);
+        let last_template = self.open.top_html(Tag::Template);
+        let last_table = self.open.top_html(Tag::Table);
         if let Some(template) = last_template
             && last_table.is_none_or(|table| template > table)
         {
@@ -697,11 +403,16 @@ impl<'s, S: TreeSink> Builder<'s, S> {
     }
 
     fn push(&mut self, h: S::Handle, ns: Ns, tag: Tag, name: &[u8], html_ip: bool) {
+        let name = if tag == Tag::Other {
+            self.open.intern(name)
+        } else {
+            UNNAMED
+        };
         self.open.push(Elem {
             h,
             tag,
             ns,
-            name: (tag == Tag::Other).then(|| name.into()),
+            name,
             html_ip,
         });
     }
@@ -778,53 +489,12 @@ impl<'s, S: TreeSink> Builder<'s, S> {
         self.sink.append(parent, node);
     }
 
-    fn last_html(&self, tag: Tag) -> Option<usize> {
-        if !self.open.has_html(tag) {
-            return None;
-        }
-        self.open.iter().rposition(|e| e.is(tag))
-    }
-
     fn in_scope(&self, tag: Tag, scope: Scope) -> bool {
-        if !self.open.has_html(tag) {
-            return false;
-        }
-        for e in self.open.iter().rev() {
-            if e.is(tag) {
-                return true;
-            }
-            if e.bounds(scope) {
-                return false;
-            }
-        }
-        false
+        self.open.in_scope(&[tag], scope)
     }
 
     fn any_in_scope(&self, tags: &[Tag], scope: Scope) -> bool {
-        if !tags.iter().any(|&tag| self.open.has_html(tag)) {
-            return false;
-        }
-        for e in self.open.iter().rev() {
-            if e.is_any(tags) {
-                return true;
-            }
-            if e.bounds(scope) {
-                return false;
-            }
-        }
-        false
-    }
-
-    fn element_in_scope(&self, h: S::Handle) -> bool {
-        for e in self.open.iter().rev() {
-            if e.h == h {
-                return true;
-            }
-            if e.bounds(Scope::Default) {
-                return false;
-            }
-        }
-        false
+        self.open.in_scope(tags, scope)
     }
 
     fn generate_implied_end_tags(&mut self, except: Option<Tag>) {
@@ -920,8 +590,8 @@ impl<'s, S: TreeSink> Builder<'s, S> {
         !self.template_modes.is_empty()
     }
 
-    fn remove_from_stack(&mut self, h: S::Handle) {
-        if let Some(i) = self.open.iter().rposition(|e| e.h == h) {
+    fn remove_from_stack(&mut self, h: S::Handle, tag: Tag) {
+        if let Some(i) = self.stack_position(h, tag) {
             self.open.remove(i);
         }
     }
@@ -930,35 +600,61 @@ impl<'s, S: TreeSink> Builder<'s, S> {
         self.afe.iter().rposition(|f| f.handle() == Some(h))
     }
 
+    fn listed_position(&self, position: usize, cursor: &mut usize) -> Option<usize> {
+        if !self.afe.lists(self.open.serial_at(position)) {
+            return None;
+        }
+        let h = self.open[position].h;
+        let found = self.afe[..*cursor]
+            .iter()
+            .rposition(|f| f.handle() == Some(h))
+            .or_else(|| self.afe_index(h));
+        if let Some(i) = found {
+            *cursor = i;
+        }
+        found
+    }
+
+    fn stack_position(&self, h: S::Handle, tag: Tag) -> Option<usize> {
+        let mut position = self.open.top_html(tag);
+        while let Some(i) = position {
+            if self.open[i].h == h {
+                return Some(i);
+            }
+            position = self.open.below_same(i);
+        }
+        None
+    }
+
     fn push_formatting(&mut self, h: S::Handle, token: &TagToken) {
         let tag = token.tag();
-        let mut matching = Vec::new();
-        for (i, f) in self.afe.iter().enumerate().rev() {
-            match f {
-                Fmt::Marker => break,
-                Fmt::El { tag: t, attrs, .. } if *t == tag && same_attrs(attrs, token.attrs()) => {
-                    matching.push(i);
+        let (candidates, key) = self.afe.identical_candidates(tag, token.attrs());
+        if candidates >= 3 {
+            let mut matching = Vec::new();
+            for (i, f) in self.afe.iter().enumerate().rev() {
+                match f {
+                    Fmt::Marker => break,
+                    Fmt::El { tag: t, attrs, .. }
+                        if *t == tag && same_attrs(attrs, token.attrs()) =>
+                    {
+                        matching.push(i);
+                        if matching.len() == candidates {
+                            break;
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
+            }
+            if matching.len() >= 3 {
+                self.afe.remove(matching[matching.len() - 1]);
             }
         }
-        if matching.len() >= 3 {
-            self.afe.remove(matching[matching.len() - 1]);
-        }
-        self.afe.push(Fmt::El {
-            h,
-            serial: self.open.top_serial(),
-            tag,
-            attrs: token.attrs().to_vec(),
-        });
+        let serial = self.open.top_serial();
+        self.afe.push(h, serial, tag, token.attrs().to_vec(), key);
     }
 
     fn clear_afe_to_marker(&mut self) {
-        while let Some(f) = self.afe.pop() {
-            if let Fmt::Marker = f {
-                return;
-            }
-        }
+        self.afe.clear_to_marker();
     }
 
     fn reconstruct_formatting(&mut self) {
@@ -990,12 +686,8 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             let h = self.create_element(Ns::Html, tag, name, &attrs, NO_POSITION);
             self.insert_at(place, h);
             self.push(h, Ns::Html, tag, name, false);
-            self.afe[i] = Fmt::El {
-                h,
-                serial: self.open.top_serial(),
-                tag,
-                attrs,
-            };
+            let serial = self.open.top_serial();
+            self.afe.rehandle(i, h, serial);
             i += 1;
         }
     }
@@ -1003,12 +695,15 @@ impl<'s, S: TreeSink> Builder<'s, S> {
     fn adoption_agency(&mut self, subject: Tag) -> bool {
         if let Some(cur) = self.open.last()
             && cur.is(subject)
-            && self.afe_index(cur.h).is_none()
+            && !self.afe.lists(self.open.top_serial())
         {
             self.open.pop();
             return true;
         }
         for _ in 0..8 {
+            if self.afe.count_tag(subject) == 0 {
+                return false;
+            }
             let mut found = None;
             for (i, f) in self.afe.iter().enumerate().rev() {
                 match f {
@@ -1023,11 +718,14 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             let Some((fe_afe, fe)) = found else {
                 return false;
             };
-            let Some(fe_index) = self.open.iter().rposition(|e| e.h == fe) else {
+            let Some(fe_index) = self.stack_position(fe, subject) else {
                 self.afe.remove(fe_afe);
                 return true;
             };
-            if !self.element_in_scope(fe) {
+            if !self
+                .open
+                .clear_of_boundaries_above(fe_index, Scope::Default)
+            {
                 return true;
             }
             let furthest = (fe_index + 1..self.open.len()).find(|&i| self.open[i].is_special());
@@ -1042,6 +740,9 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             let mut node_index = fb_index;
             let mut last_node = fb;
             let mut inner = 0;
+            let mut cursor = self.afe.len();
+            let mut unstacked = Vec::new();
+            let mut unlisted = Vec::new();
             loop {
                 inner += 1;
                 node_index -= 1;
@@ -1049,15 +750,15 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 if node == fe {
                     break;
                 }
-                let mut node_afe = self.afe_index(node);
+                let mut node_afe = self.listed_position(node_index, &mut cursor);
                 if inner > 3
                     && let Some(i) = node_afe
                 {
-                    self.afe.remove(i);
+                    unlisted.push(i);
                     node_afe = None;
                 }
                 let Some(node_afe) = node_afe else {
-                    self.open.remove(node_index);
+                    unstacked.push(node_index);
                     continue;
                 };
                 let (tag, attrs) = match &self.afe[node_afe] {
@@ -1067,12 +768,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 let name = tag.name().map_or(&b""[..], |n| n.to_bytes());
                 let new = self.create_element(Ns::Html, tag, name, &attrs, NO_POSITION);
                 let serial = self.open.replace_handle(node_index, new);
-                self.afe[node_afe] = Fmt::El {
-                    h: new,
-                    serial,
-                    tag,
-                    attrs,
-                };
+                self.afe.rehandle(node_afe, new, serial);
                 if last_node == fb {
                     bookmark = Bookmark::InsertAfter(new);
                 }
@@ -1080,6 +776,10 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 self.sink.append(new, last_node);
                 last_node = new;
             }
+            unstacked.reverse();
+            self.open.remove_all(&unstacked);
+            unlisted.sort_unstable();
+            self.afe.remove_all(&unlisted);
             self.sink.remove(last_node);
             let place = self.appropriate_place(Some(common_ancestor));
             self.insert_at(place, last_node);
@@ -1094,7 +794,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             let new = self.create_element(Ns::Html, tag, name, &attrs, NO_POSITION);
             self.sink.reparent_children(fb, new);
             self.sink.append(fb, new);
-            self.remove_from_stack(fe);
+            self.remove_from_stack(fe, subject);
             let fb_now = self
                 .open
                 .iter()
@@ -1106,20 +806,30 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                     h: new,
                     tag,
                     ns: Ns::Html,
-                    name: None,
+                    name: UNNAMED,
                     html_ip: false,
                 },
             );
-            let entry = Fmt::El {
-                h: new,
-                serial,
-                tag,
-                attrs,
-            };
             match bookmark {
-                Bookmark::Replace(_) => self.afe[fe_afe] = entry,
+                Bookmark::Replace(_) => self.afe.rehandle(fe_afe, new, serial),
                 Bookmark::InsertAfter(after) => {
-                    self.afe.remove(fe_afe);
+                    let entry = match self.afe.remove(fe_afe) {
+                        Fmt::El {
+                            tag,
+                            attrs,
+                            key,
+                            level,
+                            ..
+                        } => Fmt::El {
+                            h: new,
+                            serial,
+                            tag,
+                            attrs,
+                            key,
+                            level,
+                        },
+                        Fmt::Marker => Fmt::Marker,
+                    };
                     let at = self.afe_index(after).map_or(self.afe.len(), |i| i + 1);
                     self.afe.insert(at, entry);
                 }
@@ -1128,59 +838,52 @@ impl<'s, S: TreeSink> Builder<'s, S> {
         true
     }
 
-    fn body_sets_mode(&self) -> bool {
-        self.open.has_html(Tag::Body)
-            && self.open.html_count(Tag::Html) == 1
-            && self.open.first().is_some_and(|e| e.is(Tag::Html))
-            && !RESET_MODE_TAGS.iter().any(|&tag| self.open.has_html(tag))
+    fn mode_for(&self, tag: Tag, last: bool) -> Option<Mode> {
+        match tag {
+            Tag::Td | Tag::Th if !last => Some(Mode::InCell),
+            Tag::Tr => Some(Mode::InRow),
+            Tag::Tbody | Tag::Thead | Tag::Tfoot => Some(Mode::InTableBody),
+            Tag::Caption => Some(Mode::InCaption),
+            Tag::Colgroup => Some(Mode::InColumnGroup),
+            Tag::Table => Some(Mode::InTable),
+            Tag::Template => Some(*self.template_modes.last().unwrap_or(&Mode::InBody)),
+            Tag::Head if !last => Some(Mode::InHead),
+            Tag::Body => Some(Mode::InBody),
+            Tag::Frameset => Some(Mode::InFrameset),
+            Tag::Html => Some(if self.head.is_none() {
+                Mode::BeforeHead
+            } else {
+                Mode::AfterHead
+            }),
+            _ => None,
+        }
     }
 
     fn reset_insertion_mode(&mut self) {
-        if self.body_sets_mode() {
-            self.mode = Mode::InBody;
+        let topmost = RESET_MODE_TAGS
+            .iter()
+            .filter_map(|&tag| self.open.top_html(tag))
+            .filter(|&i| i > 0)
+            .max();
+        if let Some(i) = topmost
+            && let Some(mode) = self.mode_for(self.open[i].tag, false)
+        {
+            self.mode = mode;
             return;
         }
-        for i in (0..self.open.len()).rev() {
-            let last = i == 0;
-            let (tag, ns) = match (&self.context, last) {
-                (Some(ctx), true) => (ctx.tag, ctx.ns),
-                _ => (self.open[i].tag, self.open[i].ns),
-            };
-            if ns != Ns::Html {
-                if last {
-                    self.mode = Mode::InBody;
-                    return;
-                }
-                continue;
-            }
-            let mode = match tag {
-                Tag::Td | Tag::Th if !last => Some(Mode::InCell),
-                Tag::Tr => Some(Mode::InRow),
-                Tag::Tbody | Tag::Thead | Tag::Tfoot => Some(Mode::InTableBody),
-                Tag::Caption => Some(Mode::InCaption),
-                Tag::Colgroup => Some(Mode::InColumnGroup),
-                Tag::Table => Some(Mode::InTable),
-                Tag::Template => Some(*self.template_modes.last().unwrap_or(&Mode::InBody)),
-                Tag::Head if !last => Some(Mode::InHead),
-                Tag::Body => Some(Mode::InBody),
-                Tag::Frameset => Some(Mode::InFrameset),
-                Tag::Html => Some(if self.head.is_none() {
-                    Mode::BeforeHead
-                } else {
-                    Mode::AfterHead
-                }),
-                _ => None,
-            };
-            if let Some(mode) = mode {
-                self.mode = mode;
-                return;
-            }
-            if last {
-                self.mode = Mode::InBody;
-                return;
-            }
-        }
-        self.mode = Mode::InBody;
+        let Some(first) = self.open.first() else {
+            self.mode = Mode::InBody;
+            return;
+        };
+        let (tag, ns) = match &self.context {
+            Some(ctx) => (ctx.tag, ctx.ns),
+            None => (first.tag, first.ns),
+        };
+        self.mode = if ns == Ns::Html {
+            self.mode_for(tag, true).unwrap_or(Mode::InBody)
+        } else {
+            Mode::InBody
+        };
     }
 
     fn generic_text(&mut self, token: &TagToken, state: State) {
@@ -1340,7 +1043,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 }
                 Tag::Template => {
                     self.insert_html(t);
-                    self.afe.push(Fmt::Marker);
+                    self.afe.push_marker();
                     self.frameset_ok = false;
                     self.mode = Mode::InTemplate;
                     self.template_modes.push(Mode::InTemplate);
@@ -1464,11 +1167,11 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                         h: head,
                         tag: Tag::Head,
                         ns: Ns::Html,
-                        name: None,
+                        name: UNNAMED,
                         html_ip: false,
                     });
                     let step = self.in_head(tok);
-                    self.remove_from_stack(head);
+                    self.remove_from_stack(head, Tag::Head);
                     return step;
                 }
                 Tag::Head => return Step::Done,
@@ -1650,24 +1353,33 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             }
             Tag::A => {
                 let mut existing = None;
-                for f in self.afe.iter().rev() {
-                    match f {
-                        Fmt::Marker => break,
-                        Fmt::El { tag: Tag::A, h, .. } => {
-                            existing = Some(*h);
-                            break;
+                if self.afe.count_tag(Tag::A) > 0 {
+                    for f in self.afe.iter().rev() {
+                        match f {
+                            Fmt::Marker => break,
+                            Fmt::El {
+                                tag: Tag::A,
+                                h,
+                                serial,
+                                ..
+                            } => {
+                                existing = Some((*h, *serial));
+                                break;
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
-                if let Some(a) = existing {
+                if let Some((a, serial)) = existing {
                     if !self.adoption_agency(Tag::A) {
                         self.any_other_end_tag(Tag::A, b"a");
                     }
-                    if let Some(i) = self.afe_index(a) {
+                    if self.afe.lists(serial)
+                        && let Some(i) = self.afe_index(a)
+                    {
                         self.afe.remove(i);
                     }
-                    self.remove_from_stack(a);
+                    self.remove_from_stack(a, Tag::A);
                 }
                 self.reconstruct_formatting();
                 let h = self.insert_html(t);
@@ -1703,7 +1415,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             Tag::Applet | Tag::Marquee | Tag::Object => {
                 self.reconstruct_formatting();
                 self.insert_html(t);
-                self.afe.push(Fmt::Marker);
+                self.afe.push_marker();
                 self.frameset_ok = false;
             }
             Tag::Table => {
@@ -1852,15 +1564,8 @@ impl<'s, S: TreeSink> Builder<'s, S> {
     }
 
     fn any_other_end_tag(&mut self, tag: Tag, name: &[u8]) {
-        for i in (0..self.open.len()).rev() {
-            let e = &self.open[i];
-            if e.ns == Ns::Html && e.name_matches(tag, name) {
-                self.open.truncate(i);
-                return;
-            }
-            if e.is_special() {
-                return;
-            }
+        if let Some(i) = self.open.html_end_target(tag, name) {
+            self.open.truncate(i);
         }
     }
 
@@ -1924,10 +1629,11 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 } else {
                     let node = self.form.take();
                     if let Some(node) = node
-                        && self.element_in_scope(node)
+                        && let Some(i) = self.stack_position(node, Tag::Form)
+                        && self.open.clear_of_boundaries_above(i, Scope::Default)
                     {
                         self.generate_implied_end_tags(None);
-                        self.remove_from_stack(node);
+                        self.remove_from_stack(node, Tag::Form);
                     }
                 }
             }
@@ -2046,7 +1752,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             Tok::Start(t) => match t.tag() {
                 Tag::Caption => {
                     self.clear_to_context(&[Tag::Table]);
-                    self.afe.push(Fmt::Marker);
+                    self.afe.push_marker();
                     self.insert_html(t);
                     self.mode = Mode::InCaption;
                     Step::Done
@@ -2344,7 +2050,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 self.clear_to_context(&[Tag::Tr]);
                 self.insert_html(t);
                 self.mode = Mode::InCell;
-                self.afe.push(Fmt::Marker);
+                self.afe.push_marker();
                 Step::Done
             }
             Tok::End(t) if t.tag() == Tag::Tr => {
@@ -2696,22 +2402,14 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 Step::Done
             }
             Tok::End(t) => {
-                let tag = t.tag();
-                let mut i = self.open.len() - 1;
-                loop {
-                    if i == 0 {
-                        return Step::Done;
-                    }
-                    let e = &self.open[i];
-                    if e.name_matches(tag, &t.name) {
-                        self.open.truncate(i);
-                        return Step::Done;
-                    }
-                    i -= 1;
-                    if self.open[i].ns == Ns::Html {
-                        return self.by_mode(tok);
-                    }
+                if self.open.len() <= 1 {
+                    return Step::Done;
                 }
+                if let Some(i) = self.open.foreign_end_target(t.tag(), &t.name) {
+                    self.open.truncate(i);
+                    return Step::Done;
+                }
+                self.by_mode(tok)
             }
             Tok::Eof => self.by_mode(tok),
         }

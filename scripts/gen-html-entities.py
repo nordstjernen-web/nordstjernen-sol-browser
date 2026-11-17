@@ -6,8 +6,9 @@ Usage: gen-html-entities.py [ENTITIES_JSON] [OUT]
 ENTITIES_JSON defaults to https://html.spec.whatwg.org/entities.json, fetched
 over the network; pass a local copy to generate offline. The output is the
 table of named character references the src/html5_rs tokenizer matches against,
-sorted by name so it can be binary searched, and is run through rustfmt when
-it is on the PATH.
+sorted by name so it can be binary searched, followed by the index of where the
+names starting with each byte begin; it is run through rustfmt when it is on
+the PATH.
 """
 import json
 import os
@@ -58,6 +59,14 @@ def main():
         lines.append('    (b"%s", "%s"),' % (name.decode('ascii'),
                                              rust_str(codepoints)))
     lines.append('];')
+    starts = [0] * 129
+    for name, _ in rows:
+        starts[name[0] + 1] += 1
+    for i in range(1, 129):
+        starts[i] += starts[i - 1]
+    lines.append('')
+    lines.append('pub static BY_FIRST_BYTE: [u16; 129] = [%s];' %
+                 ', '.join(str(n) for n in starts))
     with open(OUT, 'w', encoding='utf-8', newline='\n') as f:
         f.write('\n'.join(lines) + '\n')
     rustfmt = shutil.which('rustfmt')
