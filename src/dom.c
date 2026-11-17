@@ -2556,37 +2556,49 @@ ns_select_first_selected_option(const ns_node *select)
     return found;
 }
 
+ns_node *
+ns_option_select(const ns_node *option)
+{
+    if (!ns_node_is_element_named(option, "option")) return NULL;
+    ns_node *p = option->parent;
+    if (ns_node_is_element_named(p, "optgroup")) p = p->parent;
+    return ns_node_is_element_named(p, "select") ? p : NULL;
+}
+
+gboolean
+ns_select_picks_first_option(const ns_node *select)
+{
+    if (ns_element_get_attr(select, "data-nd-noselect")) return FALSE;
+    if (ns_element_get_attr(select, "multiple")) return FALSE;
+    const char *size = ns_element_get_attr(select, "size");
+    if (size) {
+        char *end = NULL;
+        long v = strtol(size, &end, 10);
+        if (end != size && v > 1) return FALSE;
+    }
+    return TRUE;
+}
+
+gboolean
+ns_option_selectable(const ns_node *option)
+{
+    if (ns_element_get_attr(option, "disabled")) return FALSE;
+    const ns_node *p = option->parent;
+    return !ns_node_is_element_named(p, "optgroup") ||
+           !ns_element_get_attr(p, "disabled");
+}
+
 const ns_node *
 ns_select_chosen_option(const ns_node *select)
 {
     if (!select) return NULL;
     const ns_node *selected = ns_select_first_selected_option(select);
     if (selected) return selected;
-    if (ns_element_get_attr(select, "data-nd-noselect")) return NULL;
-    if (ns_element_get_attr(select, "multiple")) return NULL;
-    const char *size = ns_element_get_attr(select, "size");
-    if (size) {
-        char *end = NULL;
-        long v = strtol(size, &end, 10);
-        if (end != size && v > 1) return NULL;
-    }
-    const ns_node *first = NULL;
-    for (const ns_node *c = select->first_child; c && !first; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "optgroup")) {
-            if (ns_element_get_attr(c, "disabled")) continue;
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option") &&
-                    !ns_element_get_attr(cc, "disabled")) {
-                    first = cc;
-                    break;
-                }
-            }
-        } else if (ns_node_is_element_named(c, "option") &&
-                   !ns_element_get_attr(c, "disabled")) {
-            first = c;
-        }
-    }
-    return first;
+    if (!ns_select_picks_first_option(select)) return NULL;
+    for (const ns_node *o = ns_select_next_option(select, NULL); o;
+         o = ns_select_next_option(select, o))
+        if (ns_option_selectable(o)) return o;
+    return NULL;
 }
 
 const ns_node *

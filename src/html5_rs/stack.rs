@@ -319,16 +319,6 @@ impl<H> OpenStack<H> {
         Some(elem)
     }
 
-    pub(crate) fn truncate(&mut self, len: usize) {
-        while self.elems.len() > len {
-            self.pop();
-        }
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.truncate(0);
-    }
-
     pub(crate) fn remove_all(&mut self, ascending: &[usize]) {
         let Some(&first) = ascending.first() else {
             return;

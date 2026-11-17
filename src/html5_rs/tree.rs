@@ -455,7 +455,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
         adjust_foreign_attrs(token, ns);
         self.insert_element(token, ns);
         if token.self_closing {
-            self.open.pop();
+            self.pop_open();
         }
     }
 
@@ -514,7 +514,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             if !implied || except.is_some_and(|t| e.is(t)) {
                 return;
             }
-            self.open.pop();
+            self.pop_open();
         }
     }
 
@@ -542,12 +542,39 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             ]) {
                 return;
             }
-            self.open.pop();
+            self.pop_open();
+        }
+    }
+
+    fn pop_open(&mut self) -> Option<Elem<S::Handle>> {
+        let elem = self.open.pop()?;
+        self.finish_children(&elem);
+        Some(elem)
+    }
+
+    fn truncate_open(&mut self, len: usize) {
+        while self.open.len() > len {
+            self.pop_open();
+        }
+    }
+
+    fn remove_open(&mut self, position: usize) {
+        let finished = self.open[position].h;
+        let is_option = self.open[position].is(Tag::Option);
+        self.open.remove(position);
+        if is_option {
+            self.sink.option_children_parsed(finished);
+        }
+    }
+
+    fn finish_children(&mut self, elem: &Elem<S::Handle>) {
+        if elem.is(Tag::Option) {
+            self.sink.option_children_parsed(elem.h);
         }
     }
 
     fn pop_until(&mut self, tag: Tag) {
-        while let Some(e) = self.open.pop() {
+        while let Some(e) = self.pop_open() {
             if e.is(tag) {
                 return;
             }
@@ -555,7 +582,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
     }
 
     fn pop_until_any(&mut self, tags: &[Tag]) {
-        while let Some(e) = self.open.pop() {
+        while let Some(e) = self.pop_open() {
             if e.is_any(tags) {
                 return;
             }
@@ -567,7 +594,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             if e.is_any(tags) || e.is(Tag::Template) || e.is(Tag::Html) {
                 return;
             }
-            self.open.pop();
+            self.pop_open();
         }
     }
 
@@ -592,7 +619,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
 
     fn remove_from_stack(&mut self, h: S::Handle, tag: Tag) {
         if let Some(i) = self.stack_position(h, tag) {
-            self.open.remove(i);
+            self.remove_open(i);
         }
     }
 
@@ -710,7 +737,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             && cur.is(subject)
             && !self.afe.lists(self.open.top_serial())
         {
-            self.open.pop();
+            self.pop_open();
             return true;
         }
         for _ in 0..8 {
@@ -743,7 +770,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             }
             let furthest = (fe_index + 1..self.open.len()).find(|&i| self.open[i].is_special());
             let Some(fb_index) = furthest else {
-                self.open.truncate(fe_index);
+                self.truncate_open(fe_index);
                 self.afe.remove(fe_afe);
                 return true;
             };
@@ -772,6 +799,9 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 }
                 let Some(node_afe) = node_afe else {
                     unstacked.push(node_index);
+                    if self.open[node_index].is(Tag::Option) {
+                        self.sink.option_children_parsed(node);
+                    }
                     continue;
                 };
                 let Some((_, new)) = self.recreate_listed(node_afe) else {
@@ -901,7 +931,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
     }
 
     fn stop(&mut self) -> Step {
-        self.open.clear();
+        self.truncate_open(0);
         Step::Done
     }
 
@@ -1024,7 +1054,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 Tag::Html => return self.in_body(tok),
                 Tag::Base | Tag::Basefont | Tag::Bgsound | Tag::Link | Tag::Meta => {
                     self.insert_html(t);
-                    self.open.pop();
+                    self.pop_open();
                     return Step::Done;
                 }
                 Tag::Title => {
@@ -1061,7 +1091,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             },
             Tok::End(t) => match t.tag() {
                 Tag::Head => {
-                    self.open.pop();
+                    self.pop_open();
                     self.mode = Mode::AfterHead;
                     return Step::Done;
                 }
@@ -1081,7 +1111,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             },
             _ => {}
         }
-        self.open.pop();
+        self.pop_open();
         self.mode = Mode::AfterHead;
         Step::Again
     }
@@ -1091,7 +1121,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             Tok::Doctype(_) => return Step::Done,
             Tok::Start(t) if t.tag() == Tag::Html => return self.in_body(tok),
             Tok::End(t) if t.tag() == Tag::Noscript => {
-                self.open.pop();
+                self.pop_open();
                 self.mode = Mode::InHead;
                 return Step::Done;
             }
@@ -1124,7 +1154,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             Tok::End(t) if t.tag() != Tag::Br => return Step::Done,
             _ => {}
         }
-        self.open.pop();
+        self.pop_open();
         self.mode = Mode::InHead;
         Step::Again
     }
@@ -1266,7 +1296,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 if self.open.len() > 1 && self.open[1].is(Tag::Body) && self.frameset_ok {
                     let body = self.open[1].h;
                     self.sink.remove(body);
-                    self.open.truncate(1);
+                    self.truncate_open(1);
                     self.insert_html(t);
                     self.mode = Mode::InFrameset;
                 }
@@ -1302,7 +1332,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             Tag::H1 | Tag::H2 | Tag::H3 | Tag::H4 | Tag::H5 | Tag::H6 => {
                 self.close_p_in_button_scope();
                 if self.open.last().is_some_and(|e| e.is_any(HEADINGS)) {
-                    self.open.pop();
+                    self.pop_open();
                 }
                 self.insert_html(t);
             }
@@ -1436,7 +1466,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             Tag::Area | Tag::Br | Tag::Embed | Tag::Img | Tag::Keygen | Tag::Wbr => {
                 self.reconstruct_formatting();
                 self.insert_html(t);
-                self.open.pop();
+                self.pop_open();
                 self.frameset_ok = false;
             }
             Tag::Input => {
@@ -1448,7 +1478,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 }
                 self.reconstruct_formatting();
                 self.insert_html(t);
-                self.open.pop();
+                self.pop_open();
                 if !t
                     .attr(b"type")
                     .is_some_and(|v| v.eq_ignore_ascii_case(b"hidden"))
@@ -1458,7 +1488,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             }
             Tag::Param | Tag::Source | Tag::Track => {
                 self.insert_html(t);
-                self.open.pop();
+                self.pop_open();
             }
             Tag::Hr => {
                 self.close_p_in_button_scope();
@@ -1466,7 +1496,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                     self.generate_implied_end_tags(None);
                 }
                 self.insert_html(t);
-                self.open.pop();
+                self.pop_open();
                 self.frameset_ok = false;
             }
             Tag::Image => {
@@ -1511,7 +1541,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 if self.in_scope(Tag::Select, Scope::Default) {
                     self.generate_implied_end_tags(Some(Tag::Optgroup));
                 } else if self.current_is(Tag::Option) {
-                    self.open.pop();
+                    self.pop_open();
                 }
                 self.reconstruct_formatting();
                 self.insert_html(t);
@@ -1520,7 +1550,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 if self.in_scope(Tag::Select, Scope::Default) {
                     self.generate_implied_end_tags(None);
                 } else if self.current_is(Tag::Option) {
-                    self.open.pop();
+                    self.pop_open();
                 }
                 self.reconstruct_formatting();
                 self.insert_html(t);
@@ -1572,7 +1602,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
 
     fn any_other_end_tag(&mut self, tag: Tag, name: &[u8]) {
         if let Some(i) = self.open.html_end_target(tag, name) {
-            self.open.truncate(i);
+            self.truncate_open(i);
         }
     }
 
@@ -1696,7 +1726,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             Tag::Br => {
                 self.reconstruct_formatting();
                 self.insert_html_tag(Tag::Br);
-                self.open.pop();
+                self.pop_open();
                 self.frameset_ok = false;
             }
             _ => self.any_other_end_tag(tag, &t.name),
@@ -1712,12 +1742,12 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 Step::Done
             }
             Tok::Eof => {
-                self.open.pop();
+                self.pop_open();
                 self.mode = self.original_mode;
                 Step::Again
             }
             Tok::End(_) => {
-                self.open.pop();
+                self.pop_open();
                 self.mode = self.original_mode;
                 Step::Done
             }
@@ -1802,7 +1832,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                         .is_some_and(|v| v.eq_ignore_ascii_case(b"hidden")) =>
                 {
                     self.insert_html(t);
-                    self.open.pop();
+                    self.pop_open();
                     Step::Done
                 }
                 Tag::Form => {
@@ -1813,7 +1843,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                     if !self.parsing_template_contents() {
                         self.form = Some(h);
                     }
-                    self.open.pop();
+                    self.pop_open();
                     Step::Done
                 }
                 _ => self.table_anything_else(tok),
@@ -1951,7 +1981,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 Tag::Html => return self.in_body(tok),
                 Tag::Col => {
                     self.insert_html(t);
-                    self.open.pop();
+                    self.pop_open();
                     return Step::Done;
                 }
                 Tag::Template => return self.in_head(tok),
@@ -1960,7 +1990,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             Tok::End(t) => match t.tag() {
                 Tag::Colgroup => {
                     if self.current_is(Tag::Colgroup) {
-                        self.open.pop();
+                        self.pop_open();
                         self.mode = Mode::InTable;
                     }
                     return Step::Done;
@@ -1974,7 +2004,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
         if !self.current_is(Tag::Colgroup) {
             return Step::Done;
         }
-        self.open.pop();
+        self.pop_open();
         self.mode = Mode::InTable;
         Step::Again
     }
@@ -1997,7 +2027,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             Tok::End(t) if SECTIONS.contains(&t.tag()) => {
                 if self.in_scope(t.tag(), Scope::Table) {
                     self.clear_to_context(SECTIONS);
-                    self.open.pop();
+                    self.pop_open();
                     self.mode = Mode::InTable;
                 }
                 Step::Done
@@ -2036,7 +2066,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             return Step::Done;
         }
         self.clear_to_context(SECTIONS);
-        self.open.pop();
+        self.pop_open();
         self.mode = Mode::InTable;
         Step::Again
     }
@@ -2046,7 +2076,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             return false;
         }
         self.clear_to_context(&[Tag::Tr]);
-        self.open.pop();
+        self.pop_open();
         self.mode = Mode::InTableBody;
         true
     }
@@ -2275,14 +2305,14 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 }
                 Tag::Frame => {
                     self.insert_html(t);
-                    self.open.pop();
+                    self.pop_open();
                 }
                 Tag::Noframes => return self.in_head(tok),
                 _ => {}
             },
             Tok::End(t) if t.tag() == Tag::Frameset => {
                 if self.open.len() > 1 {
-                    self.open.pop();
+                    self.pop_open();
                     if self.context.is_none() && !self.current_is(Tag::Frameset) {
                         self.mode = Mode::AfterFrameset;
                     }
@@ -2413,7 +2443,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                     return Step::Done;
                 }
                 if let Some(i) = self.open.foreign_end_target(t.tag(), &t.name) {
-                    self.open.truncate(i);
+                    self.truncate_open(i);
                     return Step::Done;
                 }
                 self.by_mode(tok)
@@ -2427,7 +2457,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             if e.ns == Ns::Html || e.is_mathml_text_ip() || e.is_html_ip() {
                 break;
             }
-            self.open.pop();
+            self.pop_open();
         }
         self.by_mode(tok)
     }

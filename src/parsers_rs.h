@@ -59,6 +59,10 @@ void     ns_h5_remove(ns_node *node);
 void     ns_h5_reparent_children(ns_h5_sink *sink, ns_node *from, ns_node *to);
 ns_node *ns_h5_template_contents(ns_h5_sink *sink, ns_node *template_element);
 void     ns_h5_discard(ns_h5_sink *sink, ns_node *node);
+ns_node *ns_h5_option_selectedcontent(ns_h5_sink *sink, ns_node *option);
+ns_node *ns_h5_first_child(ns_node *node);
+void     ns_h5_copy_option(ns_h5_sink *sink, ns_node *option,
+                           ns_node *selectedcontent);
 
 G_END_DECLS
 

@@ -33,7 +33,14 @@ struct ns_h5_sink {
     ns_node    *merge_element;
     GHashTable *merge_names;
     GHashTable *template_hosts;
+    ns_node    *fresh_selectedcontent;
+    GHashTable *selects;
 };
+
+typedef struct {
+    ns_node       *selectedcontent;
+    const ns_node *chosen;
+} ns_h5_select;
 
 static ns_h5_sink *
 ns_h5_sink_new(void)
@@ -49,8 +56,10 @@ ns_h5_sink_finish(ns_h5_sink *sink)
     sink->attr_element = NULL;
     sink->attr_tail = NULL;
     sink->merge_element = NULL;
+    sink->fresh_selectedcontent = NULL;
     g_clear_pointer(&sink->merge_names, g_hash_table_destroy);
     g_clear_pointer(&sink->template_hosts, g_hash_table_destroy);
+    g_clear_pointer(&sink->selects, g_hash_table_destroy);
 }
 
 static void
@@ -98,6 +107,8 @@ ns_h5_element(ns_h5_sink *sink, const char *name, size_t len, int borrowed,
         el->src_line = line;
         el->src_col = column;
     }
+    if (len == 15 && memcmp(name, "selectedcontent", 15) == 0)
+        sink->fresh_selectedcontent = el;
     return el;
 }
 
@@ -239,11 +250,131 @@ ns_h5_can_adopt(const ns_h5_sink *sink, const ns_node *parent,
     return !ns_h5_is_inclusive_ancestor(sink, child, parent);
 }
 
+static gboolean
+ns_h5_named(const ns_node *n, const char *name)
+{
+    return n->kind == NS_NODE_ELEMENT && n->name && n->name[0] == name[0] &&
+           strcmp(n->name, name) == 0;
+}
+
+static ns_node *
+ns_h5_selectedcontent_select(const ns_h5_sink *sink,
+                             const ns_node *selectedcontent)
+{
+    ns_node *select = NULL;
+    int depth = 0;
+    for (ns_node *p = selectedcontent->parent;
+         p && depth++ < NS_DOM_MAX_DEPTH; p = p->parent) {
+        if (ns_h5_named(p, "select")) {
+            if (select) return NULL;
+            if (sink->selects && g_hash_table_contains(sink->selects, p))
+                return NULL;
+            select = p;
+        } else if (ns_h5_named(p, "option") ||
+                   ns_h5_named(p, "selectedcontent")) {
+            return NULL;
+        }
+    }
+    return select;
+}
+
+static gboolean
+ns_selectedcontent_omits(const ns_node *n)
+{
+    static const char *const omitted[] = {
+        "script", "frame", "iframe", "embed", "object",
+    };
+    if (n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
+    for (size_t i = 0; i < G_N_ELEMENTS(omitted); i++)
+        if (strcmp(n->name, omitted[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static void
+ns_selectedcontent_prune(ns_node *copy)
+{
+    GPtrArray *roots = g_ptr_array_new();
+    g_ptr_array_add(roots, copy);
+    while (roots->len) {
+        ns_node *root = g_ptr_array_steal_index_fast(roots, roots->len - 1);
+        if (root->tpl_content) g_ptr_array_add(roots, root->tpl_content);
+        ns_node *n = root->first_child;
+        while (n) {
+            if (ns_selectedcontent_omits(n)) {
+                ns_node *next = ns_node_next_in_subtree(n, root, FALSE);
+                ns_node_remove(n);
+                ns_node_free(n);
+                n = next;
+                continue;
+            }
+            if (n->tpl_content) g_ptr_array_add(roots, n->tpl_content);
+            n = ns_node_next_in_subtree(n, root, TRUE);
+        }
+    }
+    g_ptr_array_free(roots, TRUE);
+}
+
+void
+ns_h5_copy_option(ns_h5_sink *sink, ns_node *option, ns_node *selectedcontent)
+{
+    for (const ns_node *c = option->first_child; c; c = c->next_sibling) {
+        if (ns_selectedcontent_omits(c)) continue;
+        ns_node *copy = ns_node_clone(c, TRUE);
+        if (!copy) continue;
+        ns_selectedcontent_prune(copy);
+        if (copy->kind == NS_NODE_TEXT)
+            ns_node_set_text_borrow(copy, ns_h5_arena_copy(sink, copy->text,
+                                                           copy->text_len));
+        ns_node_append_child(selectedcontent, copy);
+    }
+}
+
+static void
+ns_h5_selectedcontent_inserted(ns_h5_sink *sink, ns_node *selectedcontent)
+{
+    sink->fresh_selectedcontent = NULL;
+    if (selectedcontent->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) return;
+    ns_node *select = ns_h5_selectedcontent_select(sink, selectedcontent);
+    if (!select || ns_element_get_attr(select, "multiple")) return;
+    if (!sink->selects)
+        sink->selects = g_hash_table_new_full(NULL, NULL, NULL, g_free);
+    ns_h5_select *state = g_new(ns_h5_select, 1);
+    state->selectedcontent = selectedcontent;
+    state->chosen = ns_select_chosen_option(select);
+    g_hash_table_insert(sink->selects, select, state);
+    if (state->chosen)
+        ns_h5_copy_option(sink, (ns_node *)state->chosen, selectedcontent);
+}
+
+ns_node *
+ns_h5_option_selectedcontent(ns_h5_sink *sink, ns_node *option)
+{
+    if (!sink->selects) return NULL;
+    ns_node *select = ns_option_select(option);
+    ns_h5_select *state =
+        select ? g_hash_table_lookup(sink->selects, select) : NULL;
+    if (!state) return NULL;
+    gboolean takes_choice =
+        ns_element_get_attr(option, "selected") ||
+        (!state->chosen && ns_select_picks_first_option(select) &&
+         ns_option_selectable(option));
+    if (takes_choice) state->chosen = option;
+    return state->chosen == option ? state->selectedcontent : NULL;
+}
+
+ns_node *
+ns_h5_first_child(ns_node *node)
+{
+    return node->first_child;
+}
+
 void
 ns_h5_append(ns_h5_sink *sink, ns_node *parent, ns_node *child)
 {
     if (!ns_h5_can_adopt(sink, parent, child)) return;
     ns_node_append_child(parent, child);
+    if (child == sink->fresh_selectedcontent)
+        ns_h5_selectedcontent_inserted(sink, child);
 }
 
 void
@@ -262,6 +393,8 @@ ns_h5_insert_before(ns_h5_sink *sink, ns_node *sibling, ns_node *child)
         parent->first_child = child;
     sibling->prev_sibling = child;
     ns_dom_tree_changed();
+    if (child == sink->fresh_selectedcontent)
+        ns_h5_selectedcontent_inserted(sink, child);
 }
 
 static gsize
