@@ -3,6 +3,10 @@ Changelog:
 
 1.0.50-dev:
 ======
+* `float: inline-start` / `inline-end` and `clear: inline-start` /
+  `inline-end` are supported: they resolve to left or right from the
+  containing block's `direction`. They were rejected before, so a float
+  written that way did not float at all.
 * A `position: sticky` box that is a direct child of its scroll container
   stays stuck for the whole scroll range. Its containing block was taken
   as the scroller's visible box rather than its scrollable content, so a

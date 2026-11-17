@@ -14909,10 +14909,11 @@ parse_value_for(ns_css_prop prop, const char *text)
         v = parse_keyword_choice(t, "nowrap wrap wrap-reverse");
         break;
     case NS_CSS_FLOAT:
-        v = parse_keyword_choice(t, "none left right");
+        v = parse_keyword_choice(t, "none left right inline-start inline-end");
         break;
     case NS_CSS_CLEAR:
-        v = parse_keyword_choice(t, "none left right both");
+        v = parse_keyword_choice(t,
+            "none left right both inline-start inline-end");
         break;
     case NS_CSS_BORDER_TOP_STYLE:
     case NS_CSS_BORDER_RIGHT_STYLE:
@@ -33840,6 +33841,22 @@ style_keyword_or_initial(const ns_style *s, ns_css_prop prop)
 }
 
 static void
+resolve_flow_relative_float(ns_style *out, const ns_style *parent_style)
+{
+    static const ns_css_prop props[] = { NS_CSS_FLOAT, NS_CSS_CLEAR };
+    const ns_style *block = parent_style ? parent_style : out;
+    gboolean rtl = ns_css_keyword_is(block->values[NS_CSS_DIRECTION], "rtl");
+    for (gsize i = 0; i < G_N_ELEMENTS(props); i++) {
+        const ns_css_value *v = out->values[props[i]];
+        gboolean start = ns_css_keyword_is(v, "inline-start");
+        if (!start && !ns_css_keyword_is(v, "inline-end")) continue;
+        ns_css_value_free(out->values[props[i]]);
+        out->values[props[i]] =
+            keyword_value(g_strdup(start == rtl ? "right" : "left"));
+    }
+}
+
+static void
 derive_white_space(ns_style *out)
 {
     const char *collapse = style_keyword_or_initial(out, NS_CSS_WHITE_SPACE_COLLAPSE);
@@ -34127,6 +34144,7 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
     }
     resolve_def_colors(out);
     derive_white_space(out);
+    resolve_flow_relative_float(out, parent_style);
     resolve_emphasis_style(out);
     resolve_text_size_adjust(out);
     {
