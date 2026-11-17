@@ -108,17 +108,18 @@ ns_h5_arena_copy(ns_h5_sink *sink, const char *text, size_t len)
 
 ns_node *
 ns_h5_element(ns_h5_sink *sink, const char *name, size_t len, int borrowed,
-              int line, int column)
+              int tag, int line, int column)
 {
     ns_node *el = ns_node_new_element(NULL);
-    ns_node_set_name_borrow(el, borrowed ? name
-                                         : ns_h5_arena_copy(sink, name, len));
-    if (line > 0 && len == 6 && memcmp(name, "script", 6) == 0) {
+    const char *stored = borrowed ? name : ns_h5_arena_copy(sink, name, len);
+    ns_node_set_name_borrow_tag(el, stored,
+                                tag > NS_TAG_UNKNOWN && tag < NS_TAG_COUNT
+                                    ? (ns_tag)tag : ns_tag_lookup(stored));
+    if (line > 0 && el->tag == NS_TAG_SCRIPT)
         ns_node_set_source_position(el, line, column);
-    }
-    if (len == 5 && memcmp(name, "video", 5) == 0)
+    if (el->tag == NS_TAG_VIDEO)
         sink->media_candidate = TRUE;
-    if (len == 15 && memcmp(name, "selectedcontent", 15) == 0)
+    if (el->tag == NS_TAG_SELECTEDCONTENT)
         sink->fresh_selectedcontent = el;
     sink->fresh = el;
     sink->fresh_donor = NULL;
@@ -245,15 +246,10 @@ ns_h5_attribute(ns_h5_sink *sink, ns_node *element,
 void
 ns_h5_set_namespace(ns_node *element, int namespace_id)
 {
-    if (namespace_id == NS_H5_NS_SVG) {
+    if (namespace_id == NS_H5_NS_SVG)
         element->flags |= NS_NODE_SVG_NS;
-        ns_element_set_attr(element, "data-nd-ns-uri",
-                            "http://www.w3.org/2000/svg");
-    } else if (namespace_id == NS_H5_NS_MATHML) {
-        element->flags |= NS_NODE_FOREIGN_NS;
-        ns_element_set_attr(element, "data-nd-ns-uri",
-                            "http://www.w3.org/1998/Math/MathML");
-    }
+    else if (namespace_id == NS_H5_NS_MATHML)
+        element->flags |= NS_NODE_FOREIGN_NS | NS_NODE_MATHML_NS;
 }
 
 ns_node *
@@ -1145,10 +1141,8 @@ ns_html_parse_fragment_in_context(const ns_node *context, const char *input,
     int ns = NS_H5_NS_HTML;
     if (tag && (context->flags & NS_NODE_SVG_NS)) {
         ns = NS_H5_NS_SVG;
-    } else if (tag && (context->flags & NS_NODE_FOREIGN_NS)) {
-        const char *uri = ns_element_get_attr(context, "data-nd-ns-uri");
-        if (uri && strcmp(uri, "http://www.w3.org/1998/Math/MathML") == 0)
-            ns = NS_H5_NS_MATHML;
+    } else if (tag && (context->flags & NS_NODE_MATHML_NS)) {
+        ns = NS_H5_NS_MATHML;
     }
     return parse_fragment_in_namespace(tag, ns, input, len, scripting);
 }

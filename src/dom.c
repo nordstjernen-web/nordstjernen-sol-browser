@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
 
+#define NS_TAG_NAMES_TABLE
 #include "dom.h"
 
 #include "css.h"
@@ -301,7 +302,7 @@ ns_input_value_range_state(const ns_node *input, const char *value,
 {
     if (underflow) *underflow = FALSE;
     if (overflow) *overflow = FALSE;
-    if (!input || !ns_node_is_element_named(input, "input")) return FALSE;
+    if (!input || !ns_node_is_tag(input, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(input, "type");
     double v;
     if (!ns_input_value_to_number(type, value, &v)) return FALSE;
@@ -427,7 +428,7 @@ int
 ns_input_step_apply(const ns_node *input, int sign, double n, char *buf,
                     gsize buflen)
 {
-    if (!input || !ns_node_is_element_named(input, "input"))
+    if (!input || !ns_node_is_tag(input, NS_TAG_INPUT))
         return NS_STEP_NOT_APPLICABLE;
     const char *type = ns_element_get_attr(input, "type");
     ns_form_input_kind kind = ns_form_input_kind_of_type(type);
@@ -482,7 +483,7 @@ ns_input_step_apply(const ns_node *input, int sign, double n, char *buf,
 gboolean
 ns_input_value_step_mismatch(const ns_node *input, const char *value)
 {
-    if (!input || !ns_node_is_element_named(input, "input")) return FALSE;
+    if (!input || !ns_node_is_tag(input, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(input, "type");
     ns_form_input_kind kind = ns_form_input_kind_of_type(type);
     if (kind == NS_FORM_INPUT_OTHER) return FALSE;
@@ -509,7 +510,7 @@ ns_input_value_step_mismatch(const ns_node *input, const char *value)
 static gboolean
 ns_input_type_is(const ns_node *node, const char *want)
 {
-    if (!ns_node_is_element_named(node, "input")) return FALSE;
+    if (!ns_node_is_tag(node, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(node, "type");
     return type && g_ascii_strcasecmp(type, want) == 0;
 }
@@ -669,8 +670,8 @@ void
 ns_node_arm_spellcheck(ns_node *n)
 {
     for (ns_node *cur = n; cur; cur = cur->parent) {
-        if (ns_node_is_editable(cur) || ns_node_is_element_named(cur, "input") ||
-            ns_node_is_element_named(cur, "textarea")) {
+        if (ns_node_is_editable(cur) || ns_node_is_tag(cur, NS_TAG_INPUT) ||
+            ns_node_is_tag(cur, NS_TAG_TEXTAREA)) {
             if (!ns_element_get_attr(cur, NS_SPELLCHECK_ARMED_ATTR))
                 ns_element_set_attr(cur, NS_SPELLCHECK_ARMED_ATTR, "");
             return;
@@ -881,11 +882,44 @@ ns_node_new_document(void)
     return ns_node_new(NS_NODE_DOCUMENT);
 }
 
+const char *
+ns_element_namespace_uri(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT) return NULL;
+    if (n->flags & NS_NODE_SVG_NS) return NS_SVG_NAMESPACE;
+    if (n->flags & NS_NODE_MATHML_NS) return NS_MATHML_NAMESPACE;
+    if (n->flags & NS_NODE_FOREIGN_NS)
+        return ns_element_get_attr(n, "data-nd-ns-uri");
+    return NULL;
+}
+
+ns_tag
+ns_tag_lookup(const char *name)
+{
+    if (!name || !*name) return NS_TAG_UNKNOWN;
+    gsize lo = 0, hi = G_N_ELEMENTS(ns_tag_sorted);
+    while (lo < hi) {
+        gsize mid = (lo + hi) / 2;
+        int cmp = strcmp(ns_tag_names[ns_tag_sorted[mid]], name);
+        if (cmp == 0) return (ns_tag)ns_tag_sorted[mid];
+        if (cmp < 0) lo = mid + 1;
+        else hi = mid;
+    }
+    return NS_TAG_UNKNOWN;
+}
+
+const char *
+ns_tag_name(ns_tag tag)
+{
+    return tag > NS_TAG_UNKNOWN && tag < NS_TAG_COUNT ? ns_tag_names[tag] : NULL;
+}
+
 ns_node *
 ns_node_new_element(char *name)
 {
     ns_node *n = ns_node_new(NS_NODE_ELEMENT);
     n->name = name;
+    n->tag = (guint16)ns_tag_lookup(name);
     n->flags |= NS_NODE_OWN_NAME;
     return n;
 }
@@ -926,9 +960,17 @@ void
 ns_node_set_name_borrow(ns_node *n, const char *name)
 {
     if (!n) return;
+    ns_node_set_name_borrow_tag(n, name, ns_tag_lookup(name));
+}
+
+void
+ns_node_set_name_borrow_tag(ns_node *n, const char *name, ns_tag tag)
+{
+    if (!n) return;
     if (n->flags & NS_NODE_OWN_NAME)
         g_free(n->name);
     n->name = (char *)name;
+    n->tag = (guint16)tag;
     n->flags &= ~NS_NODE_OWN_NAME;
 }
 
@@ -942,6 +984,7 @@ ns_node_set_name_owned(ns_node *n, char *name)
     if (n->flags & NS_NODE_OWN_NAME)
         g_free(n->name);
     n->name = name;
+    n->tag = (guint16)ns_tag_lookup(name);
     n->flags |= NS_NODE_OWN_NAME;
 }
 
@@ -1612,6 +1655,7 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
     case NS_NODE_ELEMENT:
         out = ns_node_new_element(src->name ? g_strdup(src->name) : g_strdup(""));
         out->flags |= src->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS |
+                                    NS_NODE_MATHML_NS |
                                     NS_NODE_KEEP_CASE |
                                     NS_NODE_INPUT_INDETERMINATE |
                                     NS_NODE_STYLE_ATTR_TRUSTED);
@@ -1794,7 +1838,7 @@ ns_node_is_element_named(const ns_node *n, const char *tag)
 gboolean
 ns_input_is_one_line_text(const ns_node *n)
 {
-    if (!ns_node_is_element_named(n, "input")) return FALSE;
+    if (!ns_node_is_tag(n, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(n, "type");
     if (!type) return TRUE;
     static const char *const other_states[] = {
@@ -1859,7 +1903,7 @@ ns_node_find_by_id_depth(const ns_node *root, const char *id, int depth)
         const char *eid = ns_element_id_attr(root);
         if (eid && strcmp(eid, id) == 0) return (ns_node *)root;
     }
-    if (ns_node_is_element_named(root, "template")) return NULL;
+    if (ns_node_is_html_tag(root, NS_TAG_TEMPLATE)) return NULL;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
         if (ns_dom_tree_scope_boundary(c)) continue;
         ns_node *m = ns_node_find_by_id_depth(c, id, depth + 1);
@@ -1881,7 +1925,7 @@ ns_doc_index_walk(ns_node *doc, ns_node *root, gboolean scoped,
             descend = FALSE;
         } else {
             visit(doc, n);
-            if (scoped && ns_node_is_element_named(n, "template"))
+            if (scoped && ns_node_is_html_tag(n, NS_TAG_TEMPLATE))
                 descend = FALSE;
         }
         n = ns_node_next_in_subtree(n, root, descend);
@@ -2428,11 +2472,11 @@ static ns_node *
 ns_node_find_anchor_name_depth(const ns_node *root, const char *name, int depth)
 {
     if (!root || !name || depth >= NS_DOM_MAX_DEPTH) return NULL;
-    if (ns_node_is_element_named(root, "a")) {
+    if (ns_node_is_tag(root, NS_TAG_A)) {
         const char *n = ns_element_get_attr(root, "name");
         if (n && strcmp(n, name) == 0) return (ns_node *)root;
     }
-    if (ns_node_is_element_named(root, "template")) return NULL;
+    if (ns_node_is_html_tag(root, NS_TAG_TEMPLATE)) return NULL;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
         ns_node *m = ns_node_find_anchor_name_depth(c, name, depth + 1);
         if (m) return m;
@@ -2460,7 +2504,7 @@ ns_element_hidden_until_found(const ns_node *el)
 gboolean
 ns_details_fragment_needs_open(const ns_node *details, const ns_node *target)
 {
-    if (!ns_node_is_element_named(details, "details") ||
+    if (!ns_node_is_tag(details, NS_TAG_DETAILS) ||
         !target || target == details ||
         ns_element_get_attr(details, "open"))
         return FALSE;
@@ -2470,7 +2514,7 @@ ns_details_fragment_needs_open(const ns_node *details, const ns_node *target)
     if (!child || child->parent != details) return FALSE;
     const ns_node *summary = NULL;
     for (const ns_node *c = details->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "summary")) {
+        if (ns_node_is_tag(c, NS_TAG_SUMMARY)) {
             summary = c;
             break;
         }
@@ -2562,16 +2606,16 @@ ns_select_next_option(const ns_node *select, const ns_node *prev)
         c = select->first_child;
     } else if (prev->parent != select) {
         for (const ns_node *o = prev->next_sibling; o; o = o->next_sibling)
-            if (ns_node_is_element_named(o, "option")) return (ns_node *)o;
+            if (ns_node_is_tag(o, NS_TAG_OPTION)) return (ns_node *)o;
         c = prev->parent->next_sibling;
     } else {
         c = prev->next_sibling;
     }
     for (; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "option")) return (ns_node *)c;
-        if (ns_node_is_element_named(c, "optgroup"))
+        if (ns_node_is_tag(c, NS_TAG_OPTION)) return (ns_node *)c;
+        if (ns_node_is_tag(c, NS_TAG_OPTGROUP))
             for (const ns_node *o = c->first_child; o; o = o->next_sibling)
-                if (ns_node_is_element_named(o, "option")) return (ns_node *)o;
+                if (ns_node_is_tag(o, NS_TAG_OPTION)) return (ns_node *)o;
     }
     return NULL;
 }
@@ -2594,10 +2638,10 @@ ns_select_first_selected_option(const ns_node *select)
 ns_node *
 ns_option_select(const ns_node *option)
 {
-    if (!ns_node_is_element_named(option, "option")) return NULL;
+    if (!ns_node_is_tag(option, NS_TAG_OPTION)) return NULL;
     ns_node *p = option->parent;
-    if (ns_node_is_element_named(p, "optgroup")) p = p->parent;
-    return ns_node_is_element_named(p, "select") ? p : NULL;
+    if (ns_node_is_tag(p, NS_TAG_OPTGROUP)) p = p->parent;
+    return ns_node_is_tag(p, NS_TAG_SELECT) ? p : NULL;
 }
 
 gboolean
@@ -2619,7 +2663,7 @@ ns_option_selectable(const ns_node *option)
 {
     if (ns_element_get_attr(option, "disabled")) return FALSE;
     const ns_node *p = option->parent;
-    return !ns_node_is_element_named(p, "optgroup") ||
+    return !ns_node_is_tag(p, NS_TAG_OPTGROUP) ||
            !ns_element_get_attr(p, "disabled");
 }
 
@@ -2651,7 +2695,7 @@ ns_form_owner(const ns_node *control, const ns_node *doc)
                 tree_root = tree_root->parent;
             }
             ns_node *owner = ns_node_find_by_id(tree_root, form_id);
-            if (ns_node_is_element_named(owner, "form")) return owner;
+            if (ns_node_is_tag(owner, NS_TAG_FORM)) return owner;
         }
         return NULL;
     }
@@ -2661,7 +2705,7 @@ ns_form_owner(const ns_node *control, const ns_node *doc)
         if (p->kind == NS_NODE_ELEMENT &&
             ns_element_get_attr(p, "data-nd-shadow-root") != NULL)
             break;
-        if (ns_node_is_element_named(p, "form")) return p;
+        if (ns_node_is_tag(p, NS_TAG_FORM)) return p;
     }
     return NULL;
 }
@@ -2683,7 +2727,7 @@ ns_form_reset_control(ns_node *n)
     } else if (strcmp(n->name, "select") == 0) {
         ns_element_remove_attr(n, "data-nd-noselect");
         for (ns_node *o = n->first_child; o; o = o->next_sibling) {
-            if (ns_node_is_element_named(o, "option"))
+            if (ns_node_is_tag(o, NS_TAG_OPTION))
                 ns_element_remove_attr(o, "selected");
         }
     }
@@ -2719,7 +2763,7 @@ ns_fieldset_first_legend(const ns_node *fieldset)
 {
     if (!fieldset) return NULL;
     for (const ns_node *c = fieldset->first_child; c; c = c->next_sibling)
-        if (ns_node_is_element_named(c, "legend")) return c;
+        if (ns_node_is_tag(c, NS_TAG_LEGEND)) return c;
     return NULL;
 }
 
@@ -2742,11 +2786,11 @@ ns_element_effectively_disabled(const ns_node *el)
     if (!ns_element_supports_disabled(el)) return FALSE;
     if (ns_element_get_attr(el, "disabled")) return TRUE;
     for (const ns_node *p = el->parent; p; p = p->parent) {
-        if (ns_node_is_element_named(el, "option") &&
-            ns_node_is_element_named(p, "optgroup") &&
+        if (ns_node_is_tag(el, NS_TAG_OPTION) &&
+            ns_node_is_tag(p, NS_TAG_OPTGROUP) &&
             ns_element_get_attr(p, "disabled"))
             return TRUE;
-        if (!ns_node_is_element_named(p, "fieldset") ||
+        if (!ns_node_is_tag(p, NS_TAG_FIELDSET) ||
             !ns_element_get_attr(p, "disabled"))
             continue;
         const ns_node *legend = ns_fieldset_first_legend(p);
@@ -3064,7 +3108,7 @@ ns_xml_element_ns(const ns_node *n)
 {
     if (n->flags & NS_NODE_SVG_NS) return "http://www.w3.org/2000/svg";
     if (n->flags & NS_NODE_FOREIGN_NS) {
-        const char *u = ns_element_get_attr(n, "data-nd-ns-uri");
+        const char *u = ns_element_namespace_uri(n);
         return u ? u : "";
     }
     return NS_HTML_NAMESPACE;
@@ -3311,7 +3355,7 @@ static const ns_node *
 ns_find_map(const ns_node *n, const char *name, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return NULL;
-    if (ns_node_is_element_named(n, "map")) {
+    if (ns_node_is_tag(n, NS_TAG_MAP)) {
         const char *mn = ns_element_get_attr(n, "name");
         const char *mid = ns_element_get_attr(n, "id");
         if ((mn && strcmp(mn, name) == 0) || (mid && strcmp(mid, name) == 0))
@@ -3330,7 +3374,7 @@ ns_map_first_area(const ns_node *n, double lx, double ly, double iw, double ih,
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return NULL;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "area") &&
+        if (ns_node_is_tag(c, NS_TAG_AREA) &&
             ns_area_hit(ns_element_get_attr(c, "shape"),
                         ns_element_get_attr(c, "coords"), lx, ly, iw, ih))
             return c;

@@ -51,7 +51,7 @@ ns_form_default_button_in(const ns_node *scan, const ns_node *form,
     if (scan->kind == NS_NODE_ELEMENT && ns_form_is_submit_trigger(scan) &&
         ns_form_owner(scan, doc) == form)
         return scan;
-    if (ns_node_is_element_named(scan, "template")) return NULL;
+    if (ns_node_is_html_tag(scan, NS_TAG_TEMPLATE)) return NULL;
     for (const ns_node *c = scan->first_child; c; c = c->next_sibling) {
         const ns_node *hit = ns_form_default_button_in(c, form, doc, depth + 1);
         if (hit) return hit;
@@ -90,8 +90,8 @@ form_option_disabled(const ns_node *option)
     if (ns_element_effectively_disabled(option)) return TRUE;
     int depth = 0;
     for (const ns_node *p = option ? option->parent : NULL; p && depth++ < NS_FORM_MAX_DEPTH; p = p->parent) {
-        if (ns_node_is_element_named(p, "select")) return FALSE;
-        if (ns_node_is_element_named(p, "optgroup") &&
+        if (ns_node_is_tag(p, NS_TAG_SELECT)) return FALSE;
+        if (ns_node_is_tag(p, NS_TAG_OPTGROUP) &&
             ns_element_get_attr(p, "disabled"))
             return TRUE;
     }
@@ -110,17 +110,17 @@ form_selected_options(const ns_node *select)
         return out;
     }
     for (const ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "optgroup")) {
+        if (ns_node_is_tag(c, NS_TAG_OPTGROUP)) {
             if (ns_element_effectively_disabled(c) ||
                 ns_element_get_attr(c, "disabled"))
                 continue;
             for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option") &&
+                if (ns_node_is_tag(cc, NS_TAG_OPTION) &&
                     ns_element_get_attr(cc, "selected") &&
                     !form_option_disabled(cc))
                     g_ptr_array_add(out, (gpointer)cc);
             }
-        } else if (ns_node_is_element_named(c, "option") &&
+        } else if (ns_node_is_tag(c, NS_TAG_OPTION) &&
                    ns_element_get_attr(c, "selected") &&
                    !form_option_disabled(c)) {
             g_ptr_array_add(out, (gpointer)c);

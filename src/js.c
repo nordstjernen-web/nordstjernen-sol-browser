@@ -328,8 +328,8 @@ static void ns_js_promote_deferred_iframes(ns_js *js);
 static inline gboolean
 ns_node_is_navigable_frame(const ns_node *n)
 {
-    return ns_node_is_element_named(n, "iframe") ||
-           ns_node_is_element_named(n, "frame");
+    return ns_node_is_tag(n, NS_TAG_IFRAME) ||
+           ns_node_is_tag(n, NS_TAG_FRAME);
 }
 static void ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin);
 static gboolean ns_node_is_media_element(const ns_node *n);
@@ -677,7 +677,7 @@ ns_iframe_effective_sandbox(const ns_node *node)
             any = TRUE;
             continue;
         }
-        if (!ns_node_is_element_named(p, "iframe")) continue;
+        if (!ns_node_is_tag(p, NS_TAG_IFRAME)) continue;
         const char *val = ns_element_get_attr(p, "sandbox");
         const char *csp_val = ns_element_get_attr(p, "data-nd-csp-sandbox");
         if (!val && !csp_val) continue;
@@ -4011,7 +4011,7 @@ ns_tlist_supports(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
             "1 argument required, but only 0 present");
     const char *const *tokens = NULL;
     gsize count = 0;
-    if (strcmp(attr, "rel") == 0 && ns_node_is_element_named(owner, "link")) {
+    if (strcmp(attr, "rel") == 0 && ns_node_is_tag(owner, NS_TAG_LINK)) {
         tokens = link_rel_tokens;
         count = G_N_ELEMENTS(link_rel_tokens);
     }
@@ -5373,7 +5373,7 @@ ns_html_tag_has_plain_interface(const char *lower_name)
 static JSValue
 ns_foreign_kind_proto(ns_js *js, const ns_node *node)
 {
-    const char *ns = ns_element_get_attr(node, "data-nd-ns-uri");
+    const char *ns = ns_element_namespace_uri(node);
     gboolean mathml = ns && strcmp(ns, "http://www.w3.org/1998/Math/MathML") == 0;
     return mathml && JS_IsObject(js->proto_mathmlelement)
         ? js->proto_mathmlelement : js->proto_element;
@@ -6119,7 +6119,7 @@ ns_element_get_localName(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || !n->name) return JS_NULL;
     if ((n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) &&
-        ns_element_get_attr(n, "data-nd-ns-uri")) {
+        ns_element_namespace_uri(n)) {
         const char *colon = strchr(n->name, ':');
         if (colon) return JS_NewString(ctx, colon + 1);
     }
@@ -6136,7 +6136,7 @@ ns_element_get_prefix(JSContext *ctx, JSValueConst this_val)
         if (stored) return JS_NewString(ctx, stored);
     }
     if ((n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) &&
-        ns_element_get_attr(n, "data-nd-ns-uri")) {
+        ns_element_namespace_uri(n)) {
         const char *colon = strchr(n->name, ':');
         if (colon)
             return JS_NewStringLen(ctx, n->name, (size_t)(colon - n->name));
@@ -6259,9 +6259,9 @@ ns_element_attr_getter(JSContext *ctx, JSValueConst this_val, int magic)
     gsize v_len = 0;
     const char *v = ns_element_get_attr_len(n, names[magic], &v_len);
     gboolean action_defaults_to_doc =
-        (magic == 9 && ns_node_is_element_named(n, "form")) ||
-        (magic == 39 && (ns_node_is_element_named(n, "button") ||
-                         ns_node_is_element_named(n, "input")));
+        (magic == 9 && ns_node_is_tag(n, NS_TAG_FORM)) ||
+        (magic == 39 && (ns_node_is_tag(n, NS_TAG_BUTTON) ||
+                         ns_node_is_tag(n, NS_TAG_INPUT)));
     if (action_defaults_to_doc && (!v || !*v)) {
         ns_js *js = js_from_ctx(ctx);
         return JS_NewString(ctx, js && js->current_url ? js->current_url : "");
@@ -6967,8 +6967,8 @@ ns_element_get_tabIndex(JSContext *ctx, JSValueConst this_val)
             "select", "textarea", NULL,
         };
         gboolean zero = ns_node_name_is_any_of(n, focusable);
-        if (!zero && ns_node_is_element_named(n, "summary"))
-            zero = n->parent && ns_node_is_element_named(n->parent, "details");
+        if (!zero && ns_node_is_tag(n, NS_TAG_SUMMARY))
+            zero = n->parent && ns_node_is_tag(n->parent, NS_TAG_DETAILS);
         return JS_NewInt32(ctx, zero ? 0 : -1);
     }
     return JS_NewInt32(ctx, ns_parse_int(v, 0, G_MININT, G_MAXINT));
@@ -7268,7 +7268,7 @@ ns_node_in_template_content(const ns_node *n)
 {
     for (const ns_node *p = n; p; p = p->parent)
         if ((p->flags & NS_NODE_TEMPLATE_CONTENT) ||
-            ns_node_is_element_named(p, "template"))
+            ns_node_is_html_tag(p, NS_TAG_TEMPLATE))
             return TRUE;
     return FALSE;
 }
@@ -7279,10 +7279,10 @@ ns_element_get_htmlFor(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
         return JS_UNDEFINED;
-    if (ns_node_is_element_named(n, "output"))
+    if (ns_node_is_tag(n, NS_TAG_OUTPUT))
         return ns_make_token_list(ctx, this_val, "for");
-    if (!ns_node_is_element_named(n, "label") &&
-        !ns_node_is_element_named(n, "script"))
+    if (!ns_node_is_tag(n, NS_TAG_LABEL) &&
+        !ns_node_is_tag(n, NS_TAG_SCRIPT))
         return JS_UNDEFINED;
     return ns_element_reflect_str_get(ctx, this_val, "for", FALSE);
 }
@@ -7338,7 +7338,7 @@ ns_element_boolattr_getter(JSContext *ctx, JSValueConst this_val, int magic)
     if (magic < 0 || magic >= (int)G_N_ELEMENTS(kBoolAttrs)) return JS_FALSE;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return JS_FALSE;
-    if (strcmp(kBoolAttrs[magic], "async") == 0 && !ns_node_is_element_named(n, "script"))
+    if (strcmp(kBoolAttrs[magic], "async") == 0 && !ns_node_is_tag(n, NS_TAG_SCRIPT))
         return JS_NewCFunction(ctx, ns_element_async_method, "async", 2);
     return ns_element_get_attr(n, kBoolAttrs[magic]) ? JS_TRUE : JS_FALSE;
 }
@@ -7349,7 +7349,7 @@ ns_element_boolattr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst v
     if (magic < 0 || magic >= (int)G_N_ELEMENTS(kBoolAttrs)) return JS_UNDEFINED;
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n) return JS_UNDEFINED;
-    if (strcmp(kBoolAttrs[magic], "async") == 0 && !ns_node_is_element_named(n, "script")) {
+    if (strcmp(kBoolAttrs[magic], "async") == 0 && !ns_node_is_tag(n, NS_TAG_SCRIPT)) {
         JS_DefinePropertyValueStr(ctx, this_val, "async", JS_DupValue(ctx, val),
                                   JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
         return JS_UNDEFINED;
@@ -7360,7 +7360,7 @@ ns_element_boolattr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst v
     if (to_set) ns_js_set_attr_recorded(_j, n, kBoolAttrs[magic], "");
     else        ns_js_remove_attr_recorded(_j, n, kBoolAttrs[magic]);
     if (strcmp(kBoolAttrs[magic], "open") == 0 && was_open != to_set &&
-        ns_node_is_element_named(n, "details"))
+        ns_node_is_tag(n, NS_TAG_DETAILS))
         ns_js_details_toggle_open(_j, n, to_set);
     return JS_UNDEFINED;
 }
@@ -7770,7 +7770,7 @@ ns_inner_text_rendered_child(const ns_node *parent, const ns_node *child)
                (g_ascii_strcasecmp(child->name, "option") == 0 ||
                 g_ascii_strcasecmp(child->name, "optgroup") == 0);
     if (g_ascii_strcasecmp(parent->name, "optgroup") == 0 &&
-        parent->parent && ns_node_is_element_named(parent->parent, "select"))
+        parent->parent && ns_node_is_tag(parent->parent, NS_TAG_SELECT))
         return child_is && g_ascii_strcasecmp(child->name, "option") == 0;
     return TRUE;
 }
@@ -7877,7 +7877,7 @@ ns_inner_text_collect(ns_js *js, const ns_node *n, ns_inner_text_ctx *c,
         return;
     }
     if (n->kind != NS_NODE_ELEMENT) return;
-    if (!is_root && visible && ns_node_is_element_named(n, "svg")) {
+    if (!is_root && visible && ns_node_is_tag(n, NS_TAG_SVG)) {
         const ns_style *ss = js && js->style_table
                            ? g_hash_table_lookup(js->style_table, n) : NULL;
         if (ns_display_is_none(ns_css_display_of(ss)) ||
@@ -7945,7 +7945,7 @@ ns_inner_outer_text_unsupported(const ns_node *n)
 {
     if (!n || n->kind != NS_NODE_ELEMENT) return TRUE;
     if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) return TRUE;
-    return ns_node_is_element_named(n, "svg") || ns_node_is_element_named(n, "math");
+    return ns_node_is_tag(n, NS_TAG_SVG) || ns_node_is_tag(n, NS_TAG_MATH);
 }
 
 static JSValue
@@ -7954,9 +7954,9 @@ ns_element_get_innerText(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return JS_NULL;
     if (ns_inner_outer_text_unsupported(n)) return JS_UNDEFINED;
-    if (ns_node_is_element_named(n, "iframe") ||
-        ns_node_is_element_named(n, "frame") ||
-        ns_node_is_element_named(n, "frameset"))
+    if (ns_node_is_tag(n, NS_TAG_IFRAME) ||
+        ns_node_is_tag(n, NS_TAG_FRAME) ||
+        ns_node_is_tag(n, NS_TAG_FRAMESET))
         return JS_NewString(ctx, "");
     ns_js *js = js_from_ctx(ctx);
     if (js) ns_js_flush_layout(js);
@@ -8504,10 +8504,10 @@ ns_element_get_relList(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return JS_UNDEFINED;
     gboolean html_ns = !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS));
-    gboolean ok = (html_ns && (ns_node_is_element_named(n, "a")
-                               || ns_node_is_element_named(n, "area")
-                               || ns_node_is_element_named(n, "form")
-                               || ns_node_is_element_named(n, "link")))
+    gboolean ok = (html_ns && (ns_node_is_tag(n, NS_TAG_A)
+                               || ns_node_is_tag(n, NS_TAG_AREA)
+                               || ns_node_is_tag(n, NS_TAG_FORM)
+                               || ns_node_is_tag(n, NS_TAG_LINK)))
                || ((n->flags & NS_NODE_SVG_NS)
                    && n->name && strcmp(n->name, "a") == 0);
     if (!ok) return JS_UNDEFINED;
@@ -8533,7 +8533,7 @@ ns_element_get_sandbox_list(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS))
-        || !ns_node_is_element_named(n, "iframe"))
+        || !ns_node_is_tag(n, NS_TAG_IFRAME))
         return JS_UNDEFINED;
     return ns_make_token_list(ctx, this_val, "sandbox");
 }
@@ -8544,10 +8544,10 @@ ns_element_get_sizes_list(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
         return JS_UNDEFINED;
-    if (ns_node_is_element_named(n, "link"))
+    if (ns_node_is_tag(n, NS_TAG_LINK))
         return ns_make_token_list(ctx, this_val, "sizes");
-    if (ns_node_is_element_named(n, "img")
-        || ns_node_is_element_named(n, "source"))
+    if (ns_node_is_tag(n, NS_TAG_IMG)
+        || ns_node_is_tag(n, NS_TAG_SOURCE))
         return ns_element_reflect_str_get(ctx, this_val, "sizes", FALSE);
     return JS_UNDEFINED;
 }
@@ -9370,7 +9370,7 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
     const char *s = free_s ? JS_ToCStringLen(ctx, &s_len, val) : "";
     if (!s) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
-    if (ns_node_is_element_named(n, "template")) {
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) {
         ns_node *content = ns_template_content_get(n);
         if (content) content->flags |= NS_NODE_SCRIPTING_DISABLED;
         ns_node *tfrag = ns_html_parse_fragment_with_scripting(
@@ -9875,7 +9875,7 @@ ns_add_node_listener(JSContext *ctx, ns_node *target, int argc,
         if (!element) {
             passive = TRUE;
         } else if (_js->current_doc) {
-            ns_node *html = ns_node_is_element_named(_js->current_doc, "html")
+            ns_node *html = ns_node_is_tag(_js->current_doc, NS_TAG_HTML)
                 ? _js->current_doc
                 : ns_node_find_first_element(_js->current_doc, "html");
             ns_node *body = ns_node_find_first_element(_js->current_doc, "body");
@@ -14546,7 +14546,7 @@ ns_media_select_source(const ns_node *media)
     const char *src = ns_element_get_attr(media, "src");
     if (src && *src) return src;
     for (const ns_node *c = media->first_child; c; c = c->next_sibling) {
-        if (!ns_node_is_element_named(c, "source")) continue;
+        if (!ns_node_is_tag(c, NS_TAG_SOURCE)) continue;
         const char *csrc = ns_element_get_attr(c, "src");
         if (!csrc || !*csrc) continue;
         const char *type = ns_element_get_attr(c, "type");
@@ -17921,7 +17921,7 @@ ns_window_nd_adopt_style_element(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     if (argc < 1 || !JS_IsHostAccess(ctx)) return JS_UNDEFINED;
     ns_node *style = ns_unwrap_element_mut(argv[0]);
-    if (style && ns_node_is_element_named(style, "style"))
+    if (style && ns_node_is_tag(style, NS_TAG_STYLE))
         style->flags |= NS_NODE_STYLE_ATTR_TRUSTED;
     return JS_UNDEFINED;
 }
@@ -19068,7 +19068,7 @@ ns_inset_containing_block(ns_js *js, const ns_node *n, const ns_box *b,
             for (const ns_node *p = n ? n->parent : NULL; p; p = p->parent) {
                 if (p->kind != NS_NODE_ELEMENT) continue;
                 if (!p->parent || p->parent->kind == NS_NODE_DOCUMENT ||
-                    ns_node_is_element_named(p, "body"))
+                    ns_node_is_tag(p, NS_TAG_BODY))
                     break;
                 const ns_style *ps = g_hash_table_lookup(js->style_table, p);
                 if (ps && ns_inset_style_scroll_container(ps))
@@ -24150,8 +24150,8 @@ ns_form_data_option_disabled(const ns_node *option)
 {
     if (ns_element_effectively_disabled(option)) return TRUE;
     for (const ns_node *p = option ? option->parent : NULL; p; p = p->parent) {
-        if (ns_node_is_element_named(p, "select")) return FALSE;
-        if (ns_node_is_element_named(p, "optgroup") &&
+        if (ns_node_is_tag(p, NS_TAG_SELECT)) return FALSE;
+        if (ns_node_is_tag(p, NS_TAG_OPTGROUP) &&
             ns_element_get_attr(p, "disabled"))
             return TRUE;
     }
@@ -24171,12 +24171,12 @@ ns_form_data_append_select(JSContext *ctx, JSValueConst fd,
         return;
     }
     for (const ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "optgroup")) {
+        if (ns_node_is_tag(c, NS_TAG_OPTGROUP)) {
             if (ns_element_effectively_disabled(c) ||
                 ns_element_get_attr(c, "disabled"))
                 continue;
             for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option") &&
+                if (ns_node_is_tag(cc, NS_TAG_OPTION) &&
                     ns_element_get_attr(cc, "selected") &&
                     !ns_form_data_option_disabled(cc)) {
                     char *v = ns_option_value_dup(cc);
@@ -24184,7 +24184,7 @@ ns_form_data_append_select(JSContext *ctx, JSValueConst fd,
                     g_free(v);
                 }
             }
-        } else if (ns_node_is_element_named(c, "option") &&
+        } else if (ns_node_is_tag(c, NS_TAG_OPTION) &&
                    ns_element_get_attr(c, "selected") &&
                    !ns_form_data_option_disabled(c)) {
             char *v = ns_option_value_dup(c);
@@ -32848,7 +32848,7 @@ ns_js_link_attr_changed(ns_js *js, ns_node *link, const char *name,
                         const char *namespace_uri, const char *old_value)
 {
     if (!js || !link || !name || namespace_uri ||
-        !ns_node_is_element_named(link, "link") ||
+        !ns_node_is_tag(link, NS_TAG_LINK) ||
         !ns_node_in_active_document(js, link) ||
         !ns_link_attr_change_needs_load(link, name, old_value))
         return;
@@ -32932,7 +32932,7 @@ ns_js_patch_inline_transform(ns_js *js, ns_node *n, const char *name,
 {
     if (!js->cssom_style_write || !old_value || !js->style_table ||
         !js->layout_root || g_ascii_strcasecmp(name, "style") != 0 ||
-        n->kind != NS_NODE_ELEMENT || ns_node_is_element_named(n, "style"))
+        n->kind != NS_NODE_ELEMENT || ns_node_is_tag(n, NS_TAG_STYLE))
         return FALSE;
     const ns_node *root = ns_node_root(n);
     if (!root || root->kind != NS_NODE_DOCUMENT ||
@@ -32973,7 +32973,7 @@ ns_js_set_attr_recorded_len(ns_js *js, ns_node *n, const char *name,
                          memcmp(old, new_value, vlen) == 0);
     char *old_copy = old ? ns_value_dup_len(old, old_len) : NULL;
     if (g_ascii_strcasecmp(name, "style") == 0 &&
-        !ns_node_is_element_named(n, "style")) {
+        !ns_node_is_tag(n, NS_TAG_STYLE)) {
         if (js && js->cssom_style_write) n->flags |= NS_NODE_STYLE_ATTR_TRUSTED;
         else n->flags &= ~NS_NODE_STYLE_ATTR_TRUSTED;
     }
@@ -35822,8 +35822,8 @@ ns_call_on_handler(ns_js *js, JSValue handler, JSValueConst this_obj,
 static gboolean
 ns_node_is_window_handler_holder(const ns_node *n)
 {
-    return ns_node_is_element_named(n, "body") ||
-           ns_node_is_element_named(n, "frameset");
+    return ns_node_is_tag(n, NS_TAG_BODY) ||
+           ns_node_is_tag(n, NS_TAG_FRAMESET);
 }
 
 static gboolean ns_fire_inline_on_handler_in_realm(ns_js *js,
@@ -36350,9 +36350,9 @@ static JSValue
 ns_event_window_for_document(ns_js *js, const ns_node *doc)
 {
     if (js && doc && doc != js->current_doc && doc->parent &&
-        (ns_node_is_element_named(doc->parent, "iframe") ||
-         ns_node_is_element_named(doc->parent, "frame") ||
-         (ns_node_is_element_named(doc->parent, "object") ||
+        (ns_node_is_tag(doc->parent, NS_TAG_IFRAME) ||
+         ns_node_is_tag(doc->parent, NS_TAG_FRAME) ||
+         (ns_node_is_tag(doc->parent, NS_TAG_OBJECT) ||
           ns_node_is_pdf_embed(doc->parent)))) {
         JSValue realm = ns_iframe_lookup_realm_window(js, doc->parent);
         if (JS_IsObject(realm)) return realm;
@@ -36567,7 +36567,7 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     guint bubble_len = path->len;
     if (strcmp(type, "submit") == 0 || strcmp(type, "reset") == 0) {
         for (guint i = 1; i < path->len; i++) {
-            if (ns_node_is_element_named(path->pdata[i], "form")) {
+            if (ns_node_is_tag(path->pdata[i], NS_TAG_FORM)) {
                 bubble_len = i;
                 break;
             }
@@ -37359,7 +37359,7 @@ ns_js_purge_subtree_rafs(ns_js *js, ns_node *root)
 {
     if (!js) return;
     for (ns_node *n = root; n; n = ns_node_next_in_subtree(n, root, TRUE)) {
-        if (!ns_node_is_element_named(n, "iframe")) continue;
+        if (!ns_node_is_tag(n, NS_TAG_IFRAME)) continue;
         ns_js_purge_frame_rafs(js, n);
         ns_js_purge_frame_timers(js, n);
         ns_js_scrub_iframe_globals(js, n);
@@ -37791,7 +37791,7 @@ ns_js_fire_img_load_once(ns_js *js, ns_node *node, gboolean failed)
     if (node->flags & NS_NODE_IMG_LOAD_FIRED) return;
     if (js->halted || js->in_pump) return;
     node->flags |= NS_NODE_IMG_LOAD_FIRED;
-    if (ns_node_is_element_named(node, "img")) {
+    if (ns_node_is_tag(node, NS_TAG_IMG)) {
         const ns_image *im = ns_js_image_for_node(js, node);
         if (im) ns_js_record_image_timing(js, node, im->url, im);
     }
@@ -39067,7 +39067,7 @@ ns_element_insertAdjacentHTML(JSContext *ctx, JSValueConst this_val,
     const ns_node *root = ns_node_root(self);
     gboolean scripting = !root ||
         !(root->flags & NS_NODE_SCRIPTING_DISABLED);
-    ns_node *fragment = ns_node_is_element_named(context, "html")
+    ns_node *fragment = ns_node_is_tag(context, NS_TAG_HTML)
         ? ns_html_parse_fragment_with_scripting("body", html, -1, scripting)
         : ns_html_parse_fragment_in_context(context, html, -1, scripting);
     if (fragment) {
@@ -39598,7 +39598,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
 {
     (void)ctx;
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (ns_node_is_element_named(n, "select") && argc >= 1 &&
+    if (ns_node_is_tag(n, NS_TAG_SELECT) && argc >= 1 &&
         !JS_IsUndefined(argv[0])) {
         int32_t idx = -1;
         JS_ToInt32(ctx, &idx, argv[0]);
@@ -40682,7 +40682,7 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
             changed && g_ascii_strcasecmp(name, "src") == 0 &&
             ns_js_img_src_layout_neutral(n);
         if (g_ascii_strcasecmp(name, "style") == 0 &&
-            !ns_node_is_element_named(n, "style"))
+            !ns_node_is_tag(n, NS_TAG_STYLE))
             n->flags &= ~NS_NODE_STYLE_ATTR_TRUSTED;
         if (changed) {
             ns_element_set_attr_len(n, name, val, (gssize)val_len);
@@ -40697,10 +40697,10 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         if (_j) ns_js_record_attr_change(_j, n, name, old_copy);
         if (_j) ns_ce_attr_changed(_j, n, name, old_copy, val);
         if (changed && g_ascii_strcasecmp(name, "type") == 0 &&
-            ns_node_is_element_named(n, "input"))
+            ns_node_is_tag(n, NS_TAG_INPUT))
             ns_input_resanitize_value(n);
         if (g_ascii_strcasecmp(name, "open") == 0 && !old_copy &&
-            ns_node_is_element_named(n, "details"))
+            ns_node_is_tag(n, NS_TAG_DETAILS))
             ns_js_details_toggle_open(_j, n, TRUE);
         g_free(old_copy);
         if (changed && g_ascii_strcasecmp(name, "src") == 0 &&
@@ -40741,7 +40741,7 @@ ns_element_removeAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
         ns_js *_j = js_from_ctx(ctx);
         ns_js_remove_attr_recorded(_j, n, name);
         if (g_ascii_strcasecmp(name, "open") == 0 &&
-            ns_node_is_element_named(n, "details"))
+            ns_node_is_tag(n, NS_TAG_DETAILS))
             ns_js_details_toggle_open(_j, n, FALSE);
     }
     ns_body_forward_content_handler(ctx, n, name, NULL);
@@ -40800,7 +40800,7 @@ static JSValue
 ns_element_get_firstElementChild(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (ns_node_is_element_named(n, "template")) return JS_NULL;
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return JS_NULL;
     return ns_make_element(ctx, first_element_child(n));
 }
 
@@ -40879,7 +40879,7 @@ static JSValue
 ns_element_get_firstChild(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (ns_node_is_element_named(n, "template")) return JS_NULL;
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return JS_NULL;
     return ns_make_element(ctx, ns_dom_first_child(n));
 }
 
@@ -40887,7 +40887,7 @@ static JSValue
 ns_element_get_lastChild(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (ns_node_is_element_named(n, "template")) return JS_NULL;
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return JS_NULL;
     return ns_make_element(ctx, ns_dom_last_child(n));
 }
 
@@ -40895,7 +40895,7 @@ static JSValue
 ns_element_get_lastElementChild(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || ns_node_is_element_named(n, "template")) return JS_NULL;
+    if (!n || ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return JS_NULL;
     for (const ns_node *c = n->last_child; c; c = c->prev_sibling)
         if (c->kind == NS_NODE_ELEMENT && !ns_node_hidden_from_script(c))
             return ns_make_element(ctx, c);
@@ -40934,7 +40934,7 @@ ns_element_get_childElementCount(JSContext *ctx, JSValueConst this_val)
 {
     (void)ctx;
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || ns_node_is_element_named(n, "template")) return JS_NewInt32(ctx, 0);
+    if (!n || ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return JS_NewInt32(ctx, 0);
     int count = 0;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         if (c->kind == NS_NODE_ELEMENT && !ns_node_hidden_from_script(c)) count++;
@@ -40964,7 +40964,7 @@ ns_collect_by_tag_h(const ns_node *n, const char *tag, const char *tag_lower,
     if (n->kind == NS_NODE_ELEMENT && n->name &&
         ns_tag_query_matches(n, tag, tag_lower))
         JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, n));
-    if (ns_node_is_element_named(n, "template")) return;
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         ns_collect_by_tag_h(c, tag, tag_lower, ctx, arr, idx, depth + 1);
 }
@@ -41028,7 +41028,7 @@ ns_collect_by_class(const ns_node *n, const char *cls, gboolean ci,
     if (!n || depth >= 512 || ns_dom_hidden_child(n)) return;
     if (n->kind == NS_NODE_ELEMENT && element_has_class(n, cls, ci))
         JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, n));
-    if (ns_node_is_element_named(n, "template")) return;
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         ns_collect_by_class(c, cls, ci, ctx, arr, idx, depth + 1);
 }
@@ -41076,7 +41076,7 @@ ns_walk_first_match(const ns_node *root, GPtrArray *sels, int depth)
     if (!root || depth >= 512 || ns_dom_hidden_child(root)) return NULL;
     if (root->kind == NS_NODE_ELEMENT && ns_matches_any_selector(sels, root))
         return root;
-    if (ns_node_is_element_named(root, "template")) return NULL;
+    if (ns_node_is_html_tag(root, NS_TAG_TEMPLATE)) return NULL;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
         const ns_node *m = ns_walk_first_match(c, sels, depth + 1);
         if (m) return m;
@@ -41091,7 +41091,7 @@ ns_walk_all_matches(const ns_node *root, GPtrArray *sels, JSContext *ctx,
     if (!root || depth >= 512 || ns_dom_hidden_child(root)) return;
     if (root->kind == NS_NODE_ELEMENT && ns_matches_any_selector(sels, root))
         JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, root));
-    if (ns_node_is_element_named(root, "template")) return;
+    if (ns_node_is_html_tag(root, NS_TAG_TEMPLATE)) return;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling)
         ns_walk_all_matches(c, sels, ctx, arr, idx, depth + 1);
 }
@@ -41550,7 +41550,7 @@ ns_walk_collect_marked(const ns_node *n, GHashTable *marked, JSContext *ctx,
         JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, n));
         (*left)--;
     }
-    if (ns_node_is_element_named(n, "template")) return;
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return;
     for (const ns_node *c = n->first_child; c && *left; c = c->next_sibling)
         ns_walk_collect_marked(c, marked, ctx, arr, idx, left, depth + 1);
 }
@@ -42098,7 +42098,7 @@ ns_element_hasChildNodes(JSContext *ctx, JSValueConst this_val,
 {
     (void)ctx; (void)argc; (void)argv;
     const ns_node *el = ns_unwrap_element(this_val);
-    if (!el || ns_node_is_element_named(el, "template")) return JS_FALSE;
+    if (!el || ns_node_is_html_tag(el, NS_TAG_TEMPLATE)) return JS_FALSE;
     for (const ns_node *c = el->first_child; c; c = c->next_sibling)
         if (!ns_dom_hidden_child(c)) return JS_TRUE;
     return JS_FALSE;
@@ -42148,7 +42148,7 @@ static const char *
 ns_node_namespace_uri(const ns_node *n)
 {
     if (!n || n->kind != NS_NODE_ELEMENT) return NULL;
-    const char *stored = ns_element_get_attr(n, "data-nd-ns-uri");
+    const char *stored = ns_element_namespace_uri(n);
     if (stored) return stored;
     if (n->flags & NS_NODE_SVG_NS)
         return "http://www.w3.org/2000/svg";
@@ -43485,8 +43485,8 @@ static gboolean
 ns_offset_parent_candidate(ns_js *js, const ns_node *n)
 {
     if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
-    if (ns_node_is_element_named(n, "body") ||
-        ns_node_is_element_named(n, "html"))
+    if (ns_node_is_tag(n, NS_TAG_BODY) ||
+        ns_node_is_tag(n, NS_TAG_HTML))
         return TRUE;
     const ns_style *s = js && js->style_table
                       ? g_hash_table_lookup(js->style_table, n) : NULL;
@@ -43507,8 +43507,8 @@ ns_offset_parent_candidate(ns_js *js, const ns_node *n)
 static gboolean
 ns_offset_parent_is_static_root(ns_js *js, const ns_node *p)
 {
-    if (!ns_node_is_element_named(p, "body") &&
-        !ns_node_is_element_named(p, "html"))
+    if (!ns_node_is_tag(p, NS_TAG_BODY) &&
+        !ns_node_is_tag(p, NS_TAG_HTML))
         return FALSE;
     const ns_style *s = js && js->style_table
                       ? g_hash_table_lookup(js->style_table, p) : NULL;
@@ -43792,7 +43792,7 @@ ns_js_value_matches_pattern(const char *v, const char *pat)
 static gboolean
 ns_node_is_radio(const ns_node *n)
 {
-    const char *type = ns_node_is_element_named(n, "input")
+    const char *type = ns_node_is_tag(n, NS_TAG_INPUT)
         ? ns_element_get_attr(n, "type") : NULL;
     return type && g_ascii_strcasecmp(type, "radio") == 0;
 }
@@ -44042,7 +44042,7 @@ ns_element_check_validity(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc; (void)argv;
     const ns_node *n = ns_unwrap_element(this_val);
-    if (ns_node_is_element_named(n, "form")) {
+    if (ns_node_is_tag(n, NS_TAG_FORM)) {
         const ns_node *doc = ns_node_root(n);
         GPtrArray *bad = g_ptr_array_new();
         ns_js_form_collect_invalid(n, doc ? doc : n, doc ? doc : n, 0, bad);
@@ -44078,14 +44078,14 @@ ns_element_get_validation_message(JSContext *ctx, JSValueConst this_val)
     ns_js_compute_validity(n, &vm, &tm, &pm, &tl, &ts, &ru, &ro, &sm);
     if (!(vm || tm || pm || tl || ts || ru || ro || sm))
         return JS_NewString(ctx, "");
-    const char *type = ns_node_is_element_named(n, "input")
+    const char *type = ns_node_is_tag(n, NS_TAG_INPUT)
         ? ns_element_get_attr(n, "type") : NULL;
     if (vm) {
         if (type && g_ascii_strcasecmp(type, "checkbox") == 0)
             return JS_NewString(ctx, "Please check this box.");
         if (type && g_ascii_strcasecmp(type, "radio") == 0)
             return JS_NewString(ctx, "Please select one of these options.");
-        if (ns_node_is_element_named(n, "select"))
+        if (ns_node_is_tag(n, NS_TAG_SELECT))
             return JS_NewString(ctx, "Please select an item in the list.");
         return JS_NewString(ctx, "Please fill out this field.");
     }
@@ -44119,7 +44119,7 @@ ns_node_will_validate(const ns_node *n)
     if (ns_form_control_readonly_bars_validation(n)) return FALSE;
     if (is_input && ns_element_get_attr(n, "readonly")) return FALSE;
     for (const ns_node *p = n->parent; p; p = p->parent)
-        if (ns_node_is_element_named(p, "datalist")) return FALSE;
+        if (ns_node_is_tag(p, NS_TAG_DATALIST)) return FALSE;
     const char *type = is_input ? ns_element_get_attr(n, "type") : NULL;
     if (type && (g_ascii_strcasecmp(type, "button") == 0 ||
                  g_ascii_strcasecmp(type, "reset")  == 0 ||
@@ -44168,7 +44168,7 @@ static JSValue
 ns_element_get_label_control(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *label = ns_unwrap_element(this_val);
-    if (!ns_node_is_element_named(label, "label")) return JS_NULL;
+    if (!ns_node_is_tag(label, NS_TAG_LABEL)) return JS_NULL;
     const char *forv = ns_element_get_attr(label, "for");
     if (forv) {
         const ns_node *target =
@@ -44197,7 +44197,7 @@ ns_collect_labels_for(JSContext *ctx, const ns_node *scan, const ns_node *n,
                       JSValue arr, uint32_t *idx, int depth)
 {
     if (!scan || depth >= 512) return;
-    if (ns_node_is_element_named(scan, "label") &&
+    if (ns_node_is_tag(scan, NS_TAG_LABEL) &&
         ns_label_associated_control(scan) == n)
         JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, scan));
     for (const ns_node *c = scan->first_child; c; c = c->next_sibling)
@@ -44232,7 +44232,7 @@ static JSValue
 ns_element_get_default_value(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (ns_node_is_element_named(n, "output")) {
+    if (ns_node_is_tag(n, NS_TAG_OUTPUT)) {
         if (ns_element_get_attr(n, "data-nd-output-dirty")) {
             const char *d = ns_element_get_attr(n, "data-nd-output-default");
             return JS_NewString(ctx, d ? d : "");
@@ -44242,7 +44242,7 @@ ns_element_get_default_value(JSContext *ctx, JSValueConst this_val)
         g_free(t);
         return v;
     }
-    if (ns_node_is_element_named(n, "textarea")) {
+    if (ns_node_is_tag(n, NS_TAG_TEXTAREA)) {
         char *t = ns_textarea_default_value_dup(n);
         JSValue v = JS_NewString(ctx, t ? t : "");
         g_free(t);
@@ -44256,11 +44256,11 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
 {
     ns_node *el = ns_unwrap_element_mut(this_val);
     if (!el) return JS_UNDEFINED;
-    if (!ns_node_is_element_named(el, "output") &&
-        !ns_node_is_element_named(el, "textarea"))
+    if (!ns_node_is_tag(el, NS_TAG_OUTPUT) &&
+        !ns_node_is_tag(el, NS_TAG_TEXTAREA))
         return ns_element_reflect_str_set(ctx, this_val, val, "value");
     const char *s = JS_ToCString(ctx, val);
-    if (ns_node_is_element_named(el, "output")) {
+    if (ns_node_is_tag(el, NS_TAG_OUTPUT)) {
         ns_js *_j = js_from_ctx(ctx);
         ns_element_set_attr(el, "data-nd-output-default", s ? s : "");
         if (!ns_element_get_attr(el, "data-nd-output-dirty")) {
@@ -44272,7 +44272,7 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
         if (_j) _j->mutated = TRUE;
         return JS_UNDEFINED;
     }
-    if (ns_node_is_element_named(el, "textarea")) {
+    if (ns_node_is_tag(el, NS_TAG_TEXTAREA)) {
         ns_js *_j = js_from_ctx(ctx);
         ns_js_clear_children(_j, el);
         if (s && *s)
@@ -44330,10 +44330,10 @@ ns_element_get_selected(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return JS_FALSE;
     if (ns_element_get_attr(n, "selected")) return JS_TRUE;
-    if (!ns_node_is_element_named(n, "option")) return JS_FALSE;
+    if (!ns_node_is_tag(n, NS_TAG_OPTION)) return JS_FALSE;
     const ns_node *p = n->parent;
-    if (ns_node_is_element_named(p, "optgroup")) p = p->parent;
-    if (ns_node_is_element_named(p, "select") &&
+    if (ns_node_is_tag(p, NS_TAG_OPTGROUP)) p = p->parent;
+    if (ns_node_is_tag(p, NS_TAG_SELECT) &&
         !ns_element_get_attr(p, "multiple") &&
         ns_select_chosen_option(p) == n)
         return JS_TRUE;
@@ -44347,16 +44347,16 @@ ns_element_set_selected(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     if (!n) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
     gboolean on = JS_ToBool(ctx, val) ? TRUE : FALSE;
-    if (ns_node_is_element_named(n, "option")) {
+    if (ns_node_is_tag(n, NS_TAG_OPTION)) {
         ns_node *sel = n->parent;
-        if (ns_node_is_element_named(sel, "optgroup")) sel = sel->parent;
-        if (ns_node_is_element_named(sel, "select"))
+        if (ns_node_is_tag(sel, NS_TAG_OPTGROUP)) sel = sel->parent;
+        if (ns_node_is_tag(sel, NS_TAG_SELECT))
             ns_element_remove_attr(sel, "data-nd-noselect");
     }
-    if (on && ns_node_is_element_named(n, "option")) {
+    if (on && ns_node_is_tag(n, NS_TAG_OPTION)) {
         ns_node *p = n->parent;
-        if (ns_node_is_element_named(p, "optgroup")) p = p->parent;
-        if (ns_node_is_element_named(p, "select") &&
+        if (ns_node_is_tag(p, NS_TAG_OPTGROUP)) p = p->parent;
+        if (ns_node_is_tag(p, NS_TAG_SELECT) &&
             !ns_element_get_attr(p, "multiple")) {
             for (ns_node *o = ns_select_next_option(p, NULL); o;
                  o = ns_select_next_option(p, o))
@@ -44800,8 +44800,8 @@ ns_element_get_ownerDocument(JSContext *ctx, JSValueConst this_val)
             if (doc_anc != js->current_doc) {
                 const ns_node *host = doc_anc->parent;
                 if (host && host->js_wrapper &&
-                    (ns_node_is_element_named(host, "iframe") ||
-                     (ns_node_is_element_named(host, "object") ||
+                    (ns_node_is_tag(host, NS_TAG_IFRAME) ||
+                     (ns_node_is_tag(host, NS_TAG_OBJECT) ||
                       ns_node_is_pdf_embed(host)))) {
                     JSValue hw = JS_MKPTR(JS_TAG_OBJECT, host->js_wrapper);
                     JSValue realm = JS_GetPropertyStr(ctx, hw, "__ndRealmDoc");
@@ -44880,7 +44880,7 @@ ns_element_get_namespaceURI(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (n && n->kind == NS_NODE_ELEMENT) {
-        const char *stored = ns_element_get_attr(n, "data-nd-ns-uri");
+        const char *stored = ns_element_namespace_uri(n);
         if (stored) return JS_NewString(ctx, stored);
     }
     if (n && (n->flags & NS_NODE_SVG_NS))
@@ -44922,7 +44922,7 @@ static JSValue
 ns_input_get_files(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!ns_node_is_element_named(n, "input")) return JS_NULL;
+    if (!ns_node_is_tag(n, NS_TAG_INPUT)) return JS_NULL;
     const char *type = ns_element_get_attr(n, "type");
     if (!type || g_ascii_strcasecmp(type, "file") != 0) return JS_NULL;
     JSValue cached = JS_GetPropertyStr(ctx, this_val, "__nd_files_cache");
@@ -45562,7 +45562,7 @@ static const char *
 ns_node_element_namespace(const ns_node *n)
 {
     if (!n || n->kind != NS_NODE_ELEMENT) return NULL;
-    const char *stored = ns_element_get_attr(n, "data-nd-ns-uri");
+    const char *stored = ns_element_namespace_uri(n);
     if (stored) return *stored ? stored : NULL;
     if (n->flags & NS_NODE_SVG_NS) return "http://www.w3.org/2000/svg";
     if (n->flags & NS_NODE_FOREIGN_NS) return NULL;
@@ -46132,7 +46132,7 @@ ns_element_get_disabled(JSContext *ctx, JSValueConst this_val)
     (void)ctx;
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el) return JS_FALSE;
-    if (ns_node_is_element_named(el, "style"))
+    if (ns_node_is_tag(el, NS_TAG_STYLE))
         return (el->flags & NS_NODE_SHEET_DISABLED) ? JS_TRUE : JS_FALSE;
     return ns_element_get_attr(el, "disabled") ? JS_TRUE : JS_FALSE;
 }
@@ -46144,7 +46144,7 @@ ns_element_set_disabled(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     if (!el) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
     gboolean disabled = JS_ToBool(ctx, val);
-    if (ns_node_is_element_named(el, "style")) {
+    if (ns_node_is_tag(el, NS_TAG_STYLE)) {
         guint32 flags = disabled ? el->flags | NS_NODE_SHEET_DISABLED
                                  : el->flags & ~NS_NODE_SHEET_DISABLED;
         if (flags != el->flags && _j) _j->mutated = TRUE;
@@ -46428,7 +46428,7 @@ ns_element_get_value_prop(JSContext *ctx, JSValueConst this_val)
         return v;
     }
     const char *v = ns_input_used_value(el);
-    if (ns_node_is_element_named(el, "input")) {
+    if (ns_node_is_tag(el, NS_TAG_INPUT)) {
         const char *type = ns_element_get_attr(el, "type");
         if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
                      g_ascii_strcasecmp(type, "radio") == 0)) {
@@ -46446,8 +46446,8 @@ ns_element_get_value_prop(JSContext *ctx, JSValueConst this_val)
 static gboolean
 ns_text_selection_applies(const ns_node *el)
 {
-    if (ns_node_is_element_named(el, "textarea")) return TRUE;
-    if (!ns_node_is_element_named(el, "input")) return FALSE;
+    if (ns_node_is_tag(el, NS_TAG_TEXTAREA)) return TRUE;
+    if (!ns_node_is_tag(el, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(el, "type");
     if (!type || !*type) return TRUE;
     static const char *const excluded[] = {
@@ -46618,7 +46618,7 @@ ns_input_sanitize_value(const ns_node *el, const char *value)
 static void
 ns_input_resanitize_value(ns_node *el)
 {
-    if (!el || !ns_node_is_element_named(el, "input")) return;
+    if (!el || !ns_node_is_tag(el, NS_TAG_INPUT)) return;
     if (!ns_element_get_attr(el, "data-nd-vdirty")) return;
     const char *d = ns_element_get_attr(el, "data-nd-value");
     const char *cur = d ? d : ns_element_get_attr(el, "value");
@@ -46835,7 +46835,7 @@ ns_collect_links(const ns_node *n, JSContext *ctx, JSValue arr, uint32_t *idx,
 {
     if (!n || depth >= 512 || ns_dom_hidden_child(n)) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if ((ns_node_is_element_named(c, "a") || ns_node_is_element_named(c, "area")) &&
+        if ((ns_node_is_tag(c, NS_TAG_A) || ns_node_is_tag(c, NS_TAG_AREA)) &&
             ns_element_get_attr(c, "href"))
             JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, c));
         ns_collect_links(c, ctx, arr, idx, depth + 1);
@@ -46856,21 +46856,21 @@ static void
 ns_collect_table_rows(const ns_node *tbl, JSContext *ctx, JSValue arr,
                       uint32_t *idx)
 {
-    if (!ns_node_is_element_named(tbl, "table")) {
+    if (!ns_node_is_tag(tbl, NS_TAG_TABLE)) {
         ns_collect_children_named(tbl, "tr", NULL, ctx, arr, idx);
         return;
     }
     for (const ns_node *c = tbl->first_child; c; c = c->next_sibling)
-        if (ns_node_is_element_named(c, "thead"))
+        if (ns_node_is_tag(c, NS_TAG_THEAD))
             ns_collect_children_named(c, "tr", NULL, ctx, arr, idx);
     for (const ns_node *c = tbl->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "tr"))
+        if (ns_node_is_tag(c, NS_TAG_TR))
             JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, c));
-        else if (ns_node_is_element_named(c, "tbody"))
+        else if (ns_node_is_tag(c, NS_TAG_TBODY))
             ns_collect_children_named(c, "tr", NULL, ctx, arr, idx);
     }
     for (const ns_node *c = tbl->first_child; c; c = c->next_sibling)
-        if (ns_node_is_element_named(c, "tfoot"))
+        if (ns_node_is_tag(c, NS_TAG_TFOOT))
             ns_collect_children_named(c, "tr", NULL, ctx, arr, idx);
 }
 
@@ -46910,13 +46910,13 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
     uint32_t i = 0;
     switch (b->kind) {
     case NS_LIVE_CHILDREN:
-        if (!ns_node_is_element_named(root, "template"))
+        if (!ns_node_is_html_tag(root, NS_TAG_TEMPLATE))
             for (const ns_node *c = root->first_child; c; c = c->next_sibling)
                 if (c->kind == NS_NODE_ELEMENT && !ns_node_hidden_from_script(c))
                     JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
         break;
     case NS_LIVE_CHILDNODES:
-        if (!ns_node_is_element_named(root, "template"))
+        if (!ns_node_is_html_tag(root, NS_TAG_TEMPLATE))
             for (const ns_node *c = root->first_child; c; c = c->next_sibling)
                 if (!ns_node_is_embedded_doc(c) && !ns_node_hidden_from_script(c))
                     JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
@@ -47447,7 +47447,7 @@ ns_element_get_option_index(JSContext *ctx, JSValueConst this_val)
     if (!opt) return JS_NewInt32(ctx, -1);
     const ns_node *sel = NULL;
     for (const ns_node *p = opt->parent; p; p = p->parent) {
-        if (ns_node_is_element_named(p, "select")) { sel = p; break; }
+        if (ns_node_is_tag(p, NS_TAG_SELECT)) { sel = p; break; }
     }
     if (!sel) return JS_NewInt32(ctx, -1);
     return JS_NewInt32(ctx, ns_select_option_index(sel, opt));
@@ -47694,7 +47694,7 @@ ns_element_template_content(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_element_set_content(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
-    if (ns_node_is_element_named(ns_unwrap_element(this_val), "template"))
+    if (ns_node_is_html_tag(ns_unwrap_element(this_val), NS_TAG_TEMPLATE))
         return JS_UNDEFINED;
     return ns_element_reflect_str_set(ctx, this_val, val, "content");
 }
@@ -47710,8 +47710,8 @@ ns_int_attr_index(const char *attr)
 static gboolean
 ns_element_reflects_rows(const ns_node *n)
 {
-    return ns_node_is_element_named(n, "textarea") ||
-           ns_node_is_element_named(n, "frameset");
+    return ns_node_is_tag(n, NS_TAG_TEXTAREA) ||
+           ns_node_is_tag(n, NS_TAG_FRAMESET);
 }
 
 static JSValue
@@ -47774,7 +47774,7 @@ ns_element_tr_cells(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_element_map_areas(JSContext *ctx, JSValueConst this_val)
 {
-    if (!ns_node_is_element_named(ns_unwrap_element(this_val), "map"))
+    if (!ns_node_is_tag(ns_unwrap_element(this_val), NS_TAG_MAP))
         return JS_UNDEFINED;
     return ns_make_live(ctx, this_val, NS_LIVE_MAP_AREAS, NULL);
 }
@@ -47805,7 +47805,7 @@ ns_element_get_form(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el) return JS_NULL;
-    if (ns_node_is_element_named(el, "label"))
+    if (ns_node_is_tag(el, NS_TAG_LABEL))
         el = ns_label_associated_control(el);
     if (!el) return JS_NULL;
     ns_js *_j = js_from_ctx(ctx);
@@ -47858,7 +47858,7 @@ ns_array_namedItem(JSContext *ctx, JSValueConst this_val,
 static gboolean
 ns_node_is_radio_input(const ns_node *el)
 {
-    if (!ns_node_is_element_named(el, "input")) return FALSE;
+    if (!ns_node_is_tag(el, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(el, "type");
     return type && g_ascii_strcasecmp(type, "radio") == 0;
 }
@@ -48410,7 +48410,7 @@ ns_element_has_dataset(const ns_node *el)
     if (!el || el->kind != NS_NODE_ELEMENT) return FALSE;
     if (el->flags & NS_NODE_SVG_NS) return TRUE;
     if (!(el->flags & NS_NODE_FOREIGN_NS)) return TRUE;
-    const char *ns = ns_element_get_attr(el, "data-nd-ns-uri");
+    const char *ns = ns_element_namespace_uri(el);
     return ns && strcmp(ns, "http://www.w3.org/1998/Math/MathML") == 0;
 }
 
@@ -48466,8 +48466,8 @@ ns_node_is_focusable(const ns_node *el)
 static gboolean
 ns_node_accepts_text_entry(const ns_node *el)
 {
-    if (ns_node_is_element_named(el, "textarea")) return TRUE;
-    if (ns_node_is_element_named(el, "input")) {
+    if (ns_node_is_tag(el, NS_TAG_TEXTAREA)) return TRUE;
+    if (ns_node_is_tag(el, NS_TAG_INPUT)) {
         static const char *const non_text[] = {
             "button", "checkbox", "color", "file", "hidden", "image",
             "radio", "range", "reset", "submit",
@@ -48625,8 +48625,8 @@ void
 ns_js_note_user_edit(ns_js *js, const ns_node *el, const char *value_before)
 {
     if (!js || !el || js->change_pending == el) return;
-    if (!ns_node_is_element_named(el, "input") &&
-        !ns_node_is_element_named(el, "textarea"))
+    if (!ns_node_is_tag(el, NS_TAG_INPUT) &&
+        !ns_node_is_tag(el, NS_TAG_TEXTAREA))
         return;
     ns_js_forget_pending_change(js);
     ns_node_arm_js_invalidate((ns_node *)el);
@@ -49206,11 +49206,11 @@ static ns_node *
 ns_summary_toggle_target(const ns_node *el)
 {
     for (const ns_node *cur = el; cur; cur = cur->parent) {
-        if (!ns_node_is_element_named(cur, "summary")) continue;
+        if (!ns_node_is_tag(cur, NS_TAG_SUMMARY)) continue;
         ns_node *details = cur->parent;
-        if (!ns_node_is_element_named(details, "details")) return NULL;
+        if (!ns_node_is_tag(details, NS_TAG_DETAILS)) return NULL;
         for (const ns_node *c = details->first_child; c; c = c->next_sibling)
-            if (ns_node_is_element_named(c, "summary"))
+            if (ns_node_is_tag(c, NS_TAG_SUMMARY))
                 return c == cur ? details : NULL;
         return NULL;
     }
@@ -49571,7 +49571,7 @@ ns_popover_validity(ns_js *js, const ns_node *el, gboolean expect_showing,
         return NS_POPOVER_WRONG_STATE;
     if (!ns_node_in_active_document(js, el) ||
         (expected_doc && ns_node_root(el) != expected_doc) ||
-        (ns_node_is_element_named(el, "dialog") &&
+        (ns_node_is_tag(el, NS_TAG_DIALOG) &&
          ns_element_get_attr(el, "open") &&
          ns_dialog_is_modal(js->ctx, (ns_node *)el)))
         return NS_POPOVER_INVALID_STATE;
@@ -49707,7 +49707,7 @@ static void ns_dialog_focusing_steps(ns_js *js, ns_node *dialog);
 static void
 ns_popover_focusing_steps(ns_js *js, ns_node *el)
 {
-    if (ns_node_is_element_named(el, "dialog")) {
+    if (ns_node_is_tag(el, NS_TAG_DIALOG)) {
         ns_dialog_focusing_steps(js, el);
         return;
     }
@@ -50078,8 +50078,8 @@ ns_element_set_popoverTargetElement(JSContext *ctx, JSValueConst this_val,
 static gboolean
 ns_node_is_button(const ns_node *el)
 {
-    if (ns_node_is_element_named(el, "button")) return TRUE;
-    if (!ns_node_is_element_named(el, "input")) return FALSE;
+    if (ns_node_is_tag(el, NS_TAG_BUTTON)) return TRUE;
+    if (!ns_node_is_tag(el, NS_TAG_INPUT)) return FALSE;
     const char *t = ns_element_get_attr(el, "type");
     return t && (g_ascii_strcasecmp(t, "submit") == 0 ||
                  g_ascii_strcasecmp(t, "reset") == 0 ||
@@ -50140,7 +50140,7 @@ ns_popover_nearest_target(ns_js *js, const ns_node *node)
     for (const ns_node *c = node; c && depth < 4096;
          c = ns_node_flat_parent(c), depth++) {
         if (c->kind != NS_NODE_ELEMENT) continue;
-        ns_node *t = ns_node_is_element_named(c, "button")
+        ns_node *t = ns_node_is_tag(c, NS_TAG_BUTTON)
             ? ns_button_target_popover(js, c) : ns_popover_target_element(js, c);
         ns_popover_type type = ns_popover_type_of(t);
         if (t && (type == NS_POPOVER_AUTO || type == NS_POPOVER_HINT) &&
@@ -50193,7 +50193,7 @@ static void
 ns_popover_removing_steps(ns_js *js, ns_node *el)
 {
     if (!ns_popover_info_lookup(js, el)) return;
-    if (ns_node_is_element_named(el, "dialog"))
+    if (ns_node_is_tag(el, NS_TAG_DIALOG))
         ns_dialog_removing_steps(js, el);
     if (ns_popover_is_showing(el))
         ns_popover_hide(js, el, FALSE, FALSE, NULL);
@@ -50209,7 +50209,7 @@ ns_popover_attr_changed(ns_js *js, ns_node *el, const char *attr,
     if (el == js->focused_node && g_ascii_strcasecmp(attr, "type") == 0)
         ns_js_update_focus_visible(js);
     if (g_ascii_strcasecmp(attr, "open") == 0 &&
-        ns_node_is_element_named(el, "dialog")) {
+        ns_node_is_tag(el, NS_TAG_DIALOG)) {
         if (!new_value && old_value)
             ns_dialog_cleanup(js, el);
         else if (new_value && !old_value && ns_node_is_connected(el))
@@ -50276,9 +50276,9 @@ static gboolean
 ns_node_hides_focus_subtree(const ns_node *n)
 {
     if (ns_element_get_attr(n, "hidden") ||
-        ns_node_is_element_named(n, "template"))
+        ns_node_is_html_tag(n, NS_TAG_TEMPLATE))
         return TRUE;
-    if (ns_node_is_element_named(n, "dialog") && !ns_element_get_attr(n, "open"))
+    if (ns_node_is_tag(n, NS_TAG_DIALOG) && !ns_element_get_attr(n, "open"))
         return TRUE;
     return ns_popover_type_of(n) != NS_POPOVER_NONE && !ns_popover_is_showing(n);
 }
@@ -50678,7 +50678,7 @@ ns_dialog_nearest_clicked(const ns_node *target)
     int depth = 0;
     for (const ns_node *c = target; c && depth < 4096;
          c = ns_node_flat_parent(c), depth++)
-        if (ns_node_is_element_named(c, "dialog") && ns_element_get_attr(c, "open"))
+        if (ns_node_is_tag(c, NS_TAG_DIALOG) && ns_element_get_attr(c, "open"))
             return (ns_node *)c;
     return NULL;
 }
@@ -50688,7 +50688,7 @@ ns_dialog_topmost_open(ns_js *js)
 {
     for (guint i = js->close_watchers ? js->close_watchers->len : 0; i > 0; i--) {
         ns_node *d = g_ptr_array_index(js->close_watchers, i - 1);
-        if (ns_node_is_element_named(d, "dialog")) return d;
+        if (ns_node_is_tag(d, NS_TAG_DIALOG)) return d;
     }
     return NULL;
 }
@@ -50730,7 +50730,7 @@ ns_js_process_close_request(ns_js *js)
     GPtrArray *w = js->close_watchers;
     if (!w || w->len == 0) return FALSE;
     ns_node *top = g_ptr_array_index(w, w->len - 1);
-    if (!ns_node_is_element_named(top, "dialog") ||
+    if (!ns_node_is_tag(top, NS_TAG_DIALOG) ||
         ns_popover_is_showing(top)) {
         ns_popover_hide(js, top, TRUE, TRUE, NULL);
         return TRUE;
@@ -50792,7 +50792,7 @@ ns_command_is_valid(ns_command_kind cmd, const ns_node *target)
     if (cmd == NS_COMMAND_CUSTOM) return TRUE;
     if (!ns_node_is_html_element(target)) return FALSE;
     if (ns_command_is_popover(cmd)) return TRUE;
-    return ns_node_is_element_named(target, "dialog");
+    return ns_node_is_tag(target, NS_TAG_DIALOG);
 }
 
 static JSValue
@@ -50924,7 +50924,7 @@ ns_button_run_command(ns_js *js, ns_node *button, ns_node *target)
         } else if (cmd == NS_COMMAND_SHOW_POPOVER) {
             if (ns_popover_validity(js, target, FALSE, NULL) == NS_POPOVER_VALID)
                 ns_popover_show(js, target, button);
-        } else if (ns_node_is_element_named(target, "dialog")) {
+        } else if (ns_node_is_tag(target, NS_TAG_DIALOG)) {
             ns_dialog_command_steps(js, target, button, cmd);
         }
     }
@@ -50982,7 +50982,7 @@ ns_maybe_close_dialog_form(JSContext *ctx, const ns_node *form,
     }
     if (!method || g_ascii_strcasecmp(method, "dialog") != 0) return FALSE;
     const ns_node *dialog = form;
-    while (dialog && !ns_node_is_element_named(dialog, "dialog"))
+    while (dialog && !ns_node_is_tag(dialog, NS_TAG_DIALOG))
         dialog = dialog->parent;
     if (!dialog) return TRUE;
     const char *rv = (submitter && ns_node_is_submit_trigger(submitter))
@@ -51003,7 +51003,7 @@ ns_node_is_submit_trigger(const ns_node *el)
             return FALSE;
         return !ns_element_get_attr(el, "command") &&
                !ns_element_get_attr(el, "commandfor") &&
-               !ns_node_is_element_named(el->parent, "select");
+               !ns_node_is_tag(el->parent, NS_TAG_SELECT);
     }
     if (g_ascii_strcasecmp(el->name, "input") == 0) {
         const char *t = ns_element_get_attr(el, "type");
@@ -51089,7 +51089,7 @@ ns_js_reset_owned_outputs(ns_js *js, ns_node *form, ns_node *scan,
                           const ns_node *doc, int depth)
 {
     if (!form || !scan || depth >= 512) return;
-    if (ns_node_is_element_named(scan, "output") &&
+    if (ns_node_is_tag(scan, NS_TAG_OUTPUT) &&
         ns_form_owner(scan, doc) == form &&
         ns_element_get_attr(scan, "data-nd-output-dirty")) {
         const char *d = ns_element_get_attr(scan, "data-nd-output-default");
@@ -51156,7 +51156,7 @@ ns_js_clear_radio_group(ns_js *js, const ns_node *radio)
     g_queue_push_tail(&q, root);
     while (!g_queue_is_empty(&q)) {
         ns_node *n = g_queue_pop_head(&q);
-        if (n != radio && ns_node_is_element_named(n, "input")) {
+        if (n != radio && ns_node_is_tag(n, NS_TAG_INPUT)) {
             const char *t = ns_element_get_attr(n, "type");
             const char *nm = ns_element_get_attr(n, "name");
             if (t && nm && g_ascii_strcasecmp(t, "radio") == 0 &&
@@ -51184,7 +51184,7 @@ static const ns_node *
 ns_node_owner_iframe(const ns_node *n)
 {
     for (const ns_node *p = n ? n->parent : NULL; p; p = p->parent)
-        if (ns_node_is_element_named(p, "iframe")) return p;
+        if (ns_node_is_tag(p, NS_TAG_IFRAME)) return p;
     return NULL;
 }
 
@@ -51211,7 +51211,7 @@ ns_iframe_follow_href(JSContext *ctx, const ns_node *el, const char *href)
 static int
 ns_checkable_input_kind(const ns_node *el)
 {
-    if (!ns_node_is_element_named(el, "input")) return 0;
+    if (!ns_node_is_tag(el, NS_TAG_INPUT)) return 0;
     const char *type = ns_element_get_attr(el, "type");
     if (type && g_ascii_strcasecmp(type, "checkbox") == 0) return 1;
     if (type && g_ascii_strcasecmp(type, "radio") == 0) return 2;
@@ -51272,42 +51272,42 @@ static gboolean
 ns_node_is_interactive_content(const ns_node *el)
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !el->name) return FALSE;
-    if (ns_node_is_element_named(el, "a") ||
-        ns_node_is_element_named(el, "area"))
+    if (ns_node_is_tag(el, NS_TAG_A) ||
+        ns_node_is_tag(el, NS_TAG_AREA))
         return ns_element_get_attr(el, "href") != NULL;
-    if (ns_node_is_element_named(el, "input")) {
+    if (ns_node_is_tag(el, NS_TAG_INPUT)) {
         const char *t = ns_element_get_attr(el, "type");
         return !t || g_ascii_strcasecmp(t, "hidden") != 0;
     }
-    if (ns_node_is_element_named(el, "audio") ||
-        ns_node_is_element_named(el, "video"))
+    if (ns_node_is_tag(el, NS_TAG_AUDIO) ||
+        ns_node_is_tag(el, NS_TAG_VIDEO))
         return ns_element_get_attr(el, "controls") != NULL;
-    if (ns_node_is_element_named(el, "img") ||
-        (ns_node_is_element_named(el, "object") || ns_node_is_pdf_embed(el)))
+    if (ns_node_is_tag(el, NS_TAG_IMG) ||
+        (ns_node_is_tag(el, NS_TAG_OBJECT) || ns_node_is_pdf_embed(el)))
         return ns_element_get_attr(el, "usemap") != NULL;
-    return ns_node_is_element_named(el, "button") ||
-           ns_node_is_element_named(el, "details") ||
-           ns_node_is_element_named(el, "embed") ||
-           ns_node_is_element_named(el, "iframe") ||
-           ns_node_is_element_named(el, "label") ||
-           ns_node_is_element_named(el, "select") ||
-           ns_node_is_element_named(el, "textarea");
+    return ns_node_is_tag(el, NS_TAG_BUTTON) ||
+           ns_node_is_tag(el, NS_TAG_DETAILS) ||
+           ns_node_is_tag(el, NS_TAG_EMBED) ||
+           ns_node_is_tag(el, NS_TAG_IFRAME) ||
+           ns_node_is_tag(el, NS_TAG_LABEL) ||
+           ns_node_is_tag(el, NS_TAG_SELECT) ||
+           ns_node_is_tag(el, NS_TAG_TEXTAREA);
 }
 
 static gboolean
 ns_node_has_activation_behavior(const ns_node *cur)
 {
     if (!cur || cur->kind != NS_NODE_ELEMENT || !cur->name) return FALSE;
-    if (ns_node_is_element_named(cur, "a") ||
-        ns_node_is_element_named(cur, "area"))
+    if (ns_node_is_tag(cur, NS_TAG_A) ||
+        ns_node_is_tag(cur, NS_TAG_AREA))
         return ns_element_get_attr(cur, "href") != NULL;
-    if (ns_node_is_element_named(cur, "input")) {
+    if (ns_node_is_tag(cur, NS_TAG_INPUT)) {
         const char *t = ns_element_get_attr(cur, "type");
         return !t || g_ascii_strcasecmp(t, "hidden") != 0;
     }
-    if (ns_node_is_element_named(cur, "button")) return TRUE;
-    if (ns_node_is_element_named(cur, "label")) return TRUE;
-    return ns_node_is_element_named(cur, "summary") &&
+    if (ns_node_is_tag(cur, NS_TAG_BUTTON)) return TRUE;
+    if (ns_node_is_tag(cur, NS_TAG_LABEL)) return TRUE;
+    return ns_node_is_tag(cur, NS_TAG_SUMMARY) &&
            ns_summary_toggle_target(cur) != NULL;
 }
 
@@ -51409,16 +51409,16 @@ ns_element_activation_behavior(JSContext *ctx, const ns_node *act,
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_UNDEFINED;
-    if (ns_node_is_element_named(act, "summary")) {
+    if (ns_node_is_tag(act, NS_TAG_SUMMARY)) {
         ns_js_activate_summary(js, act);
         return JS_UNDEFINED;
     }
-    if (ns_node_is_element_named(act, "label")) {
+    if (ns_node_is_tag(act, NS_TAG_LABEL)) {
         ns_js_activate_label(js, act, target);
         return JS_UNDEFINED;
     }
-    if (ns_node_is_element_named(act, "a") ||
-        ns_node_is_element_named(act, "area")) {
+    if (ns_node_is_tag(act, NS_TAG_A) ||
+        ns_node_is_tag(act, NS_TAG_AREA)) {
         g_autofree char *href = g_strdup(ns_element_get_attr(act, "href"));
         const char *js_body = ns_href_javascript_body(href);
         if (js_body) {
@@ -51453,7 +51453,7 @@ ns_element_activation_behavior(JSContext *ctx, const ns_node *act,
     }
     if (ns_node_is_disabled_form_control(act))
         return JS_UNDEFINED;
-    if (ns_node_is_element_named(act, "button")) {
+    if (ns_node_is_tag(act, NS_TAG_BUTTON)) {
         ns_button_activation(js, (ns_node *)act, target);
         return JS_UNDEFINED;
     }
@@ -51539,8 +51539,8 @@ ns_js_keyboard_activate(ns_js *js, const ns_node *el, const char *key,
     if (ns_element_effectively_inert(el) ||
         ns_element_effectively_disabled(el))
         return FALSE;
-    gboolean link = (ns_node_is_element_named(el, "a") ||
-                     ns_node_is_element_named(el, "area")) &&
+    gboolean link = (ns_node_is_tag(el, NS_TAG_A) ||
+                     ns_node_is_tag(el, NS_TAG_AREA)) &&
                     ns_element_get_attr(el, "href");
     gboolean summary = ns_summary_toggle_target(el) != NULL;
     gboolean button = ns_node_is_button(el);
@@ -51567,7 +51567,7 @@ ns_js_click_activate(ns_js *js, const ns_node *node)
     const ns_node *control = NULL;
     gboolean through_label = FALSE;
     for (const ns_node *cur = node; cur && !control; cur = cur->parent) {
-        if (ns_node_is_element_named(cur, "label")) {
+        if (ns_node_is_tag(cur, NS_TAG_LABEL)) {
             const char *forv = ns_element_get_attr(cur, "for");
             if (forv && *forv && js->current_doc) {
                 const ns_node *t = ns_node_find_by_id(js->current_doc, forv);
@@ -51578,7 +51578,7 @@ ns_js_click_activate(ns_js *js, const ns_node *node)
             through_label = TRUE;
             break;
         }
-        if (ns_node_is_element_named(cur, "input")) control = cur;
+        if (ns_node_is_tag(cur, NS_TAG_INPUT)) control = cur;
         else if (ns_node_is_interactive_content(cur)) return FALSE;
     }
     if (!control) return FALSE;
@@ -51586,7 +51586,7 @@ ns_js_click_activate(ns_js *js, const ns_node *node)
     if (ns_element_effectively_inert(control)) return FALSE;
     if (through_label && ns_node_is_focusable(control))
         ns_js_set_focus(js, control);
-    if (!ns_node_is_element_named(control, "input")) return FALSE;
+    if (!ns_node_is_tag(control, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(control, "type");
     if (!type) return FALSE;
     if (g_ascii_strcasecmp(type, "checkbox") == 0) {
@@ -51610,9 +51610,9 @@ ns_js_select_choose_option(ns_js *js, ns_node *option)
 {
     if (!js || !option) return FALSE;
     ns_node *select = option->parent;
-    if (select && ns_node_is_element_named(select, "optgroup"))
+    if (select && ns_node_is_tag(select, NS_TAG_OPTGROUP))
         select = select->parent;
-    if (!select || !ns_node_is_element_named(select, "select")) return FALSE;
+    if (!select || !ns_node_is_tag(select, NS_TAG_SELECT)) return FALSE;
     if (ns_node_is_disabled_form_control(option)) return FALSE;
     ns_select_choose(select, option);
     gboolean p = FALSE;
@@ -51627,9 +51627,9 @@ ns_js_select_toggle_option(ns_js *js, ns_node *option)
 {
     if (!js || !option) return FALSE;
     ns_node *select = option->parent;
-    if (select && ns_node_is_element_named(select, "optgroup"))
+    if (select && ns_node_is_tag(select, NS_TAG_OPTGROUP))
         select = select->parent;
-    if (!select || !ns_node_is_element_named(select, "select")) return FALSE;
+    if (!select || !ns_node_is_tag(select, NS_TAG_SELECT)) return FALSE;
     if (ns_node_is_disabled_form_control(option)) return FALSE;
     if (ns_element_get_attr(option, "selected"))
         ns_element_remove_attr(option, "selected");
@@ -51670,7 +51670,7 @@ ns_select_current_index(ns_node *select, GPtrArray *opts)
 gboolean
 ns_js_select_step(ns_js *js, ns_node *select, int dir)
 {
-    if (!js || !select || !ns_node_is_element_named(select, "select")) return FALSE;
+    if (!js || !select || !ns_node_is_tag(select, NS_TAG_SELECT)) return FALSE;
     GPtrArray *opts = g_ptr_array_new();
     ns_select_collect_options(select, opts);
     gboolean done = FALSE;
@@ -51694,7 +51694,7 @@ ns_js_select_step(ns_js *js, ns_node *select, int dir)
 gboolean
 ns_js_select_edge(ns_js *js, ns_node *select, gboolean last)
 {
-    if (!js || !select || !ns_node_is_element_named(select, "select")) return FALSE;
+    if (!js || !select || !ns_node_is_tag(select, NS_TAG_SELECT)) return FALSE;
     GPtrArray *opts = g_ptr_array_new();
     ns_select_collect_options(select, opts);
     gboolean done = FALSE;
@@ -51714,7 +51714,7 @@ gboolean
 ns_js_select_typeahead(ns_js *js, ns_node *select, const char *key)
 {
     if (!js || !select || !key || !*key ||
-        !ns_node_is_element_named(select, "select")) return FALSE;
+        !ns_node_is_tag(select, NS_TAG_SELECT)) return FALSE;
     GPtrArray *opts = g_ptr_array_new();
     ns_select_collect_options(select, opts);
     gboolean done = FALSE;
@@ -51747,7 +51747,7 @@ ns_element_form_requestSubmit(JSContext *ctx, JSValueConst this_val,
     const ns_node *form = ns_unwrap_element(this_val);
     ns_js *js = js_from_ctx(ctx);
     if (!form || !js) return JS_UNDEFINED;
-    if (!ns_node_is_element_named(form, "form")) return JS_UNDEFINED;
+    if (!ns_node_is_tag(form, NS_TAG_FORM)) return JS_UNDEFINED;
     const ns_node *submitter = NULL;
     if (argc >= 1 && !JS_IsUndefined(argv[0]) && !JS_IsNull(argv[0])) {
         submitter = ns_unwrap_element(argv[0]);
@@ -51836,9 +51836,9 @@ ns_js_is_frame_document_edge(const ns_node *child, const ns_node *parent)
 {
     return child && child->kind == NS_NODE_DOCUMENT &&
            !(child->flags & NS_NODE_FRAGMENT) &&
-           (ns_node_is_element_named(parent, "iframe") ||
-            ns_node_is_element_named(parent, "frame") ||
-            (ns_node_is_element_named(parent, "object") || ns_node_is_pdf_embed(parent)));
+           (ns_node_is_tag(parent, NS_TAG_IFRAME) ||
+            ns_node_is_tag(parent, NS_TAG_FRAME) ||
+            (ns_node_is_tag(parent, NS_TAG_OBJECT) || ns_node_is_pdf_embed(parent)));
 }
 
 static const char *
@@ -51913,9 +51913,9 @@ static ns_node *
 ns_js_node_frame(const ns_node *node)
 {
     if (!node) return NULL;
-    if (ns_node_is_element_named(node, "iframe") ||
-        ns_node_is_element_named(node, "frame") ||
-        (ns_node_is_element_named(node, "object") || ns_node_is_pdf_embed(node)))
+    if (ns_node_is_tag(node, NS_TAG_IFRAME) ||
+        ns_node_is_tag(node, NS_TAG_FRAME) ||
+        (ns_node_is_tag(node, NS_TAG_OBJECT) || ns_node_is_pdf_embed(node)))
         return (ns_node *)node;
     for (const ns_node *child = node, *p = node->parent; p;
          child = p, p = p->parent)
@@ -51951,9 +51951,9 @@ ns_js_node_content_frame(const ns_node *node)
     while (p && !(p->kind == NS_NODE_DOCUMENT && !(p->flags & NS_NODE_FRAGMENT)))
         p = p->parent;
     ns_node *frame = p ? p->parent : NULL;
-    return frame && (ns_node_is_element_named(frame, "iframe") ||
-                     ns_node_is_element_named(frame, "frame") ||
-                     (ns_node_is_element_named(frame, "object") || ns_node_is_pdf_embed(frame)))
+    return frame && (ns_node_is_tag(frame, NS_TAG_IFRAME) ||
+                     ns_node_is_tag(frame, NS_TAG_FRAME) ||
+                     (ns_node_is_tag(frame, NS_TAG_OBJECT) || ns_node_is_pdf_embed(frame)))
         ? frame : NULL;
 }
 
@@ -51982,15 +51982,15 @@ ns_js_element_render_blocking(const ns_node *el)
     gboolean in_head = FALSE;
     for (const ns_node *p = el->parent; p && p->kind == NS_NODE_ELEMENT;
          p = p->parent)
-        if (ns_node_is_element_named(p, "head")) { in_head = TRUE; break; }
+        if (ns_node_is_tag(p, NS_TAG_HEAD)) { in_head = TRUE; break; }
     if (!in_head) return FALSE;
     if (ns_js_attr_has_token(el, "blocking", "render")) return TRUE;
     if (el->flags & NS_NODE_NOT_PARSER_INSERTED) return FALSE;
-    if (ns_node_is_element_named(el, "script"))
+    if (ns_node_is_tag(el, NS_TAG_SCRIPT))
         return !ns_script_type_is_module(el) &&
                !ns_element_get_attr(el, "async") &&
                !ns_element_get_attr(el, "defer");
-    if (ns_node_is_element_named(el, "link")) {
+    if (ns_node_is_tag(el, NS_TAG_LINK)) {
         const char *media = ns_element_get_attr(el, "media");
         return ns_js_attr_has_token(el, "rel", "stylesheet") &&
                !ns_js_attr_has_token(el, "rel", "alternate") &&
@@ -52658,8 +52658,8 @@ static JSValue
 ns_text_control_get_text_length(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *el = ns_unwrap_element(this_val);
-    if (!ns_node_is_element_named(el, "input") &&
-        !ns_node_is_element_named(el, "textarea"))
+    if (!ns_node_is_tag(el, NS_TAG_INPUT) &&
+        !ns_node_is_tag(el, NS_TAG_TEXTAREA))
         return JS_UNDEFINED;
     return JS_NewUint32(ctx, ns_text_control_value_length(ctx, this_val));
 }
@@ -52709,7 +52709,7 @@ ns_input_step(JSContext *ctx, JSValueConst this_val,
               int argc, JSValueConst *argv, int sign)
 {
     const ns_node *el = ns_unwrap_element(this_val);
-    if (!el || !ns_node_is_element_named(el, "input"))
+    if (!el || !ns_node_is_tag(el, NS_TAG_INPUT))
         return JS_ThrowTypeError(ctx, "Illegal invocation");
     int32_t n = 1;
     if (argc >= 1 && JS_ToInt32(ctx, &n, argv[0]))
@@ -52737,11 +52737,11 @@ ns_element_show_picker(JSContext *ctx, JSValueConst this_val,
     (void)argc;
     (void)argv;
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || (!ns_node_is_element_named(n, "input") &&
-               !ns_node_is_element_named(n, "select")))
+    if (!n || (!ns_node_is_tag(n, NS_TAG_INPUT) &&
+               !ns_node_is_tag(n, NS_TAG_SELECT)))
         return JS_ThrowTypeError(ctx, "Illegal invocation");
     gboolean readonly_applies =
-        ns_node_is_element_named(n, "input") &&
+        ns_node_is_tag(n, NS_TAG_INPUT) &&
         ns_element_get_attr(n, "readonly") != NULL &&
         ns_input_type_supports_readonly(ns_element_get_attr(n, "type"));
     if (ns_element_effectively_disabled(n) || readonly_applies)
@@ -53108,10 +53108,10 @@ ns_table_insertRow(JSContext *ctx, JSValueConst this_val,
         ns_node *parent;
         if (rows->len > 0) {
             parent = ((ns_node *)g_ptr_array_index(rows, rows->len - 1))->parent;
-        } else if (ns_node_is_element_named(tbl, "table")) {
+        } else if (ns_node_is_tag(tbl, NS_TAG_TABLE)) {
             parent = NULL;
             for (ns_node *c = tbl->first_child; c; c = c->next_sibling)
-                if (ns_node_is_element_named(c, "tbody")) parent = c;
+                if (ns_node_is_tag(c, NS_TAG_TBODY)) parent = c;
             if (!parent) {
                 parent = ns_node_new_element(g_strdup("tbody"));
                 ns_node_append_child(tbl, parent);
@@ -53237,8 +53237,8 @@ ns_select_add(JSContext *ctx, JSValueConst this_val,
     ns_node *sel = ns_unwrap_element_mut(this_val);
     if (!sel) return JS_UNDEFINED;
     ns_node *opt = ns_unwrap_element_mut(argv[0]);
-    if (!opt || !(ns_node_is_element_named(opt, "option") ||
-                  ns_node_is_element_named(opt, "optgroup")))
+    if (!opt || !(ns_node_is_tag(opt, NS_TAG_OPTION) ||
+                  ns_node_is_tag(opt, NS_TAG_OPTGROUP)))
         return JS_ThrowTypeError(ctx, "add: argument 1 is not an option or optgroup element");
     for (const ns_node *a = sel; a; a = a->parent)
         if (a == opt)
@@ -53252,11 +53252,11 @@ ns_select_add(JSContext *ctx, JSValueConst this_val,
             JS_ToInt32(ctx, &idx, argv[1]);
             int32_t i = 0;
             for (ns_node *c = sel->first_child; c && !before; c = c->next_sibling) {
-                if (ns_node_is_element_named(c, "option")) {
+                if (ns_node_is_tag(c, NS_TAG_OPTION)) {
                     if (i++ == idx) before = c;
-                } else if (ns_node_is_element_named(c, "optgroup")) {
+                } else if (ns_node_is_tag(c, NS_TAG_OPTGROUP)) {
                     for (ns_node *g = c->first_child; g; g = g->next_sibling)
-                        if (ns_node_is_element_named(g, "option") && i++ == idx) {
+                        if (ns_node_is_tag(g, NS_TAG_OPTION) && i++ == idx) {
                             before = g;
                             break;
                         }
@@ -53382,7 +53382,7 @@ ns_media_resolve_src(JSContext *ctx, ns_node *node)
     const char *src = ns_element_get_attr(node, "src");
     if (!src || !*src) {
         for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
-            if (ns_node_is_element_named(c, "source")) {
+            if (ns_node_is_tag(c, NS_TAG_SOURCE)) {
                 const char *ss = ns_element_get_attr(c, "src");
                 if (ss && *ss) { src = ss; break; }
             }
@@ -55035,7 +55035,7 @@ ns_frame_scope_navigate(JSContext *ctx, JSValueConst this_val, int argc,
     if (ns_location_target_allowed(url)) {
         if (js->iframe_load_depth > 0 && js->raf_frame_ctx == frame)
             ns_element_set_attr(frame, "data-nd-frame-nav-pending", "1");
-        gboolean is_object = (ns_node_is_element_named(frame, "object") ||
+        gboolean is_object = (ns_node_is_tag(frame, NS_TAG_OBJECT) ||
                               ns_node_is_pdf_embed(frame));
         ns_js_set_attr_recorded(js, frame, is_object ? "data" : "src", url);
         ns_js_schedule_iframe_load_full(js, frame, TRUE);
@@ -56869,13 +56869,13 @@ static JSValue
 ns_element_get_contentDocument(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || (!ns_node_is_element_named(n, "iframe") &&
-               !(ns_node_is_element_named(n, "object") || ns_node_is_pdf_embed(n)) &&
-               !ns_node_is_element_named(n, "frame") &&
-               !ns_node_is_element_named(n, "embed")))
+    if (!n || (!ns_node_is_tag(n, NS_TAG_IFRAME) &&
+               !(ns_node_is_tag(n, NS_TAG_OBJECT) || ns_node_is_pdf_embed(n)) &&
+               !ns_node_is_tag(n, NS_TAG_FRAME) &&
+               !ns_node_is_tag(n, NS_TAG_EMBED)))
         return JS_ThrowTypeError(ctx, "Illegal invocation");
     if (!ns_node_is_navigable_frame(n) &&
-        !(ns_node_is_element_named(n, "object") || ns_node_is_pdf_embed(n))) return JS_NULL;
+        !(ns_node_is_tag(n, NS_TAG_OBJECT) || ns_node_is_pdf_embed(n))) return JS_NULL;
     if (!ns_frame_owner_has_browsing_context(js_from_ctx(ctx), n))
         return JS_NULL;
     if (ns_iframe_is_cross_origin(js_from_ctx(ctx), n)) return JS_NULL;
@@ -57039,10 +57039,10 @@ ns_iframe_realm_window(JSContext *ctx, JSValueConst this_val, ns_node *n)
 static gboolean
 ns_node_is_frame_owner(const ns_node *n)
 {
-    return n && (ns_node_is_element_named(n, "iframe") ||
-                 (ns_node_is_element_named(n, "object") || ns_node_is_pdf_embed(n)) ||
-                 ns_node_is_element_named(n, "frame") ||
-                 ns_node_is_element_named(n, "embed"));
+    return n && (ns_node_is_tag(n, NS_TAG_IFRAME) ||
+                 (ns_node_is_tag(n, NS_TAG_OBJECT) || ns_node_is_pdf_embed(n)) ||
+                 ns_node_is_tag(n, NS_TAG_FRAME) ||
+                 ns_node_is_tag(n, NS_TAG_EMBED));
 }
 
 static JSValue
@@ -57120,7 +57120,7 @@ ns_window_child_frame_window(JSContext *ctx, ns_node *doc, uint32_t index,
     JSValue win = JS_UNDEFINED;
     if (!raw)
         win = ns_element_get_contentWindow(ctx, el);
-    else if (ns_node_is_element_named(frame, "iframe") &&
+    else if (ns_node_is_tag(frame, NS_TAG_IFRAME) &&
              ns_iframe_ensure_content_root((ns_node *)frame))
         win = ns_iframe_realm_window(ctx, el, (ns_node *)frame);
     JS_FreeValue(ctx, el);
@@ -57199,9 +57199,9 @@ ns_element_getSVGDocument(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc; (void)argv;
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || (!ns_node_is_element_named(n, "iframe") &&
-               !(ns_node_is_element_named(n, "object") || ns_node_is_pdf_embed(n)) &&
-               !ns_node_is_element_named(n, "embed")))
+    if (!n || (!ns_node_is_tag(n, NS_TAG_IFRAME) &&
+               !(ns_node_is_tag(n, NS_TAG_OBJECT) || ns_node_is_pdf_embed(n)) &&
+               !ns_node_is_tag(n, NS_TAG_EMBED)))
         return JS_NULL;
     JSValue doc = ns_element_get_contentDocument(ctx, this_val);
     if (!JS_IsObject(doc)) return doc;
@@ -58161,7 +58161,7 @@ ns_document_get_anchors(JSContext *ctx, JSValueConst this_val)
         ns_node *n = g_queue_pop_head(&q);
         for (ns_node *c = n->first_child; c; c = c->next_sibling) {
             if (ns_dom_hidden_child(c)) continue;
-            if (ns_node_is_element_named(c, "a") &&
+            if (ns_node_is_tag(c, NS_TAG_A) &&
                 ns_element_get_attr(c, "name"))
                 JS_SetPropertyUint32(ctx, arr, idx++, ns_make_element(ctx, c));
             g_queue_push_tail(&q, c);
@@ -58411,7 +58411,7 @@ static const ns_node *
 ns_hit_frame_of(const ns_node *doc)
 {
     return doc && doc->kind == NS_NODE_DOCUMENT &&
-        ns_node_is_element_named(doc->parent, "iframe") ? doc->parent : NULL;
+        ns_node_is_tag(doc->parent, NS_TAG_IFRAME) ? doc->parent : NULL;
 }
 
 static gboolean
@@ -60823,7 +60823,7 @@ ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
         ns_popover_attr_changed(js, node, attr, old_value, new_value);
     if (js && attr && !old_value && new_value &&
         g_ascii_strcasecmp(attr, "src") == 0 &&
-        ns_node_is_element_named(node, "script") &&
+        ns_node_is_tag(node, NS_TAG_SCRIPT) &&
         !(node->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS))) {
         ns_js_script_needs_prepare(js, node);
         return;
@@ -65239,7 +65239,7 @@ ns_collect_by_tag_ns(const ns_node *n, const char *ns, gboolean ns_wild,
                                      ns_make_element(ctx, n));
         }
     }
-    if (ns_node_is_element_named(n, "template")) return;
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         ns_collect_by_tag_ns(c, ns, ns_wild, local, local_wild,
                              ctx, arr, idx, depth + 1);
@@ -65590,9 +65590,11 @@ ns_document_createElementNS(JSContext *ctx, JSValueConst this_val,
     char *stored = is_html ? g_strdup(local) : g_strdup(name);
     ns_node *el = ns_node_new_element(stored);
     el->flags |= NS_NODE_NOT_PARSER_INSERTED;
-    if (is_svg)       el->flags |= NS_NODE_SVG_NS;
-    else if (!is_html) el->flags |= NS_NODE_FOREIGN_NS;
-    if (ns && !is_html)
+    gboolean is_mathml = ns && strcmp(ns, NS_MATHML_NAMESPACE) == 0;
+    if (is_svg)         el->flags |= NS_NODE_SVG_NS;
+    else if (is_mathml) el->flags |= NS_NODE_FOREIGN_NS | NS_NODE_MATHML_NS;
+    else if (!is_html)  el->flags |= NS_NODE_FOREIGN_NS;
+    if (ns && !is_html && !is_svg && !is_mathml)
         ns_element_set_attr(el, "data-nd-ns-uri", ns);
     if (is_html && has_prefix) {
         char *pfx = g_strndup(name, prefix_len);
@@ -66246,7 +66248,7 @@ ns_synthdoc_get_head(JSContext *ctx, JSValueConst this_val,
     ns_node *html = ns_synthdoc_html_node(this_val);
     if (!html) return JS_NULL;
     for (ns_node *c = html->first_child; c; c = c->next_sibling)
-        if (ns_node_is_element_named(c, "head"))
+        if (ns_node_is_tag(c, NS_TAG_HEAD))
             return ns_make_element(ctx, c);
     return JS_NULL;
 }
@@ -66806,7 +66808,7 @@ ns_collect_by_name(const ns_node *root, const char *name,
         if (n && strcmp(n, name) == 0)
             JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, root));
     }
-    if (ns_node_is_element_named(root, "template")) return;
+    if (ns_node_is_html_tag(root, NS_TAG_TEMPLATE)) return;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling)
         ns_collect_by_name(c, name, ctx, arr, idx, depth + 1);
 }
@@ -67011,9 +67013,9 @@ static gboolean
 ns_node_is_frame_element(const ns_node *n)
 {
     return n && n->kind == NS_NODE_ELEMENT &&
-           (ns_node_is_element_named(n, "iframe") ||
-            ns_node_is_element_named(n, "frame") ||
-            ns_node_is_element_named(n, "object") ||
+           (ns_node_is_tag(n, NS_TAG_IFRAME) ||
+            ns_node_is_tag(n, NS_TAG_FRAME) ||
+            ns_node_is_tag(n, NS_TAG_OBJECT) ||
             ns_node_is_pdf_embed(n));
 }
 
@@ -67099,12 +67101,12 @@ ns_document_expose_legacy_named_in(JSContext *ctx, JSValueConst document,
                                    const ns_node *n, int depth)
 {
     if (!n || depth >= 512) return;
-    if (ns_node_is_element_named(n, "form")) {
+    if (ns_node_is_tag(n, NS_TAG_FORM)) {
         JSValue element = ns_make_element(ctx, n);
         ns_define_missing_named_value(ctx, document,
                                       ns_element_get_attr(n, "name"), element);
         JS_FreeValue(ctx, element);
-    } else if (ns_node_is_element_named(n, "img")) {
+    } else if (ns_node_is_tag(n, NS_TAG_IMG)) {
         const char *name = ns_element_get_attr(n, "name");
         if (name && *name) {
             JSValue element = ns_make_element(ctx, n);
@@ -67175,7 +67177,7 @@ ns_document_write_from_head(ns_js *js, ns_node *head, ns_node *ref,
     ns_node *live_html = head->parent;
     ns_node *live_body = ns_node_child_element_named(live_html, "body");
     if (!live_body) live_body = ns_parser_held_child(js, live_html, "body");
-    if (!ns_node_is_element_named(live_html, "html") || !live_body)
+    if (!ns_node_is_tag(live_html, NS_TAG_HTML) || !live_body)
         return FALSE;
     ns_node *doc = ns_html_parse_with_scripting(html, -1, scripting);
     if (!doc) return FALSE;
@@ -67256,7 +67258,7 @@ ns_js_flush_document_write(ns_js *js)
         !(root->flags & NS_NODE_SCRIPTING_DISABLED);
     ns_node *body_parent = NULL;
     GPtrArray *inserted = g_ptr_array_new();
-    if (ref && ns_node_is_element_named(parent, "head") &&
+    if (ref && ns_node_is_tag(parent, NS_TAG_HEAD) &&
         ns_document_write_from_head(js, parent, ref, html, scripting,
                                     inserted, &body_parent)) {
         g_free(html);
@@ -67514,8 +67516,8 @@ ns_realmdoc_open(JSContext *ctx, JSValueConst this_val,
         JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf", JS_NewString(ctx, ""));
         ns_node *host = doc->parent;
         if (host && host->kind == NS_NODE_ELEMENT &&
-            (ns_node_is_element_named(host, "iframe") ||
-             ns_node_is_element_named(host, "frame")))
+            (ns_node_is_tag(host, NS_TAG_IFRAME) ||
+             ns_node_is_tag(host, NS_TAG_FRAME)))
             ns_element_set_attr(host, "data-nd-doc-written", "1");
         js->mutated = TRUE;
     }
@@ -67560,8 +67562,8 @@ ns_realmdoc_frame_host(const ns_node *doc)
 {
     ns_node *host = doc ? doc->parent : NULL;
     if (host && host->kind == NS_NODE_ELEMENT &&
-        (ns_node_is_element_named(host, "iframe") ||
-         ns_node_is_element_named(host, "frame")))
+        (ns_node_is_tag(host, NS_TAG_IFRAME) ||
+         ns_node_is_tag(host, NS_TAG_FRAME)))
         return host;
     return NULL;
 }
@@ -70576,7 +70578,7 @@ ns_js_register_import_maps_rec(ns_js *js, ns_node *root, int depth)
 {
     if (!js || !root || depth >= 512 ||
         (depth > 0 && ns_dom_hidden_child(root))) return;
-    if (ns_node_is_element_named(root, "script")) {
+    if (ns_node_is_tag(root, NS_TAG_SCRIPT)) {
         if (ns_script_kind(root) == NS_SCRIPT_KIND_SPECULATIONRULES &&
             !ns_element_get_attr(root, NS_SCRIPT_ALREADY_STARTED)) {
             ns_element_set_attr(root, NS_SCRIPT_ALREADY_STARTED, "1");
@@ -70601,7 +70603,7 @@ ns_js_register_import_maps_rec(ns_js *js, ns_node *root, int depth)
         }
         return;
     }
-    if (ns_node_is_element_named(root, "template")) return;
+    if (ns_node_is_html_tag(root, NS_TAG_TEMPLATE)) return;
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
         ns_js_register_import_maps_rec(js, c, depth + 1);
 }
@@ -71597,7 +71599,7 @@ static void
 ns_js_mark_scripts_already_started_rec(ns_node *n, int depth)
 {
     if (!n || depth >= 512 || (depth > 0 && ns_dom_hidden_child(n))) return;
-    if (ns_node_is_element_named(n, "script")) {
+    if (ns_node_is_tag(n, NS_TAG_SCRIPT)) {
         ns_element_set_attr(n, NS_SCRIPT_ALREADY_STARTED, "1");
         return;
     }
@@ -71615,7 +71617,7 @@ static void
 ns_js_collect_script_tasks_rec(ns_node *n, GArray *tasks, int depth)
 {
     if (!n || depth >= 512 || (depth > 0 && ns_dom_hidden_child(n))) return;
-    if (ns_node_is_element_named(n, "script")) {
+    if (ns_node_is_tag(n, NS_TAG_SCRIPT)) {
         if (ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED)) return;
         if (!ns_script_type_supported(n) || ns_script_skipped_by_nomodule(n)) {
             ns_element_set_attr(n, NS_SCRIPT_ALREADY_STARTED, "1");
@@ -71628,7 +71630,7 @@ ns_js_collect_script_tasks_rec(ns_node *n, GArray *tasks, int depth)
         g_array_append_val(tasks, task);
         return;
     }
-    if (ns_node_is_element_named(n, "template")) return;
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return;
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
         ns_js_collect_script_tasks_rec(c, tasks, depth + 1);
 }
@@ -72067,7 +72069,7 @@ ns_parser_hold_collect(ns_parser_hold *hold, ns_node *parent, ns_node *n,
     g_array_append_val(hold->held, e);
     g_hash_table_add(hold->members, parent);
     g_hash_table_add(hold->members, n);
-    if (depth >= 512 || ns_node_is_element_named(n, "template")) return;
+    if (depth >= 512 || ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return;
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
         ns_parser_hold_collect(hold, n, c, depth + 1);
 }
@@ -72231,10 +72233,10 @@ ns_subtree_has_pending_script_rec(const ns_node *n, int depth)
 {
     if (!n || depth >= 512 || (depth > 0 && ns_dom_hidden_child(n)))
         return FALSE;
-    if (ns_node_is_element_named(n, "script") &&
+    if (ns_node_is_tag(n, NS_TAG_SCRIPT) &&
         !ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED))
         return TRUE;
-    if (ns_node_is_element_named(n, "template")) return FALSE;
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return FALSE;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         if (ns_subtree_has_pending_script_rec(c, depth + 1)) return TRUE;
     return FALSE;
@@ -72364,7 +72366,7 @@ ns_link_has_source(const ns_node *n, ns_link_load_kind kind)
 static gboolean
 ns_link_load_pending(const ns_node *n)
 {
-    if (!ns_node_is_element_named(n, "link")) return FALSE;
+    if (!ns_node_is_tag(n, NS_TAG_LINK)) return FALSE;
     if (n->flags & NS_NODE_LINK_LOAD_FIRED) return FALSE;
     ns_link_load_kind kind = ns_link_load_kind_of(n);
     if (kind == NS_LINK_LOAD_NONE) return FALSE;
@@ -72463,7 +72465,7 @@ ns_js_link_fetches_drop(ns_js *js, const ns_node *root)
 static void
 ns_js_link_disconnected(ns_js *js, ns_node *node)
 {
-    if (!ns_node_is_element_named(node, "link")) return;
+    if (!ns_node_is_tag(node, NS_TAG_LINK)) return;
     node->flags &= ~NS_NODE_LINK_LOAD_FIRED;
     ns_js_link_fetches_drop(js, node);
 }
@@ -72679,7 +72681,7 @@ ns_js_collect_pending_link_loads_rec(ns_node *n, GPtrArray *out, int depth)
         g_ptr_array_add(out, n);
         return;
     }
-    if (ns_node_is_element_named(n, "template")) return;
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return;
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
         ns_js_collect_pending_link_loads_rec(c, out, depth + 1);
 }
@@ -72870,7 +72872,7 @@ ns_js_drain_async_script_roots(ns_js *js)
 static void
 ns_js_script_needs_prepare(ns_js *js, ns_node *script)
 {
-    if (!js || !ns_node_is_element_named(script, "script") ||
+    if (!js || !ns_node_is_tag(script, NS_TAG_SCRIPT) ||
         !(script->flags & NS_NODE_NOT_PARSER_INSERTED) ||
         !ns_element_get_attr(script, NS_SCRIPT_EMPTY_SOURCE) ||
         !ns_js_root_connected(js, script))
@@ -72906,7 +72908,7 @@ static void
 ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
 {
     if (!js || !root || !js->current_doc || js->halted) return;
-    if (root->parent && ns_node_is_element_named(root->parent, "script")) {
+    if (root->parent && ns_node_is_tag(root->parent, NS_TAG_SCRIPT)) {
         ns_js_script_needs_prepare(js, root->parent);
         if (root->kind != NS_NODE_ELEMENT) return;
     }
@@ -73078,7 +73080,7 @@ static const char *
 ns_frame_src_attr(const ns_node *n)
 {
     if (ns_node_is_navigable_frame(n) || ns_node_is_pdf_embed(n)) return "src";
-    if (ns_node_is_element_named(n, "object")) return "data";
+    if (ns_node_is_tag(n, NS_TAG_OBJECT)) return "data";
     return NULL;
 }
 
@@ -74717,11 +74719,11 @@ ns_js_collect_frame_images(ns_node *n, GPtrArray *out, int depth)
 {
     if (depth >= NS_DOM_MAX_DEPTH) return;
     for (ns_node *c = n ? n->first_child : NULL; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "iframe") ||
-            ns_node_is_element_named(c, "frame") ||
-            (ns_node_is_element_named(c, "object") || ns_node_is_pdf_embed(c)))
+        if (ns_node_is_tag(c, NS_TAG_IFRAME) ||
+            ns_node_is_tag(c, NS_TAG_FRAME) ||
+            (ns_node_is_tag(c, NS_TAG_OBJECT) || ns_node_is_pdf_embed(c)))
             continue;
-        if (ns_node_is_element_named(c, "img")) {
+        if (ns_node_is_tag(c, NS_TAG_IMG)) {
             const char *loading = ns_element_get_attr(c, "loading");
             if (!loading || g_ascii_strcasecmp(loading, "lazy") != 0)
                 g_ptr_array_add(out, c);
@@ -74774,7 +74776,7 @@ ns_js_frame_meta_csp_rec(const ns_node *node, ns_csp *csp, int depth)
     if (depth > NS_DOM_MAX_DEPTH) return csp;
     for (const ns_node *c = node ? node->first_child : NULL; c;
          c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "meta")) {
+        if (ns_node_is_tag(c, NS_TAG_META)) {
             const char *equiv = ns_element_get_attr(c, "http-equiv");
             const char *content = ns_element_get_attr(c, "content");
             ns_csp *parsed = equiv && content && *content &&
@@ -74859,7 +74861,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         abs_url = g_strdup(origin);
     } else if (src && *src && !g_str_has_prefix(src, "about:")) {
         abs_url = ns_url_resolve(origin, src);
-        gboolean is_object = ns_node_is_element_named(iframe, "object") ||
+        gboolean is_object = ns_node_is_tag(iframe, NS_TAG_OBJECT) ||
                              ns_node_is_pdf_embed(iframe);
         ns_csp_kind frame_kind = is_object ? NS_CSP_OBJECT : NS_CSP_FRAME;
         if (abs_url && ns_js_node_csp(js, iframe) &&
@@ -74880,9 +74882,9 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
             int frame_depth = 0, same_url_ancestors = 0;
             for (const ns_node *p = iframe->parent; p; p = p->parent) {
                 if (p->kind != NS_NODE_ELEMENT) continue;
-                if (!ns_node_is_element_named(p, "iframe") &&
-                    !ns_node_is_element_named(p, "frame") &&
-                    !(ns_node_is_element_named(p, "object") || ns_node_is_pdf_embed(p)))
+                if (!ns_node_is_tag(p, NS_TAG_IFRAME) &&
+                    !ns_node_is_tag(p, NS_TAG_FRAME) &&
+                    !(ns_node_is_tag(p, NS_TAG_OBJECT) || ns_node_is_pdf_embed(p)))
                     continue;
                 frame_depth++;
                 const char *au = ns_element_get_attr(p, "data-nd-frame-url");
@@ -75009,7 +75011,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         }
     }
 
-    if (ns_node_is_pdf_embed(iframe) || ns_node_is_element_named(iframe, "object")) {
+    if (ns_node_is_pdf_embed(iframe) || ns_node_is_tag(iframe, NS_TAG_OBJECT)) {
         gboolean doc_type = resp && resp->content_type &&
             (ns_content_type_is_pdf(resp->content_type) ||
              (!ns_node_is_pdf_embed(iframe) &&
@@ -75351,7 +75353,7 @@ ns_js_schedule_static_iframes_rec(ns_js *js, ns_node *n, int depth)
             const char *src    = ns_element_get_attr(n, frame_attr);
             const char *srcdoc = ns_element_get_attr(n, "srcdoc");
             if ((src && *src) || (srcdoc && *srcdoc) ||
-                ns_node_is_element_named(n, "iframe"))
+                ns_node_is_tag(n, NS_TAG_IFRAME))
                 ns_js_schedule_iframe_load(js, n);
         }
         return;
@@ -75535,18 +75537,18 @@ static void
 ns_js_track_document_images(ns_js *js, ns_node *n, int depth)
 {
     if (!n || depth >= 512 || (depth > 0 && ns_dom_hidden_child(n))) return;
-    if (ns_node_is_element_named(n, "img")) {
+    if (ns_node_is_tag(n, NS_TAG_IMG)) {
         const char *src = ns_element_get_attr(n, "src");
         const char *loading = ns_element_get_attr(n, "loading");
         if (src && *src && !ns_element_get_attr(n, "srcset") &&
             !(loading && g_ascii_strcasecmp(loading, "lazy") == 0) &&
-            !ns_node_is_element_named(n->parent, "picture") &&
+            !ns_node_is_tag(n->parent, NS_TAG_PICTURE) &&
             !(js->js_image_loads && g_hash_table_contains(js->js_image_loads, n)) &&
             !(n->flags & NS_NODE_IMG_LOAD_FIRED))
             ns_js_start_image_load(js, n, src);
         return;
     }
-    if (ns_node_is_element_named(n, "template")) return;
+    if (ns_node_is_html_tag(n, NS_TAG_TEMPLATE)) return;
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
         ns_js_track_document_images(js, c, depth + 1);
 }
@@ -75856,7 +75858,7 @@ ns_media_by_src_collect(JSContext *ctx, const ns_node *n, const char *url,
             gboolean match = src && strcmp(src, url) == 0;
             for (const ns_node *s = c->first_child; !match && s;
                  s = s->next_sibling) {
-                if (!ns_node_is_element_named(s, "source")) continue;
+                if (!ns_node_is_tag(s, NS_TAG_SOURCE)) continue;
                 const char *source_src = ns_element_get_attr(s, "src");
                 match = source_src && strcmp(source_src, url) == 0;
             }
@@ -76232,8 +76234,8 @@ ns_find_named_frame(const ns_node *n, const char *name, int depth)
 {
     if (!n || depth >= 256) return NULL;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "iframe") ||
-            ns_node_is_element_named(c, "frame")) {
+        if (ns_node_is_tag(c, NS_TAG_IFRAME) ||
+            ns_node_is_tag(c, NS_TAG_FRAME)) {
             const char *frame_name = ns_element_get_attr(c, "name");
             if (frame_name && strcmp(frame_name, name) == 0) return c;
         }
@@ -76273,7 +76275,7 @@ gboolean
 ns_js_navigate_frame(ns_js *js, ns_node *frame, const char *url)
 {
     if (!js || !frame || !url || !*url) return FALSE;
-    gboolean is_object = (ns_node_is_element_named(frame, "object") ||
+    gboolean is_object = (ns_node_is_tag(frame, NS_TAG_OBJECT) ||
                           ns_node_is_pdf_embed(frame));
     ns_js_set_attr_recorded(js, frame, is_object ? "data" : "src", url);
     ns_js_schedule_iframe_load_full(js, frame, TRUE);
@@ -76585,7 +76587,7 @@ ns_wd_frame_arg(int argc, JSValueConst *argv)
 {
     if (argc < 1) return NULL;
     ns_node *n = ns_unwrap_element_mut(argv[0]);
-    return n && ns_node_is_element_named(n, "iframe") ? n : NULL;
+    return n && ns_node_is_tag(n, NS_TAG_IFRAME) ? n : NULL;
 }
 
 static JSValue

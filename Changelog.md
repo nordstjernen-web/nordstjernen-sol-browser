@@ -3,6 +3,17 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Elements know their tag as a number. The HTML parser hands each element
+  the id it already computed for its name, and code that asked whether a
+  node is, say, a `<div>` by comparing strings (475 places) compares that
+  id instead. SVG and MathML elements no longer carry their namespace as
+  a hidden attribute; two flag bits say which namespace they are in, and
+  only elements in other namespaces keep the URI. A `<template>` inside
+  `<svg>` or `<math>` is no longer treated as an HTML template: it has no
+  `content` and the parser does not give it a document fragment of its
+  own, as in other browsers. In web-platform-tests the html5lib
+  `template.dat` case that covers it now passes (it runs three ways) and
+  so does `domparsing/svg-template.html`.
 * A DOM node takes 112 bytes instead of 176, so a page's tree needs 36%
   less memory: 2.7 MB instead of 4.2 MB for a long Wikipedia article,
   83 MB instead of 130 MB for the single-page HTML Standard. The fields

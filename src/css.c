@@ -25361,15 +25361,15 @@ ns_el_placeholder_shown(const ns_node *el)
 static gboolean
 ns_el_is_checked(const ns_node *el)
 {
-    if (ns_node_is_element_named(el, "option")) {
+    if (ns_node_is_tag(el, NS_TAG_OPTION)) {
         if (ns_element_get_attr(el, "selected")) return TRUE;
         const ns_node *sel = el->parent;
-        if (ns_node_is_element_named(sel, "optgroup")) sel = sel->parent;
-        return ns_node_is_element_named(sel, "select") &&
+        if (ns_node_is_tag(sel, NS_TAG_OPTGROUP)) sel = sel->parent;
+        return ns_node_is_tag(sel, NS_TAG_SELECT) &&
                !ns_element_get_attr(sel, "multiple") &&
                ns_select_chosen_option(sel) == el;
     }
-    if (!ns_node_is_element_named(el, "input"))
+    if (!ns_node_is_tag(el, NS_TAG_INPUT))
         return FALSE;
     const char *type = ns_element_get_attr(el, "type");
     if (!type || (g_ascii_strcasecmp(type, "checkbox") != 0 &&
@@ -25381,12 +25381,12 @@ ns_el_is_checked(const ns_node *el)
 static gboolean
 ns_el_is_submit_button(const ns_node *el)
 {
-    if (ns_node_is_element_named(el, "input")) {
+    if (ns_node_is_tag(el, NS_TAG_INPUT)) {
         const char *type = ns_element_get_attr(el, "type");
         return type && (g_ascii_strcasecmp(type, "submit") == 0 ||
                         g_ascii_strcasecmp(type, "image") == 0);
     }
-    if (!ns_node_is_element_named(el, "button")) return FALSE;
+    if (!ns_node_is_tag(el, NS_TAG_BUTTON)) return FALSE;
     const char *type = ns_element_get_attr(el, "type");
     return !type || !*type ||
            g_ascii_strcasecmp(type, "submit") == 0 ||
@@ -25403,7 +25403,7 @@ ns_css_first_submit_button_for(const ns_node *scan, const ns_node *doc,
         !ns_element_effectively_disabled(scan) &&
         ns_form_owner(scan, doc) == owner)
         return scan;
-    if (ns_node_is_element_named(scan, "template")) return NULL;
+    if (ns_node_is_html_tag(scan, NS_TAG_TEMPLATE)) return NULL;
     for (const ns_node *c = scan->first_child; c; c = c->next_sibling) {
         const ns_node *hit =
             ns_css_first_submit_button_for(c, doc, owner, depth + 1);
@@ -25415,9 +25415,9 @@ ns_css_first_submit_button_for(const ns_node *scan, const ns_node *doc,
 static gboolean
 ns_el_is_default(const ns_node *el)
 {
-    if (ns_node_is_element_named(el, "option"))
+    if (ns_node_is_tag(el, NS_TAG_OPTION))
         return ns_element_get_attr(el, "selected") != NULL;
-    if (ns_node_is_element_named(el, "input")) {
+    if (ns_node_is_tag(el, NS_TAG_INPUT)) {
         const char *type = ns_element_get_attr(el, "type");
         if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
                      g_ascii_strcasecmp(type, "radio") == 0))
@@ -25436,7 +25436,7 @@ ns_css_radio_group_has_checked(const ns_node *scan, const ns_node *doc,
                                int depth)
 {
     if (!scan || depth >= 512) return FALSE;
-    if (ns_node_is_element_named(scan, "input")) {
+    if (ns_node_is_tag(scan, NS_TAG_INPUT)) {
         const char *type = ns_element_get_attr(scan, "type");
         if (type && g_ascii_strcasecmp(type, "radio") == 0) {
             const char *scan_name = ns_element_get_attr(scan, "name");
@@ -25447,7 +25447,7 @@ ns_css_radio_group_has_checked(const ns_node *scan, const ns_node *doc,
                 return TRUE;
         }
     }
-    if (ns_node_is_element_named(scan, "template")) return FALSE;
+    if (ns_node_is_html_tag(scan, NS_TAG_TEMPLATE)) return FALSE;
     for (const ns_node *c = scan->first_child; c; c = c->next_sibling)
         if (ns_css_radio_group_has_checked(c, doc, owner, name, depth + 1))
             return TRUE;
@@ -25457,9 +25457,9 @@ ns_css_radio_group_has_checked(const ns_node *scan, const ns_node *doc,
 static gboolean
 ns_el_is_indeterminate(const ns_node *el)
 {
-    if (ns_node_is_element_named(el, "progress"))
+    if (ns_node_is_tag(el, NS_TAG_PROGRESS))
         return ns_element_get_attr(el, "value") == NULL;
-    if (!ns_node_is_element_named(el, "input")) return FALSE;
+    if (!ns_node_is_tag(el, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(el, "type");
     if (!type || g_ascii_strcasecmp(type, "radio") != 0) return FALSE;
     const char *name = ns_element_get_attr(el, "name");
@@ -25474,7 +25474,7 @@ ns_el_range_state(const ns_node *el, gboolean *under, gboolean *over)
 {
     if (under) *under = FALSE;
     if (over) *over = FALSE;
-    if (!ns_node_is_element_named(el, "input")) return FALSE;
+    if (!ns_node_is_tag(el, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(el, "type");
     if (!ns_input_type_has_number_value(type)) return FALSE;
     if (!ns_element_get_attr(el, "min") && !ns_element_get_attr(el, "max"))
@@ -25487,12 +25487,12 @@ ns_el_range_state(const ns_node *el, gboolean *under, gboolean *over)
 static gboolean
 ns_el_is_blank(const ns_node *el)
 {
-    if (ns_node_is_element_named(el, "input")) {
+    if (ns_node_is_tag(el, NS_TAG_INPUT)) {
         if (!ns_input_is_text_entry(el)) return FALSE;
         const char *value = ns_element_get_attr(el, "value");
         return !value || !*value;
     }
-    if (!ns_node_is_element_named(el, "textarea")) return FALSE;
+    if (!ns_node_is_tag(el, NS_TAG_TEXTAREA)) return FALSE;
     char *txt = ns_node_collect_text(el);
     gboolean blank = TRUE;
     for (const char *p = txt ? txt : ""; *p; p++) {
@@ -25520,8 +25520,8 @@ static gboolean
 ns_el_is_link(const ns_node *el)
 {
     if (g_css_detached || !ns_element_get_attr(el, "href")) return FALSE;
-    return ns_node_is_element_named(el, "a") ||
-           ns_node_is_element_named(el, "area");
+    return ns_node_is_tag(el, NS_TAG_A) ||
+           ns_node_is_tag(el, NS_TAG_AREA);
 }
 
 static GHashTable *g_visited_urls = NULL;
@@ -26053,7 +26053,7 @@ ns_css_node_has_target_within(const ns_node *el, int depth)
     if (!el || depth >= 512) return FALSE;
     if (el->kind == NS_NODE_ELEMENT && ns_css_node_is_target(el))
         return TRUE;
-    if (ns_node_is_element_named(el, "template")) return FALSE;
+    if (ns_node_is_html_tag(el, NS_TAG_TEMPLATE)) return FALSE;
     for (const ns_node *c = el->first_child; c; c = c->next_sibling)
         if (ns_css_node_has_target_within(c, depth + 1))
             return TRUE;
@@ -26341,7 +26341,7 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
     if (sel->ns_none) {
         gboolean null_ns = (el->flags & NS_NODE_FOREIGN_NS) &&
                            !(el->flags & NS_NODE_SVG_NS) &&
-                           !ns_element_get_attr(el, "data-nd-ns-uri");
+                           !ns_element_namespace_uri(el);
         if (!null_ns) return FALSE;
     }
     if (sel->type && !(sel->type[0] == '*' && sel->type[1] == '\0')) {
@@ -26657,8 +26657,8 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 if (!css_slotted_into_host(el, pc->arg)) return FALSE;
                 break;
             case NS_CSS_PC_OPEN:
-                if ((!ns_node_is_element_named(el, "details") &&
-                     !ns_node_is_element_named(el, "dialog")) ||
+                if ((!ns_node_is_tag(el, NS_TAG_DETAILS) &&
+                     !ns_node_is_tag(el, NS_TAG_DIALOG)) ||
                     !ns_element_get_attr(el, "open"))
                     return FALSE;
                 break;
@@ -26718,39 +26718,39 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                     return FALSE;
                 break;
             case NS_CSS_PC_PLAYING:
-                if ((!ns_node_is_element_named(el, "video") &&
-                     !ns_node_is_element_named(el, "audio")) ||
+                if ((!ns_node_is_tag(el, NS_TAG_VIDEO) &&
+                     !ns_node_is_tag(el, NS_TAG_AUDIO)) ||
                     !ns_element_get_attr(el, "data-nd-playing"))
                     return FALSE;
                 break;
             case NS_CSS_PC_PAUSED:
-                if ((!ns_node_is_element_named(el, "video") &&
-                     !ns_node_is_element_named(el, "audio")) ||
+                if ((!ns_node_is_tag(el, NS_TAG_VIDEO) &&
+                     !ns_node_is_tag(el, NS_TAG_AUDIO)) ||
                     ns_element_get_attr(el, "data-nd-playing"))
                     return FALSE;
                 break;
             case NS_CSS_PC_MUTED:
-                if ((!ns_node_is_element_named(el, "video") &&
-                     !ns_node_is_element_named(el, "audio")) ||
+                if ((!ns_node_is_tag(el, NS_TAG_VIDEO) &&
+                     !ns_node_is_tag(el, NS_TAG_AUDIO)) ||
                     (!ns_element_get_attr(el, "muted") &&
                      !ns_element_get_attr(el, "data-nd-muted")))
                     return FALSE;
                 break;
             case NS_CSS_PC_SEEKING:
-                if ((!ns_node_is_element_named(el, "video") &&
-                     !ns_node_is_element_named(el, "audio")) ||
+                if ((!ns_node_is_tag(el, NS_TAG_VIDEO) &&
+                     !ns_node_is_tag(el, NS_TAG_AUDIO)) ||
                     !ns_element_get_attr(el, "data-nd-seeking"))
                     return FALSE;
                 break;
             case NS_CSS_PC_BUFFERING:
-                if ((!ns_node_is_element_named(el, "video") &&
-                     !ns_node_is_element_named(el, "audio")) ||
+                if ((!ns_node_is_tag(el, NS_TAG_VIDEO) &&
+                     !ns_node_is_tag(el, NS_TAG_AUDIO)) ||
                     !ns_element_get_attr(el, "data-nd-buffering"))
                     return FALSE;
                 break;
             case NS_CSS_PC_STALLED:
-                if ((!ns_node_is_element_named(el, "video") &&
-                     !ns_node_is_element_named(el, "audio")) ||
+                if ((!ns_node_is_tag(el, NS_TAG_VIDEO) &&
+                     !ns_node_is_tag(el, NS_TAG_AUDIO)) ||
                     !ns_element_get_attr(el, "data-nd-stalled"))
                     return FALSE;
                 break;
@@ -33829,12 +33829,12 @@ static const char *
 document_meta_color_scheme(const ns_node *n, int depth)
 {
     if (!n || depth > 8) return NULL;
-    if (ns_node_is_element_named(n, "meta")) {
+    if (ns_node_is_tag(n, NS_TAG_META)) {
         const char *name = ns_element_get_attr(n, "name");
         if (name && g_ascii_strcasecmp(name, "color-scheme") == 0)
             return ns_element_get_attr(n, "content");
     }
-    if (ns_node_is_element_named(n, "body")) return NULL;
+    if (ns_node_is_tag(n, NS_TAG_BODY)) return NULL;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         const char *found = document_meta_color_scheme(c, depth + 1);
         if (found) return found;
@@ -34176,29 +34176,29 @@ static const ns_node *
 table_of_part(const ns_node *el)
 {
     const ns_node *p = el->parent;
-    if (ns_node_is_element_named(el, "td") ||
-        ns_node_is_element_named(el, "th")) {
-        if (!ns_node_is_element_named(p, "tr")) return NULL;
+    if (ns_node_is_tag(el, NS_TAG_TD) ||
+        ns_node_is_tag(el, NS_TAG_TH)) {
+        if (!ns_node_is_tag(p, NS_TAG_TR)) return NULL;
         p = p->parent;
     }
-    if ((ns_node_is_element_named(el, "td") ||
-         ns_node_is_element_named(el, "th") ||
-         ns_node_is_element_named(el, "tr")) &&
-        (ns_node_is_element_named(p, "thead") ||
-         ns_node_is_element_named(p, "tbody") ||
-         ns_node_is_element_named(p, "tfoot")))
+    if ((ns_node_is_tag(el, NS_TAG_TD) ||
+         ns_node_is_tag(el, NS_TAG_TH) ||
+         ns_node_is_tag(el, NS_TAG_TR)) &&
+        (ns_node_is_tag(p, NS_TAG_THEAD) ||
+         ns_node_is_tag(p, NS_TAG_TBODY) ||
+         ns_node_is_tag(p, NS_TAG_TFOOT)))
         p = p->parent;
-    return ns_node_is_element_named(p, "table") ? p : NULL;
+    return ns_node_is_tag(p, NS_TAG_TABLE) ? p : NULL;
 }
 
 static const ns_node *
 img_dimension_attribute_source(const ns_node *img)
 {
     const ns_node *picture = img->parent;
-    if (!ns_node_is_element_named(picture, "picture")) return img;
+    if (!ns_node_is_tag(picture, NS_TAG_PICTURE)) return img;
     for (const ns_node *c = picture->first_child; c && c != img;
          c = c->next_sibling) {
-        if (!ns_node_is_element_named(c, "source")) continue;
+        if (!ns_node_is_tag(c, NS_TAG_SOURCE)) continue;
         const char *srcset = ns_element_get_attr(c, "srcset");
         if (!srcset || !*srcset) continue;
         const char *media = ns_element_get_attr(c, "media");
@@ -34310,7 +34310,7 @@ presentational_hints_css(const ns_node *el)
     gboolean any = strcmp(el->name, "td") == 0 || strcmp(el->name, "th") == 0 ||
                    strcmp(el->name, "body") == 0 ||
                    (strcmp(el->name, "img") == 0 &&
-                    ns_node_is_element_named(el->parent, "picture")) ||
+                    ns_node_is_tag(el->parent, NS_TAG_PICTURE)) ||
                    strcmp(el->name, "tr") == 0 ||
                    strcmp(el->name, "thead") == 0 ||
                    strcmp(el->name, "tbody") == 0 ||
@@ -34389,8 +34389,8 @@ presentational_hints_css(const ns_node *el)
         const ns_node *doc = el;
         while (doc && doc->kind != NS_NODE_DOCUMENT) doc = doc->parent;
         const ns_node *container = doc ? doc->parent : NULL;
-        if (!ns_node_is_element_named(container, "iframe") &&
-            !ns_node_is_element_named(container, "frame"))
+        if (!ns_node_is_tag(container, NS_TAG_IFRAME) &&
+            !ns_node_is_tag(container, NS_TAG_FRAME))
             container = NULL;
         static const struct {
             const char *start, *end, *attr, *alt;
@@ -36768,8 +36768,8 @@ static gboolean
 attr_disables_descendants(const ns_node *target, const char *name)
 {
     return g_ascii_strcasecmp(name, "disabled") == 0 &&
-           (ns_node_is_element_named(target, "fieldset") ||
-            ns_node_is_element_named(target, "optgroup"));
+           (ns_node_is_tag(target, NS_TAG_FIELDSET) ||
+            ns_node_is_tag(target, NS_TAG_OPTGROUP));
 }
 
 static gboolean
@@ -37058,7 +37058,7 @@ ns_css_attr_may_affect_style(const ns_node *target, const char *name)
     if (!name || !*name || !g_struct_ready || !g_attr_keys) return TRUE;
     if (is_presentational_attr_name(name)) return TRUE;
     if (g_ascii_strcasecmp(name, "rel") == 0 &&
-        ns_node_is_element_named(target, "link"))
+        ns_node_is_tag(target, NS_TAG_LINK))
         return TRUE;
     char *low = g_ascii_strdown(name, -1);
     gboolean affects = g_hash_table_contains(g_attr_keys, low);
@@ -37844,7 +37844,7 @@ button_inline_to_inline_block(const ns_node *el, ns_style *s)
         !v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword ||
         (strcmp(v->u.keyword, "inline") != 0 &&
          strcmp(v->u.keyword, "inline flow") != 0) ||
-        !ns_node_is_element_named(el, "button"))
+        !ns_node_is_tag(el, NS_TAG_BUTTON))
         return;
     s->display = ns_css_display_from_keyword("inline-block");
 }
@@ -37854,8 +37854,8 @@ frame_inner_display_to_flow_root(const ns_node *el, ns_style *s)
 {
     if (s->display.box != NS_DISPLAY_BOX_NORMAL ||
         s->display.internal != NS_DISPLAY_INTERNAL_NONE ||
-        (!ns_node_is_element_named(el, "iframe") &&
-         !ns_node_is_element_named(el, "frame")))
+        (!ns_node_is_tag(el, NS_TAG_IFRAME) &&
+         !ns_node_is_tag(el, NS_TAG_FRAME)))
         return;
     if (s->display.inner == NS_DISPLAY_INNER_FLEX ||
         s->display.inner == NS_DISPLAY_INNER_GRID ||
@@ -37867,7 +37867,7 @@ frame_inner_display_to_flow_root(const ns_node *el, ns_style *s)
 static void
 strip_native_widget_decorations(const ns_node *el, ns_style *s)
 {
-    if (!ns_node_is_element_named(el, "input")) return;
+    if (!ns_node_is_tag(el, NS_TAG_INPUT)) return;
     const char *type = ns_element_get_attr(el, "type");
     if (!type || (g_ascii_strcasecmp(type, "checkbox") != 0 &&
                   g_ascii_strcasecmp(type, "radio") != 0))
@@ -39111,7 +39111,7 @@ scoped_css_cached(const char *css, gsize len, const char *host_id,
 static char *
 style_element_final_css(ns_node *style)
 {
-    if (!ns_node_is_element_named(style, "style")) return NULL;
+    if (!ns_node_is_tag(style, NS_TAG_STYLE)) return NULL;
     const char *media = ns_element_get_attr(style, "media");
     if (media && *media && !ns_css_media_query_matches(media)) return NULL;
     GString *buf = g_string_new(NULL);

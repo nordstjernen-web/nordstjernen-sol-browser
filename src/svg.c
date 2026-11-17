@@ -1719,7 +1719,7 @@ svg_element_viewport(const svg_ctx *ctx, const ns_node *el, double *vw,
                      double *vh)
 {
     const ns_node *svg = el->parent;
-    while (svg && svg != ctx->root && !ns_node_is_element_named(svg, "svg"))
+    while (svg && svg != ctx->root && !ns_node_is_tag(svg, NS_TAG_SVG))
         svg = svg->parent;
     svg_viewbox_size(ctx->root, ctx->icb_w, ctx->icb_h, vw, vh);
     if (!svg || svg == ctx->root) return;

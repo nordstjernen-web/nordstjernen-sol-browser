@@ -926,10 +926,10 @@ box_is_native_control(const ns_box *b)
 {
     if (!b->style || keyword_is(b->style->values[NS_CSS_APPEARANCE], "none"))
         return FALSE;
-    return ns_node_is_element_named(b->dom, "button") ||
-           ns_node_is_element_named(b->dom, "input") ||
-           ns_node_is_element_named(b->dom, "select") ||
-           ns_node_is_element_named(b->dom, "textarea");
+    return ns_node_is_tag(b->dom, NS_TAG_BUTTON) ||
+           ns_node_is_tag(b->dom, NS_TAG_INPUT) ||
+           ns_node_is_tag(b->dom, NS_TAG_SELECT) ||
+           ns_node_is_tag(b->dom, NS_TAG_TEXTAREA);
 }
 
 static gboolean
@@ -1806,7 +1806,7 @@ style_shows_resize_grip(const ns_style *s, const ns_node *dom)
     if (!s || !dom || keyword_is(s->values[NS_CSS_RESIZE], "none") ||
         !s->values[NS_CSS_RESIZE])
         return FALSE;
-    return ns_node_is_element_named(dom, "textarea") ||
+    return ns_node_is_tag(dom, NS_TAG_TEXTAREA) ||
            !keyword_is(s->values[NS_CSS_OVERFLOW_X], "visible") ||
            !keyword_is(s->values[NS_CSS_OVERFLOW_Y], "visible");
 }
@@ -6383,7 +6383,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             if (is_textarea && !block_chrome &&
                 style_shows_resize_grip(r->style, r->dom))
                 paint_resize_grip(cr, x1, y1);
-            if (r->dom && ns_node_is_element_named(r->dom, "select") &&
+            if (r->dom && ns_node_is_tag(r->dom, NS_TAG_SELECT) &&
                 !keyword_is(r->style ? r->style->values[NS_CSS_APPEARANCE]
                                      : NULL, "none")) {
                 const ns_css_value *cv = r->style
@@ -8319,7 +8319,7 @@ image_request_errored(const ns_box *b, const ns_image *img)
     if (ns_element_get_attr(b->dom, "src") ||
         ns_element_get_attr(b->dom, "srcset"))
         return TRUE;
-    return ns_node_is_element_named(b->dom->parent, "picture");
+    return ns_node_is_tag(b->dom->parent, NS_TAG_PICTURE);
 }
 
 static void
@@ -8494,7 +8494,7 @@ paint_math(cairo_t *cr, const ns_box *b)
 static void
 paint_image(cairo_t *cr, const ns_box *b)
 {
-    if (ns_node_is_element_named(b->dom, "canvas")) return;
+    if (ns_node_is_tag(b->dom, NS_TAG_CANVAS)) return;
     const ns_image *img = NULL;
     if (b->dom && g_paint_js)
         img = ns_js_image_for_node(g_paint_js, b->dom);
@@ -8760,7 +8760,7 @@ list_item_count(const ns_node *parent)
     int total = 0;
     for (const ns_node *p = parent ? parent->first_child : NULL;
          p; p = p->next_sibling) {
-        if (ns_node_is_element_named(p, "li")) total++;
+        if (ns_node_is_tag(p, NS_TAG_LI)) total++;
     }
     return total;
 }
@@ -8795,7 +8795,7 @@ list_item_number_children(const ns_node *parent)
     gboolean reversed = ns_element_get_attr(parent, "reversed") != NULL;
     int current = reversed && !start_attr ? list_item_count(parent) : start;
     for (const ns_node *p = parent->first_child; p; p = p->next_sibling) {
-        if (!ns_node_is_element_named(p, "li")) continue;
+        if (!ns_node_is_tag(p, NS_TAG_LI)) continue;
         const char *val = ns_element_get_attr(p, "value");
         int ordinal = val ? ns_parse_int(val, current, -1000000, 1000000)
                           : current;
@@ -8834,7 +8834,7 @@ list_item_ordinal(const ns_node *li)
     gboolean reversed = ns_element_get_attr(parent, "reversed") != NULL;
     int current = reversed && !start_attr ? list_item_count(parent) : start;
     for (const ns_node *p = parent->first_child; p; p = p->next_sibling) {
-        if (!ns_node_is_element_named(p, "li")) continue;
+        if (!ns_node_is_tag(p, NS_TAG_LI)) continue;
         const char *val = ns_element_get_attr(p, "value");
         int ordinal = val ? ns_parse_int(val, current, -1000000, 1000000)
                           : current;
@@ -11245,8 +11245,8 @@ box_overflow_clip_rect(const ns_box *b, double *px, double *py,
 {
     const ns_style *bs = b->style;
     if (!bs || !b->parent ||
-        ns_node_is_element_named(b->dom, "html") ||
-        ns_node_is_element_named(b->dom, "body"))
+        ns_node_is_tag(b->dom, NS_TAG_HTML) ||
+        ns_node_is_tag(b->dom, NS_TAG_BODY))
         return FALSE;
     gboolean clip_x, clip_y;
     box_overflow_clip_axes(b, &clip_x, &clip_y);
@@ -11816,7 +11816,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             paint_svg(cr, b);
     }
     if (!skip_contents && !self_hidden &&
-        ns_node_is_element_named(b->dom, "canvas") && g_paint_js) {
+        ns_node_is_tag(b->dom, NS_TAG_CANVAS) && g_paint_js) {
         if (g_paint_collect_stats) g_paint_stats.canvases++;
         cairo_surface_t *surf = ns_js_canvas_surface(g_paint_js, b->dom);
         if (surf) {

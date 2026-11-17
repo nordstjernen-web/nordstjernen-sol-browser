@@ -42,7 +42,7 @@ int   ns_rs_html_stream_finish(ns_rs_html_stream *stream);
 void  ns_rs_html_stream_free(ns_rs_html_stream *stream);
 
 ns_node *ns_h5_element(ns_h5_sink *sink, const char *name, size_t len,
-                       int borrowed, int line, int column);
+                       int borrowed, int tag, int line, int column);
 void     ns_h5_attribute(ns_h5_sink *sink, ns_node *element,
                          const char *name, size_t name_len,
                          const char *value, size_t value_len, int namespace_id,
