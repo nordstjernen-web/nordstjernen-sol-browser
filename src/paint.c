@@ -4304,12 +4304,23 @@ ns_paint_apply_justify(NsPangoLayout *layout, const ns_style *s, gboolean rtl)
         ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_LEFT);
 }
 
+static gboolean
+layout_is_one_last_line(NsPangoLayout *layout, const ns_style *s)
+{
+    const ns_css_value *last = s ? s->values[NS_CSS_TEXT_ALIGN_LAST] : NULL;
+    if (!last || keyword_is(last, "auto")) return FALSE;
+    const char *text = ns_pango_layout_get_text(layout);
+    return text && *text && ns_pango_layout_get_line_count(layout) == 1;
+}
+
 void
 ns_paint_apply_text_align(NsPangoLayout *layout, const ns_style *s)
 {
     const ns_css_value *ta = s ? s->values[NS_CSS_TEXT_ALIGN] : NULL;
     gboolean rtl = ns_pango_context_get_base_dir(
         ns_pango_layout_get_context(layout)) == NS_PANGO_DIRECTION_RTL;
+    if (!keyword_is(ta, "justify") && layout_is_one_last_line(layout, s))
+        ta = s->values[NS_CSS_TEXT_ALIGN_LAST];
     if (keyword_is(ta, "center"))
         ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_CENTER);
     else if (keyword_is(ta, "right") ||

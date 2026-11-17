@@ -3,6 +3,12 @@ Changelog:
 
 1.0.50-dev:
 ======
+* `text-align-last` applies to a block whose text fits on one line, which
+  is then its last line: `text-align-last: center` or `right` on a
+  single-line heading, button or table cell now aligns it. It was read
+  only together with `text-align: justify`. A block that wraps to
+  several lines still aligns all of them by `text-align` unless it is
+  justified.
 * `@supports font-tech(...)` and `@supports font-format(...)` are
   evaluated: `font-format()` is true for `woff2`, `woff`, `opentype`,
   `truetype` and `collection`, `font-tech()` for `variations`,
