@@ -2223,7 +2223,7 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
     if (!n || !n->name) return NULL;
     ns_js *js = js_from_ctx(ctx);
     if (!js) return NULL;
-    if (strcmp(n->name, "canvas") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_CANVAS)) {
         ns_canvas_state *st = ns_canvas_state_for(js, n);
         if (st && st->surf) {
             *out_w = st->w;
@@ -2240,21 +2240,21 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
     if (js->layout_root) {
         const ns_box *b = ns_box_find_by_dom(js->layout_root, n);
         if (b && b->media) {
-            if (strcmp(n->name, "img") == 0 && b->media->image) {
+            if (ns_node_is_tag(n, NS_TAG_IMG) && b->media->image) {
                 const ns_image *im = (const ns_image *)b->media->image;
                 if (im->texture) {
                     tex = im->texture;
                     source_url = im->final_url ? im->final_url : im->url;
                     cors_allow_origin = im->cors_allow_origin;
                 }
-            } else if (strcmp(n->name, "video") == 0 && b->media->video) {
+            } else if (ns_node_is_tag(n, NS_TAG_VIDEO) && b->media->video) {
                 const ns_video *v = (const ns_video *)b->media->video;
                 tex = v->poster_texture;
                 source_url = v->poster_url;
             }
         }
     }
-    if (strcmp(n->name, "video") == 0 && js->media_frame_cb) {
+    if (ns_node_is_tag(n, NS_TAG_VIDEO) && js->media_frame_cb) {
         const char *frame_url = NULL;
         const char *frame_cors = NULL;
         ns_texture *frame = js->media_frame_cb(n, &frame_url, &frame_cors,
@@ -2266,7 +2266,7 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
         }
     }
     ns_image *im_cache = NULL;
-    if (!tex && strcmp(n->name, "img") == 0) {
+    if (!tex && ns_node_is_tag(n, NS_TAG_IMG)) {
         const ns_image *im = ns_js_image_for_node(js, n);
         if (im && im->texture) {
             tex = im->texture;

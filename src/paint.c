@@ -745,8 +745,7 @@ static gboolean
 box_is_input_block(const ns_box *b)
 {
     return b && b->style && b->kind == NS_BOX_BLOCK && b->dom &&
-           b->dom->kind == NS_NODE_ELEMENT && b->dom->name &&
-           strcmp(b->dom->name, "input") == 0;
+           b->dom->kind == NS_NODE_ELEMENT && ns_node_is_tag(b->dom, NS_TAG_INPUT);
 }
 
 static gboolean
@@ -5029,8 +5028,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
             case NS_INLINE_INPUT_FIELD:
             case NS_INLINE_INPUT_FIELD_FOCUSED:
             case NS_INLINE_BUTTON: {
-                gboolean ta = r->dom && r->dom->name &&
-                              strcmp(r->dom->name, "textarea") == 0;
+                gboolean ta = r->dom && ns_node_is_tag(r->dom, NS_TAG_TEXTAREA);
                 if (!ta)
                     attr_insert_range(attrs,
                         ns_pango_attr_allow_breaks_new(FALSE),
@@ -6257,7 +6255,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             ns_pango_layout_index_to_pos(layout, (int)r->start, &r0);
             ns_pango_layout_index_to_pos(layout,
                 (int)(r->len > 0 ? r->start + r->len - 1 : r->start), &r1);
-            if (r->dom && r->dom->name && strcmp(r->dom->name, "option") == 0) {
+            if (r->dom && ns_node_is_tag(r->dom, NS_TAG_OPTION)) {
                 double rx0 = text_x + (double)r0.x / NS_PANGO_SCALE;
                 double rx1 = text_x + (double)(r1.x + r1.width) / NS_PANGO_SCALE;
                 double ry0 = y_origin + (double)r0.y / NS_PANGO_SCALE;
@@ -6309,8 +6307,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                     if (want_w > cur_w) x1 = x0 + want_w;
                 }
             }
-            gboolean is_textarea = r->dom && r->dom->name &&
-                                   strcmp(r->dom->name, "textarea") == 0;
+            gboolean is_textarea = r->dom && ns_node_is_tag(r->dom, NS_TAG_TEXTAREA);
             if (css_w <= 0 && r->kind == NS_INLINE_BUTTON) {
                 double mnw = inline_control_css_min_width(r, b);
                 if (mnw > 0 && x1 - x0 < mnw) {
@@ -8731,8 +8728,7 @@ static gboolean
 marker_is_ordered(const ns_node *li, const char *style_kw)
 {
     if (!style_kw)
-        return li->parent && li->parent->name &&
-               strcmp(li->parent->name, "ol") == 0;
+        return li->parent && ns_node_is_tag(li->parent, NS_TAG_OL);
     return strcmp(style_kw, "disc") != 0 && strcmp(style_kw, "circle") != 0 &&
            strcmp(style_kw, "square") != 0 && strcmp(style_kw, "none") != 0 &&
            strncmp(style_kw, "disclosure-", 11) != 0;
@@ -8849,7 +8845,7 @@ marker_default_kind(const ns_node *li, const char *style_kw)
 {
     if (style_kw && ordered_marker_kind(style_kw)) return style_kw;
     const ns_node *parent = li ? li->parent : NULL;
-    if (parent && parent->name && strcmp(parent->name, "ol") == 0)
+    if (parent && ns_node_is_tag(parent, NS_TAG_OL))
         return ordered_kind_from_type_attr(ns_element_get_attr(parent, "type"));
     return style_kw;
 }
@@ -9042,7 +9038,7 @@ li_generates_marker(const ns_node *li, const ns_style *li_style)
     if (!li->parent || !li->parent->name) return FALSE;
     const ns_css_value *d = li_style ? li_style->values[NS_CSS_DISPLAY] : NULL;
     if (!d || d->kind != NS_CSS_V_KEYWORD || !d->u.keyword)
-        return strcmp(li->name, "li") == 0;
+        return ns_node_is_tag(li, NS_TAG_LI);
     return strstr(d->u.keyword, "list-item") != NULL;
 }
 
@@ -10351,8 +10347,7 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
     gboolean cacheable = q->box->dom && !q->own_only &&
                          !q->box->first_child &&
                          q->box->kind == NS_BOX_BLOCK &&
-                         !(q->box->dom->name &&
-                           strcmp(q->box->dom->name, "canvas") == 0);
+                         !(ns_node_is_tag(q->box->dom, NS_TAG_CANVAS));
     if (cacheable && g_paint_anim) {
         double anim_op;
         guint8 anim_col[4];

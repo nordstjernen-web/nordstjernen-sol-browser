@@ -189,8 +189,8 @@ ns_form_control_readonly_bars_validation(const ns_node *control)
     if (!control || control->kind != NS_NODE_ELEMENT || !control->name)
         return FALSE;
     if (!ns_element_get_attr(control, "readonly")) return FALSE;
-    if (strcmp(control->name, "textarea") == 0) return TRUE;
-    if (strcmp(control->name, "input") != 0) return FALSE;
+    if (ns_node_is_tag(control, NS_TAG_TEXTAREA)) return TRUE;
+    if (!ns_node_is_tag(control, NS_TAG_INPUT)) return FALSE;
     return ns_input_type_supports_readonly(ns_element_get_attr(control, "type"));
 }
 
@@ -199,8 +199,8 @@ ns_form_control_length_limits_apply(const ns_node *control)
 {
     if (!control || control->kind != NS_NODE_ELEMENT || !control->name)
         return FALSE;
-    if (strcmp(control->name, "textarea") == 0) return TRUE;
-    if (strcmp(control->name, "input") != 0) return FALSE;
+    if (ns_node_is_tag(control, NS_TAG_TEXTAREA)) return TRUE;
+    if (!ns_node_is_tag(control, NS_TAG_INPUT)) return FALSE;
     return ns_input_type_supports_text_constraints(ns_element_get_attr(control, "type"));
 }
 
@@ -209,10 +209,10 @@ ns_form_control_supports_required(const ns_node *control)
 {
     if (!control || control->kind != NS_NODE_ELEMENT || !control->name)
         return FALSE;
-    if (strcmp(control->name, "textarea") == 0 ||
-        strcmp(control->name, "select") == 0)
+    if (ns_node_is_tag(control, NS_TAG_TEXTAREA) ||
+        ns_node_is_tag(control, NS_TAG_SELECT))
         return TRUE;
-    if (strcmp(control->name, "input") != 0) return FALSE;
+    if (!ns_node_is_tag(control, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(control, "type");
     if (!type || !*type) return TRUE;
     return g_ascii_strcasecmp(type, "hidden") != 0 &&
@@ -625,8 +625,8 @@ gboolean
 ns_node_is_text_input(const ns_node *n)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
-    if (strcmp(n->name, "textarea") == 0) return TRUE;
-    if (strcmp(n->name, "input") != 0) return FALSE;
+    if (ns_node_is_tag(n, NS_TAG_TEXTAREA)) return TRUE;
+    if (!ns_node_is_tag(n, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(n, "type");
     if (!type || !*type) return TRUE;
     return g_ascii_strcasecmp(type, "text")     == 0 ||
@@ -642,7 +642,7 @@ gboolean
 ns_node_is_contenteditable_host(const ns_node *n)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
-    if (strcmp(n->name, "input") == 0 || strcmp(n->name, "textarea") == 0)
+    if (ns_node_is_tag(n, NS_TAG_INPUT) || ns_node_is_tag(n, NS_TAG_TEXTAREA))
         return FALSE;
     return ns_ce_attr_enables(ns_element_get_attr(n, "contenteditable"));
 }
@@ -701,7 +701,7 @@ ns_node_spellcheck_host(const ns_node *n)
 gboolean
 ns_input_value_is_dirty_mode(const ns_node *n)
 {
-    if (!n || !n->name || strcmp(n->name, "input") != 0) return FALSE;
+    if (!n || !n->name || !ns_node_is_tag(n, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(n, "type");
     if (!type) return TRUE;
     return !(g_ascii_strcasecmp(type, "checkbox") == 0 ||
@@ -718,7 +718,7 @@ const char *
 ns_input_used_value(const ns_node *n)
 {
     if (!n) return NULL;
-    if (n->name && strcmp(n->name, "textarea") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_TEXTAREA)) {
         const char *dirty = ns_element_get_attr(n, "data-nd-vdirty");
         if (dirty) {
             const char *value = ns_element_get_attr(n, "data-nd-value");
@@ -740,7 +740,7 @@ char *
 ns_textarea_default_value_dup(const ns_node *n)
 {
     GString *value = g_string_new(NULL);
-    if (n && n->name && strcmp(n->name, "textarea") == 0) {
+    if (n && ns_node_is_tag(n, NS_TAG_TEXTAREA)) {
         for (const ns_node *c = n->first_child; c; c = c->next_sibling)
             if (c->kind == NS_NODE_TEXT && c->text)
                 g_string_append(value, c->text);
@@ -790,7 +790,7 @@ const char *
 ns_node_editable_value(const ns_node *n)
 {
     if (!n) return "";
-    if (n->name && strcmp(n->name, "textarea") == 0)
+    if (ns_node_is_tag(n, NS_TAG_TEXTAREA))
         return ns_input_used_value(n);
     if (ns_node_is_contenteditable_host(n)) {
         for (const ns_node *c = n->first_child; c; c = c->next_sibling)
@@ -806,7 +806,7 @@ void
 ns_node_set_editable_value(ns_node *n, const char *value)
 {
     if (!n) return;
-    if (n->name && strcmp(n->name, "textarea") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_TEXTAREA)) {
         char *normalized = ns_textarea_normalized_value_dup(value);
         ns_element_set_attr(n, "data-nd-value", normalized);
         ns_element_set_attr(n, "data-nd-vdirty", "1");
@@ -849,7 +849,7 @@ ns_node_is_numeric_input(const ns_node *control)
 {
     if (!control || control->kind != NS_NODE_ELEMENT || !control->name)
         return FALSE;
-    if (strcmp(control->name, "input") != 0) return FALSE;
+    if (!ns_node_is_tag(control, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(control, "type");
     return type && g_ascii_strcasecmp(type, "number") == 0;
 }
@@ -970,7 +970,7 @@ ns_node_set_name_borrow_tag(ns_node *n, const char *name, ns_tag tag)
     if (n->flags & NS_NODE_OWN_NAME)
         g_free(n->name);
     n->name = (char *)name;
-    n->tag = (guint16)tag;
+    n->tag = n->kind == NS_NODE_ELEMENT ? (guint16)tag : 0;
     n->flags &= ~NS_NODE_OWN_NAME;
 }
 
@@ -984,7 +984,7 @@ ns_node_set_name_owned(ns_node *n, char *name)
     if (n->flags & NS_NODE_OWN_NAME)
         g_free(n->name);
     n->name = name;
-    n->tag = (guint16)ns_tag_lookup(name);
+    n->tag = n->kind == NS_NODE_ELEMENT ? (guint16)ns_tag_lookup(name) : 0;
     n->flags |= NS_NODE_OWN_NAME;
 }
 
@@ -1400,7 +1400,7 @@ gboolean
 ns_node_is_pdf_embed(const ns_node *n)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name ||
-        strcmp(n->name, "embed") != 0)
+        !ns_node_is_tag(n, NS_TAG_EMBED))
         return FALSE;
     const char *type = ns_element_get_attr(n, "type");
     if (type && *type)
@@ -2695,8 +2695,8 @@ static void
 ns_form_reset_control(ns_node *n)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return;
-    if (strcmp(n->name, "input") == 0 ||
-        strcmp(n->name, "textarea") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_INPUT) ||
+        ns_node_is_tag(n, NS_TAG_TEXTAREA)) {
         const char *type = ns_element_get_attr(n, "type");
         if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
                      g_ascii_strcasecmp(type, "radio") == 0)) {
@@ -2705,7 +2705,7 @@ ns_form_reset_control(ns_node *n)
         ns_element_remove_attr(n, "data-nd-value");
         ns_element_remove_attr(n, "data-nd-vdirty");
         ns_element_remove_attr(n, "data-nd-user-edited");
-    } else if (strcmp(n->name, "select") == 0) {
+    } else if (ns_node_is_tag(n, NS_TAG_SELECT)) {
         ns_element_remove_attr(n, "data-nd-noselect");
         for (ns_node *o = n->first_child; o; o = o->next_sibling) {
             if (ns_node_is_tag(o, NS_TAG_OPTION))
@@ -2752,13 +2752,13 @@ gboolean
 ns_element_supports_disabled(const ns_node *el)
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !el->name) return FALSE;
-    return strcmp(el->name, "button") == 0 ||
-           strcmp(el->name, "fieldset") == 0 ||
-           strcmp(el->name, "input") == 0 ||
-           strcmp(el->name, "optgroup") == 0 ||
-           strcmp(el->name, "option") == 0 ||
-           strcmp(el->name, "select") == 0 ||
-           strcmp(el->name, "textarea") == 0;
+    return ns_node_is_tag(el, NS_TAG_BUTTON) ||
+           ns_node_is_tag(el, NS_TAG_FIELDSET) ||
+           ns_node_is_tag(el, NS_TAG_INPUT) ||
+           ns_node_is_tag(el, NS_TAG_OPTGROUP) ||
+           ns_node_is_tag(el, NS_TAG_OPTION) ||
+           ns_node_is_tag(el, NS_TAG_SELECT) ||
+           ns_node_is_tag(el, NS_TAG_TEXTAREA);
 }
 
 gboolean
@@ -2818,10 +2818,10 @@ collect_text(const ns_node *n, GString *out, int depth, gboolean own_document)
         return;
     }
     if (n->kind == NS_NODE_ELEMENT && n->name &&
-        (strcmp(n->name, "style")    == 0 ||
-         strcmp(n->name, "script")   == 0 ||
-         strcmp(n->name, "noscript") == 0 ||
-         strcmp(n->name, "template") == 0))
+        (ns_node_is_tag(n, NS_TAG_STYLE) ||
+         ns_node_is_tag(n, NS_TAG_SCRIPT) ||
+         ns_node_is_tag(n, NS_TAG_NOSCRIPT) ||
+         ns_node_is_tag(n, NS_TAG_TEMPLATE)))
         return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         collect_text(c, out, depth + 1, own_document);

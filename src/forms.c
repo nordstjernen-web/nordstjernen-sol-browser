@@ -18,11 +18,11 @@ gboolean
 ns_form_is_submit_trigger(const ns_node *n)
 {
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
-    if (strcmp(n->name, "button") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_BUTTON)) {
         const char *type = ns_element_get_attr(n, "type");
         return !type || g_ascii_strcasecmp(type, "submit") == 0;
     }
-    if (strcmp(n->name, "input") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_INPUT)) {
         const char *type = ns_element_get_attr(n, "type");
         return type && (g_ascii_strcasecmp(type, "submit") == 0 ||
                         g_ascii_strcasecmp(type, "image") == 0);
@@ -73,8 +73,8 @@ ns_form_is_reset_trigger(const ns_node *n)
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
     const char *type = ns_element_get_attr(n, "type");
     if (!type || g_ascii_strcasecmp(type, "reset") != 0) return FALSE;
-    return strcmp(n->name, "button") == 0 ||
-           strcmp(n->name, "input") == 0;
+    return ns_node_is_tag(n, NS_TAG_BUTTON) ||
+           ns_node_is_tag(n, NS_TAG_INPUT);
 }
 
 static gboolean
@@ -136,10 +136,10 @@ ns_form_collect_inputs_depth(const ns_node *form, const ns_node *n,
 {
     if (!n || depth >= NS_FORM_MAX_DEPTH) return;
     if (n->kind == NS_NODE_ELEMENT && n->name) {
-        gboolean is_input    = strcmp(n->name, "input") == 0;
-        gboolean is_textarea = strcmp(n->name, "textarea") == 0;
-        gboolean is_select   = strcmp(n->name, "select") == 0;
-        gboolean is_button   = strcmp(n->name, "button") == 0;
+        gboolean is_input    = ns_node_is_tag(n, NS_TAG_INPUT);
+        gboolean is_textarea = ns_node_is_tag(n, NS_TAG_TEXTAREA);
+        gboolean is_select   = ns_node_is_tag(n, NS_TAG_SELECT);
+        gboolean is_button   = ns_node_is_tag(n, NS_TAG_BUTTON);
         if (is_input || is_textarea || is_select || is_button) {
             if (!form_control_belongs_to(form, n, doc)) goto recurse;
             const char *name = ns_element_get_attr(n, "name");
@@ -270,9 +270,9 @@ ns_form_first_invalid_depth(const ns_node *form, const ns_node *n,
 {
     if (!n || depth >= NS_FORM_MAX_DEPTH) return NULL;
     if (n->kind == NS_NODE_ELEMENT && n->name) {
-        gboolean is_input    = strcmp(n->name, "input") == 0;
-        gboolean is_textarea = strcmp(n->name, "textarea") == 0;
-        gboolean is_select   = strcmp(n->name, "select") == 0;
+        gboolean is_input    = ns_node_is_tag(n, NS_TAG_INPUT);
+        gboolean is_textarea = ns_node_is_tag(n, NS_TAG_TEXTAREA);
+        gboolean is_select   = ns_node_is_tag(n, NS_TAG_SELECT);
         if (is_input || is_textarea || is_select) {
             if (form_control_belongs_to(form, n, doc) &&
                 !ns_element_effectively_disabled(n) &&

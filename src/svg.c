@@ -1334,8 +1334,7 @@ svg_stops_owner(svg_ctx *ctx, const ns_node *n)
     const ns_node *cur = n;
     for (int i = 0; cur && i < NS_SVG_MAX_HREF_CHAIN; i++) {
         for (const ns_node *c = cur->first_child; c; c = c->next_sibling)
-            if (c->kind == NS_NODE_ELEMENT && c->name &&
-                strcmp(c->name, "stop") == 0)
+            if (c->kind == NS_NODE_ELEMENT && ns_node_is_tag(c, NS_TAG_STOP))
                 return cur;
         cur = svg_href_target(ctx, cur);
     }
@@ -1348,7 +1347,7 @@ svg_add_stops(svg_ctx *ctx, cairo_pattern_t *pat, const ns_node *owner,
 {
     double last = 0.0;
     for (const ns_node *c = owner->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name || strcmp(c->name, "stop") != 0)
+        if (c->kind != NS_NODE_ELEMENT || !c->name || !ns_node_is_tag(c, NS_TAG_STOP))
             continue;
         const char *os = svg_prop(c, "offset");
         double off = os ? svg_length_str(os, 1.0, st->font_size, 0.0) : 0.0;
@@ -1482,7 +1481,7 @@ static cairo_pattern_t *
 svg_gradient_pattern(svg_ctx *ctx, const ns_node *g, const svg_state *st,
                      double alpha, double bx, double by, double bw, double bh)
 {
-    gboolean linear = strcmp(g->name, "linearGradient") == 0;
+    gboolean linear = ns_node_is_tag(g, NS_TAG_LINEAR_GRADIENT);
     const char *units = svg_inherited_attr(ctx, g, "gradientUnits");
     gboolean obb = !units || g_ascii_strcasecmp(units, "userSpaceOnUse") != 0;
     double bw_ref = obb ? 1.0 : ctx->vw;
@@ -1905,10 +1904,10 @@ svg_paint_server(svg_ctx *ctx, const ns_node *server, const svg_state *st,
     double x1, y1, x2, y2;
     cairo_path_extents(ctx->cr, &x1, &y1, &x2, &y2);
     svg_rect bbox = { x1, y1, x2 - x1, y2 - y1 };
-    if (strcmp(server->name, "pattern") == 0)
+    if (ns_node_is_tag(server, NS_TAG_PATTERN))
         return svg_pattern_paint(ctx, server, st, opacity, &bbox);
-    if (strcmp(server->name, "linearGradient") == 0 ||
-        strcmp(server->name, "radialGradient") == 0)
+    if (ns_node_is_tag(server, NS_TAG_LINEAR_GRADIENT) ||
+        ns_node_is_tag(server, NS_TAG_RADIAL_GRADIENT))
         return svg_gradient_pattern(ctx, server, st, opacity,
                                     bbox.x, bbox.y, bbox.w, bbox.h);
     return NULL;
@@ -2031,7 +2030,7 @@ svg_clip_path_children(svg_ctx *ctx, const ns_node *clip, const svg_state *st)
 {
     for (const ns_node *c = clip->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "use") == 0) {
+        if (ns_node_is_tag(c, NS_TAG_USE)) {
             const ns_node *t = svg_href_target(ctx, c);
             if (t && ctx->depth < NS_SVG_MAX_DEPTH) {
                 ctx->depth++;
@@ -2072,7 +2071,7 @@ svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     if (!id) return NULL;
     const ns_node *mask = svg_by_id(ctx, id);
     g_free(id);
-    if (!mask || !mask->name || strcmp(mask->name, "mask") != 0) return NULL;
+    if (!mask || !mask->name || !ns_node_is_tag(mask, NS_TAG_MASK)) return NULL;
     if (ctx->depth >= NS_SVG_MAX_DEPTH) return NULL;
 
     cairo_surface_t *target = cairo_get_target(ctx->cr);
@@ -2169,20 +2168,20 @@ svg_filter_blur(svg_ctx *ctx, const ns_node *n)
     if (!id) return 0;
     const ns_node *f = svg_by_id(ctx, id);
     g_free(id);
-    if (!f || !f->name || strcmp(f->name, "filter") != 0) return 0;
+    if (!f || !f->name || !ns_node_is_tag(f, NS_TAG_FILTER)) return 0;
     double variance = 0;
     const char *transparent_result = NULL, *source_result = NULL;
     for (const ns_node *c = f->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
         const char *result = svg_attr(c, "result");
-        if (strcmp(c->name, "feFlood") == 0 && variance == 0) {
+        if (ns_node_is_tag(c, NS_TAG_FE_FLOOD) && variance == 0) {
             const char *op = svg_attr(c, "flood-opacity");
             double o = 1;
             if (!op || !svg_num(&op, &o) || o != 0) return 0;
             transparent_result = result;
             continue;
         }
-        if (strcmp(c->name, "feBlend") == 0 && variance == 0) {
+        if (ns_node_is_tag(c, NS_TAG_FE_BLEND) && variance == 0) {
             const char *mode = svg_attr(c, "mode");
             const char *in = svg_attr(c, "in");
             const char *in2 = svg_attr(c, "in2");
@@ -2193,7 +2192,7 @@ svg_filter_blur(svg_ctx *ctx, const ns_node *n)
             source_result = result;
             continue;
         }
-        if (strcmp(c->name, "feGaussianBlur") != 0) return 0;
+        if (!ns_node_is_tag(c, NS_TAG_FE_GAUSSIAN_BLUR)) return 0;
         const char *in = svg_attr(c, "in");
         if ((!in || !*in) && transparent_result && !source_result) return 0;
         if (in && *in && strcmp(in, "SourceGraphic") != 0 &&
@@ -2243,7 +2242,7 @@ svg_apply_clip(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     if (!id) return;
     const ns_node *clip = svg_by_id(ctx, id);
     g_free(id);
-    if (!clip || !clip->name || strcmp(clip->name, "clipPath") != 0) return;
+    if (!clip || !clip->name || !ns_node_is_tag(clip, NS_TAG_CLIP_PATH)) return;
     if (ctx->depth >= NS_SVG_MAX_DEPTH) return;
 
     ctx->depth++;
@@ -2433,7 +2432,7 @@ svg_marker_ref(svg_ctx *ctx, const ns_node *n, const char *prop)
     if (!id) return NULL;
     const ns_node *m = svg_by_id(ctx, id);
     g_free(id);
-    if (!m || !m->name || strcmp(m->name, "marker") != 0) return NULL;
+    if (!m || !m->name || !ns_node_is_tag(m, NS_TAG_MARKER)) return NULL;
     return m;
 }
 
@@ -2979,7 +2978,7 @@ svg_render_node_nested(svg_ctx *ctx, const ns_node *n,
             if (ctx->hit && !outer_owner) ctx->hit->owner = n;
             ctx->depth++;
             st.instanced = TRUE;
-            if (t->name && strcmp(t->name, "symbol") == 0) {
+            if (ns_node_is_tag(t, NS_TAG_SYMBOL)) {
                 double w = svg_attr_length(n, "width", ctx->vw, st.font_size, ctx->vw);
                 double h = svg_attr_length(n, "height", ctx->vh, st.font_size, ctx->vh);
                 cairo_rectangle(cr, 0, 0, w, h);
@@ -3226,7 +3225,7 @@ svg_measure_use(svg_ctx *ctx, const ns_node *n, const svg_state *st,
     svg_state_copy(&instance, st);
     instance.instanced = TRUE;
     ctx->depth++;
-    if (referenced->name && strcmp(referenced->name, "symbol") == 0) {
+    if (ns_node_is_tag(referenced, NS_TAG_SYMBOL)) {
         double w = svg_attr_length(n, "width", ctx->vw, fs, ctx->vw);
         double h = svg_attr_length(n, "height", ctx->vh, fs, ctx->vh);
         cairo_matrix_t fitted;
@@ -3272,7 +3271,7 @@ svg_measure_toward_target(svg_ctx *ctx, const ns_node *n, const svg_state *st,
                           const svg_frame *frame, svg_extent *own)
 {
     svg_measure *m = ctx->measure;
-    if (strcmp(n->name, "switch") == 0) {
+    if (ns_node_is_tag(n, NS_TAG_SWITCH)) {
         const ns_node *choice = svg_switch_choice(n);
         if (!choice || !g_hash_table_contains(m->path, choice)) {
             m->out->rendered = FALSE;
@@ -3303,7 +3302,7 @@ svg_measure_local_matrix(svg_ctx *ctx, const ns_node *n, const svg_state *st,
                          cairo_matrix_t *local, cairo_matrix_t *viewport)
 {
     svg_local_transform(n, "transform", local);
-    if (strcmp(n->name, "svg") != 0) return;
+    if (!ns_node_is_tag(n, NS_TAG_SVG)) return;
     double fs = st->font_size;
     double w = svg_attr_length(n, "width", ctx->vw, fs, ctx->vw);
     double h = svg_attr_length(n, "height", ctx->vh, fs, ctx->vh);
@@ -3336,11 +3335,11 @@ svg_measure_node_nested(svg_ctx *ctx, const ns_node *n,
     svg_measure_local_matrix(ctx, n, &st, &local, &viewport);
     svg_frame frame = svg_frame_inside(outer, &local);
     svg_frame child_frame = frame;
-    if (strcmp(n->name, "svg") == 0) child_frame.to_viewport = viewport;
+    if (ns_node_is_tag(n, NS_TAG_SVG)) child_frame.to_viewport = viewport;
 
     svg_extent own = { 0 };
     gboolean reached = !m->inside &&
-        (n == m->target || strcmp(n->name, "text") == 0);
+        (n == m->target || ns_node_is_tag(n, NS_TAG_TEXT));
     if (reached) m->inside = TRUE;
     if (!m->inside)
         svg_measure_toward_target(ctx, n, &st, &child_frame, &own);
@@ -3374,8 +3373,7 @@ svg_measure_node(svg_ctx *ctx, const ns_node *n, const svg_state *parent,
 static gboolean
 ns_svg_node_is_root(const ns_node *n)
 {
-    return n && n->kind == NS_NODE_ELEMENT && n->name &&
-           strcmp(n->name, "svg") == 0;
+    return n && n->kind == NS_NODE_ELEMENT && ns_node_is_tag(n, NS_TAG_SVG);
 }
 
 void
@@ -3633,7 +3631,7 @@ static gboolean
 svg_is_style_element(const ns_node *n)
 {
     if (n->kind != NS_NODE_ELEMENT || !n->name ||
-        strcmp(n->name, "style") != 0) return FALSE;
+        !ns_node_is_tag(n, NS_TAG_STYLE)) return FALSE;
     const char *type = svg_attr(n, "type");
     return !type || !*type || g_ascii_strcasecmp(type, "text/css") == 0;
 }
