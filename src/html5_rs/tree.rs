@@ -596,6 +596,18 @@ impl<'s, S: TreeSink> Builder<'s, S> {
         }
     }
 
+    fn recreate_listed(&mut self, position: usize) -> Option<(Tag, S::Handle)> {
+        let Fmt::El { tag, .. } = &self.afe[position] else {
+            return None;
+        };
+        let tag = *tag;
+        let attrs = self.afe.take_attrs(position);
+        let name = tag.name().map_or(&b""[..], |n| n.to_bytes());
+        let h = self.create_element(Ns::Html, tag, name, &attrs, NO_POSITION);
+        self.afe.restore_attrs(position, attrs);
+        Some((tag, h))
+    }
+
     fn afe_index(&self, h: S::Handle) -> Option<usize> {
         self.afe.iter().rposition(|f| f.handle() == Some(h))
     }
@@ -650,7 +662,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             }
         }
         let serial = self.open.top_serial();
-        self.afe.push(h, serial, tag, token.attrs().to_vec(), key);
+        self.afe.push(h, serial, tag, token.attrs(), key);
     }
 
     fn clear_afe_to_marker(&mut self) {
@@ -675,16 +687,17 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             }
         }
         while i < self.afe.len() {
-            let Fmt::El { tag, attrs, .. } = &self.afe[i] else {
+            if let Fmt::Marker = &self.afe[i] {
+                i += 1;
+                continue;
+            }
+            let place = self.appropriate_place(None);
+            let Some((tag, h)) = self.recreate_listed(i) else {
                 i += 1;
                 continue;
             };
-            let tag = *tag;
-            let attrs = attrs.clone();
-            let place = self.appropriate_place(None);
-            let name = tag.name().map_or(&b""[..], |n| n.to_bytes());
-            let h = self.create_element(Ns::Html, tag, name, &attrs, NO_POSITION);
             self.insert_at(place, h);
+            let name = tag.name().map_or(&b""[..], |n| n.to_bytes());
             self.push(h, Ns::Html, tag, name, false);
             let serial = self.open.top_serial();
             self.afe.rehandle(i, h, serial);
@@ -761,12 +774,9 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                     unstacked.push(node_index);
                     continue;
                 };
-                let (tag, attrs) = match &self.afe[node_afe] {
-                    Fmt::El { tag, attrs, .. } => (*tag, attrs.clone()),
-                    Fmt::Marker => break,
+                let Some((_, new)) = self.recreate_listed(node_afe) else {
+                    break;
                 };
-                let name = tag.name().map_or(&b""[..], |n| n.to_bytes());
-                let new = self.create_element(Ns::Html, tag, name, &attrs, NO_POSITION);
                 let serial = self.open.replace_handle(node_index, new);
                 self.afe.rehandle(node_afe, new, serial);
                 if last_node == fb {
@@ -786,12 +796,9 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             let Some(fe_afe) = self.afe_index(fe) else {
                 return true;
             };
-            let (tag, attrs) = match &self.afe[fe_afe] {
-                Fmt::El { tag, attrs, .. } => (*tag, attrs.clone()),
-                Fmt::Marker => return true,
+            let Some((tag, new)) = self.recreate_listed(fe_afe) else {
+                return true;
             };
-            let name = tag.name().map_or(&b""[..], |n| n.to_bytes());
-            let new = self.create_element(Ns::Html, tag, name, &attrs, NO_POSITION);
             self.sink.reparent_children(fb, new);
             self.sink.append(fb, new);
             self.remove_from_stack(fe, subject);
@@ -813,7 +820,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
             match bookmark {
                 Bookmark::Replace(_) => self.afe.rehandle(fe_afe, new, serial),
                 Bookmark::InsertAfter(after) => {
-                    let entry = match self.afe.remove(fe_afe) {
+                    let entry = match self.afe.take(fe_afe) {
                         Fmt::El {
                             tag,
                             attrs,

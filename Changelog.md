@@ -3,6 +3,12 @@ Changelog:
 
 1.0.50-dev:
 ======
+* The HTML tokenizer scans text, attribute values, comments and raw text
+  eight bytes at a time and counts newlines the same way, and the list of
+  active formatting elements reuses the attribute lists it keeps instead
+  of allocating new ones for every `<a>`, `<b>` or `<i>`. Parsing takes
+  11 to 29% fewer instructions; Wikipedia, BBC News and MDN pages parse 6
+  to 18% faster.
 * The HTML parser has no quadratic paths left on deeply nested or
   misnested markup. The fix earlier in this release covered the ones the
   switch from lexbor had brought in; a sweep of every tag against 24 kinds
