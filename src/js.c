@@ -20106,6 +20106,9 @@ ns_pseudo_substyle(const ns_style *s, const char *pseudo)
     if (strcmp(pseudo, "backdrop") == 0)     return s->backdrop;
     if (strcmp(pseudo, "file-selector-button") == 0)
         return s->file_selector_button;
+    if (strcmp(pseudo, "-webkit-progress-value") == 0 ||
+        strcmp(pseudo, "-moz-progress-bar") == 0)
+        return s->progress_value;
     return NULL;
 }
 

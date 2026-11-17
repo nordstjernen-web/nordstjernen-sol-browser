@@ -2276,6 +2276,44 @@ cell_hides_empty(const ns_box *b)
 }
 
 static void
+paint_block_gauge(cairo_t *cr, const ns_box *b, double x, double y, double w,
+                  double h, corner_radii radii)
+{
+    double frac = 0;
+    guint8 rgb[3] = {0};
+    ns_gauge_kind kind = b->kind == NS_BOX_BLOCK && b->dom
+        ? ns_layout_gauge_state(b->dom, &frac, rgb) : NS_GAUGE_NONE;
+    if (kind == NS_GAUGE_NONE || w <= 0 || h <= 0) return;
+    const ns_style *s = b->style;
+    gboolean native = !(s && keyword_is(s->values[NS_CSS_APPEARANCE], "none"));
+    const ns_css_value *ac = s ? s->values[NS_CSS_ACCENT_COLOR] : NULL;
+    rgba fill = rgba_of(ac && ac->kind == NS_CSS_V_COLOR ? ac : NULL,
+                        0.0, 0.459, 1.0, 1);
+    if (kind == NS_GAUGE_METER)
+        fill = (rgba){ rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0, 1 };
+    const ns_css_value *value_bg = s && s->progress_value
+        ? s->progress_value->values[NS_CSS_BACKGROUND_COLOR] : NULL;
+    if (kind == NS_GAUGE_PROGRESS && value_bg && value_bg->kind == NS_CSS_V_COLOR)
+        fill = rgba_of(value_bg, fill.r, fill.g, fill.b, fill.a);
+    if (frac > 1) frac = 1;
+    cairo_save(cr);
+    rounded_rect_path(cr, x, y, w, h,
+                      native ? corner_radii_uniform(h / 2.0) : radii);
+    if (native) {
+        cairo_set_source_rgb(cr, 0.88, 0.88, 0.90);
+        cairo_fill_preserve(cr);
+    }
+    cairo_clip(cr);
+    set_source_rgba(cr, fill);
+    if (frac >= 0)
+        cairo_rectangle(cr, x, y, w * frac, h);
+    else if (native)
+        cairo_rectangle(cr, x + w * 0.325, y, w * 0.35, h);
+    cairo_fill(cr);
+    cairo_restore(cr);
+}
+
+static void
 paint_block(cairo_t *cr, const ns_box *b)
 {
     if (cell_hides_empty(b)) return;
@@ -2414,6 +2452,13 @@ paint_block(cairo_t *cr, const ns_box *b)
         cairo_pop_group_to_source(cr);
         cairo_paint(cr);
     }
+
+    paint_block_gauge(cr, b,
+        border_x + b->border.left, border_y + b->border.top,
+        border_w - b->border.left - b->border.right,
+        border_h - b->border.top - b->border.bottom,
+        corner_radii_inset(radii, b->border.top, b->border.right,
+                           b->border.bottom, b->border.left));
 
     if (s && s->values[NS_CSS_BOX_SHADOW] &&
         s->values[NS_CSS_BOX_SHADOW]->kind == NS_CSS_V_SHADOW) {
