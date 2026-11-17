@@ -3,6 +3,22 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Security: the WebGL getters accept only the parameter names WebGL
+  defines. `getTexParameter`, `getBufferParameter`,
+  `getRenderbufferParameter`, `getFramebufferAttachmentParameter`,
+  `getProgramParameter`, `getShaderParameter`, `getVertexAttrib`,
+  `getVertexAttribOffset`, `getQueryParameter` and
+  `getActiveUniformBlockParameter` passed any number a page gave them to
+  the OpenGL driver with room for one value, so a desktop-GL name that
+  returns several, such as `TEXTURE_BORDER_COLOR`, made the driver write
+  past it on the stack. Other names now return `null` and raise
+  `INVALID_ENUM`. `getTexParameter` returns the LOD and anisotropy values
+  as floats and `TEXTURE_IMMUTABLE_FORMAT` as a boolean.
+* Security: `bufferData` with an invalid usage raises `INVALID_ENUM`
+  without touching the buffer, and the size WebGL checks draws and
+  `bufferSubData` against is the one the driver reports after the call.
+  A failed call used to record the requested size, so later draws were
+  checked against a size the buffer did not have.
 * A `<progress>` or `<meter>` that is a block box (`display: block`,
   absolutely positioned, a flex or grid item) draws its bar. Only the
   inline form drew one, so such an element showed its background and no

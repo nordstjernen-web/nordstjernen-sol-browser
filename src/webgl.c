@@ -1456,6 +1456,21 @@ wgl_getError(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     return JS_NewInt32(ctx, (int)err);
 }
 
+static gboolean
+wgl_pname_among(GLenum pname, const GLenum *allowed, gsize count)
+{
+    for (gsize i = 0; i < count; i++)
+        if (allowed[i] == pname) return TRUE;
+    return FALSE;
+}
+
+static JSValue
+wgl_invalid_enum(ns_webgl *g)
+{
+    g->injected_error = GL_INVALID_ENUM;
+    return JS_NULL;
+}
+
 static GLint
 wgl_param_cap(GLenum pname)
 {
@@ -1649,6 +1664,9 @@ wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
         JS_FreeValue(ctx, a);
         return ta;
     }
+    case GL_PROGRAM_BINARY_FORMATS:
+    case GL_SHADER_BINARY_FORMATS:
+        return wgl_invalid_enum(g);
     default: {
         GLint v[32] = { 0 };
         glGetIntegerv(pname, v);
@@ -2344,9 +2362,14 @@ static JSValue
 wgl_getShaderParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    static const GLenum allowed[] = {
+        GL_SHADER_TYPE, GL_DELETE_STATUS, GL_COMPILE_STATUS,
+    };
     GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
     GLint v = 0;
     if (pname == 0x91B1) return JS_TRUE;
+    if (!wgl_pname_among(pname, allowed, G_N_ELEMENTS(allowed)))
+        return wgl_invalid_enum(g);
     glGetShaderiv((GLuint)wgl_name(ctx, argv[0]), pname, &v);
     if (pname == GL_COMPILE_STATUS || pname == GL_DELETE_STATUS)
         return JS_NewBool(ctx, v);
@@ -2459,9 +2482,17 @@ static JSValue
 wgl_getProgramParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
+    static const GLenum allowed[] = {
+        GL_DELETE_STATUS, GL_LINK_STATUS, GL_VALIDATE_STATUS,
+        GL_ATTACHED_SHADERS, GL_ACTIVE_ATTRIBUTES, GL_ACTIVE_UNIFORMS,
+        GL_TRANSFORM_FEEDBACK_BUFFER_MODE, GL_TRANSFORM_FEEDBACK_VARYINGS,
+        GL_ACTIVE_UNIFORM_BLOCKS,
+    };
     GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
     GLint v = 0;
     if (pname == 0x91B1) return JS_TRUE;
+    if (!wgl_pname_among(pname, allowed, G_N_ELEMENTS(allowed)))
+        return wgl_invalid_enum(g);
     glGetProgramiv((GLuint)wgl_name(ctx, argv[0]), pname, &v);
     if (pname == GL_LINK_STATUS || pname == GL_VALIDATE_STATUS ||
         pname == GL_DELETE_STATUS)
@@ -2642,12 +2673,51 @@ wgl_buffer_range_ok(ns_webgl *g, GLenum target, GLintptr offset, size_t len)
     return end <= size;
 }
 
+static gboolean
+wgl_buffer_usage_ok(const ns_webgl *g, GLenum usage)
+{
+    switch (usage) {
+    case GL_STREAM_DRAW:
+    case GL_STATIC_DRAW:
+    case GL_DYNAMIC_DRAW:
+        return TRUE;
+    case GL_STREAM_READ:
+    case GL_STREAM_COPY:
+    case GL_STATIC_READ:
+    case GL_STATIC_COPY:
+    case GL_DYNAMIC_READ:
+    case GL_DYNAMIC_COPY:
+        return g->version >= 2;
+    default:
+        return FALSE;
+    }
+}
+
+static void
+wgl_buffer_stored(ns_webgl *g, GLenum target, GLuint bn, const uint8_t *p,
+                  size_t len)
+{
+    if (!bn) return;
+    GLint stored = -1;
+    glGetBufferParameteriv(target, GL_BUFFER_SIZE, &stored);
+    if (stored < 0 || (size_t)stored != len) {
+        wgl_set_buffer_size(g, bn, stored > 0 ? (size_t)stored : 0);
+        return;
+    }
+    wgl_set_buffer_size(g, bn, len);
+    if (target == GL_ELEMENT_ARRAY_BUFFER) wgl_elem_shadow_set(g, bn, p, len);
+}
+
 static JSValue
 wgl_bufferData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
     GLenum target = (GLenum)argi(ctx, argc, argv, 0);
     GLenum usage = (GLenum)argi(ctx, argc, argv, 2);
+    if (!wgl_buffer_usage_ok(g, usage)) {
+        g->injected_error = GL_INVALID_ENUM;
+        return JS_UNDEFINED;
+    }
     GLuint bn = wgl_bound_buffer(g, target);
     gboolean is_elem = target == GL_ELEMENT_ARRAY_BUFFER;
     wgl_elem_shadow_clear(g, bn);
@@ -2655,15 +2725,10 @@ wgl_bufferData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         int64_t size = 0;
         JS_ToInt64(ctx, &size, argv[1]);
         if (size < 0 || (uint64_t)size > NS_WEBGL_MAX_ALLOC) return JS_UNDEFINED;
-        if (is_elem) {
-            uint8_t *z = size ? g_malloc0((size_t)size) : NULL;
-            glBufferData(target, (GLsizeiptr)size, z, usage);
-            wgl_elem_shadow_set(g, bn, NULL, (size_t)size);
-            g_free(z);
-        } else {
-            glBufferData(target, (GLsizeiptr)size, NULL, usage);
-        }
-        wgl_set_buffer_size(g, bn, (size_t)size);
+        uint8_t *z = is_elem && size ? g_malloc0((size_t)size) : NULL;
+        glBufferData(target, (GLsizeiptr)size, z, usage);
+        g_free(z);
+        wgl_buffer_stored(g, target, bn, NULL, (size_t)size);
         return JS_UNDEFINED;
     }
     JSValue hold;
@@ -2674,8 +2739,7 @@ wgl_bufferData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return JS_UNDEFINED;
     }
     glBufferData(target, (GLsizeiptr)len, p, usage);
-    wgl_set_buffer_size(g, bn, len);
-    if (is_elem) wgl_elem_shadow_set(g, bn, p, len);
+    wgl_buffer_stored(g, target, bn, p, len);
     if (p && !JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
     return JS_UNDEFINED;
 }
@@ -3693,29 +3757,91 @@ static JSValue wgl_isRenderbuffer(JSContext *c, JSValueConst t, int a, JSValueCo
 
 static JSValue
 wgl_get_target_iv(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
-                  void (*fn)(GLenum, GLenum, GLint *))
+                  void (*fn)(GLenum, GLenum, GLint *),
+                  const GLenum *allowed, gsize count)
 {
     WGL_GET(0);
+    GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
+    if (!wgl_pname_among(pname, allowed, count)) return wgl_invalid_enum(g);
     GLint v = 0;
-    fn((GLenum)argi(ctx, argc, argv, 0), (GLenum)argi(ctx, argc, argv, 1), &v);
+    fn((GLenum)argi(ctx, argc, argv, 0), pname, &v);
     return JS_NewInt32(ctx, v);
 }
 
-static JSValue wgl_getBufferParameter(JSContext *c, JSValueConst t, int a, JSValueConst *v)
-{ return wgl_get_target_iv(c, t, a, v, glGetBufferParameteriv); }
-static JSValue wgl_getTexParameter(JSContext *c, JSValueConst t, int a, JSValueConst *v)
-{ return wgl_get_target_iv(c, t, a, v, glGetTexParameteriv); }
-static JSValue wgl_getRenderbufferParameter(JSContext *c, JSValueConst t, int a, JSValueConst *v)
-{ return wgl_get_target_iv(c, t, a, v, glGetRenderbufferParameteriv); }
+static JSValue
+wgl_getBufferParameter(JSContext *c, JSValueConst t, int a, JSValueConst *v)
+{
+    static const GLenum allowed[] = { GL_BUFFER_SIZE, GL_BUFFER_USAGE };
+    return wgl_get_target_iv(c, t, a, v, glGetBufferParameteriv, allowed,
+                             G_N_ELEMENTS(allowed));
+}
+
+static JSValue
+wgl_getRenderbufferParameter(JSContext *c, JSValueConst t, int a, JSValueConst *v)
+{
+    static const GLenum allowed[] = {
+        GL_RENDERBUFFER_WIDTH, GL_RENDERBUFFER_HEIGHT,
+        GL_RENDERBUFFER_INTERNAL_FORMAT, GL_RENDERBUFFER_RED_SIZE,
+        GL_RENDERBUFFER_GREEN_SIZE, GL_RENDERBUFFER_BLUE_SIZE,
+        GL_RENDERBUFFER_ALPHA_SIZE, GL_RENDERBUFFER_DEPTH_SIZE,
+        GL_RENDERBUFFER_STENCIL_SIZE, GL_RENDERBUFFER_SAMPLES,
+    };
+    return wgl_get_target_iv(c, t, a, v, glGetRenderbufferParameteriv, allowed,
+                             G_N_ELEMENTS(allowed));
+}
+
+static JSValue
+wgl_getTexParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    static const GLenum integers[] = {
+        GL_TEXTURE_MAG_FILTER, GL_TEXTURE_MIN_FILTER, GL_TEXTURE_WRAP_S,
+        GL_TEXTURE_WRAP_T, GL_TEXTURE_WRAP_R, GL_TEXTURE_COMPARE_FUNC,
+        GL_TEXTURE_COMPARE_MODE, GL_TEXTURE_BASE_LEVEL, GL_TEXTURE_MAX_LEVEL,
+        GL_TEXTURE_IMMUTABLE_FORMAT, GL_TEXTURE_IMMUTABLE_LEVELS,
+    };
+    WGL_GET(0);
+    GLenum target = (GLenum)argi(ctx, argc, argv, 0);
+    GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
+    if (pname == GL_TEXTURE_MAX_LOD || pname == GL_TEXTURE_MIN_LOD ||
+        pname == GL_TEXTURE_MAX_ANISOTROPY_EXT) {
+        GLfloat f = 0;
+        glGetTexParameterfv(target, pname, &f);
+        return JS_NewFloat64(ctx, f);
+    }
+    if (!wgl_pname_among(pname, integers, G_N_ELEMENTS(integers)))
+        return wgl_invalid_enum(g);
+    GLint v = 0;
+    glGetTexParameteriv(target, pname, &v);
+    if (pname == GL_TEXTURE_IMMUTABLE_FORMAT) return JS_NewBool(ctx, v);
+    return JS_NewInt32(ctx, v);
+}
 
 static JSValue
 wgl_getFramebufferAttachmentParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
+    static const GLenum allowed[] = {
+        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+        GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL,
+        GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE,
+        GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER,
+        GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE,
+        GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE,
+        GL_FRAMEBUFFER_ATTACHMENT_BLUE_SIZE,
+        GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE,
+        GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE,
+        GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE,
+        GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE,
+        GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING,
+    };
     WGL_GET(0);
+    GLenum pname = (GLenum)argi(ctx, argc, argv, 2);
+    if (!wgl_pname_among(pname, allowed, G_N_ELEMENTS(allowed)))
+        return wgl_invalid_enum(g);
     GLint v = 0;
     glGetFramebufferAttachmentParameteriv((GLenum)argi(ctx, argc, argv, 0),
                                           (GLenum)argi(ctx, argc, argv, 1),
-                                          (GLenum)argi(ctx, argc, argv, 2), &v);
+                                          pname, &v);
     return JS_NewInt32(ctx, v);
 }
 
@@ -3733,6 +3859,14 @@ wgl_getVertexAttrib(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
         JS_FreeValue(ctx, a);
         return ta;
     }
+    static const GLenum allowed[] = {
+        GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, GL_VERTEX_ATTRIB_ARRAY_ENABLED,
+        GL_VERTEX_ATTRIB_ARRAY_SIZE, GL_VERTEX_ATTRIB_ARRAY_STRIDE,
+        GL_VERTEX_ATTRIB_ARRAY_TYPE, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED,
+        GL_VERTEX_ATTRIB_ARRAY_INTEGER, GL_VERTEX_ATTRIB_ARRAY_DIVISOR,
+    };
+    if (!wgl_pname_among(pname, allowed, G_N_ELEMENTS(allowed)))
+        return wgl_invalid_enum(g);
     GLint v = 0;
     glGetVertexAttribiv(index, pname, &v);
     if (pname == GL_VERTEX_ATTRIB_ARRAY_ENABLED ||
@@ -3748,8 +3882,12 @@ wgl_getVertexAttribOffset(JSContext *ctx, JSValueConst this_val, int argc, JSVal
 {
     WGL_GET(0);
     void *p = NULL;
+    if ((GLenum)argi(ctx, argc, argv, 1) != GL_VERTEX_ATTRIB_ARRAY_POINTER) {
+        g->injected_error = GL_INVALID_ENUM;
+        return JS_NewInt32(ctx, 0);
+    }
     glGetVertexAttribPointerv((GLuint)argi(ctx, argc, argv, 0),
-                              (GLenum)argi(ctx, argc, argv, 1), &p);
+                              GL_VERTEX_ATTRIB_ARRAY_POINTER, &p);
     return JS_NewInt32(ctx, (int)(intptr_t)p);
 }
 
@@ -4451,6 +4589,8 @@ wgl_getQueryParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueCo
     WGL_GET(0);
     GLenum pname = (GLenum)argi(ctx, argc, argv, 1);
     GLuint v = 0;
+    if (pname != GL_QUERY_RESULT && pname != GL_QUERY_RESULT_AVAILABLE)
+        return wgl_invalid_enum(g);
     glGetQueryObjectuiv((GLuint)wgl_name(ctx, argv[0]), pname, &v);
     if (pname == GL_QUERY_RESULT_AVAILABLE)
         return JS_NewBool(ctx, v);
@@ -4598,6 +4738,14 @@ wgl_getActiveUniformBlockParameter(JSContext *ctx, JSValueConst this_val, int ar
         g_free(vals);
         return ta;
     }
+    static const GLenum allowed[] = {
+        GL_UNIFORM_BLOCK_BINDING, GL_UNIFORM_BLOCK_DATA_SIZE,
+        GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS,
+        GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER,
+        GL_UNIFORM_BLOCK_REFERENCED_BY_FRAGMENT_SHADER,
+    };
+    if (!wgl_pname_among(pname, allowed, G_N_ELEMENTS(allowed)))
+        return wgl_invalid_enum(g);
     GLint v = 0;
     glGetActiveUniformBlockiv(pr, idx, pname, &v);
     return JS_NewInt32(ctx, v);
