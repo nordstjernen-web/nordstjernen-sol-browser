@@ -3,6 +3,15 @@ Changelog:
 
 1.0.50-dev:
 ======
+* `CSSKeyframesRule` and `CSSKeyframeRule` are real objects. A
+  `@keyframes` rule has `name`, `cssRules`, `length`, `appendRule()`,
+  `deleteRule()` and `findRule()`, and each keyframe has `keyText` and a
+  live `style`; the rule was an opaque block of text before, with `name`
+  and `cssRules` undefined, so scripts that inspect or patch animations
+  threw. Keyframe selectors serialize as percentages (`from` is `0%`),
+  and an edit reaches animations started afterwards. `@layer a, b;` is a
+  `CSSLayerStatementRule` with `nameList`, and `CSSImportRule.layerName`
+  reports the layer of `@import url(x.css) layer(base)`.
 * `MediaList` splits its queries on commas. `rule.media.mediaText` for
   `@media screen, print` read `screen,, print` and `media[0]` was
   `screen,`, because a second helper of the same name, which splits on
