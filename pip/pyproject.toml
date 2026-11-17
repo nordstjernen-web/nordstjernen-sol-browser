@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nordstjernen-browser"
 dynamic = ["version"]
-description = "Nordstjernen Web Browser: a minimal, secure web browser written from scratch in C with GTK 4"
+description = "Nordstjernen Web Browser: a minimal, secure web browser written in C with GTK 4"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "LicenseRef-NSL-1.0 OR GPL-3.0-or-later"

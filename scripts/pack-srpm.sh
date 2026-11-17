@@ -83,7 +83,7 @@ Requires:       uchardet
 %description
 Nordstjernen is a small, free software web browser written in C with
 GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint and
-JavaScript glue are written from scratch — no third-party browser
+JavaScript glue are the project's own — no third-party browser
 engine is used. SVG images are rendered in-engine.
 
 %prep

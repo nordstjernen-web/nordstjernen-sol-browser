@@ -1,7 +1,7 @@
 Name:           nordstjernen
 Version:        1.0.29
 Release:        1%{?dist}
-Summary:        Clean-room, hardened web browser written from scratch in C
+Summary:        Clean-room, hardened web browser written in C
 
 License:        LicenseRef-NSL-1.0 OR GPL-3.0-or-later
 URL:            https://github.com/nordstjernen-web/nordstjernen-sol-browser
@@ -43,8 +43,8 @@ Recommends:     mpv
 ExclusiveOS:    linux
 
 %description
-Nordstjernen is an independent, lightweight web browser built entirely
-from scratch in C, using GTK 4 for the UI and libcurl for networking.
+Nordstjernen is an independent, lightweight web browser written
+in C, using GTK 4 for the UI and libcurl for networking.
 It is a clean-room implementation with no upstream browser engine: the
 HTML parser (its own, in safe Rust), the JavaScript interpreter (QuickJS),
 and the image decoder (Wuffs) are all integrated in-tree. The engine is a

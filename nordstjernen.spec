@@ -60,7 +60,7 @@ Requires(post): update-alternatives
 Requires(postun): update-alternatives
 
 %description
-Nordstjernen is a clean-room web browser written from scratch in C, with a
+Nordstjernen is a clean-room web browser written in C, with a
 GTK 4 user interface and a libcurl network stack. It is built to be small,
 secure, and readable by a single person end to end.
 
