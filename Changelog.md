@@ -3,6 +3,11 @@ Changelog:
 
 1.0.50-dev:
 ======
+* A `position: sticky` box that is a direct child of its scroll container
+  stays stuck for the whole scroll range. Its containing block was taken
+  as the scroller's visible box rather than its scrollable content, so a
+  sticky table header or toolbar inside an `overflow: auto` pane scrolled
+  away after the first screenful.
 * Flow-relative properties follow `direction`. `margin-inline-start`,
   `padding-inline-end`, `inset-inline-start`, `border-inline-start`, the
   `margin-inline` / `padding-inline` / `inset-inline` / `border-inline`
