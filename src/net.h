@@ -104,6 +104,9 @@ typedef struct ns_response {
     double response_end_ms;
     int   security;
     int   redirect_count;
+    gpointer       document;
+    gsize          document_bytes;
+    GDestroyNotify document_free;
 } ns_response;
 
 void ns_response_free(ns_response *resp);
@@ -175,6 +178,18 @@ void ns_net_request_async_streaming(const char         *url,
                                     gpointer            chunk_data,
                                     GAsyncReadyCallback callback,
                                     gpointer            user_data);
+
+void ns_net_request_async_document(const char         *url,
+                                   const char         *top_url,
+                                   const char         *method,
+                                   const void         *body,
+                                   gsize               body_len,
+                                   const char         *content_type,
+                                   const char *const  *extra_headers,
+                                   ns_net_chunk_fn     on_chunk,
+                                   gpointer            chunk_data,
+                                   GAsyncReadyCallback callback,
+                                   gpointer            user_data);
 
 void ns_net_download_async(const char         *url,
                            const char         *top_url,

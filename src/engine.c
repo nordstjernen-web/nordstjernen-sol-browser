@@ -16,6 +16,7 @@
 #include "css.h"
 #include "css_syntax.h"
 #include "debuglog.h"
+#include "html.h"
 #include "image.h"
 #include "paint.h"
 #include "print.h"
@@ -93,13 +94,21 @@ on_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     g_main_loop_quit(st->loop);
 }
 
+static void
+on_document_chunk(gpointer user_data, const char *url, long status,
+                  const char *raw_headers, const guint8 *data, gsize len)
+{
+    (void)status;
+    ns_html_load_chunk(user_data, url, raw_headers, data, len);
+}
+
 static ns_response *
 engine_request_blocking(const char *url, const char *top_url,
                         const char *method, const void *body, gsize body_len,
                         const char *content_type, gboolean navigation,
                         const char *initiator, gboolean user_activated,
                         const char *const *resource_headers,
-                        GError **error)
+                        gboolean document, GError **error)
 {
     fetch_state st = {0};
     st.loop = g_main_loop_new(NULL, FALSE);
@@ -118,11 +127,23 @@ engine_request_blocking(const char *url, const char *top_url,
     if (initiator_header) navigation_headers[nh++] = initiator_header;
     const char *const *headers = navigation ? navigation_headers
                                             : resource_headers;
-    ns_net_request_async(url, top_url, method, body, body_len, content_type,
-                         headers,
-                         NULL, on_fetch_done, &st);
+    ns_html_load *load = NULL;
+    if (document) {
+        const ns_config *cfg = ns_config_get();
+        load = ns_html_load_new(!cfg || cfg->javascript_enabled);
+    }
+    if (load)
+        ns_net_request_async_document(url, top_url, method, body, body_len,
+                                      content_type, headers,
+                                      on_document_chunk, load,
+                                      on_fetch_done, &st);
+    else
+        ns_net_request_async(url, top_url, method, body, body_len,
+                             content_type, headers,
+                             NULL, on_fetch_done, &st);
     engine_blocking_wait(st.loop);
     g_main_loop_unref(st.loop);
+    ns_html_load_finish(load, st.resp);
     if (error) *error = st.error;
     else g_clear_error(&st.error);
     return st.resp;
@@ -132,7 +153,7 @@ ns_response *
 ns_engine_fetch_blocking(const char *url, const char *top_url, GError **error)
 {
     return engine_request_blocking(url, top_url, "GET", NULL, 0, NULL,
-                                   FALSE, NULL, FALSE, NULL, error);
+                                   FALSE, NULL, FALSE, NULL, FALSE, error);
 }
 
 static ns_response *
@@ -140,7 +161,7 @@ engine_fetch_blocking_with_headers(const char *url, const char *top_url,
                                    const char *const *headers, GError **error)
 {
     return engine_request_blocking(url, top_url, "GET", NULL, 0, NULL,
-                                   FALSE, NULL, FALSE, headers, error);
+                                   FALSE, NULL, FALSE, headers, FALSE, error);
 }
 
 ns_response *
@@ -150,7 +171,7 @@ ns_engine_navigate_blocking(const char *url, const char *top_url,
 {
     return engine_request_blocking(url, top_url, "GET", NULL, 0, NULL,
                                    TRUE, initiator, user_activated, NULL,
-                                   error);
+                                   TRUE, error);
 }
 
 ns_response *
@@ -160,7 +181,8 @@ ns_engine_reload_blocking(const char *url, const char *top_url, GError **error)
         "X-ND-Navigate: 1", "X-ND-User-Activated: 1", "X-ND-Reload: 1", NULL
     };
     return engine_request_blocking(url, top_url, "GET", NULL, 0, NULL,
-                                   FALSE, NULL, FALSE, reload_headers, error);
+                                   FALSE, NULL, FALSE, reload_headers, TRUE,
+                                   error);
 }
 
 ns_response *
@@ -172,7 +194,7 @@ ns_engine_navigate_post_blocking(const char *url, const char *top_url,
 {
     return engine_request_blocking(url, top_url, "POST", body, body_len,
                                    content_type, TRUE, initiator,
-                                   user_activated, NULL, error);
+                                   user_activated, NULL, TRUE, error);
 }
 
 static gboolean

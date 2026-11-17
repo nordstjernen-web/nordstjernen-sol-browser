@@ -2341,6 +2341,8 @@ ns_response_free(ns_response *resp)
     g_free(resp->raw_headers);
     if (resp->body)
         g_byte_array_unref(resp->body);
+    if (resp->document && resp->document_free)
+        resp->document_free(resp->document);
     g_free(resp->error);
     g_free(resp->tls_warning);
     g_free(resp->remote_ip);
@@ -2354,6 +2356,9 @@ ns_response_copy(const ns_response *src)
     if (!src) return NULL;
     ns_response *r = g_new0(ns_response, 1);
     *r = *src;
+    r->document = NULL;
+    r->document_bytes = 0;
+    r->document_free = NULL;
     r->final_url = g_strdup(src->final_url);
     r->content_type = g_strdup(src->content_type);
     r->content_disposition = g_strdup(src->content_disposition);
@@ -8375,6 +8380,7 @@ ns_net_request_async_streaming_full(const char         *url,
                                     ns_net_chunk_fn     on_chunk,
                                     gpointer            chunk_data,
                                     gboolean            discard_body,
+                                    gboolean            may_join,
                                     GAsyncReadyCallback callback,
                                     gpointer            user_data)
 {
@@ -8383,7 +8389,7 @@ ns_net_request_async_streaming_full(const char         *url,
     if (ns_net_complete_blob(url, top_url, cancellable, callback, user_data))
         return;
 
-    char *key = (!cancellable && !body && !on_chunk)
+    char *key = (!cancellable && !body && (!on_chunk || may_join))
         ? ns_net_request_key(url, top_url, method, extra_headers) : NULL;
     if (key) {
         gboolean joined = FALSE;
@@ -8451,7 +8457,26 @@ ns_net_request_async_streaming(const char         *url,
     ns_net_request_async_streaming_full(url, top_url, method, body, body_len,
                                         content_type, extra_headers,
                                         cancellable, on_chunk, chunk_data,
-                                        FALSE, callback, user_data);
+                                        FALSE, FALSE, callback, user_data);
+}
+
+void
+ns_net_request_async_document(const char         *url,
+                              const char         *top_url,
+                              const char         *method,
+                              const void         *body,
+                              gsize               body_len,
+                              const char         *content_type,
+                              const char *const  *extra_headers,
+                              ns_net_chunk_fn     on_chunk,
+                              gpointer            chunk_data,
+                              GAsyncReadyCallback callback,
+                              gpointer            user_data)
+{
+    ns_net_request_async_streaming_full(url, top_url, method, body, body_len,
+                                        content_type, extra_headers, NULL,
+                                        on_chunk, chunk_data, FALSE, TRUE,
+                                        callback, user_data);
 }
 
 void
@@ -8465,7 +8490,7 @@ ns_net_download_async(const char         *url,
 {
     ns_net_request_async_streaming_full(url, top_url, "GET", NULL, 0, NULL,
                                         NULL, cancellable, on_chunk,
-                                        chunk_data, TRUE, callback,
+                                        chunk_data, TRUE, FALSE, callback,
                                         user_data);
 }
 
