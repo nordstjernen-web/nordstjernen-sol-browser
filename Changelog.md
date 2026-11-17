@@ -3,6 +3,16 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Security: a page could hang its tab with a few hundred kilobytes of
+  markup. Each time the adoption agency moved a node that had children,
+  the tree sink walked every ancestor of the new parent to rule out a
+  cycle, so `<a><div>x` repeated 20,000 times (180 KB) took 3.4 seconds to
+  parse and four times as much did not finish in 100 seconds. The sink
+  now skips the walk when the node is one the parser just created and
+  filled from the very element it is being appended to, and the tree
+  builder no longer nests elements deeper than the DOM's depth limit of
+  512: past it, new elements become children of the element at the limit,
+  as in Blink and Gecko. The two inputs now parse in 7 ms and 30 ms.
 * Build: the Rust floor rises from 1.91 to 1.100, and the HTML parser
   uses what the newer compiler offers: `if let` guards in the tree
   builder and the script-data tokenizer states, `array_windows` for the

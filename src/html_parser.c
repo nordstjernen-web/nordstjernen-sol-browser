@@ -34,6 +34,8 @@ struct ns_h5_sink {
     GHashTable *merge_names;
     GHashTable *template_hosts;
     ns_node    *fresh_selectedcontent;
+    ns_node    *fresh;
+    ns_node    *fresh_donor;
     GHashTable *selects;
     gboolean    declarative_shadow;
     gboolean    media_candidate;
@@ -59,6 +61,8 @@ ns_h5_sink_finish(ns_h5_sink *sink)
     sink->attr_tail = NULL;
     sink->merge_element = NULL;
     sink->fresh_selectedcontent = NULL;
+    sink->fresh = NULL;
+    sink->fresh_donor = NULL;
     g_clear_pointer(&sink->merge_names, g_hash_table_destroy);
     g_clear_pointer(&sink->template_hosts, g_hash_table_destroy);
     g_clear_pointer(&sink->selects, g_hash_table_destroy);
@@ -113,6 +117,8 @@ ns_h5_element(ns_h5_sink *sink, const char *name, size_t len, int borrowed,
         sink->media_candidate = TRUE;
     if (len == 15 && memcmp(name, "selectedcontent", 15) == 0)
         sink->fresh_selectedcontent = el;
+    sink->fresh = el;
+    sink->fresh_donor = NULL;
     return el;
 }
 
@@ -387,7 +393,11 @@ ns_h5_first_child(ns_node *node)
 void
 ns_h5_append(ns_h5_sink *sink, ns_node *parent, ns_node *child)
 {
-    if (!ns_h5_can_adopt(sink, parent, child)) return;
+    gboolean took_all_of_parent = child == sink->fresh &&
+                                  parent == sink->fresh_donor && !child->parent;
+    sink->fresh = NULL;
+    sink->fresh_donor = NULL;
+    if (!took_all_of_parent && !ns_h5_can_adopt(sink, parent, child)) return;
     ns_node_append_child(parent, child);
     if (child == sink->fresh_selectedcontent)
         ns_h5_selectedcontent_inserted(sink, child);
@@ -397,6 +407,8 @@ void
 ns_h5_insert_before(ns_h5_sink *sink, ns_node *sibling, ns_node *child)
 {
     ns_node *parent = sibling->parent;
+    sink->fresh = NULL;
+    sink->fresh_donor = NULL;
     if (!parent || sibling == child || !ns_h5_can_adopt(sink, parent, child))
         return;
     ns_node_remove(child);
@@ -488,9 +500,13 @@ ns_h5_remove(ns_node *node)
 void
 ns_h5_reparent_children(ns_h5_sink *sink, ns_node *from, ns_node *to)
 {
+    gboolean into_empty_fresh = to == sink->fresh && !to->parent &&
+                                !to->first_child && !to->tpl_content;
+    sink->fresh_donor = NULL;
     if (ns_h5_is_inclusive_ancestor(sink, from, to)) return;
     while (from->first_child)
         ns_node_append_child(to, from->first_child);
+    if (into_empty_fresh) sink->fresh_donor = from;
 }
 
 ns_node *

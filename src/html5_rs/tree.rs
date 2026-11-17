@@ -10,6 +10,7 @@ use crate::{Attrs, Context, ElementName, LocalName, Ns, Position, QuirksMode, Tr
 
 const NO_POSITION: Position = Position { line: 0, column: 0 };
 const REPLACEMENT: &[u8] = "\u{FFFD}".as_bytes();
+const DEEPEST_PARENT: usize = 509;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Mode {
@@ -352,7 +353,7 @@ impl<'s, S: TreeSink> Builder<'s, S> {
     }
 
     fn template_adjusted(&mut self, index: usize) -> Place<S::Handle> {
-        let elem = &self.open[index];
+        let elem = &self.open[index.min(DEEPEST_PARENT)];
         if elem.is(Tag::Template) {
             let h = elem.h;
             Place::Append(self.sink.template_contents(h))
@@ -362,7 +363,9 @@ impl<'s, S: TreeSink> Builder<'s, S> {
     }
 
     fn appropriate_place(&mut self, target: Option<usize>) -> Place<S::Handle> {
-        let index = target.unwrap_or(self.open.len() - 1);
+        let index = target
+            .unwrap_or(self.open.len() - 1)
+            .min(DEEPEST_PARENT);
         let elem = &self.open[index];
         if !(self.foster && elem.is_any(&[Tag::Table, Tag::Tbody, Tag::Tfoot, Tag::Thead, Tag::Tr]))
         {
@@ -766,6 +769,11 @@ impl<'s, S: TreeSink> Builder<'s, S> {
                 .open
                 .clear_of_boundaries_above(fe_index, Scope::Default)
             {
+                return true;
+            }
+            if fe_index > DEEPEST_PARENT {
+                self.truncate_open(fe_index);
+                self.afe.remove(fe_afe);
                 return true;
             }
             let furthest = (fe_index + 1..self.open.len()).find(|&i| self.open[i].is_special());
