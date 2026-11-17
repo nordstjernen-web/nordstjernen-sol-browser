@@ -354,11 +354,11 @@ ns_h5_option_selectedcontent(ns_h5_sink *sink, ns_node *option)
     ns_h5_select *state =
         select ? g_hash_table_lookup(sink->selects, select) : NULL;
     if (!state) return NULL;
-    if (ns_element_get_attr(option, "selected"))
-        state->chosen = option;
-    else if (!state->chosen && ns_select_picks_first_option(select) &&
-             ns_option_selectable(option))
-        state->chosen = option;
+    gboolean takes_choice =
+        ns_element_get_attr(option, "selected") ||
+        (!state->chosen && ns_select_picks_first_option(select) &&
+         ns_option_selectable(option));
+    if (takes_choice) state->chosen = option;
     return state->chosen == option ? state->selectedcontent : NULL;
 }
 
