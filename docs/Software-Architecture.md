@@ -213,6 +213,25 @@ intermediate tree — preserving quirks mode, declarative shadow
 DOM, and standards media-metadata extraction. Node strings live in one
 arena per document, kept alive as backing store on the DOM root.
 
+The parser also takes its input in pieces. In the Rust crate a
+`Parser` is fed with `feed`, driven with `advance` and ended with
+`finish`; the tokenizer suspends wherever a token could still change with
+more input and resumes there, and the tree it builds is the same for every
+way of cutting the input. With `pause_at_scripts` set, `advance` returns
+at each `</script>` so the embedder can run the script, hand back what it
+wrote with `write` (inserted at the insertion point and tokenized before
+the rest of the document) and continue with `resume`. On the C side
+`ns_html_stream_new` / `_feed` / `_finish` (`src/html.h`) build a document
+from chunks without pausing for scripts; page loads still hand the parser
+the whole decoded body, and script-created markup still goes through the
+`document.write` code in `src/js.c`. `NS_HTML_PARSE_CHUNK=N` in the
+environment routes every document parse through the streaming path in
+N-byte chunks, which is how that path is checked against real pages.
+
+The tree builder stops nesting at `NS_DOM_MAX_DEPTH`: once the stack of
+open elements is that tall, further elements become children of the
+element at the limit, the way Blink and Gecko cap parser depth.
+
 **Style + layout core.** `ns_render_relayout_profile` (`src/render.c:681`)
 sets the viewport, runs `ns_css_compute` to produce the `ns_node* →
 ns_style*` table, builds the `ns_box` layout tree with `ns_layout_build`,

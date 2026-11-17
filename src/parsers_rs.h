@@ -32,6 +32,15 @@ void  ns_rs_html_parse_fragment(const char *context, size_t context_len,
                                 ns_h5_sink *sink);
 char *ns_rs_html_named_char_ref(const char *name, size_t len);
 
+typedef struct ns_rs_html_stream ns_rs_html_stream;
+
+ns_rs_html_stream *ns_rs_html_stream_new(int scripting, ns_node *document,
+                                         ns_h5_sink *sink);
+void  ns_rs_html_stream_feed(ns_rs_html_stream *stream, const char *data,
+                             size_t len);
+int   ns_rs_html_stream_finish(ns_rs_html_stream *stream);
+void  ns_rs_html_stream_free(ns_rs_html_stream *stream);
+
 ns_node *ns_h5_element(ns_h5_sink *sink, const char *name, size_t len,
                        int borrowed, int line, int column);
 void     ns_h5_attribute(ns_h5_sink *sink, ns_node *element,

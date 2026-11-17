@@ -9365,14 +9365,15 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return JS_UNDEFINED;
     gboolean free_s = !JS_IsNull(val);
-    const char *s = free_s ? JS_ToCString(ctx, val) : "";
+    size_t s_len = 0;
+    const char *s = free_s ? JS_ToCStringLen(ctx, &s_len, val) : "";
     if (!s) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
     if (ns_node_is_element_named(n, "template")) {
         ns_node *content = ns_template_content_get(n);
         if (content) content->flags |= NS_NODE_SCRIPTING_DISABLED;
         ns_node *tfrag = ns_html_parse_fragment_with_scripting(
-            "template", s, -1, FALSE);
+            "template", s, (gssize)s_len, FALSE);
         if (declarative && tfrag)
             ns_html_convert_declarative_shadow(tfrag);
         if (free_s) JS_FreeCString(ctx, s);
@@ -9401,7 +9402,8 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
     const ns_node *root = ns_node_root(n);
     gboolean scripting = !root ||
         !(root->flags & NS_NODE_SCRIPTING_DISABLED);
-    ns_node *fragment = ns_html_parse_fragment_in_context(n, s, -1, scripting);
+    ns_node *fragment = ns_html_parse_fragment_in_context(n, s, (gssize)s_len,
+                                                          scripting);
     if (declarative && fragment)
         ns_html_convert_declarative_shadow(fragment);
     if (free_s) JS_FreeCString(ctx, s);
@@ -66434,7 +66436,9 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
     JS_DefinePropertyValueStr(ctx, w, "baseURI",
         JS_NewString(ctx, u), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, w, "compatMode",
-        JS_NewString(ctx, "CSS1Compat"), JS_PROP_C_W_E);
+        JS_NewString(ctx, (doc_node->flags & NS_NODE_QUIRKS) ? "BackCompat"
+                                                             : "CSS1Compat"),
+        JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, w, "characterSet",
         JS_NewString(ctx, cs), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, w, "charset",
@@ -67053,9 +67057,11 @@ ns_document_get_visibilityState(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_document_get_compatMode(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
     ns_js *jsx = js_from_ctx(ctx);
-    if (jsx && jsx->current_doc && (jsx->current_doc->flags & NS_NODE_QUIRKS))
+    const ns_node *doc = ns_unwrap_element_mut(this_val);
+    if (!doc || doc->kind != NS_NODE_DOCUMENT)
+        doc = jsx ? jsx->current_doc : NULL;
+    if (doc && (doc->flags & NS_NODE_QUIRKS))
         return JS_NewString(ctx, "BackCompat");
     return JS_NewString(ctx, "CSS1Compat");
 }
@@ -67523,10 +67529,11 @@ ns_realmdoc_flush_written(ns_js *js, ns_node *doc)
     JSValue wrapper = JS_MKPTR(JS_TAG_OBJECT, doc->js_wrapper);
     JSValue cur = JS_GetPropertyStr(ctx, wrapper, "\xff" "wbuf");
     if (!JS_IsString(cur)) { JS_FreeValue(ctx, cur); return FALSE; }
-    const char *buf = JS_ToCString(ctx, cur);
+    size_t buf_len = 0;
+    const char *buf = JS_ToCStringLen(ctx, &buf_len, cur);
     JS_FreeValue(ctx, cur);
     if (buf) {
-        ns_node *parsed = ns_html_parse(buf, -1);
+        ns_node *parsed = ns_html_parse(buf, (gssize)buf_len);
         JS_FreeCString(ctx, buf);
         if (parsed) {
             ns_js_orphan_children(js, doc);
@@ -67573,6 +67580,16 @@ ns_realmdoc_queue_written_load(ns_js *js, ns_node *host)
 }
 
 static void
+ns_js_append_string(JSContext *ctx, GString *out, JSValueConst value)
+{
+    size_t len = 0;
+    const char *text = JS_ToCStringLen(ctx, &len, value);
+    if (!text) return;
+    g_string_append_len(out, text, (gssize)len);
+    JS_FreeCString(ctx, text);
+}
+
+static void
 ns_realmdoc_append_write(JSContext *ctx, JSValueConst this_val, int argc,
                          JSValueConst *argv, gboolean newline)
 {
@@ -67586,18 +67603,16 @@ ns_realmdoc_append_write(JSContext *ctx, JSValueConst this_val, int argc,
     }
     GString *buf = g_string_new(NULL);
     if (JS_IsString(cur)) {
-        const char *c = JS_ToCString(ctx, cur);
-        if (c) { g_string_append(buf, c); JS_FreeCString(ctx, c); }
+        ns_js_append_string(ctx, buf, cur);
     } else {
         ns_js_orphan_children(js, doc);
     }
     JS_FreeValue(ctx, cur);
-    for (int i = 0; i < argc; i++) {
-        const char *s = JS_ToCString(ctx, argv[i]);
-        if (s) { g_string_append(buf, s); JS_FreeCString(ctx, s); }
-    }
+    for (int i = 0; i < argc; i++)
+        ns_js_append_string(ctx, buf, argv[i]);
     if (newline) g_string_append_c(buf, '\n');
-    JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf", JS_NewString(ctx, buf->str));
+    JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf",
+                      JS_NewStringLen(ctx, buf->str, buf->len));
     g_string_free(buf, TRUE);
     ns_node *host = ns_realmdoc_frame_host(doc);
     if (host) ns_realmdoc_queue_written_load(js, host);
@@ -74834,6 +74849,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
 
     char *abs_url = NULL;
     char *decoded = NULL;
+    gsize decoded_html_len = 0;
     ns_response *resp = NULL;
 
     ns_js_start_frame_clock(js, iframe);
@@ -74966,9 +74982,9 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
                         resp->final_url ? resp->final_url : abs_url);
                     ns_element_set_attr(iframe, "data-nd-frame-charset", "UTF-8");
                 } else if (resp->body->len > 0) {
-                    decoded = ns_html_decode_body_full(
+                    decoded = ns_html_decode_body_len(
                         (const char *)resp->body->data, resp->body->len,
-                        resp->content_type, NULL);
+                        resp->content_type, NULL, &decoded_html_len);
                     char *declared = ns_html_declared_charset(
                         (const char *)resp->body->data, resp->body->len,
                         resp->content_type);
@@ -75104,7 +75120,10 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
                 "<html><head><title>Parse Error</title></head><body>"
                 "<p>This XML document is not well-formed.</p></body></html>");
         }
-        ns_node *cdoc = ns_html_parse(decoded, (gssize)strlen(decoded));
+        gsize text_len = strlen(decoded);
+        ns_node *cdoc = ns_html_parse(
+            decoded, (gssize)(malformed_xml ? text_len
+                                            : MAX(text_len, decoded_html_len)));
         if (cdoc) {
             ns_node *html = ns_node_find_first_element(cdoc, "html");
             if (html) {

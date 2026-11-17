@@ -1,4 +1,4 @@
-//! Nordstjernen — the WHATWG HTML tokenizer over a whole, newline-normalized input, with zero-copy text runs and reused token buffers.
+//! Nordstjernen — the WHATWG HTML tokenizer over newline-normalized input that may arrive in pieces, with zero-copy text runs and reused token buffers.
 //! Copyright 2026 Andreas Røsdal
 //! SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
 
@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use crate::charref;
 use crate::scan::{find_any, newlines};
 use crate::tags::{AttrNs, Tag};
-use crate::{Attribute, Position};
+use crate::{Attribute, Position, Positions};
 
 const REPLACEMENT: &[u8] = "\u{FFFD}".as_bytes();
 
@@ -86,6 +86,7 @@ pub enum Kind {
     Pi,
     Doctype,
     Eof,
+    NeedInput,
 }
 
 #[derive(Clone, Debug)]
@@ -167,12 +168,16 @@ pub struct Tokenizer<'a> {
     last_start_tag: Vec<u8>,
     pending: Option<Kind>,
     done: bool,
+    pub partial: bool,
+    pub positions: Positions,
     line: u32,
     line_start: usize,
+    line_dropped: usize,
     line_scan: usize,
 }
 
 const LINEAR_ATTR_CHECK: usize = 32;
+const LOOKBEHIND: usize = 2;
 
 fn is_ws(c: u8) -> bool {
     matches!(c, b'\t' | b'\n' | b'\x0c' | b' ')
@@ -201,10 +206,76 @@ impl<'a> Tokenizer<'a> {
             last_start_tag: Vec::new(),
             pending: None,
             done: false,
+            partial: false,
+            positions: Positions::All,
             line: 1,
             line_start: 0,
+            line_dropped: 0,
             line_scan: 0,
         }
+    }
+
+    pub fn rebind<'b>(self, input: &'b [u8]) -> Tokenizer<'b> {
+        Tokenizer {
+            input,
+            pos: self.pos,
+            state: self.state,
+            allow_cdata: self.allow_cdata,
+            text_start: self.text_start,
+            text_end: self.text_end,
+            text_buf: self.text_buf,
+            text_in_buf: self.text_in_buf,
+            text_emitted: self.text_emitted,
+            scratch: self.scratch,
+            tag: self.tag,
+            end_tag: self.end_tag,
+            drop_attr: self.drop_attr,
+            attr_names: self.attr_names,
+            comment: self.comment,
+            pi_target: self.pi_target,
+            doctype: self.doctype,
+            last_start_tag: self.last_start_tag,
+            pending: self.pending,
+            done: self.done,
+            partial: self.partial,
+            positions: self.positions,
+            line: self.line,
+            line_start: self.line_start,
+            line_dropped: self.line_dropped,
+            line_scan: self.line_scan,
+        }
+    }
+
+    pub fn consumed(&self) -> usize {
+        self.pos
+    }
+
+    pub fn holds_input_text(&self) -> bool {
+        !self.text_in_buf && self.text_start != self.text_end
+    }
+
+    pub fn forget_consumed(&mut self, input: &[u8]) -> usize {
+        let dropped = self.pos.saturating_sub(LOOKBEHIND);
+        if self.line_scan < dropped {
+            let (count, last) = newlines(&input[self.line_scan..dropped]);
+            self.line += count as u32;
+            if let Some(i) = last {
+                self.line_start = self.line_scan + i + 1;
+                self.line_dropped = 0;
+            }
+            self.line_scan = dropped;
+        }
+        self.pos -= dropped;
+        self.line_scan -= dropped;
+        self.text_start = 0;
+        self.text_end = 0;
+        if self.line_start >= dropped {
+            self.line_start -= dropped;
+        } else {
+            self.line_dropped += dropped - self.line_start;
+            self.line_start = 0;
+        }
+        dropped
     }
 
     pub fn text(&self) -> &[u8] {
@@ -274,12 +345,13 @@ impl<'a> Tokenizer<'a> {
             self.line += count as u32;
             if let Some(i) = last {
                 self.line_start = self.line_scan + i + 1;
+                self.line_dropped = 0;
             }
             self.line_scan = offset;
         }
         Position {
             line: self.line,
-            column: (offset - self.line_start + 1) as u32,
+            column: (offset + self.line_dropped - self.line_start + 1) as u32,
         }
     }
 
@@ -313,7 +385,31 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    fn suspend(&mut self) -> Option<Kind> {
+        if self.text_is_empty() {
+            Some(Kind::NeedInput)
+        } else {
+            Some(Kind::Chars)
+        }
+    }
+
+    fn lacks(&self, at: usize, needed: usize) -> bool {
+        self.partial && self.input.len() < at + needed
+    }
+
+    fn charref_incomplete(&self, amp: usize) -> bool {
+        self.partial && charref::incomplete(self.input, amp + 1)
+    }
+
+    fn keyword_incomplete(&self, word: &[u8]) -> bool {
+        let rest = &self.input[self.pos..];
+        self.partial && rest.len() < word.len() && word[..rest.len()].eq_ignore_ascii_case(rest)
+    }
+
     fn eof(&mut self) -> Option<Kind> {
+        if self.partial {
+            return self.suspend();
+        }
         self.done = true;
         self.pos = self.input.len();
         self.emit(Kind::Eof)
@@ -351,7 +447,14 @@ impl<'a> Tokenizer<'a> {
         }
         self.last_start_tag.clear();
         self.last_start_tag.extend_from_slice(&self.tag.name);
-        self.tag.position = Some(self.position_at(self.pos));
+        let wanted = match self.positions {
+            Positions::All => true,
+            Positions::Scripts => self.tag.tag == Some(Tag::Script),
+            Positions::None => false,
+        };
+        if wanted {
+            self.tag.position = Some(self.position_at(self.pos));
+        }
         self.emit(Kind::StartTag)
     }
 
@@ -521,11 +624,16 @@ impl<'a> Tokenizer<'a> {
         let found = find_any(&self.input[start..], *b"<&");
         let Some(i) = found else {
             self.push_input(start, self.input.len());
+            self.pos = self.input.len();
             return self.eof();
         };
         let at = start + i;
         self.push_input(start, at);
         if self.input[at] == b'&' {
+            if self.charref_incomplete(at) {
+                self.pos = at;
+                return self.suspend();
+            }
             self.charref_into_text(at);
         } else {
             self.pos = at + 1;
@@ -539,20 +647,33 @@ impl<'a> Tokenizer<'a> {
         let found = find_any(&self.input[start..], [b'<', b'&', 0]);
         let Some(i) = found else {
             self.push_input(start, self.input.len());
+            self.pos = self.input.len();
             return self.eof();
         };
         let at = start + i;
         self.push_input(start, at);
         match self.input[at] {
+            b'&' if self.charref_incomplete(at) => {
+                self.pos = at;
+                return self.suspend();
+            }
             b'&' => self.charref_into_text(at),
             0 => {
                 cold_path();
                 self.push_bytes(REPLACEMENT);
                 self.pos = at + 1;
             }
+            _ if self.end_tag_undecided(at) => {
+                self.pos = at;
+                return self.suspend();
+            }
             _ => self.text_less_than(at),
         }
         None
+    }
+
+    fn end_tag_undecided(&self, at: usize) -> bool {
+        self.lacks(at, self.last_start_tag.len() + 3)
     }
 
     fn text_less_than(&mut self, at: usize) {
@@ -571,6 +692,7 @@ impl<'a> Tokenizer<'a> {
         let found = find_any(&self.input[start..], [b'<', 0]);
         let Some(i) = found else {
             self.push_input(start, self.input.len());
+            self.pos = self.input.len();
             return self.eof();
         };
         let at = start + i;
@@ -579,6 +701,9 @@ impl<'a> Tokenizer<'a> {
             cold_path();
             self.push_bytes(REPLACEMENT);
             self.pos = at + 1;
+        } else if self.end_tag_undecided(at) {
+            self.pos = at;
+            return self.suspend();
         } else {
             self.text_less_than(at);
         }
@@ -590,6 +715,7 @@ impl<'a> Tokenizer<'a> {
         let found = find_any(&self.input[start..], [b'<', 0]);
         let Some(i) = found else {
             self.push_input(start, self.input.len());
+            self.pos = self.input.len();
             return self.eof();
         };
         let at = start + i;
@@ -598,6 +724,9 @@ impl<'a> Tokenizer<'a> {
             cold_path();
             self.push_bytes(REPLACEMENT);
             self.pos = at + 1;
+        } else if self.end_tag_undecided(at) {
+            self.pos = at;
+            return self.suspend();
         } else if self.input.get(at + 1) == Some(&b'!') {
             self.push_input(at, at + 2);
             self.pos = at + 2;
@@ -613,6 +742,7 @@ impl<'a> Tokenizer<'a> {
         match find_any(&self.input[start..], [0]) {
             None => {
                 self.push_input(start, self.input.len());
+                self.pos = self.input.len();
                 self.eof()
             }
             Some(i) => {
@@ -637,13 +767,20 @@ impl<'a> Tokenizer<'a> {
 
     fn script_escape(&mut self) -> Option<Kind> {
         let Some(c) = self.peek() else {
-            if self.state == State::ScriptEscapedLt {
+            if self.state == State::ScriptEscapedLt && !self.partial {
                 let at = self.pos;
                 self.push_input(at - 1, at);
             }
             return self.eof();
         };
         let at = self.pos;
+        let lookahead = matches!(
+            self.state,
+            State::ScriptEscapedLt | State::ScriptDoubleEscapedLt
+        );
+        if lookahead && self.lacks(at, self.last_start_tag.len().max(6) + 2) {
+            return self.suspend();
+        }
         match self.state {
             State::ScriptEscapeStart | State::ScriptEscapeStartDash => {
                 if c == b'-' {
@@ -764,7 +901,9 @@ impl<'a> Tokenizer<'a> {
                 self.state = State::PiOpen;
             }
             None => {
-                self.push_input(lt, lt + 1);
+                if !self.partial {
+                    self.push_input(lt, lt + 1);
+                }
                 return self.eof();
             }
             Some(_) => {
@@ -786,8 +925,10 @@ impl<'a> Tokenizer<'a> {
                 self.state = State::Data;
             }
             None => {
-                let at = self.pos;
-                self.push_input(at - 2, at);
+                if !self.partial {
+                    let at = self.pos;
+                    self.push_input(at - 2, at);
+                }
                 return self.eof();
             }
             Some(_) => {
@@ -799,26 +940,29 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn tag_name(&mut self) -> Option<Kind> {
-        while let Some(c) = self.peek() {
-            self.pos += 1;
-            match c {
-                b'\t' | b'\n' | b'\x0c' | b' ' => {
-                    self.state = State::BeforeAttrName;
-                    return None;
-                }
-                b'/' => {
-                    self.state = State::SelfClosing;
-                    return None;
-                }
-                b'>' => return self.emit_tag(),
-                0 => {
-                    cold_path();
-                    self.tag.name.extend_from_slice(REPLACEMENT);
-                }
-                _ => self.tag.name.push(c.to_ascii_lowercase()),
+        let rest = &self.input[self.pos..];
+        let run = rest
+            .iter()
+            .position(|&c| matches!(c, b'\t' | b'\n' | b'\x0c' | b' ' | b'/' | b'>' | 0))
+            .unwrap_or(rest.len());
+        let from = self.tag.name.len();
+        self.tag.name.extend_from_slice(&rest[..run]);
+        self.tag.name[from..].make_ascii_lowercase();
+        self.pos += run;
+        let Some(&c) = rest.get(run) else {
+            return self.eof();
+        };
+        self.pos += 1;
+        match c {
+            b'/' => self.state = State::SelfClosing,
+            b'>' => return self.emit_tag(),
+            0 => {
+                cold_path();
+                self.tag.name.extend_from_slice(REPLACEMENT);
             }
+            _ => self.state = State::BeforeAttrName,
         }
-        self.eof()
+        None
     }
 
     fn before_attr_name(&mut self) -> Option<Kind> {
@@ -843,37 +987,51 @@ impl<'a> Tokenizer<'a> {
                 }
             }
         }
+        if self.partial {
+            return self.suspend();
+        }
         self.state = State::AfterAttrName;
         None
     }
 
     fn attr_name(&mut self) -> Option<Kind> {
-        while let Some(c) = self.peek() {
-            match c {
-                b'\t' | b'\n' | b'\x0c' | b' ' | b'/' | b'>' => {
-                    self.check_duplicate_attr();
-                    self.state = State::AfterAttrName;
-                    return None;
+        let input = self.input;
+        let rest = &input[self.pos..];
+        let run = rest
+            .iter()
+            .position(|&c| matches!(c, b'\t' | b'\n' | b'\x0c' | b' ' | b'/' | b'>' | b'=' | 0))
+            .unwrap_or(rest.len());
+        let name = &mut self.current_attr().name;
+        let from = name.len();
+        name.extend_from_slice(&rest[..run]);
+        name[from..].make_ascii_lowercase();
+        self.pos += run;
+        match rest.get(run) {
+            None => {
+                if self.partial {
+                    return self.suspend();
                 }
-                b'=' => {
-                    self.check_duplicate_attr();
-                    self.pos += 1;
-                    self.state = State::BeforeAttrValue;
-                    return None;
-                }
-                0 => {
-                    cold_path();
-                    self.current_attr().name.extend_from_slice(REPLACEMENT);
-                    self.pos += 1;
-                }
-                _ => {
-                    self.current_attr().name.push(c.to_ascii_lowercase());
-                    self.pos += 1;
-                }
+                self.check_duplicate_attr();
+                self.eof()
+            }
+            Some(0) => {
+                cold_path();
+                self.current_attr().name.extend_from_slice(REPLACEMENT);
+                self.pos += 1;
+                None
+            }
+            Some(b'=') => {
+                self.check_duplicate_attr();
+                self.pos += 1;
+                self.state = State::BeforeAttrValue;
+                None
+            }
+            Some(_) => {
+                self.check_duplicate_attr();
+                self.state = State::AfterAttrName;
+                None
             }
         }
-        self.check_duplicate_attr();
-        self.eof()
     }
 
     fn after_attr_name(&mut self) -> Option<Kind> {
@@ -928,6 +1086,9 @@ impl<'a> Tokenizer<'a> {
                 }
             }
         }
+        if self.partial {
+            return self.suspend();
+        }
         self.state = State::AttrValueUnquoted;
         None
     }
@@ -936,15 +1097,23 @@ impl<'a> Tokenizer<'a> {
         loop {
             let start = self.pos;
             let found = find_any(&self.input[start..], [quote, b'&', 0]);
+            let input = self.input;
             let Some(i) = found else {
+                if self.partial {
+                    self.current_attr().value.extend_from_slice(&input[start..]);
+                    self.pos = input.len();
+                }
                 return self.eof();
             };
             let at = start + i;
-            let input = self.input;
             self.current_attr()
                 .value
                 .extend_from_slice(&input[start..at]);
             match input[at] {
+                b'&' if self.charref_incomplete(at) => {
+                    self.pos = at;
+                    return self.suspend();
+                }
                 b'&' => self.charref_into_attr(at),
                 0 => {
                     cold_path();
@@ -970,6 +1139,9 @@ impl<'a> Tokenizer<'a> {
                 }
                 b'&' => {
                     let at = self.pos;
+                    if self.charref_incomplete(at) {
+                        return self.suspend();
+                    }
                     self.charref_into_attr(at);
                 }
                 b'>' => {
@@ -1031,6 +1203,10 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn emit_comment_then_eof(&mut self) -> Option<Kind> {
+        if self.partial {
+            self.pos = self.input.len();
+            return self.suspend();
+        }
         self.done = true;
         self.pos = self.input.len();
         if self.text_is_empty() {
@@ -1061,6 +1237,12 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn markup_decl(&mut self) -> Option<Kind> {
+        if self.keyword_incomplete(b"--")
+            || self.keyword_incomplete(b"doctype")
+            || self.keyword_incomplete(b"[CDATA[")
+        {
+            return self.suspend();
+        }
         if self.input[self.pos..].starts_with(b"--") {
             self.pos += 2;
             self.comment.clear();
@@ -1106,6 +1288,9 @@ impl<'a> Tokenizer<'a> {
             return None;
         }
         let c = self.peek();
+        if c.is_none() && self.partial {
+            return self.suspend();
+        }
         match self.state {
             State::CommentStart => match c {
                 Some(b'-') => {
@@ -1225,6 +1410,10 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn emit_doctype_then_eof(&mut self, force_quirks: bool) -> Option<Kind> {
+        if self.partial {
+            self.pos = self.input.len();
+            return self.suspend();
+        }
         if force_quirks {
             self.doctype.force_quirks = true;
         }
@@ -1252,6 +1441,9 @@ impl<'a> Tokenizer<'a> {
     fn doctype_states(&mut self) -> Option<Kind> {
         let c = self.peek();
         let state = self.state;
+        if c.is_none() && self.partial {
+            return self.suspend();
+        }
         match state {
             State::Doctype => match c {
                 Some(b'\t' | b'\n' | b'\x0c' | b' ') => {
@@ -1316,6 +1508,11 @@ impl<'a> Tokenizer<'a> {
                     return self.emit_doctype();
                 }
                 None => return self.emit_doctype_then_eof(true),
+                Some(_) if self.keyword_incomplete(b"public")
+                    || self.keyword_incomplete(b"system") =>
+                {
+                    return self.suspend();
+                }
                 Some(_) => {
                     if self.starts_with_ci(b"public") {
                         self.pos += 6;
@@ -1465,7 +1662,10 @@ impl<'a> Tokenizer<'a> {
                 None
             }
             None => {
-                self.push_input(start, self.input.len());
+                let kept = if self.partial { 2 } else { 0 };
+                let end = self.input.len().saturating_sub(kept).max(start);
+                self.push_input(start, end);
+                self.pos = end;
                 self.eof()
             }
         }
@@ -1480,6 +1680,9 @@ impl<'a> Tokenizer<'a> {
 
     fn pi_states(&mut self) -> Option<Kind> {
         let c = self.peek();
+        if c.is_none() && self.partial {
+            return self.suspend();
+        }
         match self.state {
             State::PiOpen => match c {
                 Some(c) if c.is_ascii_alphabetic() || c == b'_' => {
@@ -1519,6 +1722,10 @@ impl<'a> Tokenizer<'a> {
                 let start = self.pos;
                 let found = find_any(&self.input[start..], *b"?>");
                 let Some(i) = found else {
+                    if self.partial {
+                        self.comment.extend_from_slice(&self.input[start..]);
+                        self.pos = self.input.len();
+                    }
                     return self.eof();
                 };
                 let at = start + i;

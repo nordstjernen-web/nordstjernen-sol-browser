@@ -83,8 +83,23 @@ fn longest_match(rest: &[u8]) -> Option<(usize, &'static str)> {
     best
 }
 
+const COMMON: [(&[u8], &[u8]); 6] = [
+    (b"amp;", b"&"),
+    (b"lt;", b"<"),
+    (b"gt;", b">"),
+    (b"quot;", b"\""),
+    (b"nbsp;", "\u{A0}".as_bytes()),
+    (b"apos;", b"'"),
+];
+
 fn named(input: &[u8], pos: usize, in_attr: bool, out: &mut Vec<u8>) -> usize {
     let rest = &input[pos..];
+    for (name, value) in COMMON {
+        if rest.starts_with(name) {
+            out.extend_from_slice(value);
+            return pos + name.len();
+        }
+    }
     let Some((len, value)) = longest_match(rest) else {
         out.push(b'&');
         return pos;
@@ -138,6 +153,28 @@ fn numeric(input: &[u8], pos: usize, out: &mut Vec<u8>) -> usize {
     };
     push_char(out, char::from_u32(code).unwrap_or('\u{FFFD}'));
     p
+}
+
+pub fn incomplete(input: &[u8], pos: usize) -> bool {
+    let rest = &input[pos.min(input.len())..];
+    match rest.first() {
+        None => true,
+        Some(b'#') => {
+            let hex = matches!(rest.get(1), Some(b'x' | b'X'));
+            let digits = &rest[if hex { 2 } else { 1 }..];
+            digits.iter().all(|&c| {
+                if hex {
+                    c.is_ascii_hexdigit()
+                } else {
+                    c.is_ascii_digit()
+                }
+            })
+        }
+        Some(c) if c.is_ascii_alphanumeric() => {
+            rest.len() <= LONGEST_NAME + 1 && rest.iter().all(u8::is_ascii_alphanumeric)
+        }
+        Some(_) => false,
+    }
 }
 
 pub fn consume(input: &[u8], pos: usize, in_attr: bool, out: &mut Vec<u8>) -> usize {

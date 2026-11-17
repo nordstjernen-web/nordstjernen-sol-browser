@@ -23,6 +23,8 @@ enum {
 };
 
 #define NS_H5_ARENA_CHUNK (64u * 1024u)
+#define NS_H5_TEXT_MAX    (G_MAXUINT32 - 1u)
+#define NS_SCHEMA_VIDEO_OBJECT "schema.org/VideoObject"
 
 struct ns_h5_sink {
     GPtrArray  *chunks;
@@ -34,6 +36,9 @@ struct ns_h5_sink {
     GHashTable *merge_names;
     GHashTable *template_hosts;
     ns_node    *fresh_selectedcontent;
+    ns_node    *fresh;
+    ns_node    *fresh_donor;
+    GPtrArray  *jsonld_scripts;
     GHashTable *selects;
     gboolean    declarative_shadow;
     gboolean    media_candidate;
@@ -59,6 +64,9 @@ ns_h5_sink_finish(ns_h5_sink *sink)
     sink->attr_tail = NULL;
     sink->merge_element = NULL;
     sink->fresh_selectedcontent = NULL;
+    sink->fresh = NULL;
+    sink->fresh_donor = NULL;
+    g_clear_pointer(&sink->jsonld_scripts, g_ptr_array_unref);
     g_clear_pointer(&sink->merge_names, g_hash_table_destroy);
     g_clear_pointer(&sink->template_hosts, g_hash_table_destroy);
     g_clear_pointer(&sink->selects, g_hash_table_destroy);
@@ -113,6 +121,8 @@ ns_h5_element(ns_h5_sink *sink, const char *name, size_t len, int borrowed,
         sink->media_candidate = TRUE;
     if (len == 15 && memcmp(name, "selectedcontent", 15) == 0)
         sink->fresh_selectedcontent = el;
+    sink->fresh = el;
+    sink->fresh_donor = NULL;
     return el;
 }
 
@@ -153,14 +163,57 @@ ns_h5_merge_attribute(ns_h5_sink *sink, ns_node *element,
         ns_h5_append_attribute(sink, element, name, value);
 }
 
-static void
-ns_h5_note_attribute(ns_h5_sink *sink, const char *name, const char *value)
+static gboolean
+ns_h5_names_video_metadata(const char *name, const char *value)
 {
-    if (strcmp(name, "shadowrootmode") == 0 || strcmp(name, "shadowroot") == 0)
+    switch (name[0]) {
+    case 'p':
+        if (strcmp(name, "property") != 0) return FALSE;
+        break;
+    case 'n':
+        if (strcmp(name, "name") != 0) return FALSE;
+        break;
+    case 'i':
+        return strcmp(name, "itemtype") == 0 &&
+               strstr(value, NS_SCHEMA_VIDEO_OBJECT) != NULL;
+    default:
+        return FALSE;
+    }
+    return g_ascii_strncasecmp(value, "og:video", 8) == 0 ||
+           g_ascii_strcasecmp(value, "twitter:player") == 0;
+}
+
+static void
+ns_h5_note_attribute(ns_h5_sink *sink, ns_node *element, const char *name,
+                     const char *value)
+{
+    if (name[0] == 's' &&
+        (strcmp(name, "shadowrootmode") == 0 || strcmp(name, "shadowroot") == 0)) {
         sink->declarative_shadow = TRUE;
-    else if ((strcmp(name, "id") == 0 && strcmp(value, "player") == 0) ||
-             (strcmp(name, "class") == 0 && strstr(value, "player")))
+    } else if (sink->media_candidate) {
+        return;
+    } else if (ns_h5_names_video_metadata(name, value)) {
         sink->media_candidate = TRUE;
+    } else if (name[0] == 't' && strcmp(name, "type") == 0 &&
+               g_ascii_strcasecmp(value, "application/ld+json") == 0) {
+        if (!sink->jsonld_scripts) sink->jsonld_scripts = g_ptr_array_new();
+        g_ptr_array_add(sink->jsonld_scripts, element);
+    }
+}
+
+static void
+ns_h5_note_video_jsonld(ns_h5_sink *sink)
+{
+    if (!sink->jsonld_scripts || sink->media_candidate) return;
+    for (guint i = 0; i < sink->jsonld_scripts->len; i++) {
+        const ns_node *script = g_ptr_array_index(sink->jsonld_scripts, i);
+        for (const ns_node *c = script->first_child; c; c = c->next_sibling)
+            if (c->kind == NS_NODE_TEXT && c->text &&
+                strstr(c->text, "VideoObject")) {
+                sink->media_candidate = TRUE;
+                return;
+            }
+    }
 }
 
 void
@@ -171,9 +224,9 @@ ns_h5_attribute(ns_h5_sink *sink, ns_node *element,
 {
     if (!element || element->kind != NS_NODE_ELEMENT || name_len == 0) return;
     const char *qname = ns_h5_arena_copy(sink, name, name_len);
-    if (ns_attr_name_is_internal(qname)) return;
+    if ((qname[0] | 0x20) == 'd' && ns_attr_name_is_internal(qname)) return;
     const char *val = ns_h5_arena_copy(sink, value, value_len);
-    ns_h5_note_attribute(sink, qname, val);
+    ns_h5_note_attribute(sink, element, qname, val);
     if (only_if_missing) {
         ns_h5_merge_attribute(sink, element, qname, val);
         return;
@@ -230,8 +283,7 @@ ns_h5_doctype(ns_h5_sink *sink, ns_node *document,
               const char *system_id, size_t system_len)
 {
     ns_node *out = ns_node_new_element(NULL);
-    ns_node_set_name_borrow(out, name_len ? ns_h5_arena_copy(sink, name, name_len)
-                                          : "html");
+    ns_node_set_name_borrow(out, ns_h5_arena_copy(sink, name, name_len));
     ns_element_set_attr(out, "publicId",
                         ns_h5_arena_copy(sink, public_id, public_len));
     ns_element_set_attr(out, "systemId",
@@ -387,7 +439,11 @@ ns_h5_first_child(ns_node *node)
 void
 ns_h5_append(ns_h5_sink *sink, ns_node *parent, ns_node *child)
 {
-    if (!ns_h5_can_adopt(sink, parent, child)) return;
+    gboolean took_all_of_parent = child == sink->fresh &&
+                                  parent == sink->fresh_donor && !child->parent;
+    sink->fresh = NULL;
+    sink->fresh_donor = NULL;
+    if (!took_all_of_parent && !ns_h5_can_adopt(sink, parent, child)) return;
     ns_node_append_child(parent, child);
     if (child == sink->fresh_selectedcontent)
         ns_h5_selectedcontent_inserted(sink, child);
@@ -397,6 +453,8 @@ void
 ns_h5_insert_before(ns_h5_sink *sink, ns_node *sibling, ns_node *child)
 {
     ns_node *parent = sibling->parent;
+    sink->fresh = NULL;
+    sink->fresh_donor = NULL;
     if (!parent || sibling == child || !ns_h5_can_adopt(sink, parent, child))
         return;
     ns_node_remove(child);
@@ -427,7 +485,7 @@ ns_h5_extend_text(ns_node *node, const char *text, size_t len)
     size_t add = strnlen(text, len);
     gsize old_len = node->text_len;
     gsize new_len = old_len + add;
-    if (add == 0 || new_len > G_MAXUINT32) return;
+    if (add == 0) return;
     if (!(node->flags & NS_NODE_OWN_TEXT)) {
         char *owned = g_malloc(ns_h5_text_capacity(new_len));
         if (old_len) memcpy(owned, node->text, old_len);
@@ -449,28 +507,46 @@ ns_h5_text_node(ns_h5_sink *sink, const char *text, size_t len)
     return out;
 }
 
+static size_t
+ns_h5_text_room(const ns_node *node)
+{
+    if (!node || node->kind != NS_NODE_TEXT) return 0;
+    return NS_H5_TEXT_MAX - MIN(node->text_len, NS_H5_TEXT_MAX);
+}
+
 void
 ns_h5_append_text(ns_h5_sink *sink, ns_node *parent,
                   const char *text, size_t len)
 {
-    if (!text || len == 0) return;
-    ns_node *last = parent->last_child;
-    if (last && last->kind == NS_NODE_TEXT)
-        ns_h5_extend_text(last, text, len);
-    else
-        ns_node_append_child(parent, ns_h5_text_node(sink, text, len));
+    if (!text) return;
+    while (len > 0) {
+        size_t room = ns_h5_text_room(parent->last_child);
+        size_t take = MIN(len, room ? room : NS_H5_TEXT_MAX);
+        if (room)
+            ns_h5_extend_text(parent->last_child, text, take);
+        else
+            ns_node_append_child(parent, ns_h5_text_node(sink, text, take));
+        text += take;
+        len -= take;
+    }
 }
 
 void
 ns_h5_insert_text_before(ns_h5_sink *sink, ns_node *sibling,
                          const char *text, size_t len)
 {
-    if (!text || len == 0) return;
-    ns_node *prev = sibling->prev_sibling;
-    if (prev && prev->kind == NS_NODE_TEXT)
-        ns_h5_extend_text(prev, text, len);
-    else
-        ns_h5_insert_before(sink, sibling, ns_h5_text_node(sink, text, len));
+    if (!text) return;
+    while (len > 0) {
+        size_t room = ns_h5_text_room(sibling->prev_sibling);
+        size_t take = MIN(len, room ? room : NS_H5_TEXT_MAX);
+        if (room)
+            ns_h5_extend_text(sibling->prev_sibling, text, take);
+        else
+            ns_h5_insert_before(sink, sibling,
+                                ns_h5_text_node(sink, text, take));
+        text += take;
+        len -= take;
+    }
 }
 
 ns_node *
@@ -488,9 +564,13 @@ ns_h5_remove(ns_node *node)
 void
 ns_h5_reparent_children(ns_h5_sink *sink, ns_node *from, ns_node *to)
 {
+    gboolean into_empty_fresh = to == sink->fresh && !to->parent &&
+                                !to->first_child && !to->tpl_content;
+    sink->fresh_donor = NULL;
     if (ns_h5_is_inclusive_ancestor(sink, from, to)) return;
     while (from->first_child)
         ns_node_append_child(to, from->first_child);
+    if (into_empty_fresh) sink->fresh_donor = from;
 }
 
 ns_node *
@@ -509,6 +589,7 @@ ns_h5_template_contents(ns_h5_sink *sink, ns_node *template_element)
 void
 ns_h5_discard(ns_h5_sink *sink, ns_node *node)
 {
+    if (sink->jsonld_scripts) sink->media_candidate = TRUE;
     ns_h5_sink_finish(sink);
     ns_node_free(node);
 }
@@ -667,6 +748,9 @@ document_media_target(const ns_node *root)
 {
     ns_node *video = ns_node_find_first_element(root, "video");
     if (video) return video;
+    ns_node *described = find_element_with_attr_contains(
+        (ns_node *)root, "itemtype", NS_SCHEMA_VIDEO_OBJECT, 0);
+    if (described) return described;
     ns_node *target = ns_node_find_by_id(root, "player");
     if (target) return target;
     return find_element_with_attr_contains((ns_node *)root, "class", "player",
@@ -752,11 +836,6 @@ first_nonempty(char *a, char *b)
 static void
 ns_media_extract_standard(const ns_node *root)
 {
-    ns_node *target = document_media_target(root);
-    if (!target || ns_element_get_attr(target, NS_MEDIA_SRC_ATTR) ||
-        ns_element_get_attr(target, NS_MEDIA_STREAM_ATTR))
-        return;
-
     ns_media_sources sources = {
         .metas = g_ptr_array_new(),
         .video_jsonld = g_ptr_array_new_with_free_func(g_free),
@@ -786,7 +865,9 @@ ns_media_extract_standard(const ns_node *root)
     g_ptr_array_free(sources.metas, TRUE);
     g_ptr_array_free(sources.video_jsonld, TRUE);
     gboolean has_video = direct || og_video || tw_player || embed;
-    if (has_video) {
+    ns_node *target = has_video ? document_media_target(root) : NULL;
+    if (target && !ns_element_get_attr(target, NS_MEDIA_SRC_ATTR) &&
+        !ns_element_get_attr(target, NS_MEDIA_STREAM_ATTR)) {
         if (direct)
             ns_element_set_attr(target, NS_MEDIA_SRC_ATTR, direct);
         else if (og_video && media_url_is_direct_playable(og_video))
@@ -801,43 +882,6 @@ ns_media_extract_standard(const ns_node *root)
     g_free(tw_player);
     g_free(poster);
     g_free(embed);
-}
-
-static gboolean
-ns_text_all_whitespace(const char *s)
-{
-    if (!s) return TRUE;
-    for (; *s; s++)
-        if (*s != ' ' && *s != '\t' && *s != '\n' && *s != '\r' && *s != '\f')
-            return FALSE;
-    return TRUE;
-}
-
-static void
-ns_prune_html_interelement_whitespace(ns_node *root)
-{
-    if (!root) return;
-    ns_node *html = NULL;
-    for (ns_node *c = root->first_child; c; c = c->next_sibling)
-        if (c->kind == NS_NODE_ELEMENT && c->name &&
-            g_ascii_strcasecmp(c->name, "html") == 0) { html = c; break; }
-    if (!html) return;
-    gboolean has_head = FALSE, has_body = FALSE;
-    for (ns_node *c = html->first_child; c; c = c->next_sibling)
-        if (c->kind == NS_NODE_ELEMENT && c->name) {
-            if (g_ascii_strcasecmp(c->name, "head") == 0) has_head = TRUE;
-            else if (g_ascii_strcasecmp(c->name, "body") == 0) has_body = TRUE;
-        }
-    if (!has_head || !has_body) return;
-    ns_node *c = html->first_child;
-    while (c) {
-        ns_node *next = c->next_sibling;
-        if (c->kind == NS_NODE_TEXT && ns_text_all_whitespace(c->text)) {
-            ns_node_remove(c);
-            ns_node_free(c);
-        }
-        c = next;
-    }
 }
 
 static void
@@ -894,26 +938,115 @@ ns_html_assign_script_positions(ns_node *root, const char *input, size_t len)
     g_array_free(cols, TRUE);
 }
 
-ns_node *
-ns_html_parse_with_scripting(const char *input, gssize len,
-                             gboolean scripting)
+static ns_node *
+ns_h5_document_new(ns_h5_sink **sink)
 {
-    if (!input) return NULL;
-    size_t n = (len < 0) ? strlen(input) : (size_t)len;
     ns_node *root = ns_node_new_document();
-    ns_h5_sink *sink = ns_h5_sink_new();
-    ns_node_attach_backing(root, sink, ns_h5_sink_free);
-    int quirks = ns_rs_html_parse_document(input, n, scripting, root, sink);
+    *sink = ns_h5_sink_new();
+    ns_node_attach_backing(root, *sink, ns_h5_sink_free);
+    return root;
+}
+
+static ns_node *
+ns_h5_document_finish(ns_node *root, ns_h5_sink *sink, int quirks,
+                      gboolean scripting)
+{
+    ns_h5_note_video_jsonld(sink);
     ns_h5_sink_finish(sink);
     if (quirks == 2)
         root->flags |= NS_NODE_QUIRKS;
     else if (quirks == 1)
         root->flags |= NS_NODE_LIMITED_QUIRKS;
     if (!scripting) root->flags |= NS_NODE_SCRIPTING_DISABLED;
-    ns_prune_html_interelement_whitespace(root);
     if (sink->declarative_shadow) ns_dsd_convert(root, 0);
     if (sink->media_candidate) ns_media_extract_standard(root);
     return root;
+}
+
+struct ns_html_stream {
+    ns_rs_html_stream *parser;
+    ns_node           *root;
+    ns_h5_sink        *sink;
+    gboolean           scripting;
+};
+
+ns_html_stream *
+ns_html_stream_new(gboolean scripting)
+{
+    ns_html_stream *stream = g_new0(ns_html_stream, 1);
+    stream->root = ns_h5_document_new(&stream->sink);
+    stream->scripting = scripting;
+    stream->parser = ns_rs_html_stream_new(scripting, stream->root,
+                                           stream->sink);
+    return stream;
+}
+
+void
+ns_html_stream_feed(ns_html_stream *stream, const char *data, gsize len)
+{
+    if (!stream || !data || len == 0) return;
+    ns_rs_html_stream_feed(stream->parser, data, len);
+}
+
+ns_node *
+ns_html_stream_document(const ns_html_stream *stream)
+{
+    return stream ? stream->root : NULL;
+}
+
+ns_node *
+ns_html_stream_finish(ns_html_stream *stream)
+{
+    if (!stream) return NULL;
+    int quirks = ns_rs_html_stream_finish(stream->parser);
+    ns_node *root = ns_h5_document_finish(stream->root, stream->sink, quirks,
+                                          stream->scripting);
+    g_free(stream);
+    return root;
+}
+
+void
+ns_html_stream_cancel(ns_html_stream *stream)
+{
+    if (!stream) return;
+    ns_rs_html_stream_free(stream->parser);
+    ns_node_free(stream->root);
+    g_free(stream);
+}
+
+static gsize
+ns_html_parse_chunk_size(void)
+{
+    static gsize chunk = G_MAXSIZE;
+    if (chunk == G_MAXSIZE) {
+        const char *env = g_getenv("NS_HTML_PARSE_CHUNK");
+        chunk = env ? (gsize)g_ascii_strtoull(env, NULL, 10) : 0;
+    }
+    return chunk;
+}
+
+static ns_node *
+ns_html_parse_in_chunks(const char *input, size_t n, gsize chunk,
+                        gboolean scripting)
+{
+    ns_html_stream *stream = ns_html_stream_new(scripting);
+    for (size_t at = 0; at < n; at += chunk)
+        ns_html_stream_feed(stream, input + at, MIN(chunk, n - at));
+    return ns_html_stream_finish(stream);
+}
+
+ns_node *
+ns_html_parse_with_scripting(const char *input, gssize len,
+                             gboolean scripting)
+{
+    if (!input) return NULL;
+    size_t n = (len < 0) ? strlen(input) : (size_t)len;
+    gsize chunk = ns_html_parse_chunk_size();
+    if (chunk > 0) return ns_html_parse_in_chunks(input, n, chunk, scripting);
+    ns_h5_sink *sink;
+    ns_node *root = ns_h5_document_new(&sink);
+    int quirks = ns_rs_html_parse_document(input, n, scripting, root, sink);
+    return ns_h5_document_finish(root, sink, quirks, scripting);
 }
 
 ns_node *

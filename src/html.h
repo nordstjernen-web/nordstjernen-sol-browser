@@ -19,6 +19,15 @@ ns_node *ns_parse_document_for_type(const char *input, gssize len,
                                     const char *content_type,
                                     gboolean scripting);
 
+typedef struct ns_html_stream ns_html_stream;
+
+ns_html_stream *ns_html_stream_new(gboolean scripting);
+void     ns_html_stream_feed(ns_html_stream *stream, const char *data,
+                             gsize len);
+ns_node *ns_html_stream_document(const ns_html_stream *stream);
+ns_node *ns_html_stream_finish(ns_html_stream *stream);
+void     ns_html_stream_cancel(ns_html_stream *stream);
+
 ns_node *ns_xml_parse(const char *input, gssize len);
 ns_node *ns_xml_parse_html_entities(const char *input, gssize len);
 char *ns_html_named_char_ref(const char *name, gsize len);
@@ -51,6 +60,9 @@ char *ns_html_declared_charset(const char *body, gsize len,
 
 char *ns_html_decode_body_full(const char *body, gsize len,
                                const char *content_type, char **charset_out);
+char *ns_html_decode_body_len(const char *body, gsize len,
+                              const char *content_type, char **charset_out,
+                              gsize *len_out);
 
 char *ns_html_image_document(const char *url);
 
