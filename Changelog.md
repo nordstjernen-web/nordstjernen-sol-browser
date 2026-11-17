@@ -3,6 +3,15 @@ Changelog:
 
 1.0.50-dev:
 ======
+* `@supports font-tech(...)` and `@supports font-format(...)` are
+  evaluated: `font-format()` is true for `woff2`, `woff`, `opentype`,
+  `truetype` and `collection`, `font-tech()` for `variations`,
+  `features-opentype`, `color-colrv0`, `color-cbdt` and `color-sbix`.
+  Every function in a supports condition used to be false, so a
+  stylesheet that offered a variable font behind
+  `@supports font-tech(variations)` fell back to the static one.
+  `CSS.supports('selector(:host(...))')` and `:host-context()` are true,
+  matching what shadow-tree stylesheets already do.
 * `CSSKeyframesRule` and `CSSKeyframeRule` are real objects. A
   `@keyframes` rule has `name`, `cssRules`, `length`, `appendRule()`,
   `deleteRule()` and `findRule()`, and each keyframe has `keyText` and a
