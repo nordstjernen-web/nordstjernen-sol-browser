@@ -3,6 +3,12 @@ Changelog:
 
 1.0.50-dev:
 ======
+* A document whose doctype names HTML 4.01 Frameset or Transitional with
+  an empty system identifier, as in `<!DOCTYPE HTML PUBLIC "-//W3C//DTD
+  HTML 4.01 Transitional//EN" "">`, renders in quirks mode, the same as
+  one with no system identifier, as the HTML Standard now asks (it used
+  to get limited-quirks mode). A non-empty system identifier still gives
+  limited-quirks mode.
 * A `<frameset>` after a `<template>` in the head replaces the body again,
   as the HTML Standard now asks: inserting the body that the "after head"
   insertion mode implies resets the frameset-ok flag to "ok", so the
