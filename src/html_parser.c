@@ -630,8 +630,8 @@ ns_dsd_attach(const ns_node *host, ns_node *c)
     ns_element_remove_attr(c, "shadowrootserializable");
     ns_element_remove_attr(c, "shadowrootclonable");
     if (ns_node_tpl_content(c)) {
-        ns_node *frag = c->rare->tpl_content;
-        c->rare->tpl_content = NULL;
+        ns_node *frag = c->extra->tpl_content;
+        c->extra->tpl_content = NULL;
         while (frag->first_child)
             ns_node_append_child(c, frag->first_child);
         ns_node_free(frag);

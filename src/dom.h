@@ -82,7 +82,7 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_SVG_NAMESPACE    "http://www.w3.org/2000/svg"
 #define NS_MATHML_NAMESPACE "http://www.w3.org/1998/Math/MathML"
 
-typedef struct ns_node_rare {
+typedef struct ns_node_extra {
     void  *backing;
     void (*backing_free)(void *);
     GHashTable *id_index;
@@ -91,7 +91,7 @@ typedef struct ns_node_rare {
     struct ns_node *tpl_content;
     int src_line;
     int src_col;
-} ns_node_rare;
+} ns_node_extra;
 
 struct ns_node {
     struct ns_node *parent;
@@ -105,7 +105,7 @@ struct ns_node {
     ns_attr *attrs;
     void *class_set;
     void *js_wrapper;
-    ns_node_rare *rare;
+    ns_node_extra *extra;
 
     union {
         guint64 attr_bloom;
@@ -135,40 +135,40 @@ ns_node_is_html_tag(const ns_node *n, ns_tag tag)
 static inline ns_node *
 ns_node_tpl_content(const ns_node *n)
 {
-    return n->rare ? n->rare->tpl_content : NULL;
+    return n->extra ? n->extra->tpl_content : NULL;
 }
 
 static inline GHashTable *
 ns_node_id_index(const ns_node *n)
 {
-    return n->rare ? n->rare->id_index : NULL;
+    return n->extra ? n->extra->id_index : NULL;
 }
 
 static inline GHashTable *
 ns_node_class_index(const ns_node *n)
 {
-    return n->rare ? n->rare->class_index : NULL;
+    return n->extra ? n->extra->class_index : NULL;
 }
 
 static inline GHashTable *
 ns_node_tag_index(const ns_node *n)
 {
-    return n->rare ? n->rare->tag_index : NULL;
+    return n->extra ? n->extra->tag_index : NULL;
 }
 
 static inline int
 ns_node_src_line(const ns_node *n)
 {
-    return n->rare ? n->rare->src_line : 0;
+    return n->extra ? n->extra->src_line : 0;
 }
 
 static inline int
 ns_node_src_col(const ns_node *n)
 {
-    return n->rare ? n->rare->src_col : 0;
+    return n->extra ? n->extra->src_col : 0;
 }
 
-ns_node_rare *ns_node_rare_get(ns_node *n);
+ns_node_extra *ns_node_extra_get(ns_node *n);
 void ns_node_set_tpl_content(ns_node *n, ns_node *content);
 void ns_node_set_source_position(ns_node *n, int line, int col);
 void ns_node_arm_invalidator(ns_node *n, ns_node_invalidator invalidate);
