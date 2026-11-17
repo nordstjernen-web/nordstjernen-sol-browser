@@ -3,6 +3,15 @@ Changelog:
 
 1.0.50-dev:
 ======
+* The HTML parser has no quadratic paths left on deeply nested or
+  misnested markup. The fix above covered the ones the switch from lexbor
+  had brought in; a sweep of every tag against 24 kinds of deep stack
+  found more that were just as slow with lexbor: `<rt>` or `<option>` under a
+  deeply buried `<ruby>` or `<select>`, repeated `</body>`, end tags for
+  custom elements or inside deep SVG and MathML, thousands of distinct
+  open formatting elements, `<a>` after them and an adoption agency run
+  across them. Half a megabyte of such markup took 3 to 22 seconds and
+  now takes 10 to 50 ms. Parsed trees are unchanged.
 * Named character references are found with one lookup among the names
   that share their first letter, instead of a search of the whole table
   for every prefix of the name: text full of entities parses 1.7 times
