@@ -36369,7 +36369,7 @@ incr_mark_loose_has_subjects(ns_node *doc)
         if (!a->pending) continue;
         a->pending = FALSE;
         if (a->classes->len > 0) {
-            if (!doc->class_index) ns_doc_class_index_build(doc);
+            if (!ns_node_class_index(doc)) ns_doc_class_index_build(doc);
             incr_mark_subject_candidates(
                 ns_doc_class_index_lookup(doc,
                                           g_ptr_array_index(a->classes, 0)),
@@ -36379,7 +36379,7 @@ incr_mark_loose_has_subjects(ns_node *doc)
             if (n && incr_has_anchor_matches(n, a))
                 g_hash_table_add(g_incr_dirty, n);
         } else if (a->type) {
-            if (!doc->tag_index) ns_doc_tag_index_build(doc);
+            if (!ns_node_tag_index(doc)) ns_doc_tag_index_build(doc);
             incr_mark_subject_candidates(ns_doc_tag_index_lookup(doc, a->type),
                                          a);
         }

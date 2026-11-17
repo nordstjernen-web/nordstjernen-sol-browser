@@ -1065,8 +1065,8 @@ ns_node_own_strings_deep(ns_node *n)
         ns_node *cur = g_ptr_array_index(stack, stack->len - 1);
         g_ptr_array_set_size(stack, stack->len - 1);
         ns_node_own_strings_one(cur);
-        if (cur->tpl_content)
-            g_ptr_array_add(stack, cur->tpl_content);
+        if (ns_node_tpl_content(cur))
+            g_ptr_array_add(stack, ns_node_tpl_content(cur));
         for (ns_node *c = cur->first_child; c; c = c->next_sibling)
             g_ptr_array_add(stack, c);
     }
@@ -1078,10 +1078,11 @@ ns_node_take_strings(ns_node *root)
 {
     if (!root) return;
     ns_node_own_strings_deep(root);
-    if (root->backing && root->backing_free)
-        root->backing_free(root->backing);
-    root->backing = NULL;
-    root->backing_free = NULL;
+    if (!root->rare) return;
+    if (root->rare->backing && root->rare->backing_free)
+        root->rare->backing_free(root->rare->backing);
+    root->rare->backing = NULL;
+    root->rare->backing_free = NULL;
 }
 
 static guint32
@@ -1134,10 +1135,11 @@ ns_node_attach_backing(ns_node *root, void *backing, void (*destroy)(void *))
         if (backing && destroy) destroy(backing);
         return;
     }
-    if (root->backing && root->backing_free)
-        root->backing_free(root->backing);
-    root->backing = backing;
-    root->backing_free = destroy;
+    ns_node_rare *rare = ns_node_rare_get(root);
+    if (rare->backing && rare->backing_free)
+        rare->backing_free(rare->backing);
+    rare->backing = backing;
+    rare->backing_free = destroy;
 }
 
 static void
@@ -1224,6 +1226,8 @@ ns_node_has_class(const ns_node *el, const char *name, gsize len)
     return FALSE;
 }
 
+static ns_node_invalidator g_js_invalidator;
+
 void
 ns_node_free(ns_node *node)
 {
@@ -1235,9 +1239,9 @@ ns_node_free(ns_node *node)
 
     while (stack->len > 0) {
         ns_node *cur = g_ptr_array_index(stack, stack->len - 1);
-        if (cur->tpl_content) {
-            ns_node *tc = cur->tpl_content;
-            cur->tpl_content = NULL;
+        if (ns_node_tpl_content(cur)) {
+            ns_node *tc = cur->rare->tpl_content;
+            cur->rare->tpl_content = NULL;
             g_ptr_array_add(stack, tc);
             continue;
         }
@@ -1254,32 +1258,63 @@ ns_node_free(ns_node *node)
             continue;
         }
         g_ptr_array_set_size(stack, stack->len - 1);
-        if (cur->js_invalidate)
-            cur->js_invalidate(cur);
+        if ((cur->flags & NS_NODE_JS_ARMED) && g_js_invalidator)
+            g_js_invalidator(cur);
         ns_css_forget_node(cur);
         node_text_hash_forget(cur);
         if (cur->flags & NS_NODE_OWN_NAME) g_free(cur->name);
         if (cur->flags & NS_NODE_OWN_TEXT) g_free(cur->text);
         ns_class_set_clear(cur);
         ns_attr_free(cur->attrs);
-        if (cur->backing && cur->backing_free)
-            cur->backing_free(cur->backing);
-        if (cur->id_index) {
-            g_hash_table_destroy(cur->id_index);
-            cur->id_index = NULL;
-            ns_id_index_state_forget(cur);
-        }
-        if (cur->class_index) {
-            g_hash_table_destroy(cur->class_index);
-            cur->class_index = NULL;
-        }
-        if (cur->tag_index) {
-            g_hash_table_destroy(cur->tag_index);
-            cur->tag_index = NULL;
+        ns_node_rare *rare = g_steal_pointer(&cur->rare);
+        if (rare) {
+            if (rare->backing && rare->backing_free)
+                rare->backing_free(rare->backing);
+            if (rare->id_index) {
+                g_hash_table_destroy(rare->id_index);
+                ns_id_index_state_forget(cur);
+            }
+            if (rare->class_index) g_hash_table_destroy(rare->class_index);
+            if (rare->tag_index) g_hash_table_destroy(rare->tag_index);
+            g_free(rare);
         }
         g_free(cur);
     }
     g_ptr_array_free(stack, TRUE);
+}
+
+ns_node_rare *
+ns_node_rare_get(ns_node *n)
+{
+    if (!n->rare) n->rare = g_new0(ns_node_rare, 1);
+    return n->rare;
+}
+
+void
+ns_node_set_tpl_content(ns_node *n, ns_node *content)
+{
+    if (content || n->rare) ns_node_rare_get(n)->tpl_content = content;
+}
+
+void
+ns_node_set_source_position(ns_node *n, int line, int col)
+{
+    ns_node_rare *rare = ns_node_rare_get(n);
+    rare->src_line = line;
+    rare->src_col = col;
+}
+
+void
+ns_node_arm_invalidator(ns_node *n, ns_node_invalidator invalidate)
+{
+    g_js_invalidator = invalidate;
+    n->flags |= NS_NODE_JS_ARMED;
+}
+
+void
+ns_node_disarm_invalidator(ns_node *n)
+{
+    n->flags &= ~NS_NODE_JS_ARMED;
 }
 
 static void
@@ -1623,8 +1658,8 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
             ns_node *cc = ns_node_clone_depth(c, TRUE, depth + 1);
             if (cc) ns_node_append_child(out, cc);
         }
-        if (src->tpl_content)
-            out->tpl_content = ns_node_clone_depth(src->tpl_content, TRUE,
+        if (ns_node_tpl_content(src))
+            ns_node_rare_get(out)->tpl_content = ns_node_clone_depth(src->rare->tpl_content, TRUE,
                                                    depth + 1);
     }
     return out;
@@ -1640,13 +1675,13 @@ ns_node *
 ns_template_content_get(ns_node *tpl)
 {
     if (!tpl) return NULL;
-    if (!tpl->tpl_content) {
+    if (!ns_node_tpl_content(tpl)) {
         ns_node *frag = ns_node_new_document();
         if (!frag) return NULL;
         frag->flags |= NS_NODE_FRAGMENT | NS_NODE_TEMPLATE_CONTENT;
-        tpl->tpl_content = frag;
+        ns_node_rare_get(tpl)->tpl_content = frag;
     }
-    return tpl->tpl_content;
+    return tpl->rare->tpl_content;
 }
 
 guint64
@@ -1806,7 +1841,7 @@ ns_node_find_first_element_depth(const ns_node *root, const char *tag, int depth
 ns_node *
 ns_node_find_first_element(const ns_node *root, const char *tag)
 {
-    if (root && tag && *tag && root->tag_index) {
+    if (root && tag && *tag && ns_node_tag_index(root)) {
         GPtrArray *list = ns_doc_tag_index_lookup(root, tag);
         if (list && list->len > 0) return g_ptr_array_index(list, 0);
         return NULL;
@@ -1858,8 +1893,8 @@ ns_doc_id_index_add_node(ns_node *doc, ns_node *n)
 {
     if (n->kind != NS_NODE_ELEMENT) return;
     const char *eid = ns_element_id_attr(n);
-    if (eid && *eid && !g_hash_table_contains(doc->id_index, eid))
-        g_hash_table_insert(doc->id_index, g_strdup(eid), n);
+    if (eid && *eid && !g_hash_table_contains(ns_node_id_index(doc), eid))
+        g_hash_table_insert(ns_node_id_index(doc), g_strdup(eid), n);
 }
 
 static void
@@ -1867,18 +1902,18 @@ ns_doc_id_index_remove_node(ns_node *doc, ns_node *n)
 {
     if (n->kind != NS_NODE_ELEMENT) return;
     const char *eid = ns_element_id_attr(n);
-    if (eid && *eid && g_hash_table_lookup(doc->id_index, eid) == n)
-        g_hash_table_remove(doc->id_index, eid);
+    if (eid && *eid && g_hash_table_lookup(ns_node_id_index(doc), eid) == n)
+        g_hash_table_remove(ns_node_id_index(doc), eid);
 }
 
 void
 ns_doc_id_index_build(ns_node *doc)
 {
     if (!doc) return;
-    if (doc->id_index) {
-        g_hash_table_remove_all(doc->id_index);
+    if (ns_node_id_index(doc)) {
+        g_hash_table_remove_all(ns_node_id_index(doc));
     } else {
-        doc->id_index = g_hash_table_new_full(g_str_hash, g_str_equal,
+        ns_node_rare_get(doc)->id_index = g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
     }
     ns_doc_index_walk(doc, doc, TRUE, ns_doc_id_index_add_node);
@@ -1888,30 +1923,30 @@ ns_doc_id_index_build(ns_node *doc)
 void
 ns_doc_id_index_register(ns_node *doc, const char *id, ns_node *node)
 {
-    if (!doc || !doc->id_index || !id || !*id || !node) return;
-    if (g_hash_table_contains(doc->id_index, id)) return;
-    g_hash_table_insert(doc->id_index, g_strdup(id), node);
+    if (!doc || !ns_node_id_index(doc) || !id || !*id || !node) return;
+    if (g_hash_table_contains(ns_node_id_index(doc), id)) return;
+    g_hash_table_insert(ns_node_id_index(doc), g_strdup(id), node);
 }
 
 void
 ns_doc_id_index_unregister(ns_node *doc, const char *id, const ns_node *node)
 {
-    if (!doc || !doc->id_index || !id || !*id) return;
-    gpointer cur = g_hash_table_lookup(doc->id_index, id);
-    if (cur == node) g_hash_table_remove(doc->id_index, id);
+    if (!doc || !ns_node_id_index(doc) || !id || !*id) return;
+    gpointer cur = g_hash_table_lookup(ns_node_id_index(doc), id);
+    if (cur == node) g_hash_table_remove(ns_node_id_index(doc), id);
 }
 
 void
 ns_doc_id_index_subtree_added(ns_node *doc, ns_node *root)
 {
-    if (!doc || !doc->id_index || !root) return;
+    if (!doc || !ns_node_id_index(doc) || !root) return;
     ns_doc_index_walk(doc, root, TRUE, ns_doc_id_index_add_node);
 }
 
 void
 ns_doc_id_index_subtree_removed(ns_node *doc, ns_node *root)
 {
-    if (!doc || !doc->id_index || !root) return;
+    if (!doc || !ns_node_id_index(doc) || !root) return;
     ns_doc_index_walk(doc, root, FALSE, ns_doc_id_index_remove_node);
 }
 
@@ -2172,28 +2207,28 @@ ns_class_is_ws(char c)
 void
 ns_doc_class_index_register(ns_node *doc, const char *class_attr, ns_node *node)
 {
-    if (!doc || !doc->class_index || !class_attr || !node) return;
+    if (!doc || !ns_node_class_index(doc) || !class_attr || !node) return;
     const char *p = class_attr;
     while (*p) {
         while (*p && ns_class_is_ws(*p)) p++;
         if (!*p) break;
         const char *tok = p;
         while (*p && !ns_class_is_ws(*p)) p++;
-        ns_doc_class_index_add_token(doc->class_index, tok, (gsize)(p - tok), node);
+        ns_doc_class_index_add_token(ns_node_class_index(doc), tok, (gsize)(p - tok), node);
     }
 }
 
 void
 ns_doc_class_index_unregister(ns_node *doc, const char *class_attr, ns_node *node)
 {
-    if (!doc || !doc->class_index || !class_attr || !node) return;
+    if (!doc || !ns_node_class_index(doc) || !class_attr || !node) return;
     const char *p = class_attr;
     while (*p) {
         while (*p && ns_class_is_ws(*p)) p++;
         if (!*p) break;
         const char *tok = p;
         while (*p && !ns_class_is_ws(*p)) p++;
-        ns_doc_class_index_remove_token(doc->class_index, tok, (gsize)(p - tok), node);
+        ns_doc_class_index_remove_token(ns_node_class_index(doc), tok, (gsize)(p - tok), node);
     }
 }
 
@@ -2217,10 +2252,10 @@ void
 ns_doc_class_index_build(ns_node *doc)
 {
     if (!doc) return;
-    if (doc->class_index) {
-        g_hash_table_remove_all(doc->class_index);
+    if (ns_node_class_index(doc)) {
+        g_hash_table_remove_all(ns_node_class_index(doc));
     } else {
-        doc->class_index = g_hash_table_new_full(g_str_hash, g_str_equal,
+        ns_node_rare_get(doc)->class_index = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                  g_free, ns_doc_index_bucket_free);
     }
     g_doc_index_building = TRUE;
@@ -2231,23 +2266,23 @@ ns_doc_class_index_build(ns_node *doc)
 void
 ns_doc_class_index_subtree_added(ns_node *doc, ns_node *root)
 {
-    if (!doc || !doc->class_index || !root) return;
+    if (!doc || !ns_node_class_index(doc) || !root) return;
     ns_doc_index_walk(doc, root, TRUE, ns_doc_class_index_add_node);
 }
 
 void
 ns_doc_class_index_subtree_removed(ns_node *doc, ns_node *root)
 {
-    if (!doc || !doc->class_index || !root) return;
+    if (!doc || !ns_node_class_index(doc) || !root) return;
     ns_doc_index_walk(doc, root, FALSE, ns_doc_class_index_remove_node);
 }
 
 GPtrArray *
 ns_doc_class_index_lookup(const ns_node *doc, const char *cls)
 {
-    if (!doc || !doc->class_index || !cls || !*cls) return NULL;
+    if (!doc || !ns_node_class_index(doc) || !cls || !*cls) return NULL;
     return ns_doc_index_bucket_nodes(doc,
-                                     g_hash_table_lookup(doc->class_index, cls));
+                                     g_hash_table_lookup(ns_node_class_index(doc), cls));
 }
 
 static void
@@ -2292,24 +2327,24 @@ static void
 ns_doc_tag_index_add_node(ns_node *doc, ns_node *n)
 {
     if (n->kind == NS_NODE_ELEMENT && n->name)
-        ns_doc_tag_index_add_single(doc->tag_index, n->name, n);
+        ns_doc_tag_index_add_single(ns_node_tag_index(doc), n->name, n);
 }
 
 static void
 ns_doc_tag_index_remove_node(ns_node *doc, ns_node *n)
 {
     if (n->kind == NS_NODE_ELEMENT && n->name)
-        ns_doc_tag_index_remove_single(doc->tag_index, n->name, n);
+        ns_doc_tag_index_remove_single(ns_node_tag_index(doc), n->name, n);
 }
 
 void
 ns_doc_tag_index_build(ns_node *doc)
 {
     if (!doc) return;
-    if (doc->tag_index) {
-        g_hash_table_remove_all(doc->tag_index);
+    if (ns_node_tag_index(doc)) {
+        g_hash_table_remove_all(ns_node_tag_index(doc));
     } else {
-        doc->tag_index = g_hash_table_new_full(g_str_hash, g_str_equal,
+        ns_node_rare_get(doc)->tag_index = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                g_free, ns_doc_index_bucket_free);
     }
     g_doc_index_building = TRUE;
@@ -2320,26 +2355,26 @@ ns_doc_tag_index_build(ns_node *doc)
 void
 ns_doc_tag_index_subtree_added(ns_node *doc, ns_node *root)
 {
-    if (!doc || !doc->tag_index || !root) return;
+    if (!doc || !ns_node_tag_index(doc) || !root) return;
     ns_doc_index_walk(doc, root, TRUE, ns_doc_tag_index_add_node);
 }
 
 void
 ns_doc_tag_index_subtree_removed(ns_node *doc, ns_node *root)
 {
-    if (!doc || !doc->tag_index || !root) return;
+    if (!doc || !ns_node_tag_index(doc) || !root) return;
     ns_doc_index_walk(doc, root, FALSE, ns_doc_tag_index_remove_node);
 }
 
 GPtrArray *
 ns_doc_tag_index_lookup(const ns_node *doc, const char *tag)
 {
-    if (!doc || !doc->tag_index || !tag || !*tag) return NULL;
+    if (!doc || !ns_node_tag_index(doc) || !tag || !*tag) return NULL;
     if (ns_str_is_ascii_lower(tag))
         return ns_doc_index_bucket_nodes(doc,
-                                         g_hash_table_lookup(doc->tag_index, tag));
+                                         g_hash_table_lookup(ns_node_tag_index(doc), tag));
     gchar *key = g_ascii_strdown(tag, -1);
-    ns_doc_index_bucket *bucket = g_hash_table_lookup(doc->tag_index, key);
+    ns_doc_index_bucket *bucket = g_hash_table_lookup(ns_node_tag_index(doc), key);
     g_free(key);
     return ns_doc_index_bucket_nodes(doc, bucket);
 }
@@ -2348,10 +2383,10 @@ ns_node *
 ns_node_find_by_id(const ns_node *root, const char *id)
 {
     if (!root || !id || !*id) return NULL;
-    if (root->id_index) {
+    if (ns_node_id_index(root)) {
         if (ns_id_index_complete(root))
-            return g_hash_table_lookup(root->id_index, id);
-        ns_node *hit = g_hash_table_lookup(root->id_index, id);
+            return g_hash_table_lookup(ns_node_id_index(root), id);
+        ns_node *hit = g_hash_table_lookup(ns_node_id_index(root), id);
         if (hit) {
             const char *hid = ns_element_get_attr(hit, "id");
             if (hid && strcmp(hid, id) == 0 && ns_node_contains(root, hit))
@@ -2359,22 +2394,22 @@ ns_node_find_by_id(const ns_node *root, const char *id)
         }
         if (ns_id_index_walked_unchanged(root)) {
             ns_doc_id_index_build((ns_node *)root);
-            return g_hash_table_lookup(root->id_index, id);
+            return g_hash_table_lookup(ns_node_id_index(root), id);
         }
         ns_node *found = ns_node_find_by_id_depth(root, id, 0);
         ns_id_index_note_walk(root);
         if (found)
-            g_hash_table_replace(root->id_index, g_strdup(id), found);
+            g_hash_table_replace(ns_node_id_index(root), g_strdup(id), found);
         else
-            g_hash_table_remove(root->id_index, id);
+            g_hash_table_remove(ns_node_id_index(root), id);
         return found;
     }
     const ns_node *doc = root;
     while (doc && doc->parent && doc->kind != NS_NODE_DOCUMENT &&
            !ns_dom_tree_scope_boundary(doc))
         doc = doc->parent;
-    if (doc && doc != root && doc->kind == NS_NODE_DOCUMENT && doc->id_index) {
-        ns_node *hit = g_hash_table_lookup(doc->id_index, id);
+    if (doc && doc != root && doc->kind == NS_NODE_DOCUMENT && ns_node_id_index(doc)) {
+        ns_node *hit = g_hash_table_lookup(ns_node_id_index(doc), id);
         if (!hit && ns_id_index_complete(doc)) return NULL;
         if (hit) {
             const char *hid = ns_element_get_attr(hit, "id");
@@ -2383,7 +2418,7 @@ ns_node_find_by_id(const ns_node *root, const char *id)
         }
         ns_node *found = ns_node_find_by_id_depth(root, id, 0);
         if (found)
-            g_hash_table_replace(doc->id_index, g_strdup(id), found);
+            g_hash_table_replace(ns_node_id_index(doc), g_strdup(id), found);
         return found;
     }
     return ns_node_find_by_id_depth(root, id, 0);
@@ -2942,8 +2977,8 @@ serialize_node_opts(const ns_node *n, GString *out, gboolean include_self,
             n->first_child->text[0] == '\n')
             g_string_append_c(out, '\n');
     }
-    if (n->tpl_content)
-        for (const ns_node *c = n->tpl_content->first_child; c;
+    if (ns_node_tpl_content(n))
+        for (const ns_node *c = ns_node_tpl_content(n)->first_child; c;
              c = c->next_sibling)
             serialize_node_opts(c, out, TRUE, depth + 1, opts);
     const ns_node *shadow = ns_serialize_shadow_child(n);
@@ -2977,8 +3012,8 @@ ns_node_inner_html(const ns_node *root)
         return g_strdup("");
     GString *out = g_string_new(NULL);
     gboolean raw_text = serialize_raw_text(root);
-    if (root && root->tpl_content)
-        root = root->tpl_content;
+    if (root && ns_node_tpl_content(root))
+        root = ns_node_tpl_content(root);
     const ns_node *shadow = ns_serialize_shadow_child(root);
     if (root)
         for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
@@ -2998,8 +3033,8 @@ ns_node_get_html(const ns_node *root, const ns_html_ser_opts *opts)
         return g_strdup("");
     GString *out = g_string_new(NULL);
     gboolean raw_text = serialize_raw_text(root);
-    if (root && root->tpl_content)
-        root = root->tpl_content;
+    if (root && ns_node_tpl_content(root))
+        root = ns_node_tpl_content(root);
     const ns_node *shadow = ns_serialize_shadow_child(root);
     if (shadow && ns_shadow_root_included(shadow, opts))
         serialize_shadow_template(shadow, out, 0, opts);
@@ -3103,7 +3138,7 @@ xml_serialize_node(const ns_node *n, GString *out, const char *parent_ns,
         g_string_append_c(out, '"');
     }
     gboolean html = strcmp(ns, NS_HTML_NAMESPACE) == 0;
-    const ns_node *kids = n->tpl_content ? n->tpl_content->first_child
+    const ns_node *kids = ns_node_tpl_content(n) ? ns_node_tpl_content(n)->first_child
                                          : n->first_child;
     if (!kids) {
         if (html && !is_void_tag(n->name)) {

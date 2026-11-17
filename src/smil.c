@@ -1091,7 +1091,7 @@ smil_scan(ns_smil *s)
         "animate", "set", "animatetransform", "animatemotion",
     };
     ns_node *doc = (ns_node *)s->doc;
-    if (!doc->tag_index) ns_doc_tag_index_build(doc);
+    if (!ns_node_tag_index(doc)) ns_doc_tag_index_build(doc);
 
     GPtrArray *nodes = g_ptr_array_new();
     for (gsize t = 0; t < G_N_ELEMENTS(tags); t++) {

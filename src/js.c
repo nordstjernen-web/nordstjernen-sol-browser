@@ -5327,7 +5327,7 @@ ns_invalidate_wrapper(ns_node *n)
     if (js && js->frame_posts) g_hash_table_remove(js->frame_posts, n);
     if (js && js->frame_referrers) g_hash_table_remove(js->frame_referrers, n);
     ns_popover_forget_node(js, n);
-    n->js_invalidate = NULL;
+    ns_node_disarm_invalidator(n);
 
     if (js && js->listeners) {
         for (guint i = 0; i < js->listeners->len; i++) {
@@ -5342,7 +5342,8 @@ ns_invalidate_wrapper(ns_node *n)
 static inline void
 ns_node_arm_js_invalidate(ns_node *n)
 {
-    if (n && !n->js_invalidate) n->js_invalidate = ns_invalidate_wrapper;
+    if (n && !(n->flags & NS_NODE_JS_ARMED))
+        ns_node_arm_invalidator(n, ns_invalidate_wrapper);
 }
 
 static gboolean ns_ce_name_valid(const char *s);
@@ -5571,7 +5572,7 @@ ns_make_element(JSContext *ctx, const ns_node *cnode)
     if (JS_IsException(obj)) return obj;
     JS_SetOpaque(obj, node);
     node->js_wrapper = JS_VALUE_GET_PTR(obj);
-    node->js_invalidate = ns_invalidate_wrapper;
+    ns_node_arm_invalidator(node, ns_invalidate_wrapper);
     JSValue kind_proto = ns_node_kind_proto(js, node);
     JSContext *node_realm = NULL;
     if (js && js->realm_cloners) {
@@ -41374,7 +41375,7 @@ ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
         ns_js *js = js_from_ctx(ctx);
         const ns_node *doc = js ? js->current_doc : NULL;
         const ns_node *hit = NULL;
-        if (doc && doc->id_index && ns_root_uses_doc_index(root, doc)) {
+        if (doc && ns_node_id_index(doc) && ns_root_uses_doc_index(root, doc)) {
             const ns_node *byid = ns_node_find_by_id(doc, sel + 1);
             if (byid) hit = ns_node_ancestor_or_self(byid, root);
             if (!hit) hit = ns_node_find_by_id(root, sel + 1);
@@ -41401,7 +41402,7 @@ ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
     if (sel[0] == '.' && ns_simple_ident_only(sel + 1)) {
         ns_js *js = js_from_ctx(ctx);
         const ns_node *doc = js ? js->current_doc : NULL;
-        if (doc && doc->class_index && ns_root_uses_doc_index(root, doc)) {
+        if (doc && ns_node_class_index(doc) && ns_root_uses_doc_index(root, doc)) {
             GPtrArray *list = ns_doc_class_index_lookup(doc, sel + 1);
             if (!want_all) {
                 const ns_node *hit = NULL;
@@ -41456,7 +41457,7 @@ ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
     if (ns_simple_ident_only(sel)) {
         ns_js *jsx = js_from_ctx(ctx);
         const ns_node *doc = jsx ? jsx->current_doc : NULL;
-        GPtrArray *list = (ns_root_uses_doc_index(root, doc) && doc->tag_index)
+        GPtrArray *list = (ns_root_uses_doc_index(root, doc) && ns_node_tag_index(doc))
             ? ns_doc_tag_index_lookup(doc, sel) : NULL;
         if (list) {
             if (!want_all) {
@@ -41521,12 +41522,12 @@ ns_query_selector_candidates(const ns_node *doc, const ns_css_selector *sel,
     const ns_css_simple *key =
         g_ptr_array_index(sel->compounds, sel->compounds->len - 1);
     if (!key || key->never_match) return FALSE;
-    if (key->classes && key->classes->len > 0 && doc->class_index &&
+    if (key->classes && key->classes->len > 0 && ns_node_class_index(doc) &&
         ((const char *)g_ptr_array_index(key->classes, 0))[0]) {
         *out = ns_doc_class_index_lookup(doc, g_ptr_array_index(key->classes, 0));
         return TRUE;
     }
-    if (key->type && strcmp(key->type, "*") != 0 && doc->tag_index) {
+    if (key->type && strcmp(key->type, "*") != 0 && ns_node_tag_index(doc)) {
         *out = ns_doc_tag_index_lookup(doc, key->type);
         return TRUE;
     }
@@ -41644,7 +41645,7 @@ ns_query_key_index(JSContext *ctx, const ns_node *root, GPtrArray *sels,
 
     GPtrArray *cands = NULL;
     const ns_node *single = NULL;
-    if (key->id && *key->id && doc->id_index) {
+    if (key->id && *key->id && ns_node_id_index(doc)) {
         single = ns_node_find_by_id(doc, key->id);
         if (!single) {
             *out = want_all ? ns_nodelist_from_array(ctx, JS_NewArray(ctx)) : JS_NULL;
@@ -41654,7 +41655,7 @@ ns_query_key_index(JSContext *ctx, const ns_node *root, GPtrArray *sels,
     } else if (root != doc) {
         return FALSE;
     } else if (key->classes && key->classes->len > 0 &&
-               doc->class_index &&
+               ns_node_class_index(doc) &&
                ((const char *)g_ptr_array_index(key->classes, 0))[0]) {
         cands = ns_doc_class_index_lookup(doc,
                                           g_ptr_array_index(key->classes, 0));
@@ -41662,7 +41663,7 @@ ns_query_key_index(JSContext *ctx, const ns_node *root, GPtrArray *sels,
             *out = want_all ? ns_nodelist_from_array(ctx, JS_NewArray(ctx)) : JS_NULL;
             return TRUE;
         }
-    } else if (key->type && strcmp(key->type, "*") != 0 && doc->tag_index) {
+    } else if (key->type && strcmp(key->type, "*") != 0 && ns_node_tag_index(doc)) {
         cands = ns_doc_tag_index_lookup(doc, key->type);
         if (!cands) {
             *out = want_all ? ns_nodelist_from_array(ctx, JS_NewArray(ctx)) : JS_NULL;
@@ -47490,7 +47491,7 @@ static char *
 ns_js_document_base_url(ns_js *js, const ns_node *doc, const char *current_url)
 {
     if (doc) {
-        if (doc->kind == NS_NODE_DOCUMENT && !doc->tag_index)
+        if (doc->kind == NS_NODE_DOCUMENT && !ns_node_tag_index(doc))
             ns_doc_tag_index_build((ns_node *)doc);
         GPtrArray *bases = ns_doc_tag_index_lookup(doc, "base");
         for (guint i = 0; bases && i < bases->len; i++) {
@@ -57110,7 +57111,7 @@ ns_window_child_frame_window(JSContext *ctx, ns_node *doc, uint32_t index,
 {
     if (!doc || (name && !*name)) return JS_UNDEFINED;
     const ns_node *frame = NULL;
-    if (doc->tag_index && !ns_node_find_first_element(doc, "frame"))
+    if (ns_node_tag_index(doc) && !ns_node_find_first_element(doc, "frame"))
         frame = ns_window_find_indexed_iframe(doc, index, name);
     else
         frame = ns_window_find_child_frame(doc, &index, name, 0);
@@ -58053,7 +58054,7 @@ ns_document_collect_by_tag(JSContext *ctx, ns_node *doc, const char *tag)
     JSValue arr = JS_NewArray(ctx);
     if (!doc) return arr;
     uint32_t idx = 0;
-    if (doc->tag_index && strcmp(tag, "*") != 0) {
+    if (ns_node_tag_index(doc) && strcmp(tag, "*") != 0) {
         GPtrArray *list = ns_doc_tag_index_lookup(doc, tag);
         GArray *items = g_array_new(FALSE, FALSE, sizeof(JSValue));
         for (guint k = 0; list && k < list->len; k++) {
@@ -68160,7 +68161,7 @@ ns_pinned_wrappers_release(ns_js *js)
             JSValue v = JS_MKPTR(JS_TAG_OBJECT, node->js_wrapper);
             JS_SetOpaque(v, NULL);
             node->js_wrapper = NULL;
-            node->js_invalidate = NULL;
+            ns_node_disarm_invalidator(node);
             JS_FreeValue(js->ctx, v);
         }
     }
@@ -69224,7 +69225,7 @@ ns_js_free(ns_js *js)
                 JSValue v = JS_MKPTR(JS_TAG_OBJECT, node->js_wrapper);
                 JS_SetOpaque(v, NULL);
                 node->js_wrapper = NULL;
-                node->js_invalidate = NULL;
+                ns_node_disarm_invalidator(node);
             }
             if (ns_js_orphan_is_detached_root(js, node))
                 g_ptr_array_add(roots, node);
@@ -70224,10 +70225,10 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
     const ns_node *inline_script = js->current_script &&
         !ns_element_get_attr(js->current_script, "src") ? js->current_script
                                                          : NULL;
-    int src_line = (inline_script && inline_script->src_line > 0)
-                       ? inline_script->src_line : 1;
-    int src_col = (inline_script && inline_script->src_col > 0)
-                      ? inline_script->src_col : 1;
+    int src_line = (inline_script && ns_node_src_line(inline_script) > 0)
+                       ? ns_node_src_line(inline_script) : 1;
+    int src_col = (inline_script && ns_node_src_col(inline_script) > 0)
+                      ? ns_node_src_col(inline_script) : 1;
     gsize bc_key_len = 0;
     char *bc_key = len >= 1024
         ? ns_js_classic_cache_key(copy, len, origin, src_line, src_col,
@@ -73176,7 +73177,7 @@ ns_subtree_has_wrapper(ns_node *root)
         ns_node *n = g_ptr_array_index(stack, stack->len - 1);
         g_ptr_array_set_size(stack, stack->len - 1);
         if (n->js_wrapper) { found = TRUE; break; }
-        if (n->tpl_content) g_ptr_array_add(stack, n->tpl_content);
+        if (ns_node_tpl_content(n)) g_ptr_array_add(stack, ns_node_tpl_content(n));
         for (ns_node *c = n->first_child; c; c = c->next_sibling)
             g_ptr_array_add(stack, c);
     }

@@ -75,46 +75,82 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_NODE_ATTR_MAYBE_ID  (1u << 22)
 #define NS_NODE_ATTR_MAYBE_SHADOW (1u << 23)
 #define NS_NODE_TEXT_HASHED    (1u << 24)
+#define NS_NODE_JS_ARMED       (1u << 28)
+
+typedef struct ns_node_rare {
+    void  *backing;
+    void (*backing_free)(void *);
+    GHashTable *id_index;
+    GHashTable *class_index;
+    GHashTable *tag_index;
+    struct ns_node *tpl_content;
+    int src_line;
+    int src_col;
+} ns_node_rare;
 
 struct ns_node {
-    ns_node_kind kind;
-
-    char *name;
-
-    char *text;
-    guint32 text_len;
-
-    ns_attr *attrs;
-
     struct ns_node *parent;
     struct ns_node *first_child;
     struct ns_node *last_child;
     struct ns_node *prev_sibling;
     struct ns_node *next_sibling;
 
-    void               *js_wrapper;
-    ns_node_invalidator js_invalidate;
-
-    void  *backing;
-    void (*backing_free)(void *);
-
-    GHashTable *id_index;
-    GHashTable *class_index;
-    GHashTable *tag_index;
-
+    char *name;
+    char *text;
+    ns_attr *attrs;
     void *class_set;
+    void *js_wrapper;
+    ns_node_rare *rare;
 
     guint64 attr_bloom;
 
+    guint32 text_len;
     guint32 attr_gen;
-
     guint32 flags;
-
-    int src_line;
-    int src_col;
-
-    struct ns_node *tpl_content;
+    ns_node_kind kind;
 };
+
+static inline ns_node *
+ns_node_tpl_content(const ns_node *n)
+{
+    return n->rare ? n->rare->tpl_content : NULL;
+}
+
+static inline GHashTable *
+ns_node_id_index(const ns_node *n)
+{
+    return n->rare ? n->rare->id_index : NULL;
+}
+
+static inline GHashTable *
+ns_node_class_index(const ns_node *n)
+{
+    return n->rare ? n->rare->class_index : NULL;
+}
+
+static inline GHashTable *
+ns_node_tag_index(const ns_node *n)
+{
+    return n->rare ? n->rare->tag_index : NULL;
+}
+
+static inline int
+ns_node_src_line(const ns_node *n)
+{
+    return n->rare ? n->rare->src_line : 0;
+}
+
+static inline int
+ns_node_src_col(const ns_node *n)
+{
+    return n->rare ? n->rare->src_col : 0;
+}
+
+ns_node_rare *ns_node_rare_get(ns_node *n);
+void ns_node_set_tpl_content(ns_node *n, ns_node *content);
+void ns_node_set_source_position(ns_node *n, int line, int col);
+void ns_node_arm_invalidator(ns_node *n, ns_node_invalidator invalidate);
+void ns_node_disarm_invalidator(ns_node *n);
 
 ns_node *ns_node_new_document(void);
 ns_node *ns_node_new_element(char *name);

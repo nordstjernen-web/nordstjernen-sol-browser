@@ -289,9 +289,21 @@ wrapper over a parser library's tree. Each node carries its `kind`
 (document/doctype/element/text/comment), tag name, text, a
 singly-linked attribute list, and parent/child/sibling pointers. Per
 document, `ns_node` maintains **id, class, and tag indexes** (hash
-tables built in bulk in document order, `src/dom.c:1604`) plus an
-attribute Bloom filter for fast selector rejection, so `getElementById`
-and selector matching don't rescan the tree.
+tables built in bulk in document order, `ns_doc_id_index_build` and its
+siblings in `src/dom.c`) plus an attribute Bloom filter for fast selector
+rejection, so `getElementById` and selector matching don't rescan the
+tree.
+
+A node is 112 bytes. Fields that only a few nodes use live in an
+`ns_node_rare` that is allocated on first use: a document root's indexes
+and parser string arena, a `<template>`'s content fragment and a
+`<script>`'s source position. Read them through the inline accessors in
+`src/dom.h` (`ns_node_tpl_content`, `ns_node_id_index`, …), which return
+NULL or 0 when the node has none; set them with `ns_node_rare_get` or
+the setters next to it. A node that the JS binding tracks carries the
+`NS_NODE_JS_ARMED` flag instead of a function pointer, and
+`ns_node_free` calls the one invalidator the binding registered with
+`ns_node_arm_invalidator`.
 
 The bridge from the HTML parser to `ns_node` is the `ns_h5_*` sink
 (`src/html_parser.c`), which sets attributes (including namespaced

@@ -114,8 +114,7 @@ ns_h5_element(ns_h5_sink *sink, const char *name, size_t len, int borrowed,
     ns_node_set_name_borrow(el, borrowed ? name
                                          : ns_h5_arena_copy(sink, name, len));
     if (line > 0 && len == 6 && memcmp(name, "script", 6) == 0) {
-        el->src_line = line;
-        el->src_col = column;
+        ns_node_set_source_position(el, line, column);
     }
     if (len == 5 && memcmp(name, "video", 5) == 0)
         sink->media_candidate = TRUE;
@@ -314,7 +313,7 @@ static gboolean
 ns_h5_can_adopt(const ns_h5_sink *sink, const ns_node *parent,
                 const ns_node *child)
 {
-    if (!child->first_child && !child->tpl_content) return parent != child;
+    if (!child->first_child && !ns_node_tpl_content(child)) return parent != child;
     return !ns_h5_is_inclusive_ancestor(sink, child, parent);
 }
 
@@ -365,7 +364,7 @@ ns_selectedcontent_prune(ns_node *copy)
     g_ptr_array_add(roots, copy);
     while (roots->len) {
         ns_node *root = g_ptr_array_steal_index_fast(roots, roots->len - 1);
-        if (root->tpl_content) g_ptr_array_add(roots, root->tpl_content);
+        if (ns_node_tpl_content(root)) g_ptr_array_add(roots, ns_node_tpl_content(root));
         ns_node *n = root->first_child;
         while (n) {
             if (ns_selectedcontent_omits(n)) {
@@ -375,7 +374,7 @@ ns_selectedcontent_prune(ns_node *copy)
                 n = next;
                 continue;
             }
-            if (n->tpl_content) g_ptr_array_add(roots, n->tpl_content);
+            if (ns_node_tpl_content(n)) g_ptr_array_add(roots, ns_node_tpl_content(n));
             n = ns_node_next_in_subtree(n, root, TRUE);
         }
     }
@@ -565,7 +564,7 @@ void
 ns_h5_reparent_children(ns_h5_sink *sink, ns_node *from, ns_node *to)
 {
     gboolean into_empty_fresh = to == sink->fresh && !to->parent &&
-                                !to->first_child && !to->tpl_content;
+                                !to->first_child && !ns_node_tpl_content(to);
     sink->fresh_donor = NULL;
     if (ns_h5_is_inclusive_ancestor(sink, from, to)) return;
     while (from->first_child)
@@ -576,7 +575,7 @@ ns_h5_reparent_children(ns_h5_sink *sink, ns_node *from, ns_node *to)
 ns_node *
 ns_h5_template_contents(ns_h5_sink *sink, ns_node *template_element)
 {
-    gboolean fresh = template_element->tpl_content == NULL;
+    gboolean fresh = ns_node_tpl_content(template_element) == NULL;
     ns_node *content = ns_template_content_get(template_element);
     if (fresh && content) {
         if (!sink->template_hosts)
@@ -633,9 +632,9 @@ ns_dsd_attach(const ns_node *host, ns_node *c)
     ns_element_remove_attr(c, "shadowrootdelegatesfocus");
     ns_element_remove_attr(c, "shadowrootserializable");
     ns_element_remove_attr(c, "shadowrootclonable");
-    if (c->tpl_content) {
-        ns_node *frag = c->tpl_content;
-        c->tpl_content = NULL;
+    if (ns_node_tpl_content(c)) {
+        ns_node *frag = c->rare->tpl_content;
+        c->rare->tpl_content = NULL;
         while (frag->first_child)
             ns_node_append_child(c, frag->first_child);
         ns_node_free(frag);
@@ -660,8 +659,8 @@ ns_dsd_convert(ns_node *n, int depth)
         if (!shadow_done && ns_dsd_attach(n, c)) shadow_done = TRUE;
         ns_dsd_convert(c, depth + 1);
     }
-    if (n->tpl_content)
-        ns_dsd_convert(n->tpl_content, depth + 1);
+    if (ns_node_tpl_content(n))
+        ns_dsd_convert(ns_node_tpl_content(n), depth + 1);
 }
 
 static void
@@ -930,8 +929,8 @@ ns_html_assign_script_positions(ns_node *root, const char *input, size_t len)
     guint m = MIN(elems->len, lines->len);
     for (guint k = 0; k < m; k++) {
         ns_node *e = g_ptr_array_index(elems, k);
-        e->src_line = g_array_index(lines, int, k);
-        e->src_col  = g_array_index(cols, int, k);
+        ns_node_set_source_position(e, g_array_index(lines, int, k),
+                                    g_array_index(cols, int, k));
     }
     g_ptr_array_free(elems, TRUE);
     g_array_free(lines, TRUE);
@@ -1080,7 +1079,7 @@ ns_xml_mark_parser_inserted(ns_node *n, int depth)
     for (ns_node *c = n->first_child; c; c = c->next_sibling) {
         c->flags &= ~NS_NODE_NOT_PARSER_INSERTED;
         ns_xml_mark_parser_inserted(c, depth + 1);
-        ns_xml_mark_parser_inserted(c->tpl_content, depth + 1);
+        ns_xml_mark_parser_inserted(ns_node_tpl_content(c), depth + 1);
     }
 }
 

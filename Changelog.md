@@ -3,6 +3,16 @@ Changelog:
 
 1.0.50-dev:
 ======
+* A DOM node takes 112 bytes instead of 176, so a page's tree needs 36%
+  less memory: 2.7 MB instead of 4.2 MB for a long Wikipedia article,
+  83 MB instead of 130 MB for the single-page HTML Standard. The fields
+  that only document roots, `<template>` and `<script>` elements use (the
+  id, class and tag indexes, the parser's string arena, template content
+  and script source positions) moved into a side structure that a node
+  gets on first use, the per-node pointer to the JavaScript wrapper's
+  invalidation function became a flag bit, and the fields were reordered
+  so the struct has no padding. Parsed trees, layout and
+  web-platform-tests results are unchanged.
 * A page's HTML is parsed while it downloads. A navigation feeds the
   streaming parser each piece of the body as the network delivers it, so
   the tree is finished when the last byte arrives instead of being built
