@@ -590,7 +590,7 @@ static const ns_node *
 render_find_viewport_meta(const ns_node *n, int depth)
 {
     if (!n || depth >= 512) return NULL;
-    if (ns_node_is_element_named(n, "meta")) {
+    if (ns_node_is_tag(n, NS_TAG_META)) {
         const char *name = ns_element_get_attr(n, "name");
         if (name && g_ascii_strcasecmp(name, "viewport") == 0)
             return n;

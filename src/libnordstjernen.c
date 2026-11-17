@@ -293,7 +293,7 @@ browser_relayout(ns_browser *b)
     {
         const ns_node *fn = b->js ? ns_js_focused_node(b->js) : NULL;
         gboolean dl_open = !b->datalist_suppressed && fn &&
-                           ns_node_is_element_named(fn, "input") &&
+                           ns_node_is_tag(fn, NS_TAG_INPUT) &&
                            ns_element_get_attr(fn, "list") != NULL;
         ns_layout_set_datalist_open(dl_open);
     }
@@ -1312,7 +1312,7 @@ static const char *
 browser_find_meta_refresh(const ns_node *n, int depth)
 {
     if (!n || depth > 1024) return NULL;
-    if (ns_node_is_element_named(n, "meta")) {
+    if (ns_node_is_tag(n, NS_TAG_META)) {
         const char *equiv = ns_element_get_attr(n, "http-equiv");
         if (equiv && g_ascii_strcasecmp(equiv, "refresh") == 0) {
             const char *content = ns_element_get_attr(n, "content");
@@ -3292,8 +3292,8 @@ static const ns_node *browser_hit_node(ns_browser *browser, int x, int y);
 static gboolean
 browser_node_is_hyperlink(const ns_node *n)
 {
-    return ns_node_is_element_named(n, "a") ||
-           ns_node_is_element_named(n, "area");
+    return ns_node_is_tag(n, NS_TAG_A) ||
+           ns_node_is_tag(n, NS_TAG_AREA);
 }
 
 static char *
@@ -3416,7 +3416,7 @@ browser_field_writable(const ns_node *field)
 static gboolean
 browser_field_copyable(const ns_node *field)
 {
-    if (!ns_node_is_element_named(field, "input")) return TRUE;
+    if (!ns_node_is_tag(field, NS_TAG_INPUT)) return TRUE;
     const char *type = ns_element_get_attr(field, "type");
     return !type || g_ascii_strcasecmp(type, "password") != 0;
 }
@@ -3605,7 +3605,7 @@ browser_copy_text(ns_browser *b)
 static gboolean
 browser_node_is_range(const ns_node *n)
 {
-    if (!ns_node_is_element_named(n, "input")) return FALSE;
+    if (!ns_node_is_tag(n, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(n, "type");
     return type && g_ascii_strcasecmp(type, "range") == 0 &&
            !ns_element_get_attr(n, "disabled");
@@ -3966,7 +3966,7 @@ browser_node_resize_axes(ns_browser *browser, const ns_node *node,
         ? g_hash_table_lookup(browser->styles, node) : NULL;
     const ns_css_value *v = s ? s->values[NS_CSS_RESIZE] : NULL;
     if (!v || ns_css_keyword_is(v, "none")) return FALSE;
-    if (!ns_node_is_element_named(node, "textarea") &&
+    if (!ns_node_is_tag(node, NS_TAG_TEXTAREA) &&
         ns_css_keyword_is(s->values[NS_CSS_OVERFLOW_X], "visible") &&
         ns_css_keyword_is(s->values[NS_CSS_OVERFLOW_Y], "visible"))
         return FALSE;
@@ -4306,8 +4306,8 @@ ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
             b->dom && b->dom->kind == NS_NODE_ELEMENT &&
             (ns_element_get_attr(b->dom, NS_MEDIA_SRC_ATTR) != NULL ||
              ns_element_get_attr(b->dom, NS_MEDIA_STREAM_ATTR) != NULL);
-        if (b->dom && (ns_node_is_element_named(b->dom, "video") ||
-                       ns_node_is_element_named(b->dom, "audio") ||
+        if (b->dom && (ns_node_is_tag(b->dom, NS_TAG_VIDEO) ||
+                       ns_node_is_tag(b->dom, NS_TAG_AUDIO) ||
                        has_media_url || has_internal_video)) {
             media = b;
             break;
@@ -4331,7 +4331,7 @@ ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
     }
 
     gboolean is_video =
-        ns_node_is_element_named(media->dom, "video") ||
+        ns_node_is_tag(media->dom, NS_TAG_VIDEO) ||
         (media->media && media->media->video_src) ||
         (media->dom->kind == NS_NODE_ELEMENT &&
          (ns_element_get_attr(media->dom, NS_MEDIA_SRC_ATTR) != NULL ||
@@ -4585,7 +4585,7 @@ browser_submit_form(ns_browser *b, const ns_node *clicked)
 {
     if (!clicked || !b->doc) return;
     gboolean from_text = ns_node_is_text_input(clicked);
-    gboolean from_form = ns_node_is_element_named(clicked, "form");
+    gboolean from_form = ns_node_is_tag(clicked, NS_TAG_FORM);
     if (!from_text && !from_form && !ns_form_is_submit_trigger(clicked))
         return;
     const ns_node *form = from_form ? clicked : ns_form_owner(clicked, b->doc);
@@ -4718,7 +4718,7 @@ ns_browser_press_full(ns_browser *browser, int x, int y, int mods, int button,
 
     gboolean in_datalist = FALSE;
     for (const ns_node *a = node; a; a = a->parent)
-        if (ns_node_is_element_named(a, "datalist")) { in_datalist = TRUE; break; }
+        if (ns_node_is_tag(a, NS_TAG_DATALIST)) { in_datalist = TRUE; break; }
     if (browser->js && !in_datalist && !mousedown_prevented) {
         const ns_node *focus = NULL;
         for (const ns_node *a = node; a; a = a->parent)
@@ -4740,7 +4740,7 @@ ns_browser_press_full(ns_browser *browser, int x, int y, int mods, int button,
             browser->sel_anchor_byte = browser->caret_byte;
         }
         browser->datalist_suppressed =
-            !(focus && ns_node_is_element_named(focus, "input") &&
+            !(focus && ns_node_is_tag(focus, NS_TAG_INPUT) &&
               ns_element_get_attr(focus, "list") != NULL);
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     }
@@ -4772,7 +4772,7 @@ ns_browser_press_full(ns_browser *browser, int x, int y, int mods, int button,
 static gboolean
 ns_is_dropdown_select(const ns_node *n)
 {
-    if (!ns_node_is_element_named(n, "select")) return FALSE;
+    if (!ns_node_is_tag(n, NS_TAG_SELECT)) return FALSE;
     if (ns_element_get_attr(n, "multiple")) return FALSE;
     const char *sz = ns_element_get_attr(n, "size");
     if (sz && atoi(sz) > 1) return FALSE;
@@ -4784,13 +4784,13 @@ browser_datalist_click(ns_browser *browser, const ns_node *node)
 {
     const ns_node *option = NULL, *dl = NULL;
     for (const ns_node *a = node; a; a = a->parent) {
-        if (!option && ns_node_is_element_named(a, "option")) option = a;
-        if (ns_node_is_element_named(a, "datalist")) { dl = a; break; }
-        if (ns_node_is_element_named(a, "select")) return FALSE;
+        if (!option && ns_node_is_tag(a, NS_TAG_OPTION)) option = a;
+        if (ns_node_is_tag(a, NS_TAG_DATALIST)) { dl = a; break; }
+        if (ns_node_is_tag(a, NS_TAG_SELECT)) return FALSE;
     }
     if (!option || !dl || !browser->js) return FALSE;
     ns_node *inp = (ns_node *)ns_js_focused_node(browser->js);
-    if (!inp || !ns_node_is_element_named(inp, "input")) return FALSE;
+    if (!inp || !ns_node_is_tag(inp, NS_TAG_INPUT)) return FALSE;
     const char *ov = ns_element_get_attr(option, "value");
     char *val = (ov && *ov) ? g_strdup(ov) : ns_option_label_dup(option);
     const char *cur = ns_node_editable_value(inp);
@@ -4810,8 +4810,8 @@ browser_dropdown_click(ns_browser *browser, const ns_node *node)
     if (browser_datalist_click(browser, node)) return TRUE;
     const ns_node *option = NULL, *select = NULL;
     for (const ns_node *a = node; a; a = a->parent) {
-        if (!option && ns_node_is_element_named(a, "option")) option = a;
-        if (ns_node_is_element_named(a, "select")) { select = a; break; }
+        if (!option && ns_node_is_tag(a, NS_TAG_OPTION)) option = a;
+        if (ns_node_is_tag(a, NS_TAG_SELECT)) { select = a; break; }
     }
     if (select && option && !ns_is_dropdown_select(select) &&
         !ns_element_get_attr(select, "disabled")) {
@@ -5313,7 +5313,7 @@ static char *
 browser_paste_text_for(const ns_node *field, const char *text, gsize lo,
                        gsize hi)
 {
-    gboolean multiline = ns_node_is_element_named(field, "textarea") ||
+    gboolean multiline = ns_node_is_tag(field, NS_TAG_TEXTAREA) ||
                          ns_node_is_contenteditable_host(field);
     gsize len = strlen(text);
     if (!multiline)
@@ -5483,14 +5483,14 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
             }
         } else if (!prevented && kind == 0) {
             const ns_node *f = ns_js_focused_node(browser->js);
-            if (f && ns_node_is_element_named(f, "input") &&
+            if (f && ns_node_is_tag(f, NS_TAG_INPUT) &&
                 !browser->datalist_suppressed && key &&
                 strcmp(key, "Escape") == 0 &&
                 ns_element_get_attr(f, "list") != NULL) {
                 browser->datalist_suppressed = TRUE;
                 browser->dirty = TRUE;
                 if (out_prevented) *out_prevented = 1;
-            } else if (f && ns_node_is_element_named(f, "select") &&
+            } else if (f && ns_node_is_tag(f, NS_TAG_SELECT) &&
                 !ns_element_get_attr(f, "disabled") &&
                 browser_select_key(browser, (ns_node *)f, key, mods)) {
                 browser->dirty = TRUE;
@@ -5554,7 +5554,7 @@ browser_node_takes_text(const ns_node *n)
         "hidden", "range", "color", NULL,
     };
     if (ns_node_is_editable(n)) return TRUE;
-    if (!ns_node_is_element_named(n, "input")) return FALSE;
+    if (!ns_node_is_tag(n, NS_TAG_INPUT)) return FALSE;
     const char *type = ns_element_get_attr(n, "type");
     for (int i = 0; type && other_inputs[i]; i++)
         if (g_ascii_strcasecmp(type, other_inputs[i]) == 0) return FALSE;
@@ -5881,7 +5881,7 @@ collect_links(const ns_node *node, const char *base, GString *out,
 {
     if (!node || depth > 1024) return;
     for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "a")) {
+        if (ns_node_is_tag(c, NS_TAG_A)) {
             const char *href = ns_element_get_attr(c, "href");
             if (href && *href && href[0] != '#' &&
                 !g_str_has_prefix(href, "javascript:")) {
@@ -5936,7 +5936,7 @@ find_icon_href(const ns_node *node, int depth)
 {
     if (!node || depth > 1024) return NULL;
     for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "link")) {
+        if (ns_node_is_tag(c, NS_TAG_LINK)) {
             const char *href = ns_element_get_attr(c, "href");
             if (href && *href && rel_token_is_icon(ns_element_get_attr(c, "rel")))
                 return href;

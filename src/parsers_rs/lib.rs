@@ -20,6 +20,7 @@ unsafe extern "C" {
         name: *const c_char,
         len: usize,
         borrowed: c_int,
+        tag: c_int,
         line: c_int,
         column: c_int,
     ) -> *mut c_void;
@@ -288,13 +289,18 @@ impl TreeSink for Sink {
             LocalName::Static(text) => (text.as_ptr(), text.to_bytes().len(), 1),
             LocalName::Dynamic(text) => (text_ptr(text), text.len(), 0),
         };
+        let tag = match (name.local, name.tag.name()) {
+            (LocalName::Static(text), Some(tag_name)) if text == tag_name => name.tag as c_int + 1,
+            _ => 0,
+        };
         let (line, column) = if self.positions {
             (position.line as c_int, position.column as c_int)
         } else {
             (0, 0)
         };
-        let element =
-            Handle(unsafe { ns_h5_element(self.context, data, len, borrowed, line, column) });
+        let element = Handle(unsafe {
+            ns_h5_element(self.context, data, len, borrowed, tag, line, column)
+        });
         for attr in attrs {
             add_attribute(self.context, element, attr, false);
         }

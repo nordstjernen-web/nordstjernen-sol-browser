@@ -305,6 +305,18 @@ the setters next to it. A node that the JS binding tracks carries the
 `ns_node_free` calls the one invalidator the binding registered with
 `ns_node_arm_invalidator`.
 
+An element also carries `tag`, the id of its name in the table of tags the
+HTML parser knows (`src/tag_names.h`, generated from
+`src/html5_rs/tags.rs` by `scripts/gen-tag-names.py`; run it after
+adding a tag there), or `NS_TAG_UNKNOWN`. The parser passes the id it
+already has; `ns_node_new_element` and the `ns_node_set_name_*` setters
+look it up, so `tag` always matches `name` exactly. `ns_node_is_tag(n,
+NS_TAG_DIV)` compares the id; `ns_node_is_html_tag` also requires the HTML
+namespace. SVG and MathML elements are marked by the `NS_NODE_SVG_NS` and
+`NS_NODE_MATHML_NS` flags; only an element in another namespace keeps its
+namespace URI in the internal `data-nd-ns-uri` attribute.
+`ns_element_namespace_uri` returns the URI either way.
+
 The bridge from the HTML parser to `ns_node` is the `ns_h5_*` sink
 (`src/html_parser.c`), which sets attributes (including namespaced
 ones), tags SVG/MathML nodes with their namespace, and routes

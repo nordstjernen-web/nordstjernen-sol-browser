@@ -651,12 +651,15 @@ xml_apply_namespace(ns_node *el, const char *qname, const char *uri)
         }
         return;
     }
-    if (uri && strcmp(uri, XML_NS_SVG) == 0)
+    if (uri && strcmp(uri, XML_NS_SVG) == 0) {
         el->flags |= NS_NODE_SVG_NS;
-    else
+    } else if (uri && strcmp(uri, NS_MATHML_NAMESPACE) == 0) {
+        el->flags |= NS_NODE_FOREIGN_NS | NS_NODE_MATHML_NS;
+    } else {
         el->flags |= NS_NODE_FOREIGN_NS;
-    if (uri && *uri)
-        ns_element_set_attr(el, "data-nd-ns-uri", uri);
+        if (uri && *uri)
+            ns_element_set_attr(el, "data-nd-ns-uri", uri);
+    }
 }
 
 static gboolean
@@ -965,7 +968,7 @@ xml_element_namespace(const ns_node *el)
 {
     if (el->flags & NS_NODE_SVG_NS) return g_strdup(XML_NS_SVG);
     if (el->flags & NS_NODE_FOREIGN_NS)
-        return g_strdup(ns_element_get_attr(el, "data-nd-ns-uri"));
+        return g_strdup(ns_element_namespace_uri(el));
     return g_strdup(XML_NS_XHTML);
 }
 

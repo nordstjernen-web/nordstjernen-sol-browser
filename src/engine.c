@@ -453,15 +453,15 @@ preload_collect(const ns_node *n, const char *base, gboolean include_images,
                 GPtrArray *connect_out, GHashTable *connect_seen, int depth)
 {
     if (!n || depth >= 512) return;
-    if (include_images && ns_node_is_element_named(n, "img")) {
+    if (include_images && ns_node_is_tag(n, NS_TAG_IMG)) {
         const char *loading = ns_element_get_attr(n, "loading");
         if (!loading || g_ascii_strcasecmp(loading, "lazy") != 0)
             preload_add_hinted(out, seen, base, ns_element_get_attr(n, "src"),
                                NS_FETCH_DEST_DEFAULT, n);
-    } else if (ns_node_is_element_named(n, "script")) {
+    } else if (ns_node_is_tag(n, NS_TAG_SCRIPT)) {
         preload_add_hinted(out, seen, base, ns_element_get_attr(n, "src"),
                            NS_FETCH_DEST_SCRIPT, n);
-    } else if (ns_node_is_element_named(n, "link")) {
+    } else if (ns_node_is_tag(n, NS_TAG_LINK)) {
         const char *rel = ns_element_get_attr(n, "rel");
         if (rel && (rel_has_token(rel, "preconnect") ||
                     rel_has_token(rel, "dns-prefetch"))) {
@@ -824,7 +824,7 @@ engine_node_in_head(const ns_node *n)
 {
     for (const ns_node *p = n ? n->parent : NULL;
          p && p->kind == NS_NODE_ELEMENT; p = p->parent)
-        if (ns_node_is_element_named(p, "head")) return TRUE;
+        if (ns_node_is_tag(p, NS_TAG_HEAD)) return TRUE;
     return FALSE;
 }
 
@@ -1588,10 +1588,10 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
 {
     if (!n || depth >= 512) return;
     gboolean named = collect_name_may_matter(n);
-    if (named && ns_node_is_element_named(n, "noscript")) return;
-    if (named && (ns_node_is_element_named(n, "iframe") ||
-                  ns_node_is_element_named(n, "frame") ||
-                  ns_node_is_element_named(n, "object") ||
+    if (named && ns_node_is_tag(n, NS_TAG_NOSCRIPT)) return;
+    if (named && (ns_node_is_tag(n, NS_TAG_IFRAME) ||
+                  ns_node_is_tag(n, NS_TAG_FRAME) ||
+                  ns_node_is_tag(n, NS_TAG_OBJECT) ||
                   ns_node_is_pdf_embed(n))) {
         sheet_run_flush(cc);
         const char *furl = ns_element_get_attr(n, "data-nd-frame-url");
@@ -1621,7 +1621,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     }
     GPtrArray *out = cc->out;
     GHashTable *cache = cc->cache;
-    if (named && ns_node_is_element_named(n, "style") &&
+    if (named && ns_node_is_tag(n, NS_TAG_STYLE) &&
         style_sheet_enabled(n) && style_element_csp_allowed(n, cc->csp_url)) {
         guint64 text_hash = 1469598103934665603ULL;
         gsize text_len = 0;
@@ -1655,7 +1655,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                                  base_url);
             }
         }
-    } else if (named && ns_node_is_element_named(n, "link") && base_url) {
+    } else if (named && ns_node_is_tag(n, NS_TAG_LINK) && base_url) {
         sheet_run_flush(cc);
         const char *rel = ns_element_get_attr(n, "rel");
         const char *href = ns_element_get_attr(n, "href");
@@ -2130,9 +2130,9 @@ static const char *
 engine_node_frame_base(const ns_node *n, const char *dflt)
 {
     for (const ns_node *p = n ? n->parent : NULL; p; p = p->parent) {
-        if (ns_node_is_element_named(p, "iframe") ||
-            ns_node_is_element_named(p, "frame") ||
-            ns_node_is_element_named(p, "object") ||
+        if (ns_node_is_tag(p, NS_TAG_IFRAME) ||
+            ns_node_is_tag(p, NS_TAG_FRAME) ||
+            ns_node_is_tag(p, NS_TAG_OBJECT) ||
             ns_node_is_pdf_embed(p)) {
             const char *fu = ns_element_get_attr(p, "data-nd-frame-url");
             if (fu && *fu) return fu;
@@ -2146,9 +2146,9 @@ ns_engine_frame_csp_allows(const ns_node *n, ns_csp_kind kind,
                            const char *abs_url)
 {
     for (const ns_node *p = n ? n->parent : NULL; p; p = p->parent) {
-        if (!ns_node_is_element_named(p, "iframe") &&
-            !ns_node_is_element_named(p, "frame") &&
-            !ns_node_is_element_named(p, "object") &&
+        if (!ns_node_is_tag(p, NS_TAG_IFRAME) &&
+            !ns_node_is_tag(p, NS_TAG_FRAME) &&
+            !ns_node_is_tag(p, NS_TAG_OBJECT) &&
             !ns_node_is_pdf_embed(p))
             continue;
         const char *header = ns_element_get_attr(p, "data-nd-frame-csp");

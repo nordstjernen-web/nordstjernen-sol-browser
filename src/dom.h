@@ -8,6 +8,8 @@
 
 #include <glib.h>
 
+#include "tag_names.h"
+
 G_BEGIN_DECLS
 
 typedef enum ns_node_kind {
@@ -74,8 +76,11 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_NODE_STYLE_ATTR_TRUSTED (1u << 27)
 #define NS_NODE_ATTR_MAYBE_ID  (1u << 22)
 #define NS_NODE_ATTR_MAYBE_SHADOW (1u << 23)
-#define NS_NODE_TEXT_HASHED    (1u << 24)
 #define NS_NODE_JS_ARMED       (1u << 28)
+#define NS_NODE_MATHML_NS      (1u << 16)
+
+#define NS_SVG_NAMESPACE    "http://www.w3.org/2000/svg"
+#define NS_MATHML_NAMESPACE "http://www.w3.org/1998/Math/MathML"
 
 typedef struct ns_node_rare {
     void  *backing;
@@ -102,13 +107,30 @@ struct ns_node {
     void *js_wrapper;
     ns_node_rare *rare;
 
-    guint64 attr_bloom;
+    union {
+        guint64 attr_bloom;
+        guint64 text_hash;
+    };
 
     guint32 text_len;
     guint32 attr_gen;
     guint32 flags;
-    ns_node_kind kind;
+    ns_node_kind kind : 8;
+    guint16 tag;
 };
+
+static inline gboolean
+ns_node_is_tag(const ns_node *n, ns_tag tag)
+{
+    return n && n->kind == NS_NODE_ELEMENT && n->tag == tag;
+}
+
+static inline gboolean
+ns_node_is_html_tag(const ns_node *n, ns_tag tag)
+{
+    return ns_node_is_tag(n, tag) &&
+           !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS));
+}
 
 static inline ns_node *
 ns_node_tpl_content(const ns_node *n)
@@ -161,6 +183,10 @@ ns_node *ns_node_new_comment_len(char *text, guint32 len);
 
 void ns_node_set_name_borrow(ns_node *n, const char *name);
 void ns_node_set_name_owned(ns_node *n, char *name);
+void ns_node_set_name_borrow_tag(ns_node *n, const char *name, ns_tag tag);
+ns_tag ns_tag_lookup(const char *name);
+const char *ns_tag_name(ns_tag tag);
+const char *ns_element_namespace_uri(const ns_node *n);
 void ns_node_set_text_borrow(ns_node *n, const char *text);
 guint64 ns_node_text_hash(ns_node *n);
 void ns_node_replace_text_owned(ns_node *n, char *text);
