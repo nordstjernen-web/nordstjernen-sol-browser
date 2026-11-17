@@ -21,6 +21,7 @@ if ! new_enough; then
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
             RUSTUP_INIT_SKIP_PATH_CHECK=yes sh -s -- -y --profile minimal --default-toolchain stable
     fi
+    hash -r
     new_enough
 fi
 rustc --version
