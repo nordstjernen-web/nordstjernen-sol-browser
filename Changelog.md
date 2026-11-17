@@ -3,6 +3,13 @@ Changelog:
 
 1.0.50-dev:
 ======
+* `MediaList` splits its queries on commas. `rule.media.mediaText` for
+  `@media screen, print` read `screen,, print` and `media[0]` was
+  `screen,`, because a second helper of the same name, which splits on
+  white space, replaced the comma splitter. The same mix-up broke the
+  selector lists of nested rules and `@scope`. `appendMedium`,
+  `deleteMedium` and assigning `CSSMediaRule.media` now change the rule's
+  condition and restyle the page.
 * `float: inline-start` / `inline-end` and `clear: inline-start` /
   `inline-end` are supported: they resolve to left or right from the
   containing block's `direction`. They were rejected before, so a float

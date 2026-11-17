@@ -10229,7 +10229,7 @@
             return selectorAnBValid(sel) && selectorParses(relative);
         }
         function scopeSelectorList(text) {
-            var parts = splitTopLevel(text, ',').map(function (p) {
+            var parts = splitTopLevelBy(text, ',').map(function (p) {
                 return p.replace(/^\s+|\s+$/g, '');
             });
             if (!parts.length) return null;
@@ -10348,7 +10348,7 @@
         method(CSSGroupingRule.prototype, 'deleteRule', function (index) {
             return deleteFrom(this, this.__rules, this.__ruleList, index);
         });
-        function splitTopLevel(text, sep) {
+        function splitTopLevelBy(text, sep) {
             var parts = [], depth = 0, start = 0;
             for (var i = 0; i < text.length; i++) {
                 var c = text.charAt(i);
@@ -10418,14 +10418,14 @@
             if (!text) return '';
             if (typeof global.__ndMediaListSerialize === 'function')
                 return global.__ndMediaListSerialize(String(text));
-            return splitTopLevel(text, ',').map(serializeMediaQuery)
+            return splitTopLevelBy(text, ',').map(serializeMediaQuery)
                        .filter(function (q) { return q !== ''; })
                        .join(', ');
         }
         function makeMediaListObject(text, onChange) {
             var serialized = serializeMediaList(text);
             var items = serialized === '' ? [] :
-                splitTopLevel(serialized, ',').map(function (q) {
+                splitTopLevelBy(serialized, ',').map(function (q) {
                     return q.replace(/^\s+|\s+$/g, '');
                 });
             var list = { length: 0 };
@@ -10444,7 +10444,7 @@
             };
             list.appendMedium = function (medium) {
                 var query = serializeMediaList(String(medium));
-                if (!query || splitTopLevel(query, ',').length !== 1) return;
+                if (!query || splitTopLevelBy(query, ',').length !== 1) return;
                 if (items.indexOf(query) >= 0) return;
                 items.push(query);
                 relist(true);
@@ -10489,8 +10489,17 @@
             },
             function () {});
         accessor(CSSMediaRule.prototype, 'media',
-            function () { return makeMediaListObject(this.__condition); },
-            function () {});
+            function () {
+                var rule = this;
+                return makeMediaListObject(rule.__condition, function (text) {
+                    rule.__condition = text;
+                    notify(rule);
+                });
+            },
+            function (v) {
+                this.__condition = serializeMediaList(String(v));
+                notify(this);
+            });
         function containerSplit(cond) {
             var s = String(cond || '');
             if (/^\(|^not\s|^not\(/i.test(s)) return ['', s];
@@ -11392,7 +11401,7 @@
         }
 
         function nestedSelectorText(sel) {
-            var parts = splitTopLevel(sel, ',');
+            var parts = splitTopLevelBy(sel, ',');
             return parts.map(function (part) {
                 var t = part.replace(/^\s+|\s+$/g, '');
                 if (!t) return t;
