@@ -11,14 +11,8 @@ fn lanes_equal(word: u64, byte: u8) -> u64 {
 }
 
 fn words(hay: &[u8]) -> (impl Iterator<Item = u64> + '_, &[u8]) {
-    let chunks = hay.chunks_exact(8);
-    let rest = chunks.remainder();
-    let words = chunks.map(|chunk| {
-        let mut bytes = [0u8; 8];
-        bytes.copy_from_slice(chunk);
-        u64::from_le_bytes(bytes)
-    });
-    (words, rest)
+    let (chunks, rest) = hay.as_chunks::<8>();
+    (chunks.iter().map(|chunk| u64::from_le_bytes(*chunk)), rest)
 }
 
 pub fn find_any<const N: usize>(hay: &[u8], needles: [u8; N]) -> Option<usize> {

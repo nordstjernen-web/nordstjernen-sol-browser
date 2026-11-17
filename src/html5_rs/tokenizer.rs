@@ -516,7 +516,7 @@ impl<'a> Tokenizer<'a> {
 
     fn data(&mut self) -> Option<Kind> {
         let start = self.pos;
-        let found = find_any(&self.input[start..], [b'<', b'&']);
+        let found = find_any(&self.input[start..], *b"<&");
         let Some(i) = found else {
             self.push_input(start, self.input.len());
             return self.eof();
@@ -1434,7 +1434,7 @@ impl<'a> Tokenizer<'a> {
                 None => return self.emit_doctype_then_eof(true),
                 Some(_) => self.state = State::BogusDoctype,
             },
-            _ => match find_any(&self.input[self.pos..], [b'>']) {
+            _ => match find_any(&self.input[self.pos..], *b">") {
                 Some(i) => {
                     self.pos += i + 1;
                     return self.emit_doctype();
@@ -1507,7 +1507,7 @@ impl<'a> Tokenizer<'a> {
             },
             State::PiData => {
                 let start = self.pos;
-                let found = find_any(&self.input[start..], [b'?', b'>']);
+                let found = find_any(&self.input[start..], *b"?>");
                 let Some(i) = found else {
                     return self.eof();
                 };
