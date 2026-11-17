@@ -1979,14 +1979,15 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         ns_net_raw_header_values(resp->raw_headers, "Connection-Allowlist");
 
     char *doc_charset = NULL;
-    char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
-                                             resp->body->len,
-                                             resp->content_type,
-                                             &doc_charset);
+    gsize decoded_len = 0;
+    char *decoded = ns_html_decode_body_len((const char *)resp->body->data,
+                                            resp->body->len,
+                                            resp->content_type,
+                                            &doc_charset, &decoded_len);
     const ns_config *parse_cfg = ns_config_get();
     gboolean scripting_on = !parse_cfg || parse_cfg->javascript_enabled;
     ns_node *doc = ns_parse_document_for_type(
-        decoded ? decoded : "", decoded ? (gssize)strlen(decoded) : 0,
+        decoded ? decoded : "", decoded ? (gssize)decoded_len : 0,
         resp->content_type, scripting_on);
     g_free(decoded);
     int sec = resp->security;

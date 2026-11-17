@@ -60,6 +60,9 @@ char *ns_html_declared_charset(const char *body, gsize len,
 
 char *ns_html_decode_body_full(const char *body, gsize len,
                                const char *content_type, char **charset_out);
+char *ns_html_decode_body_len(const char *body, gsize len,
+                              const char *content_type, char **charset_out,
+                              gsize *len_out);
 
 char *ns_html_image_document(const char *url);
 

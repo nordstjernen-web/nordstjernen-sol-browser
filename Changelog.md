@@ -27,6 +27,17 @@ Changelog:
   builder no longer nests elements deeper than the DOM's depth limit of
   512: past it, new elements become children of the element at the limit,
   as in Blink and Gecko. The two inputs now parse in 7 ms and 30 ms.
+* Documents and markup strings keep their U+0000 bytes on the way to the
+  parser, which replaces or drops them as the HTML Standard says. A
+  document used to be cut off at its first NUL byte, as were strings
+  assigned to `innerHTML` and markup written into a frame's document with
+  `document.write`. `compatMode` on a frame's document reports that
+  document's own quirks mode instead of always `CSS1Compat`. With the
+  doctype and whitespace fixes below, `html/syntax/parsing` in
+  web-platform-tests goes from 7,984 to 8,140 of 8,195 subtests, the same
+  whether documents are parsed whole or in 7-byte chunks; what remains
+  needs scripts to run while the parser is paused, and `<template>`
+  elements in the SVG namespace.
 * `<!DOCTYPE>` with no name gives a doctype whose `name` is the empty
   string instead of `html`; whitespace between `</head>` and `<body>`
   stays in the tree as a text node, as the Standard asks, instead of being
