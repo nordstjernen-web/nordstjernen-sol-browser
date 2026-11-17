@@ -22369,6 +22369,20 @@ sticky_inset(const ns_css_value *v, double basis, gboolean *set, double *out)
     *set = isfinite(*out);
 }
 
+static double
+sticky_scroll_range_x(const ns_box *container)
+{
+    return container->scrolls && container->scroll_max_x > 0
+        ? container->scroll_max_x : 0;
+}
+
+static double
+sticky_scroll_range_y(const ns_box *container)
+{
+    return container->scrolls && container->scroll_max_y > 0
+        ? container->scroll_max_y : 0;
+}
+
 static void
 ns_box_sticky_offset_in(const ns_box *b, double sp_x0, double sp_y0,
                         double sp_x1, double sp_y1,
@@ -22392,8 +22406,8 @@ ns_box_sticky_offset_in(const ns_box *b, double sp_x0, double sp_y0,
     if (p) {
         cb_left = p->x + p->margin.left + p->border.left + p->padding.left;
         cb_top  = p->y + p->margin.top  + p->border.top  + p->padding.top;
-        cb_right = cb_left + p->content_width;
-        cb_bot   = cb_top  + p->content_height;
+        cb_right = cb_left + p->content_width + sticky_scroll_range_x(p);
+        cb_bot   = cb_top  + p->content_height + sticky_scroll_range_y(p);
     } else {
         cb_left = sp_x0; cb_top = 0;
         cb_right = sp_x1; cb_bot = G_MAXDOUBLE / 2;
@@ -22534,7 +22548,7 @@ ns_box_sticky_y_model(const ns_box *b, double viewport_h, ns_sticky_y *out)
                    b->content_height +
                    b->padding.bottom + b->border.bottom + b->margin.bottom;
     double cb_top = p->y + p->margin.top + p->border.top + p->padding.top;
-    double cb_bot = cb_top + p->content_height;
+    double cb_bot = cb_top + p->content_height + sticky_scroll_range_y(p);
     double tval, bval;
     sticky_inset(b->style->values[NS_CSS_TOP], viewport_h, &out->has_top,
                  &tval);

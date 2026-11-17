@@ -14909,10 +14909,11 @@ parse_value_for(ns_css_prop prop, const char *text)
         v = parse_keyword_choice(t, "nowrap wrap wrap-reverse");
         break;
     case NS_CSS_FLOAT:
-        v = parse_keyword_choice(t, "none left right");
+        v = parse_keyword_choice(t, "none left right inline-start inline-end");
         break;
     case NS_CSS_CLEAR:
-        v = parse_keyword_choice(t, "none left right both");
+        v = parse_keyword_choice(t,
+            "none left right both inline-start inline-end");
         break;
     case NS_CSS_BORDER_TOP_STYLE:
     case NS_CSS_BORDER_RIGHT_STYLE:
@@ -16580,6 +16581,67 @@ substitute_var_fallbacks(const char *vtext, int depth)
             g_free(sub);
         }
         after_var = TRUE;
+        p = args_end + 1;
+    }
+    return g_string_free(out, FALSE);
+}
+
+static gboolean
+css_env_name_is_zero_inset(const char *name)
+{
+    static const char *const sides[] = { "top", "right", "bottom", "left" };
+    static const char *const prefixes[] = { "safe-area-inset-",
+                                            "safe-area-max-inset-" };
+    for (gsize i = 0; i < G_N_ELEMENTS(prefixes); i++) {
+        if (!g_str_has_prefix(name, prefixes[i])) continue;
+        const char *side = name + strlen(prefixes[i]);
+        for (gsize j = 0; j < G_N_ELEMENTS(sides); j++)
+            if (strcmp(side, sides[j]) == 0) return TRUE;
+    }
+    return FALSE;
+}
+
+static char *
+substitute_env_functions(const char *vtext, int depth)
+{
+    if (!vtext || depth > 16) return NULL;
+    GString *out = g_string_new(NULL);
+    const char *p = vtext;
+    const char *end = vtext + strlen(vtext);
+    while (p < end) {
+        const char *fn = css_find_function(p, end, "env");
+        if (!fn) {
+            g_string_append_len(out, p, (gssize)(end - p));
+            break;
+        }
+        g_string_append_len(out, p, (gssize)(fn - p));
+        const char *args_start = fn + 4;
+        char term = 0;
+        const char *args_end = css_scan_until(args_start, end, ")", &term);
+        if (term != ')') {
+            g_string_free(out, TRUE);
+            return NULL;
+        }
+        char comma_term = 0;
+        const char *comma = css_scan_until(args_start, args_end, ",",
+                                           &comma_term);
+        const char *name_end = comma_term == ',' ? comma : args_end;
+        char *name = css_trim_dup_range(args_start, name_end);
+        char *sub = NULL;
+        if (css_env_name_is_zero_inset(name)) {
+            sub = g_strdup("0px");
+        } else if (comma_term == ',') {
+            char *fallback = css_trim_dup_range(comma + 1, args_end);
+            sub = substitute_env_functions(fallback, depth + 1);
+            g_free(fallback);
+        }
+        g_free(name);
+        if (!sub) {
+            g_string_free(out, TRUE);
+            return NULL;
+        }
+        g_string_append(out, sub);
+        g_free(sub);
         p = args_end + 1;
     }
     return g_string_free(out, FALSE);
@@ -19131,12 +19193,34 @@ webkit_prefixed_alias(const char *name)
     return FALSE;
 }
 
+static gboolean
+prop_name_is_inline_flow_relative(const char *pname)
+{
+    return strstr(pname, "-inline") != NULL ||
+           (g_str_has_prefix(pname, "border-") &&
+            g_str_has_suffix(pname, "-radius") &&
+            (strstr(pname, "-start-") || strstr(pname, "-end-")));
+}
+
+static void
+decls_mark_flow_relative(GArray *decls, guint from, gboolean flow_relative)
+{
+    if (!decls || !flow_relative) return;
+    for (guint i = from; i < decls->len; i++)
+        g_array_index(decls, ns_css_decl, i).flow_relative = TRUE;
+}
+
 static void
 parse_declaration_block(const char **pp, const char *end,
                         GArray *decls_out, ns_css_rule *capture)
 {
     const char *p = *pp;
+    guint flow_relative_from = decls_out ? decls_out->len : 0;
+    gboolean flow_relative = FALSE;
     while (p < end && *p != '}') {
+        decls_mark_flow_relative(decls_out, flow_relative_from, flow_relative);
+        flow_relative_from = decls_out ? decls_out->len : 0;
+        flow_relative = FALSE;
         p = css_skip_ws_comments(p, end);
         while (p < end && *p == ';') {
             p++;
@@ -19170,6 +19254,7 @@ parse_declaration_block(const char **pp, const char *end,
                 pname = plain;
             }
         }
+        flow_relative = prop_name_is_inline_flow_relative(pname);
         p = css_skip_ws_comments(p, end);
         if (p >= end || *p != ':') { g_free(pname);
             char term = 0;
@@ -19190,6 +19275,18 @@ parse_declaration_block(const char **pp, const char *end,
             g_free(pname);
             if (p < end && *p == ';') p++;
             continue;
+        }
+
+        if (css_find_function(raw_vtext, raw_vtext + strlen(raw_vtext), "env")) {
+            char *without_env = substitute_env_functions(raw_vtext, 0);
+            if (!without_env) {
+                g_free(raw_vtext);
+                g_free(pname);
+                if (p < end && *p == ';') p++;
+                continue;
+            }
+            g_free(raw_vtext);
+            raw_vtext = without_env;
         }
 
         if (capture && pname[0] == '-' && pname[1] == '-' && pname[2]) {
@@ -20806,6 +20903,7 @@ parse_declaration_block(const char **pp, const char *end,
         if (p < end && *p == ';') p++;
     }
     if (p < end && *p == '}') p++;
+    decls_mark_flow_relative(decls_out, flow_relative_from, flow_relative);
     *pp = p;
 }
 
@@ -30483,6 +30581,7 @@ typedef struct match_entry {
     const ns_css_rule *rule;
     ns_css_value *value;
     ns_css_prop  prop;
+    gboolean     flow_relative;
 } match_entry;
 
 typedef struct var_match {
@@ -31151,6 +31250,7 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                     .rule = r,
                     .value = d->value,
                     .prop  = d->prop,
+                    .flow_relative = d->flow_relative,
                 };
                 g_array_append_val(dst->out, e);
             }
@@ -32485,6 +32585,7 @@ append_pending_decls(const pending_match *pm, const char *value_text,
             .rule = pm->rule,
             .value = d->value,
             .prop  = d->prop,
+            .flow_relative = d->flow_relative,
         };
         g_array_append_val(matches, me);
         if (per_element) g_ptr_array_add(owned_values, d->value);
@@ -33740,6 +33841,22 @@ style_keyword_or_initial(const ns_style *s, ns_css_prop prop)
 }
 
 static void
+resolve_flow_relative_float(ns_style *out, const ns_style *parent_style)
+{
+    static const ns_css_prop props[] = { NS_CSS_FLOAT, NS_CSS_CLEAR };
+    const ns_style *block = parent_style ? parent_style : out;
+    gboolean rtl = ns_css_keyword_is(block->values[NS_CSS_DIRECTION], "rtl");
+    for (gsize i = 0; i < G_N_ELEMENTS(props); i++) {
+        const ns_css_value *v = out->values[props[i]];
+        gboolean start = ns_css_keyword_is(v, "inline-start");
+        if (!start && !ns_css_keyword_is(v, "inline-end")) continue;
+        ns_css_value_free(out->values[props[i]]);
+        out->values[props[i]] =
+            keyword_value(g_strdup(start == rtl ? "right" : "left"));
+    }
+}
+
+static void
 derive_white_space(ns_style *out)
 {
     const char *collapse = style_keyword_or_initial(out, NS_CSS_WHITE_SPACE_COLLAPSE);
@@ -33848,11 +33965,65 @@ document_meta_color_scheme(const ns_node *n, int depth)
     return NULL;
 }
 
+static ns_css_prop
+flow_relative_mirror(ns_css_prop prop)
+{
+    static const ns_css_prop pairs[][2] = {
+        { NS_CSS_MARGIN_LEFT, NS_CSS_MARGIN_RIGHT },
+        { NS_CSS_PADDING_LEFT, NS_CSS_PADDING_RIGHT },
+        { NS_CSS_LEFT, NS_CSS_RIGHT },
+        { NS_CSS_BORDER_LEFT_WIDTH, NS_CSS_BORDER_RIGHT_WIDTH },
+        { NS_CSS_BORDER_LEFT_STYLE, NS_CSS_BORDER_RIGHT_STYLE },
+        { NS_CSS_BORDER_LEFT_COLOR, NS_CSS_BORDER_RIGHT_COLOR },
+        { NS_CSS_SCROLL_MARGIN_LEFT, NS_CSS_SCROLL_MARGIN_RIGHT },
+        { NS_CSS_SCROLL_PADDING_LEFT, NS_CSS_SCROLL_PADDING_RIGHT },
+        { NS_CSS_BORDER_TOP_LEFT_RADIUS, NS_CSS_BORDER_TOP_RIGHT_RADIUS },
+        { NS_CSS_BORDER_BOTTOM_LEFT_RADIUS, NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(pairs); i++) {
+        if (prop == pairs[i][0]) return pairs[i][1];
+        if (prop == pairs[i][1]) return pairs[i][0];
+    }
+    return prop;
+}
+
+static gboolean
+cascaded_direction_is_rtl(const GArray *matches, const ns_style *parent_style)
+{
+    for (guint i = matches->len; i > 0; i--) {
+        const match_entry *m = &g_array_index(matches, match_entry, i - 1);
+        if (m->prop != NS_CSS_DIRECTION) continue;
+        if (ns_css_keyword_is(m->value, "rtl")) return TRUE;
+        if (ns_css_keyword_is(m->value, "ltr") || value_is_initial(m->value))
+            return FALSE;
+        if (value_is_revert(m->value) || value_is_revert_layer(m->value) ||
+            value_is_revert_rule(m->value))
+            continue;
+        break;
+    }
+    return parent_style &&
+           ns_css_keyword_is(parent_style->values[NS_CSS_DIRECTION], "rtl");
+}
+
+static void
+cascade_mirror_flow_relative(GArray *matches, const ns_style *parent_style)
+{
+    gboolean any = FALSE;
+    for (guint i = 0; i < matches->len && !any; i++)
+        any = g_array_index(matches, match_entry, i).flow_relative;
+    if (!any || !cascaded_direction_is_rtl(matches, parent_style)) return;
+    for (guint i = 0; i < matches->len; i++) {
+        match_entry *m = &g_array_index(matches, match_entry, i);
+        if (m->flow_relative) m->prop = flow_relative_mirror(m->prop);
+    }
+}
+
 static void
 cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             const ns_style *layout_parent, gboolean is_root, double root_px)
 {
     g_array_sort(matches, match_cmp);
+    cascade_mirror_flow_relative(matches, parent_style);
     for (guint i = 0; i < matches->len; i++) {
         match_entry *m = &g_array_index(matches, match_entry, i);
         if (value_is_revert(m->value) || value_is_revert_layer(m->value) ||
@@ -33973,6 +34144,7 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
     }
     resolve_def_colors(out);
     derive_white_space(out);
+    resolve_flow_relative_float(out, parent_style);
     resolve_emphasis_style(out);
     resolve_text_size_adjust(out);
     {
@@ -38423,6 +38595,7 @@ cascade_walk(ns_node *node,
                         .rule = r,
                         .value = d->value,
                         .prop  = d->prop,
+                        .flow_relative = d->flow_relative,
                     };
                     g_array_append_val(matches, e);
                 }
@@ -38486,6 +38659,7 @@ cascade_walk(ns_node *node,
                         .rule = r,
                         .value = d->value,
                         .prop  = d->prop,
+                        .flow_relative = d->flow_relative,
                     };
                     g_array_append_val(matches, e);
                 }

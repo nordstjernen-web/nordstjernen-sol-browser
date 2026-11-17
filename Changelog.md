@@ -3,6 +3,33 @@ Changelog:
 
 1.0.50-dev:
 ======
+* `float: inline-start` / `inline-end` and `clear: inline-start` /
+  `inline-end` are supported: they resolve to left or right from the
+  containing block's `direction`. They were rejected before, so a float
+  written that way did not float at all.
+* A `position: sticky` box that is a direct child of its scroll container
+  stays stuck for the whole scroll range. Its containing block was taken
+  as the scroller's visible box rather than its scrollable content, so a
+  sticky table header or toolbar inside an `overflow: auto` pane scrolled
+  away after the first screenful.
+* Flow-relative properties follow `direction`. `margin-inline-start`,
+  `padding-inline-end`, `inset-inline-start`, `border-inline-start`, the
+  `margin-inline` / `padding-inline` / `inset-inline` / `border-inline`
+  shorthands, `scroll-margin-inline-*`, `scroll-padding-inline-*` and
+  `border-start-start-radius` and its siblings were mapped to the left or
+  right side when the stylesheet was parsed, so in a right-to-left
+  element they landed on the wrong side: a list in an Arabic or Hebrew
+  page was indented on the left. The cascade now resolves them against
+  the element's own `direction`, in cascade order with the physical
+  properties, and `getComputedStyle(el).marginInlineStart` reads the
+  matching side.
+* `env()` works wherever a value is allowed, not only inside `calc()`.
+  `env(safe-area-inset-top)` and the other `safe-area-inset-*` and
+  `safe-area-max-inset-*` variables are `0px`, any other name takes its
+  fallback, and a declaration whose `env()` has neither is dropped.
+  `padding: env(safe-area-inset-top, 20px)` was rejected as a whole
+  before, so pages written for notched phones lost that padding, and
+  `CSS.supports('padding-top', 'env(safe-area-inset-top)')` was false.
 * Security: the WebGL getters accept only the parameter names WebGL
   defines. `getTexParameter`, `getBufferParameter`,
   `getRenderbufferParameter`, `getFramebufferAttachmentParameter`,
