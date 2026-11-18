@@ -3,6 +3,13 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Moving the pointer, pressing a button or moving focus restyles only
+  the elements a `:hover`, `:active`, `:focus` or `:focus-within` rule
+  can reach. A stylesheet with `:has(:hover)`, a sibling rule such as
+  `:focus ~ label`, or a `:has([class…])` rule used to send every such
+  change, and every class change on `<body>`, through a cascade of the
+  whole document; on Gmail that was about 65 ms per pointer move and
+  six times per opened compose window.
 * Script-heavy pages such as Gmail repaint and restyle with less work.
   An element with `opacity`, a blend mode or a mask that also has a
   `transition` or `animation` is composited over its own box instead of
