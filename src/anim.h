@@ -12,6 +12,9 @@ typedef struct ns_anim ns_anim;
 ns_anim *ns_anim_new(void);
 void     ns_anim_free(ns_anim *a);
 void     ns_anim_load_from_stylesheet(ns_anim *a, const ns_css_stylesheet *sh);
+void     ns_anim_load_from_stylesheets(ns_anim *a,
+                                       const ns_css_stylesheet *const *sheets,
+                                       guint n_sheets);
 void     ns_anim_observe_all(ns_anim *a, GHashTable *styles, gint64 now_us);
 gboolean ns_anim_tick(ns_anim *a, gint64 now_us);
 gboolean ns_anim_has_active(const ns_anim *a);
