@@ -20582,6 +20582,7 @@ static void
 ns_anim_list_visit(const ns_anim_info *info, gpointer user)
 {
     ns_anim_list_ctx *lc = user;
+    if (info->node && (info->node->flags & NS_NODE_UA_OVERLAY)) return;
     JSValue o = ns_anim_info_to_js(lc->ctx, info);
     JS_SetPropertyStr(lc->ctx, o, "el", ns_make_element(lc->ctx, info->node));
     JS_SetPropertyUint32(lc->ctx, lc->arr, lc->n++, o);
@@ -37467,6 +37468,7 @@ ns_js_anim_event_cb(const ns_node *node, const char *type,
 {
     ns_js *js = user;
     if (!js || !js->ctx || !node || js->halted) return;
+    if (node->flags & NS_NODE_UA_OVERLAY) return;
     JSContext *ctx = js->ctx;
     if (g_str_has_prefix(type, "__ns")) {
         JSValue global = JS_GetGlobalObject(ctx);
@@ -61538,6 +61540,7 @@ ns_view_transition_overlay_remove(ns_js *js)
     ns_node *overlay = js->view_transition_overlay;
     if (!overlay) return;
     js->view_transition_overlay = NULL;
+    ns_anim_forget_node(js->anim, overlay);
     ns_node_remove(overlay);
     ns_node_free(overlay);
     ns_dom_tree_changed();
@@ -61553,13 +61556,11 @@ ns_view_transition_capture(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     if (!js || ctx != ns_js_main_realm(js) || !js->snapshot_cb ||
         js->view_transition_overlay)
-        return JS_NULL;
+        return JS_FALSE;
     ns_js_flush_layout(js);
-    char *data_url = js->snapshot_cb(js->snapshot_user_data);
-    if (!data_url) return JS_NULL;
-    JSValue out = JS_NewString(ctx, data_url);
-    g_free(data_url);
-    return out;
+    g_free(js->view_transition_snapshot);
+    js->view_transition_snapshot = js->snapshot_cb(js->snapshot_user_data);
+    return JS_NewBool(ctx, js->view_transition_snapshot != NULL);
 }
 
 static JSValue
@@ -61570,11 +61571,11 @@ ns_view_transition_show(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     ns_node *root = js ? (ns_node *)ns_js_root_element(js) : NULL;
     double duration_ms = 0;
-    if (!root || argc < 2 || !JS_IsString(argv[0]) ||
-        JS_ToFloat64(ctx, &duration_ms, argv[1]) != 0 || !(duration_ms > 0))
+    if (!root || ctx != ns_js_main_realm(js) || argc < 1 ||
+        JS_ToFloat64(ctx, &duration_ms, argv[0]) != 0 || !(duration_ms > 0))
         return JS_FALSE;
     ns_view_transition_overlay_remove(js);
-    const char *snapshot = JS_ToCString(ctx, argv[0]);
+    g_autofree char *snapshot = g_steal_pointer(&js->view_transition_snapshot);
     if (!snapshot) return JS_FALSE;
     char number[G_ASCII_DTOSTR_BUF_SIZE];
     g_autofree char *style = g_strdup_printf(
@@ -61583,7 +61584,6 @@ ns_view_transition_show(JSContext *ctx, JSValueConst this_val,
         "background-repeat:no-repeat;"
         "animation:-nd-view-transition-fade %sms ease both",
         snapshot, g_ascii_formatd(number, sizeof number, "%.0f", duration_ms));
-    JS_FreeCString(ctx, snapshot);
     ns_node *overlay = ns_node_new_element(g_strdup("nd-view-transition"));
     overlay->flags |= NS_NODE_UA_OVERLAY | NS_NODE_STYLE_ATTR_TRUSTED;
     ns_element_set_attr(overlay, "style", style);
@@ -61601,7 +61601,10 @@ ns_view_transition_end(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val; (void)argc; (void)argv;
     ns_js *js = js_from_ctx(ctx);
-    if (js) ns_view_transition_overlay_remove(js);
+    if (js) {
+        ns_view_transition_overlay_remove(js);
+        g_clear_pointer(&js->view_transition_snapshot, g_free);
+    }
     return JS_UNDEFINED;
 }
 
@@ -64235,7 +64238,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "fetchLater", ns_window_fetch_later, 1);
     ns_bind_fn(ctx, global, "__ns_set_highlights", ns_set_highlights, 1);
     ns_bind_fn(ctx, global, "__ns_vt_capture", ns_view_transition_capture, 0);
-    ns_bind_fn(ctx, global, "__ns_vt_show", ns_view_transition_show, 2);
+    ns_bind_fn(ctx, global, "__ns_vt_show", ns_view_transition_show, 1);
     ns_bind_fn(ctx, global, "__ns_vt_end", ns_view_transition_end, 0);
     ns_bind_fn(ctx, global, "__ns_set_interest_state", ns_set_interest_state, 3);
     ns_bind_fn(ctx, global, "scrollTo", ns_window_scroll_to, 2);
@@ -68271,6 +68274,7 @@ ns_js_reset_runtime_state(ns_js *js)
     ns_js_fetch_later_flush(js);
     ns_js_highlights_clear(js);
     js->view_transition_overlay = NULL;
+    g_clear_pointer(&js->view_transition_snapshot, g_free);
 
     if (js->listeners) {
         for (guint i = 0; i < js->listeners->len; i++) {
@@ -68989,6 +68993,7 @@ ns_js_free(ns_js *js)
     ns_js_fetch_later_flush(js);
     ns_js_highlights_clear(js);
     js->view_transition_overlay = NULL;
+    g_clear_pointer(&js->view_transition_snapshot, g_free);
     for (; js->mic_holds > 0; js->mic_holds--) ns_mic_release();
     for (; js->camera_holds > 0; js->camera_holds--) ns_camera_release();
     if (js->media_grant_origins) {

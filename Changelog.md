@@ -16,6 +16,11 @@ Changelog:
 * A single-line text input shows spelling marks only while focused.
 * `crypto.subtle.importKey()` rejects SPKI and PKCS#8 data with
   trailing bytes.
+* Security: a page can no longer read the pixels of cross-origin
+  frames and images through the view-transition snapshot. The snapshot
+  stays inside the engine, and the transition overlay is hidden from
+  `getAnimations()` and from animation events; removing the overlay
+  while its fade was still running could crash the renderer.
 * Security: a WebSocket opens only on a 101 response, and the shell no
   longer accepts a renderer's claim that a web load ended on an
   internal `about:` page.

@@ -132,6 +132,7 @@ struct ns_js {
     ns_js_snapshot_cb snapshot_cb;
     gpointer      snapshot_user_data;
     ns_node      *view_transition_overlay;
+    char         *view_transition_snapshot;
     gpointer      viewport_scroll_user_data;
     gboolean    (*load_delay_cb)(gpointer user_data);
     gpointer      load_delay_user_data;

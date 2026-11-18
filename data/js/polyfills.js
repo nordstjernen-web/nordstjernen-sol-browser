@@ -16164,6 +16164,9 @@
         var capture = global.__ns_vt_capture;
         var showOld = global.__ns_vt_show;
         var hideOld = global.__ns_vt_end;
+        delete global.__ns_vt_capture;
+        delete global.__ns_vt_show;
+        delete global.__ns_vt_end;
 
         function reducedMotion() {
             try { return !!global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches; }
@@ -16195,11 +16198,11 @@
             var previous = active.get(doc);
             if (previous) previous.skipTransition();
             var snapshot = (doc === global.document && typeof capture === 'function' && !reducedMotion())
-                ? capture() : null;
+                ? capture() === true : false;
             var updated = Promise.resolve().then(function () { return update ? update() : undefined; })
                                            .then(function () { return undefined; });
             var ready = updated.then(function () {
-                if (snapshot && !state.skipped && showOld(snapshot, FADE_MS)) state.fading = true;
+                if (snapshot && !state.skipped && showOld(FADE_MS)) state.fading = true;
             });
             var finished = ready.then(function () {
                 if (!state.fading) return undefined;
