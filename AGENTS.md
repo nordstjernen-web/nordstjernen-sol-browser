@@ -287,6 +287,15 @@ Optionally use the `lld` linker for faster final links
 `meson compile -C builddir` in one shot — use it instead of typing
 the two commands separately.
 
+A plain `meson setup` builds with link-time optimisation (`b_lto=true`),
+which relinks the whole engine on every change. `scripts/dev.sh build`
+configures `-Db_lto=false` for the edit-compile loop; pass it yourself
+when setting up a development tree by hand. `scripts/pgo-build.sh` makes
+the fully optimised build in `builddir-pgo/`: an instrumented build, a
+training run over `data/render-tests/` and the QuickJS microbench, then
+the rebuild from that profile (`-Dpgo=generate` / `-Dpgo=use`; meson's
+own `b_pgo` rejects the Rust targets).
+
 ## Security fixes across editions
 
 [Northstar](https://github.com/nordstjernen-web/northstar-browser) and

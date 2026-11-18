@@ -10385,7 +10385,8 @@ ns_headers_init_add_raw(JSContext *ctx, JSValueConst init, const char *raw)
         while (*eol && *eol != '\n') eol++;
         const char *lineend = eol;
         if (lineend > p && lineend[-1] == '\r') lineend--;
-        const char *colon = memchr(p, ':', (size_t)(lineend - p));
+        gsize linelen = lineend > p ? (gsize)(lineend - p) : 0;
+        const char *colon = memchr(p, ':', linelen);
         if (colon && colon > p) {
             gsize nlen = (gsize)(colon - p);
             char *name = g_ascii_strdown(p, nlen);
@@ -22109,7 +22110,8 @@ ns_xhr_getResponseHeader(JSContext *ctx, JSValueConst this_val,
             while (*eol && *eol != '\n') eol++;
             const char *lineend = eol;
             if (lineend > p && lineend[-1] == '\r') lineend--;
-            const char *colon = memchr(p, ':', (gsize)(lineend - p));
+            gsize linelen = lineend > p ? (gsize)(lineend - p) : 0;
+            const char *colon = memchr(p, ':', linelen);
             if (colon) {
                 gsize hn = (gsize)(colon - p);
                 if (hn == nlen && g_ascii_strncasecmp(p, name, nlen) == 0) {

@@ -5430,7 +5430,7 @@ synthesize_about_response(const char *url, const char *top_url,
                           const char *method, const void *req_body,
                           gsize req_body_len, ns_response *resp)
 {
-    if (!g_str_has_prefix(url, "about:")) return FALSE;
+    if (!url || !g_str_has_prefix(url, "about:")) return FALSE;
     g_autofree char *what = g_strndup(url + strlen("about:"),
                                       strcspn(url + strlen("about:"), "?#"));
     if (about_request_refused(url, top_url, is_navigation)) {

@@ -3,6 +3,12 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Builds use link-time optimisation by default (`b_lto=true`), and
+  `scripts/pgo-build.sh` makes a profile-guided build: it builds
+  instrumented binaries, trains them on `data/render-tests/` and the
+  QuickJS microbench, and rebuilds from the profile (the new `pgo` meson
+  option, for GCC and Clang). `scripts/dev.sh build` configures
+  `-Db_lto=false` to keep relinking fast.
 * Inline-blocks, images and other atomic inlines sit where the text
   layout puts them in a right-to-left line. They were drawn one box
   width too far to the start side, so an icon in an Arabic or Hebrew

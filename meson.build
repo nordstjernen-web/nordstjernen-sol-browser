@@ -10,6 +10,7 @@ project(
     'optimization=3',
     'b_ndebug=true',
     'b_pie=true',
+    'b_lto=true',
   ],
   meson_version: '>=1.3',
 )
@@ -72,12 +73,10 @@ add_project_link_arguments(
 
 ns_buildtype = get_option('buildtype')
 ns_is_release = (ns_buildtype == 'release' or ns_buildtype == 'minsize')
-# Every build profile gets -O3 (via default_options optimization=3) plus
-# dead-section pruning. Nordstjernen leans on the optimizer to inline the
-# HTML parser walks, QuickJS interpreter dispatch, and our box-layout
-# loops; -O2 left ~30% on the table for JS-heavy pages. The -O level is
-# left to meson's optimization option so it isn't passed twice (which
-# warns); we only add the section-GC flags here. Dev/non-release builds
+# Every build profile gets -O3 and link-time optimisation (default_options
+# optimization=3 and b_lto=true) plus dead-section pruning; -Db_lto=false
+# gives the faster edit-compile loop that scripts/dev.sh uses, and -Dpgo adds
+# profile-guided optimisation (scripts/pgo-build.sh). Dev/non-release builds
 # keep -g3 + frame pointers so step debugging still works under -O3.
 add_project_arguments(
   cc.get_supported_arguments(['-ffunction-sections', '-fdata-sections']),
@@ -98,9 +97,34 @@ else
     language: 'c',
   )
 endif
+ns_pgo = get_option('pgo')
+if ns_pgo != 'off'
+  ns_pgo_dir = meson.project_build_root() / 'pgo'
+  if cc.get_id() == 'clang' and ns_pgo == 'generate'
+    ns_pgo_args = ['-fprofile-generate=' + ns_pgo_dir]
+    ns_pgo_link_args = ns_pgo_args
+  elif cc.get_id() == 'clang'
+    ns_pgo_args = ['-fprofile-use=' + ns_pgo_dir / 'default.profdata',
+                   '-Wno-profile-instr-unprofiled',
+                   '-Wno-profile-instr-out-of-date',
+                   '-Wno-backend-plugin']
+    ns_pgo_link_args = []
+  elif ns_pgo == 'generate'
+    ns_pgo_args = ['-fprofile-generate', '-fprofile-update=atomic']
+    ns_pgo_link_args = ns_pgo_args
+  else
+    ns_pgo_args = cc.get_supported_arguments(
+      ['-fprofile-use', '-fprofile-correction', '-fprofile-partial-training',
+       '-Wno-missing-profile', '-Wno-coverage-mismatch'])
+    ns_pgo_link_args = ['-fprofile-use']
+  endif
+  add_project_arguments(ns_pgo_args, language: 'c')
+  add_project_link_arguments(ns_pgo_link_args, language: 'c')
+endif
 message('nordstjernen build profile: ' +
-        (ns_is_release ? 'release (LTO + stripped + hardened)'
-                       : 'development (debug symbols + frame pointer + hardened)'))
+        (ns_is_release ? 'release (stripped + hardened' : 'development (debug symbols + frame pointer + hardened') +
+        (get_option('b_lto') ? ' + LTO' : '') +
+        (ns_pgo == 'off' ? '' : ' + PGO ' + ns_pgo) + ')')
 
 ns_profile_claude = get_option('profile') == 'claude'
 ns_libcurl_min = ns_profile_claude ? '>=8.5' : '>=8.11'
