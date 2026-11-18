@@ -36062,6 +36062,117 @@ incr_note_empty_sib(const ns_css_simple *c)
     g_ptr_array_free(preds, TRUE);
 }
 
+enum {
+    INCR_REACH_NEXT      = 1 << 0,
+    INCR_REACH_FOLLOWING = 1 << 1,
+    INCR_REACH_PREVIOUS  = 1 << 2,
+    INCR_REACH_PRECEDING = 1 << 3,
+    INCR_REACH_ALL       = (1 << 4) - 1,
+};
+
+static guint g_struct_reach;
+static guint g_struct_attr_reach;
+static GHashTable *g_struct_reach_keys[4];
+static guint g_struct_sib_reach;
+static guint g_struct_anc_reach;
+static GHashTable *g_struct_sib_keys;
+
+static guint
+incr_pc_reach(ns_css_pseudo k)
+{
+    switch (k) {
+    case NS_CSS_PC_FIRST_CHILD:
+        return INCR_REACH_NEXT;
+    case NS_CSS_PC_LAST_CHILD:
+        return INCR_REACH_PREVIOUS;
+    case NS_CSS_PC_FIRST_OF_TYPE:
+    case NS_CSS_PC_NTH_CHILD:
+    case NS_CSS_PC_NTH_OF_TYPE:
+        return INCR_REACH_FOLLOWING;
+    case NS_CSS_PC_LAST_OF_TYPE:
+    case NS_CSS_PC_NTH_LAST_CHILD:
+    case NS_CSS_PC_NTH_LAST_OF_TYPE:
+        return INCR_REACH_PRECEDING;
+    case NS_CSS_PC_ONLY_CHILD:
+    case NS_CSS_PC_ONLY_OF_TYPE:
+        return INCR_REACH_FOLLOWING | INCR_REACH_PRECEDING;
+    default:
+        return 0;
+    }
+}
+
+static guint incr_selector_reach(const ns_css_selector *sel, int d);
+
+static guint
+incr_simple_reach(const ns_css_simple *c, int d)
+{
+    if (!c) return 0;
+    if (d > 6) return INCR_REACH_ALL;
+    guint reach = 0;
+    for (guint i = 0; c->pseudos && i < c->pseudos->len; i++) {
+        const ns_css_pseudo_pred *p =
+            &g_array_index(c->pseudos, ns_css_pseudo_pred, i);
+        reach |= incr_pc_reach(p->kind);
+        for (guint gi = 0; p->of_group && gi < p->of_group->len; gi++)
+            reach |= incr_selector_reach(g_ptr_array_index(p->of_group, gi),
+                                         d + 1);
+    }
+    GPtrArray *gls[3] = { c->matches_any, c->matches_none, c->has_groups };
+    for (int g = 0; g < 3; g++)
+        for (guint gi = 0; gls[g] && gi < gls[g]->len; gi++) {
+            const GPtrArray *grp = g_ptr_array_index(gls[g], gi);
+            for (guint si = 0; grp && si < grp->len; si++)
+                reach |= incr_selector_reach(g_ptr_array_index(grp, si),
+                                             d + 1);
+        }
+    return reach;
+}
+
+static guint
+incr_selector_reach(const ns_css_selector *sel, int d)
+{
+    if (!sel || !sel->compounds) return 0;
+    if (d > 6) return INCR_REACH_ALL;
+    guint reach = 0;
+    for (guint i = 0; i < sel->compounds->len; i++)
+        reach |= incr_simple_reach(g_ptr_array_index(sel->compounds, i), d);
+    for (guint i = 0; sel->combinators && i < sel->combinators->len; i++) {
+        ns_css_comb cb = g_array_index(sel->combinators, ns_css_comb, i);
+        if (cb == NS_CSS_COMB_ADJACENT || cb == NS_CSS_COMB_SIBLING)
+            reach |= INCR_REACH_FOLLOWING;
+    }
+    return reach;
+}
+
+static guint
+incr_compound_reach(const ns_css_simple *c, ns_css_comb left)
+{
+    guint reach = incr_simple_reach(c, 0);
+    if (left == NS_CSS_COMB_ADJACENT) reach |= INCR_REACH_NEXT;
+    if (left == NS_CSS_COMB_SIBLING) reach |= INCR_REACH_FOLLOWING;
+    return reach;
+}
+
+static void
+incr_note_keyed_reach(const ns_css_simple *c, guint reach)
+{
+    if (!reach) return;
+    GHashTable *own = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                            NULL);
+    GPtrArray *preds = g_ptr_array_new();
+    incr_add_positive_compound_deps(own, preds, c, 0);
+    if (preds->len > 0) g_struct_attr_reach |= reach;
+    GHashTableIter it;
+    gpointer key;
+    g_hash_table_iter_init(&it, own);
+    while (g_hash_table_iter_next(&it, &key, NULL))
+        for (int bit = 0; bit < 4; bit++)
+            if (reach & (1u << bit))
+                g_hash_table_add(g_struct_reach_keys[bit], g_strdup(key));
+    g_hash_table_destroy(own);
+    g_ptr_array_free(preds, TRUE);
+}
+
 static void
 incr_collect_struct_keys(const ns_css_stylesheet *sh)
 {
@@ -36093,9 +36204,15 @@ incr_collect_struct_keys(const ns_css_stylesheet *sh)
                                         left == NS_CSS_COMB_SIBLING);
                 if (!incr_simple_has_structural(c, 0) && !sib_subject)
                     continue;
+                guint reach = incr_compound_reach(c, left);
+                if (reach && (right == NS_CSS_COMB_ADJACENT ||
+                              right == NS_CSS_COMB_SIBLING))
+                    g_struct_reach |= INCR_REACH_FOLLOWING;
                 if (incr_add_positive_compound_deps(
-                        g_struct_keys, g_struct_attrs, c, 0))
+                        g_struct_keys, g_struct_attrs, c, 0)) {
+                    incr_note_keyed_reach(c, reach);
                     continue;
+                }
                 gboolean sib_ctx = TRUE, found = FALSE;
                 for (int j = (int)ci - 1; j >= 0; j--) {
                     ns_css_comb cb = NS_CSS_COMB_NONE;
@@ -36108,17 +36225,27 @@ incr_collect_struct_keys(const ns_css_stylesheet *sh)
                                     cb == NS_CSS_COMB_SIBLING)) {
                         if (incr_add_positive_compound_deps(
                                 g_struct_keys, g_struct_attrs, jc, 0)) {
+                            GPtrArray *preds = g_ptr_array_new();
+                            incr_add_positive_compound_deps(g_struct_sib_keys,
+                                                            preds, jc, 0);
+                            if (preds->len > 0) g_struct_reach |= reach;
+                            else g_struct_sib_reach |= reach;
+                            g_ptr_array_free(preds, TRUE);
                             found = TRUE; break;
                         }
                     } else {
                         sib_ctx = FALSE;
                         if (incr_add_positive_compound_deps(
                                 g_struct_anc_keys, g_struct_anc_attrs, jc, 0)) {
+                            g_struct_anc_reach |= reach;
                             found = TRUE; break;
                         }
                     }
                 }
-                if (!found) g_struct_loose = TRUE;
+                if (!found) {
+                    g_struct_loose = TRUE;
+                    g_struct_reach |= reach;
+                }
             }
         }
     }
@@ -36372,6 +36499,16 @@ incr_ensure_struct_keys(const ns_css_stylesheet *ua,
     if (g_struct_anc_keys) g_hash_table_remove_all(g_struct_anc_keys);
     else g_struct_anc_keys = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                    g_free, NULL);
+    if (g_struct_sib_keys) g_hash_table_remove_all(g_struct_sib_keys);
+    else g_struct_sib_keys = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                   g_free, NULL);
+    for (int bit = 0; bit < 4; bit++) {
+        if (g_struct_reach_keys[bit])
+            g_hash_table_remove_all(g_struct_reach_keys[bit]);
+        else
+            g_struct_reach_keys[bit] = g_hash_table_new_full(
+                g_str_hash, g_str_equal, g_free, NULL);
+    }
     if (g_struct_attrs) g_ptr_array_set_size(g_struct_attrs, 0);
     else g_struct_attrs = g_ptr_array_new_with_free_func(incr_attr_dep_free);
     if (g_struct_anc_attrs) g_ptr_array_set_size(g_struct_anc_attrs, 0);
@@ -36419,6 +36556,10 @@ incr_ensure_struct_keys(const ns_css_stylesheet *ua,
     g_class_keys_loose = FALSE;
     g_id_keys_loose = FALSE;
     g_struct_loose = FALSE;
+    g_struct_reach = 0;
+    g_struct_attr_reach = 0;
+    g_struct_sib_reach = 0;
+    g_struct_anc_reach = 0;
     g_sib_loose = FALSE;
     incr_collect_struct_keys(ua);
     incr_collect_name_keys(ua);
@@ -36850,8 +36991,97 @@ incr_mark_children_positions(ns_node *parent, ns_node *added)
     return TRUE;
 }
 
+#define NS_INCR_REACH_SIBLINGS_MAX 64
+
+static guint
+incr_sibling_keyed_reach(const ns_node *s, guint side)
+{
+    guint reach = 0;
+    for (int bit = 0; bit < 4; bit++)
+        if ((side & (1u << bit)) &&
+            incr_node_matches_keys(s, g_struct_reach_keys[bit]))
+            reach |= 1u << bit;
+    if ((g_struct_attr_reach & side) &&
+        incr_node_matches_attr_preds(s, g_struct_attrs))
+        reach |= g_struct_attr_reach & side;
+    return reach;
+}
+
+static gboolean
+incr_struct_reach_possible(guint reach, guint side)
+{
+    if ((reach | g_struct_attr_reach) & side) return TRUE;
+    for (int bit = 0; bit < 4; bit++)
+        if ((side & (1u << bit)) &&
+            g_hash_table_size(g_struct_reach_keys[bit]) > 0)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+incr_mark_sibling_run(ns_node *from, gboolean forward, guint reach,
+                      int *budget)
+{
+    guint far = forward ? INCR_REACH_FOLLOWING : INCR_REACH_PRECEDING;
+    guint side = far | (forward ? INCR_REACH_NEXT : INCR_REACH_PREVIOUS);
+    for (ns_node *s = from; s && incr_struct_reach_possible(reach, side);
+         s = forward ? s->next_sibling : s->prev_sibling) {
+        if (s->kind != NS_NODE_ELEMENT) continue;
+        if ((reach & side) || incr_sibling_keyed_reach(s, side)) {
+            if (--*budget < 0) return FALSE;
+            ns_css_mark_restyle_dirty(s);
+        }
+        side = far;
+    }
+    return TRUE;
+}
+
+static guint
+incr_parent_struct_reach(const ns_node *parent)
+{
+    guint reach = g_struct_reach;
+    for (const ns_node *a = parent; a && g_struct_anc_reach; a = a->parent)
+        if (incr_node_matches_keys(a, g_struct_anc_keys) ||
+            incr_node_matches_attr_preds(a, g_struct_anc_attrs)) {
+            reach |= g_struct_anc_reach;
+            break;
+        }
+    for (const ns_node *c = parent->first_child; c && g_struct_sib_reach;
+         c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT &&
+            incr_node_matches_keys(c, g_struct_sib_keys)) {
+            reach |= g_struct_sib_reach;
+            break;
+        }
+    return reach;
+}
+
+static gboolean
+incr_mark_reached_siblings(ns_node *parent, ns_node *added, ns_node *after,
+                           ns_node *before)
+{
+    if (g_incr_dirty && g_hash_table_contains(g_incr_dirty, parent))
+        return TRUE;
+    guint reach = incr_parent_struct_reach(parent);
+    if (added) {
+        after = added->next_sibling;
+        before = added->prev_sibling;
+        reach |= INCR_REACH_FOLLOWING;
+    } else if (!after && !before) {
+        return FALSE;
+    }
+    int budget = NS_INCR_REACH_SIBLINGS_MAX;
+    if (!incr_mark_sibling_run(after, TRUE, reach, &budget) ||
+        !incr_mark_sibling_run(before, FALSE, reach, &budget))
+        return FALSE;
+    incr_mark_self_dirty(parent, NULL);
+    if (added) ns_css_mark_restyle_dirty(added);
+    return TRUE;
+}
+
 static void
-incr_mark_childlist(ns_node *parent, ns_node *added)
+incr_mark_childlist(ns_node *parent, ns_node *added, ns_node *after,
+                    ns_node *before, gboolean one_gap)
 {
     if (!g_struct_ready) {
         ns_css_mark_restyle_dirty(parent);
@@ -36859,7 +37089,9 @@ incr_mark_childlist(ns_node *parent, ns_node *added)
     }
     incr_mark_empty_dependents(parent);
     if (incr_childlist_needs_flood(parent)) {
-        if (!incr_mark_children_positions(parent, added))
+        if (!incr_mark_children_positions(parent, added) &&
+            !(one_gap &&
+              incr_mark_reached_siblings(parent, added, after, before)))
             ns_css_mark_restyle_dirty(parent);
     } else if (added)
         ns_css_mark_restyle_dirty(added);
@@ -36888,7 +37120,7 @@ ns_css_mark_childlist_replaced(ns_node *parent, ns_node *added,
     if (!parent || !incr_node_connected(parent)) return;
     gboolean gated = added &&
                      incr_has_mut_begin_replaced(added, removed, n_removed);
-    incr_mark_childlist(parent, added);
+    incr_mark_childlist(parent, added, NULL, NULL, added && n_removed == 0);
     incr_has_mut_end(gated);
 }
 
@@ -36900,7 +37132,8 @@ ns_css_mark_childlist_removed(ns_node *parent, ns_node *const *removed,
     if (!parent || !incr_node_connected(parent)) return;
     gboolean gated = n_removed > 0 &&
                      incr_has_mut_begin_nodes(removed, n_removed, FALSE);
-    incr_mark_childlist(parent, NULL);
+    incr_mark_childlist(parent, NULL, next_sibling, previous_sibling,
+                        n_removed == 1);
     ns_node *gap = next_sibling ? next_sibling : previous_sibling;
     if (gap && gap->parent == parent) incr_mark_has_subjects(gap);
     incr_has_mut_end(gated);

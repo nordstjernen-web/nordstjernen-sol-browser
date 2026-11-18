@@ -2141,6 +2141,24 @@ engine_node_frame_base(const ns_node *n, const char *dflt)
     return dflt;
 }
 
+#define NS_FRAME_CSP_CACHE_MAX 32
+
+static const ns_csp *
+frame_csp_parsed(const char *header)
+{
+    static GHashTable *parsed;
+    if (!parsed)
+        parsed = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                       (GDestroyNotify)ns_csp_free);
+    gpointer csp = NULL;
+    if (g_hash_table_lookup_extended(parsed, header, NULL, &csp)) return csp;
+    if (g_hash_table_size(parsed) >= NS_FRAME_CSP_CACHE_MAX)
+        g_hash_table_remove_all(parsed);
+    csp = ns_csp_parse(header);
+    g_hash_table_insert(parsed, g_strdup(header), csp);
+    return csp;
+}
+
 gboolean
 ns_engine_frame_csp_allows(const ns_node *n, ns_csp_kind kind,
                            const char *abs_url)
@@ -2153,12 +2171,10 @@ ns_engine_frame_csp_allows(const ns_node *n, ns_csp_kind kind,
             continue;
         const char *header = ns_element_get_attr(p, "data-nd-frame-csp");
         if (!header || !*header) return TRUE;
-        ns_csp *csp = ns_csp_parse(header);
+        const ns_csp *csp = frame_csp_parsed(header);
         if (!csp) return TRUE;
-        gboolean ok = ns_csp_allows(csp, kind, abs_url,
-                                    ns_element_get_attr(p, "data-nd-frame-url"));
-        ns_csp_free(csp);
-        return ok;
+        return ns_csp_allows(csp, kind, abs_url,
+                             ns_element_get_attr(p, "data-nd-frame-url"));
     }
     return TRUE;
 }

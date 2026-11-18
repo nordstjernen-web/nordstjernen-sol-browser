@@ -285,6 +285,10 @@ struct ns_js {
     char         *lifecycle_origin;
     int           lifecycle_phase;
     gint64        lifecycle_start_us;
+    gint64        heap_usage_sampled_us;
+    int64_t       heap_used_bytes;
+    int64_t       heap_total_bytes;
+    int64_t       heap_limit_bytes;
     gint64        eval_deadline_us;
     gint64        task_start_us;
     gint64        js_monitor_deadline_us;

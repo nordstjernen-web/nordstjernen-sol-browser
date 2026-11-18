@@ -126,6 +126,7 @@ struct ns_anim {
     GHashTable *states;
     GHashTable *active;
     GHashTable *keyframes;
+    guint64     keyframe_sheets_sig;
     int         active_count;
     GArray     *events;
     gint64      now_us;
@@ -389,6 +390,7 @@ ns_anim_register_keyframes(ns_anim *a, const ns_css_keyframes *src)
             copy->stops[i].raw_props = g_strdup(src->stops[i].raw_props);
     }
     g_hash_table_replace(a->keyframes, g_strdup(src->name), copy);
+    a->keyframe_sheets_sig = 0;
 }
 
 void
@@ -400,6 +402,23 @@ ns_anim_load_from_stylesheet(ns_anim *a, const ns_css_stylesheet *sh)
             &g_array_index(sh->keyframes, ns_css_keyframes, i);
         ns_anim_register_keyframes(a, kf);
     }
+}
+
+void
+ns_anim_load_from_stylesheets(ns_anim *a, const ns_css_stylesheet *const *sheets,
+                              guint n_sheets)
+{
+    if (!a) return;
+    guint64 sig = 1469598103934665603ULL ^ n_sheets;
+    for (guint i = 0; i < n_sheets; i++) {
+        sig ^= sheets[i] ? sheets[i]->serial : 0;
+        sig *= 1099511628211ULL;
+    }
+    sig |= 1;
+    if (a->keyframe_sheets_sig == sig) return;
+    for (guint i = 0; i < n_sheets; i++)
+        ns_anim_load_from_stylesheet(a, sheets[i]);
+    a->keyframe_sheets_sig = sig;
 }
 
 static double

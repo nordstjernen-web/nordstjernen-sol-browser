@@ -268,9 +268,56 @@ static void
 render_feed_animations(const ns_render_ctx *c, GHashTable *styles)
 {
     if (!c->anim) return;
-    for (guint i = 0; i < c->n_sheets; i++)
-        if (c->sheets[i]) ns_anim_load_from_stylesheet(c->anim, c->sheets[i]);
+    ns_anim_load_from_stylesheets(c->anim, c->sheets, c->n_sheets);
     ns_anim_observe_all(c->anim, styles, g_get_monotonic_time());
+}
+
+#define NS_FONT_REQUEST_REPEAT_US G_USEC_PER_SEC
+
+static guint64
+render_font_request_signature(const ns_render_ctx *c, GHashTable *families)
+{
+    guint64 sig = 1469598103934665603ULL ^ c->n_sheets;
+    for (guint i = 0; i < c->n_sheets; i++) {
+        sig ^= c->sheets[i] ? c->sheets[i]->serial : 0;
+        sig *= 1099511628211ULL;
+        sig ^= (guint64)(guintptr)(c->sheet_docs ? c->sheet_docs[i] : NULL);
+        sig *= 1099511628211ULL;
+    }
+    sig ^= (guint64)(guintptr)c->doc;
+    sig *= 1099511628211ULL;
+    sig ^= g_str_hash(c->base_url ? c->base_url : "");
+    sig *= 1099511628211ULL;
+    sig ^= g_str_hash(c->document_url ? c->document_url : "");
+    guint64 used = 0;
+    GHashTableIter iter;
+    gpointer key, val;
+    g_hash_table_iter_init(&iter, families);
+    while (g_hash_table_iter_next(&iter, &key, &val)) {
+        const render_font_usage *usage = val;
+        guint64 h = g_str_hash(key);
+        guint64 points = usage->codepoints->len;
+        for (guint i = 0; i < usage->codepoints->len; i++)
+            points += (guint64)g_array_index(usage->codepoints, gunichar, i) *
+                      0x9e3779b97f4a7c15ULL;
+        used += (h ^ points) * 1099511628211ULL;
+    }
+    return sig ^ used;
+}
+
+static gboolean
+render_font_requests_current(const ns_render_ctx *c, GHashTable *families)
+{
+    static __thread guint64 issued_sig;
+    static __thread gint64 issued_us;
+    guint64 sig = render_font_request_signature(c, families);
+    gint64 now = g_get_monotonic_time();
+    if (issued_us && sig == issued_sig &&
+        now - issued_us < NS_FONT_REQUEST_REPEAT_US)
+        return TRUE;
+    issued_sig = sig;
+    issued_us = now;
+    return FALSE;
 }
 
 static void
@@ -303,6 +350,10 @@ render_request_fonts(const ns_render_ctx *c, GHashTable *styles)
         (GDestroyNotify)g_ptr_array_unref);
     render_collect_font_usage(c->doc, styles, families);
     g_clear_pointer(&g_font_list_matches, g_hash_table_destroy);
+    if (render_font_requests_current(c, families)) {
+        g_hash_table_destroy(families);
+        return;
+    }
     for (guint i = 0; i < c->n_sheets; i++) {
         const ns_css_stylesheet *sh = c->sheets[i];
         if (!sh || !sh->font_faces) continue;
