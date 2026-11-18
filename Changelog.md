@@ -3,6 +3,9 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Windows: the hourglass cursor shown while a page loads follows the
+  display scaling setting (48 px at 150%, 64 px at 200%) instead of
+  staying 32 px next to system cursors that scale.
 * SVG `<text>` is laid out span by span: each `<tspan>` keeps its own
   position (`x`, `y`, `dx`, `dy`), font and paint, so multi-line and
   multi-colour labels in charts and diagrams render as written. Adds
