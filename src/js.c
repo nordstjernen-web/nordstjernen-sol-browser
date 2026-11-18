@@ -69516,36 +69516,36 @@ ns_js_classic_cache_key(const char *src, gsize len, const char *origin,
 }
 
 static gboolean
-ns_js_eval_bytecode_cached(ns_js *js, const char *key, gsize key_len,
+ns_js_eval_bytecode_cached(JSContext *ctx, const char *key, gsize key_len,
                            JSValue *out_value)
 {
     GBytes *bc = ns_bytecode_cache_get(key, key_len);
     if (!bc) return FALSE;
     gsize bc_len = 0;
     const guint8 *bc_data = g_bytes_get_data(bc, &bc_len);
-    JSValue fn = JS_ReadObject(js->ctx, bc_data, bc_len, JS_READ_OBJ_BYTECODE);
+    JSValue fn = JS_ReadObject(ctx, bc_data, bc_len, JS_READ_OBJ_BYTECODE);
     g_bytes_unref(bc);
     if (JS_IsException(fn)) {
-        JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+        JS_FreeValue(ctx, JS_GetException(ctx));
         return FALSE;
     }
-    *out_value = JS_EvalFunction(js->ctx, fn);
+    *out_value = JS_EvalFunction(ctx, fn);
     return TRUE;
 }
 
 static void
-ns_js_bytecode_cache_store(ns_js *js, JSValue fn_obj, const char *key,
+ns_js_bytecode_cache_store(JSContext *ctx, JSValue fn_obj, const char *key,
                            gsize key_len)
 {
     size_t bc_size = 0;
-    uint8_t *bc = JS_WriteObject(js->ctx, &bc_size, fn_obj,
+    uint8_t *bc = JS_WriteObject(ctx, &bc_size, fn_obj,
                                  JS_WRITE_OBJ_BYTECODE);
     if (!bc || bc_size == 0) {
-        if (bc) js_free(js->ctx, bc);
+        if (bc) js_free(ctx, bc);
         return;
     }
     ns_bytecode_cache_put(key, key_len, bc, bc_size);
-    js_free(js->ctx, bc);
+    js_free(ctx, bc);
 }
 
 static char *
@@ -70272,7 +70272,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         ? ns_js_classic_cache_key(copy, len, origin, src_line, src_col,
                                   source_flags, &bc_key_len)
         : NULL;
-    cache_hit = bc_key && ns_js_eval_bytecode_cached(js, bc_key, bc_key_len, &v);
+    cache_hit = bc_key && ns_js_eval_bytecode_cached(js->ctx, bc_key, bc_key_len, &v);
     if (!cache_hit) {
         JSValue geval = JS_GetGlobalObject(js->ctx);
         JSEvalOptions opts = {
@@ -70287,7 +70287,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         JS_FreeValue(js->ctx, geval);
         if (!JS_IsException(fn)) {
             if (bc_key)
-                ns_js_bytecode_cache_store(js, fn, bc_key, bc_key_len);
+                ns_js_bytecode_cache_store(js->ctx, fn, bc_key, bc_key_len);
             v = JS_EvalFunction(js->ctx, fn);
         } else {
             v = fn;
@@ -71763,6 +71763,44 @@ ns_js_script_response_is_opaque(ns_js *js, const ns_node *script,
            !cors_allows(opaque, doc_url, final_url, resp->cors_allow_origin);
 }
 
+static JSValue
+ns_js_eval_realm_classic(JSContext *realm, const char *source, gsize length,
+                         const char *origin)
+{
+    gsize key_len = 0;
+    g_autofree char *key = length >= 1024
+        ? ns_js_classic_cache_key(source, length, origin, 1, 1, 0, &key_len)
+        : NULL;
+    gboolean profile = ns_js_profile_enabled();
+    gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    JSValue value = JS_UNDEFINED;
+    gboolean cache_hit = key && ns_js_eval_bytecode_cached(realm, key, key_len,
+                                                           &value);
+    if (!cache_hit) {
+        JSValue global = JS_GetGlobalObject(realm);
+        JSEvalOptions opts = {
+            .version = JS_EVAL_OPTIONS_VERSION,
+            .eval_flags = JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY,
+            .filename = origin,
+            .line_num = 1,
+            .col_num = 1,
+        };
+        JSValue fn = JS_EvalThis2(realm, global, source, length, &opts);
+        JS_FreeValue(realm, global);
+        if (JS_IsException(fn)) {
+            value = fn;
+        } else {
+            if (key) ns_js_bytecode_cache_store(realm, fn, key, key_len);
+            value = JS_EvalFunction(realm, fn);
+        }
+    }
+    if (profile)
+        g_printerr("[profile] js eval     %6.1fms  %zub  %s[frame] %s\n",
+                   (g_get_monotonic_time() - t0) / 1000.0, (size_t)length,
+                   cache_hit ? "[bc] " : "", origin);
+    return value;
+}
+
 static void
 ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
                          gsize length, const char *origin,
@@ -71806,9 +71844,8 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
         ns_js_budget_push(js, &budget);
         g_autofree char *copy = g_strndup(source ? source : "", length);
         js->eval_depth++;
-        JSValue value = JS_Eval(realm, copy, length,
-                                origin ? origin : "inline",
-                                JS_EVAL_TYPE_GLOBAL);
+        JSValue value = ns_js_eval_realm_classic(realm, copy, length,
+                                                 origin ? origin : "inline");
         js->eval_depth--;
         if (js->eval_depth == 0) {
             ns_js_flush_document_write(js);

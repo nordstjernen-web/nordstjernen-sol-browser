@@ -3,6 +3,21 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Script-heavy pages such as Gmail repaint and restyle with less work.
+  An element with `opacity`, a blend mode or a mask that also has a
+  `transition` or `animation` is composited over its own box instead of
+  the whole width of the tile, also when a child or pseudo-element has a
+  2D transform; a row of translucent icons used to composite a
+  full-width strip each. Adding or removing a child no longer restyles
+  every sibling subtree when a stylesheet holds an unkeyed structural
+  selector such as a bare `:first-child`: only the siblings whose
+  position can change, by the kinds of structural selectors in use and
+  the side of the change, are restyled. A relayout no longer parses a
+  frame's Content-Security-Policy for each `@font-face`, re-registers
+  every `@keyframes` rule or re-issues the font requests while the
+  stylesheets and the text are unchanged. `performance.memory` samples
+  the heap at most every two seconds, and classic scripts that run in a
+  frame's realm use the bytecode cache.
 * Builds use link-time optimisation by default (the `lto` option), and
   `scripts/pgo-build.sh` makes a profile-guided build: it builds
   instrumented binaries, trains them on `data/render-tests/` and the

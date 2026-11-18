@@ -1357,6 +1357,27 @@ ns_window_performance_getEntriesByType(JSContext *ctx, JSValueConst this_val,
     return arr;
 }
 
+#define NS_HEAP_USAGE_SAMPLE_US (2 * G_USEC_PER_SEC)
+
+static void
+ns_js_sample_heap_usage(ns_js *js)
+{
+    gint64 now = g_get_monotonic_time();
+    if (js->heap_usage_sampled_us &&
+        now - js->heap_usage_sampled_us < NS_HEAP_USAGE_SAMPLE_US)
+        return;
+    JSMemoryUsage u;
+    memset(&u, 0, sizeof(u));
+    JS_ComputeMemoryUsage(js->rt, &u);
+    int64_t used = u.memory_used_size > 0 ? u.memory_used_size : 0;
+    int64_t total = u.malloc_size > 0 ? u.malloc_size : used;
+    js->heap_used_bytes = used;
+    js->heap_total_bytes = MAX(total, used);
+    js->heap_limit_bytes = u.malloc_limit > 0 ? u.malloc_limit
+                                              : 128LL * 1024 * 1024;
+    js->heap_usage_sampled_us = now;
+}
+
 JSValue
 ns_window_performance_memory_get(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv)
@@ -1366,13 +1387,10 @@ ns_window_performance_memory_get(JSContext *ctx, JSValueConst this_val,
     JSValue mem = JS_NewObject(ctx);
     int64_t used = 0, total = 0, limit = 128LL * 1024 * 1024;
     if (js && js->rt) {
-        JSMemoryUsage u;
-        memset(&u, 0, sizeof(u));
-        JS_ComputeMemoryUsage(js->rt, &u);
-        used = u.memory_used_size > 0 ? u.memory_used_size : 0;
-        total = u.malloc_size > 0 ? u.malloc_size : used;
-        if (u.malloc_limit > 0) limit = u.malloc_limit;
-        if (total < used) total = used;
+        ns_js_sample_heap_usage(js);
+        used = js->heap_used_bytes;
+        total = js->heap_total_bytes;
+        limit = js->heap_limit_bytes;
     }
     JS_SetPropertyStr(ctx, mem, "jsHeapSizeLimit", JS_NewFloat64(ctx, (double)limit));
     JS_SetPropertyStr(ctx, mem, "totalJSHeapSize", JS_NewFloat64(ctx, (double)total));
