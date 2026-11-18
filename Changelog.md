@@ -33,6 +33,11 @@ Changelog:
   inside the label's own document. A `<label>` wrapping an `<iframe>`
   used to return a form control of the framed document, and a label in
   a frame could resolve `for` to a control of the embedding page.
+* Security: `document.currentScript` is `null` for a document other
+  than the running script's own, and `document.write()` no longer
+  inserts next to another document's script. A frame whose `blur`
+  handler ran while the embedding page called `focus()` could read
+  that page through its script element and write markup into it.
 * Security: a WebSocket opens only on a 101 response, and the shell no
   longer accepts a renderer's claim that a web load ended on an
   internal `about:` page.
