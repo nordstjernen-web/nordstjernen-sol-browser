@@ -3521,6 +3521,13 @@ ns_paint_text_ellipsizes(const ns_style *style)
            keyword_is(style->values[NS_CSS_TEXT_OVERFLOW], "ellipsis");
 }
 
+int
+ns_paint_ellipsize_mode(const ns_style *style)
+{
+    return style && keyword_is(style->values[NS_CSS_DIRECTION], "rtl")
+        ? NS_PANGO_ELLIPSIZE_START : NS_PANGO_ELLIPSIZE_END;
+}
+
 void
 ns_paint_layout_set_inline_text(NsPangoLayout *layout, const char *text)
 {
@@ -5014,12 +5021,12 @@ inline_layout_begin(const ns_box *b, const ns_style *s,
             ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
     }
     if (ns_paint_text_ellipsizes(s))
-        ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
+        ns_pango_layout_set_ellipsize(layout, ns_paint_ellipsize_mode(s));
     {
         int clamp = ns_style_line_clamp(s);
         if (clamp) {
             ns_pango_layout_set_height(layout, -clamp);
-            ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
+            ns_pango_layout_set_ellipsize(layout, ns_paint_ellipsize_mode(s));
         }
     }
     ns_paint_layout_set_inline_text(layout, b->text);
