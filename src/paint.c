@@ -10049,29 +10049,6 @@ box_ink_extents_x(const ns_box *b, double *x0, double *x1, int depth)
         box_ink_extents_x(c, x0, x1, depth + 1);
 }
 
-#define NS_PAINT_GROUP_INK_MARGIN 64.0
-
-static gboolean
-paint_group_clip(cairo_t *cr, const ns_box *b)
-{
-    if (!(b->paint_bottom > b->paint_top) ||
-        b->paint_top <= -G_MAXDOUBLE / 2 || b->paint_bottom >= G_MAXDOUBLE / 2)
-        return FALSE;
-    double bx, by, bw, bh;
-    box_border_rect(b, &bx, &by, &bw, &bh);
-    double x0 = bx, x1 = bx + bw;
-    box_ink_extents_x(b, &x0, &x1, 0);
-    double y0 = MIN(by, b->paint_top), y1 = MAX(by + bh, b->paint_bottom);
-    if (!isfinite(x0) || !isfinite(x1)) return FALSE;
-    cairo_save(cr);
-    cairo_rectangle(cr, x0 - NS_PAINT_GROUP_INK_MARGIN,
-                    y0 - NS_PAINT_GROUP_INK_MARGIN,
-                    x1 - x0 + 2 * NS_PAINT_GROUP_INK_MARGIN,
-                    y1 - y0 + 2 * NS_PAINT_GROUP_INK_MARGIN);
-    cairo_clip(cr);
-    return TRUE;
-}
-
 typedef enum {
     FILTER_LAYER_NONE,
     FILTER_LAYER_OPEN,
@@ -11035,6 +11012,137 @@ box_transform_matrix(const ns_box *b, const ns_css_transform *tf,
     cairo_matrix_multiply(out, &cm, out);
     cairo_matrix_translate(out, -ox, -oy);
     return BOX_TF_OK;
+}
+
+#define NS_PAINT_GROUP_INK_MARGIN 64.0
+#define NS_PAINT_GROUP_INK_BUDGET 512
+
+typedef struct {
+    double x0, y0, x1, y1;
+} ink_rect;
+
+static void
+ink_rect_add(ink_rect *r, double x0, double y0, double x1, double y1)
+{
+    r->x0 = MIN(r->x0, x0);
+    r->y0 = MIN(r->y0, y0);
+    r->x1 = MAX(r->x1, x1);
+    r->y1 = MAX(r->y1, y1);
+}
+
+static gboolean
+box_paint_bounds_known(const ns_box *b)
+{
+    return b->paint_bottom > b->paint_top &&
+           b->paint_top > -G_MAXDOUBLE / 2 && b->paint_bottom < G_MAXDOUBLE / 2;
+}
+
+static gboolean
+box_is_viewport_anchored(const ns_box *b)
+{
+    const ns_css_value *pv = b->style ? b->style->values[NS_CSS_POSITION] : NULL;
+    return pv && pv->kind == NS_CSS_V_KEYWORD && pv->u.keyword &&
+           (strcmp(pv->u.keyword, "fixed") == 0 ||
+            strcmp(pv->u.keyword, "sticky") == 0);
+}
+
+static gboolean
+box_anim_moves(const ns_box *b)
+{
+    return g_paint_anim && b->dom &&
+           ns_anim_get_transform(g_paint_anim, b->dom) != NULL;
+}
+
+static gboolean
+ink_rect_transform(const ns_box *b, const ns_css_transform *tf, ink_rect *r)
+{
+    cairo_matrix_t m;
+    if (ns_css_transform_is_3d(tf)) return FALSE;
+    box_tf_state state = box_transform_matrix(b, tf, &m);
+    if (state == BOX_TF_INVALID) return FALSE;
+    const double xs[] = { r->x0, r->x1, r->x1, r->x0 };
+    const double ys[] = { r->y0, r->y0, r->y1, r->y1 };
+    ink_rect out = { G_MAXDOUBLE, G_MAXDOUBLE, -G_MAXDOUBLE, -G_MAXDOUBLE };
+    for (int i = 0; i < 4 && state == BOX_TF_OK; i++) {
+        double x = xs[i], y = ys[i];
+        cairo_matrix_transform_point(&m, &x, &y);
+        ink_rect_add(&out, x, y, x, y);
+    }
+    *r = out;
+    return TRUE;
+}
+
+static gboolean
+box_resting_ink_rect(const ns_box *b, const ns_box *group, int *budget,
+                     ink_rect *out)
+{
+    double bx, by, bw, bh;
+    box_border_rect(b, &bx, &by, &bw, &bh);
+    ink_rect r = { bx, MIN(by, b->y), bx + bw, by + bh };
+    if (box_paint_bounds_known(b)) {
+        box_ink_extents_x(b, &r.x0, &r.x1, 0);
+        ink_rect_add(&r, r.x0, b->paint_top, r.x1, b->paint_bottom);
+        *out = r;
+        return TRUE;
+    }
+    if (--*budget < 0 || box_anim_moves(b)) return FALSE;
+    const ns_style *st = b->style;
+    ns_css_transform tf;
+    tf.n_ops = 0;
+    if (b != group) {
+        if (box_is_viewport_anchored(b) || box_establishes_3d(b)) return FALSE;
+        if (st && (st->values[NS_CSS_TRANSFORM] ||
+                   st->values[NS_CSS_TRANSLATE] ||
+                   st->values[NS_CSS_ROTATE] || st->values[NS_CSS_SCALE]))
+            ns_css_style_effective_transform(st, NULL, &tf);
+    }
+    r.y1 = MAX(r.y1, by + bh + b->margin.bottom);
+    double sx0, sy0, sx1, sy1;
+    if (ns_inline_shift_bounds(b, &sx0, &sy0, &sx1, &sy1))
+        ink_rect_add(&r, r.x0, b->y + sy0, r.x1,
+                     b->y + b->content_height + sy1);
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        ink_rect cr;
+        if (!box_resting_ink_rect(c, group, budget, &cr)) return FALSE;
+        ink_rect_add(&r, cr.x0, cr.y0, cr.x1, cr.y1);
+    }
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        const ns_inline_atomic *atomic =
+            &g_array_index(b->inline_atomics, ns_inline_atomic, i);
+        const ns_box *ab = atomic->box;
+        ink_rect ar;
+        if (!ab) continue;
+        if (!box_resting_ink_rect(ab, group, budget, &ar)) return FALSE;
+        double dy = b->y + atomic->owner_offset_y + ab->rel_dy - ab->y;
+        ink_rect_add(&r, r.x0, ar.y0 + dy, r.x1, ar.y1 + dy);
+    }
+    const ns_css_value *fv = st ? st->values[NS_CSS_FILTER] : NULL;
+    if (fv && fv->kind == NS_CSS_V_KEYWORD && fv->u.keyword) {
+        double spread = filter_blur_sigma(fv->u.keyword) * 3.0;
+        ink_rect_add(&r, r.x0 - spread, r.y0 - spread, r.x1 + spread,
+                     r.y1 + spread);
+    }
+    if (tf.n_ops > 0 && !ink_rect_transform(b, &tf, &r)) return FALSE;
+    *out = r;
+    return TRUE;
+}
+
+static gboolean
+paint_group_clip(cairo_t *cr, const ns_box *b)
+{
+    int budget = NS_PAINT_GROUP_INK_BUDGET;
+    ink_rect r;
+    if (!box_resting_ink_rect(b, b, &budget, &r)) return FALSE;
+    if (!isfinite(r.x0) || !isfinite(r.x1) || !isfinite(r.y0) ||
+        !isfinite(r.y1) || !(r.y1 > r.y0))
+        return FALSE;
+    cairo_save(cr);
+    cairo_rectangle(cr, r.x0 - NS_PAINT_GROUP_INK_MARGIN,
+                    r.y0 - NS_PAINT_GROUP_INK_MARGIN,
+                    r.x1 - r.x0 + 2 * NS_PAINT_GROUP_INK_MARGIN,
+                    r.y1 - r.y0 + 2 * NS_PAINT_GROUP_INK_MARGIN);
+    cairo_clip(cr);
+    return TRUE;
 }
 
 #define NS_BACKDROP_MAX_PIXELS (16 * 1024 * 1024)
