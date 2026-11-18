@@ -67512,6 +67512,13 @@ ns_written_markup_is_complete(const char *s)
     return ok;
 }
 
+static ns_node *
+ns_document_write_script(const ns_js *js)
+{
+    const ns_node *owner = ns_node_owner_doc(js->current_script);
+    return owner && owner != js->current_doc ? NULL : js->current_script;
+}
+
 static JSValue
 ns_document_write_common(JSContext *ctx, int argc, JSValueConst *argv,
                          gboolean newline)
@@ -67522,17 +67529,18 @@ ns_document_write_common(JSContext *ctx, int argc, JSValueConst *argv,
         return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
                                       "document.write during parser-created "
                                       "element construction");
-    if (!js->current_script && js->ignore_destructive_writes > 0)
+    ns_node *script = ns_document_write_script(js);
+    if (!script && js->ignore_destructive_writes > 0)
         return JS_UNDEFINED;
-    if (!js->current_script && js->ready_state >= 2 &&
+    if (!script && js->ready_state >= 2 &&
         !js->document_write_parser_open)
         ns_document_open_impl(js);
     if (js->document_write_buffer &&
-        js->document_write_script != js->current_script)
+        js->document_write_script != script)
         ns_js_flush_document_write(js);
     if (!js->document_write_buffer)
         js->document_write_buffer = g_string_new(NULL);
-    js->document_write_script = js->current_script;
+    js->document_write_script = script;
     for (int i = 0; i < argc; i++) {
         const char *s = JS_ToCString(ctx, argv[i]);
         if (!s) continue;
@@ -67540,7 +67548,7 @@ ns_document_write_common(JSContext *ctx, int argc, JSValueConst *argv,
         JS_FreeCString(ctx, s);
     }
     if (newline) g_string_append_c(js->document_write_buffer, '\n');
-    if (!js->current_script ||
+    if (!script ||
         ns_written_markup_is_complete(js->document_write_buffer->str))
         ns_js_flush_document_write(js);
     return JS_UNDEFINED;
@@ -67747,7 +67755,8 @@ ns_document_get_currentScript(JSContext *ctx, JSValueConst this_val)
 {
     (void)this_val;
     ns_js *jsx = js_from_ctx(ctx);
-    if (!jsx || !jsx->current_script) return JS_NULL;
+    if (!jsx || !ns_js_node_in_realm(jsx, ctx, jsx->current_script))
+        return JS_NULL;
     return ns_make_element(ctx, jsx->current_script);
 }
 
