@@ -44202,11 +44202,21 @@ ns_js_first_labelable_descendant(const ns_node *n, int depth)
 {
     if (!n || depth >= 512) return NULL;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (ns_dom_hidden_child(c)) continue;
         if (ns_js_node_is_labelable(c)) return c;
         const ns_node *hit = ns_js_first_labelable_descendant(c, depth + 1);
         if (hit) return hit;
     }
     return NULL;
+}
+
+static const ns_node *
+ns_js_tree_scope_root(const ns_node *n)
+{
+    while (n && n->parent && n->kind != NS_NODE_DOCUMENT &&
+           !ns_element_has_shadow_marker(n))
+        n = n->parent;
+    return n;
 }
 
 static JSValue
@@ -44217,7 +44227,7 @@ ns_element_get_label_control(JSContext *ctx, JSValueConst this_val)
     const char *forv = ns_element_get_attr(label, "for");
     if (forv) {
         const ns_node *target =
-            ns_node_find_by_id(ns_node_root(label), forv);
+            ns_node_find_by_id(ns_js_tree_scope_root(label), forv);
         if (ns_js_node_is_labelable(target)) return ns_make_element(ctx, target);
         return JS_NULL;
     }
@@ -44231,7 +44241,7 @@ ns_label_associated_control(const ns_node *label)
     const char *forv = ns_element_get_attr(label, "for");
     if (forv) {
         const ns_node *target =
-            ns_node_find_by_id(ns_node_root(label), forv);
+            ns_node_find_by_id(ns_js_tree_scope_root(label), forv);
         return ns_js_node_is_labelable(target) ? target : NULL;
     }
     return ns_js_first_labelable_descendant(label, 0);
@@ -44246,7 +44256,8 @@ ns_collect_labels_for(JSContext *ctx, const ns_node *scan, const ns_node *n,
         ns_label_associated_control(scan) == n)
         JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, scan));
     for (const ns_node *c = scan->first_child; c; c = c->next_sibling)
-        ns_collect_labels_for(ctx, c, n, arr, idx, depth + 1);
+        if (!ns_dom_hidden_child(c))
+            ns_collect_labels_for(ctx, c, n, arr, idx, depth + 1);
 }
 
 static JSValue
@@ -47028,7 +47039,7 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
         break;
     }
     case NS_LIVE_LABELS:
-        ns_collect_labels_for(ctx, ns_node_root(root), root, arr, &i, 0);
+        ns_collect_labels_for(ctx, ns_js_tree_scope_root(root), root, arr, &i, 0);
         break;
     case NS_LIVE_TABLE_ROWS:
         ns_collect_table_rows(root, ctx, arr, &i);
