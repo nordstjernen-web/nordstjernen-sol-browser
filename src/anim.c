@@ -355,6 +355,27 @@ ns_anim_prune(ns_anim *a, GHashTable *live)
 }
 
 void
+ns_anim_forget_node(ns_anim *a, const ns_node *node)
+{
+    if (!a || !node) return;
+    ns_anim_state *s = g_hash_table_lookup(a->states, node);
+    if (s) {
+        a->active_count -= state_active_count(s);
+        if (a->active_count < 0) a->active_count = 0;
+        g_hash_table_remove(a->active, s);
+        ns_css_incremental_exclude(node, FALSE);
+        g_hash_table_remove(a->states, node);
+    }
+    if (!a->events) return;
+    for (guint i = a->events->len; i-- > 0;) {
+        ns_anim_event *e = &g_array_index(a->events, ns_anim_event, i);
+        if (e->node != node) continue;
+        g_free(e->name);
+        g_array_remove_index(a->events, i);
+    }
+}
+
+void
 ns_anim_rebase(ns_anim *a, gint64 base_us)
 {
     if (!a) return;

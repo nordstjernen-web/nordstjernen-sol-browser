@@ -24,6 +24,7 @@ typedef void (*ns_anim_event_cb)(const ns_node *node, const char *type,
                                  const char *name, double elapsed_ms,
                                  gpointer user);
 void     ns_anim_drain_events(ns_anim *a, ns_anim_event_cb cb, gpointer user);
+void     ns_anim_forget_node(ns_anim *a, const ns_node *node);
 gboolean                 ns_anim_get_opacity   (ns_anim *a,
                                                 const ns_node *dom,
                                                 double *out_opacity);
