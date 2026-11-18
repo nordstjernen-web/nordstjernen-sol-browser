@@ -346,6 +346,7 @@ struct NsProcView {
     gboolean    loading;
     gboolean    busy_cursor;
     GdkCursor  *hourglass_cursor;
+    double      hourglass_scale;
 
     int         load_seq, render_seq, link_seq, click_seq, viewport_seq;
     int         key_seq, select_seq, hover_seq;
@@ -424,10 +425,12 @@ hourglass_caps_path(cairo_t *cr, double ox, double oy)
     cairo_line_to(cr, 22.3 + ox, 25.8 + oy);
 }
 
+#define NS_HOURGLASS_SIZE 32
+
 static GdkTexture *
-hourglass_texture(void)
+hourglass_texture(double scale)
 {
-    const int size = 32;
+    const int size = (int)lround(NS_HOURGLASS_SIZE * scale);
     cairo_surface_t *surface =
         cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
     if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
@@ -436,6 +439,7 @@ hourglass_texture(void)
     }
 
     cairo_t *cr = cairo_create(surface);
+    cairo_scale(cr, scale, scale);
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
     cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
@@ -515,17 +519,34 @@ hourglass_texture(void)
     return texture;
 }
 
+static double device_scale(NsProcView *v);
+
+static double
+texture_cursor_scale(NsProcView *v)
+{
+#ifdef G_OS_WIN32
+    return device_scale(v) * ns_ui_scale();
+#else
+    (void)v;
+    return 1.0;
+#endif
+}
+
 static GdkCursor *
 busy_hourglass_cursor(NsProcView *v)
 {
-    if (v->hourglass_cursor)
+    double scale = texture_cursor_scale(v);
+    if (v->hourglass_cursor && v->hourglass_scale == scale)
         return v->hourglass_cursor;
+    g_clear_object(&v->hourglass_cursor);
+    v->hourglass_scale = scale;
 
-    GdkTexture *texture = hourglass_texture();
+    GdkTexture *texture = hourglass_texture(scale);
     if (texture) {
         GdkCursor *fallback = gdk_cursor_new_from_name("wait", NULL);
+        int hotspot = (int)lround(NS_HOURGLASS_SIZE * scale / 2.0);
         v->hourglass_cursor =
-            gdk_cursor_new_from_texture(texture, 16, 16, fallback);
+            gdk_cursor_new_from_texture(texture, hotspot, hotspot, fallback);
         if (fallback)
             g_object_unref(fallback);
         g_object_unref(texture);
@@ -2274,6 +2295,8 @@ on_device_scale_changed(GObject *object, GParamSpec *pspec, gpointer data)
     (void)object;
     (void)pspec;
     NsProcView *v = data;
+    if (v->busy_cursor && !v->closed)
+        set_busy_cursor(v);
     if (v->closed || !v->opened)
         return;
     if (!maybe_update_viewport(v))
