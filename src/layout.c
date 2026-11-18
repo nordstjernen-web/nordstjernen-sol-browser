@@ -4223,7 +4223,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                                     ns_element_get_attr(n, "disabled") != NULL);
             if (!is_placeholder && disp_end > val_start &&
                 ns_element_get_attr(n, "disabled") == NULL &&
-                ns_node_spellcheck_used(n) && ns_node_spellcheck_armed(n)) {
+                focused && ns_node_spellcheck_used(n) && ns_node_spellcheck_armed(n)) {
                 ns_inline_attr sc = { .kind = NS_INLINE_SPELLCHECK,
                                       .start = val_start,
                                       .len = disp_end - val_start, .dom = n };
