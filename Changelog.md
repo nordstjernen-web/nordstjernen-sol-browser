@@ -21,6 +21,10 @@ Changelog:
   stays inside the engine, and the transition overlay is hidden from
   `getAnimations()` and from animation events; removing the overlay
   while its fade was still running could crash the renderer.
+* Security: WebGL 2 `texImage2D` / `texSubImage2D` with an `ImageData`
+  source check the source length against the tightly packed size the
+  upload reads, so `UNPACK_ROW_LENGTH` cannot make the driver read past
+  the end of the buffer.
 * Security: a WebSocket opens only on a 101 response, and the shell no
   longer accepts a renderer's claim that a web load ended on an
   internal `about:` page.

@@ -1102,6 +1102,17 @@ wgl_pixel_bytes(int format, int type)
 }
 
 static size_t
+wgl_tight_bytes(int w, int h, int format, int type)
+{
+    if (w <= 0 || h <= 0) return 0;
+    size_t total;
+    if (__builtin_mul_overflow((size_t)w, (size_t)h, &total) ||
+        __builtin_mul_overflow(total, wgl_pixel_bytes(format, type), &total))
+        return SIZE_MAX;
+    return total;
+}
+
+static size_t
 wgl_transfer_bytes(ns_webgl *g, int w, int h, int depth,
                    int format, int type, gboolean pack)
 {
@@ -3360,8 +3371,7 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         size_t len = 0;
         JSValue hold;
         const uint8_t *px = wgl_imagedata_bytes(ctx, argv[5], &w, &h, &len, &hold);
-        size_t need = (px && w > 0 && h > 0)
-            ? wgl_transfer_bytes(g, w, h, 1, format, type, FALSE) : 0;
+        size_t need = px ? wgl_tight_bytes(w, h, format, type) : 0;
         if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
             wgl_webgl1_sized_format(g, &internalformat, format, &type);
@@ -3463,8 +3473,7 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
         size_t len = 0;
         JSValue hold;
         const uint8_t *px = wgl_imagedata_bytes(ctx, argv[6], &w, &h, &len, &hold);
-        size_t need = (px && w > 0 && h > 0)
-            ? wgl_transfer_bytes(g, w, h, 1, format, type, FALSE) : 0;
+        size_t need = px ? wgl_tight_bytes(w, h, format, type) : 0;
         if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
             uint8_t *flipped = NULL;
