@@ -29,6 +29,10 @@ Changelog:
   animations on elements of the calling document. A page could use it
   to obtain elements of a cross-origin frame, or a frame those of the
   page embedding it, and read that document through them.
+* Security: `label.control`, `control.labels` and label activation stay
+  inside the label's own document. A `<label>` wrapping an `<iframe>`
+  used to return a form control of the framed document, and a label in
+  a frame could resolve `for` to a control of the embedding page.
 * Security: a WebSocket opens only on a 101 response, and the shell no
   longer accepts a renderer's claim that a web load ended on an
   internal `about:` page.
