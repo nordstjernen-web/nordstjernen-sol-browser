@@ -136,7 +136,7 @@ cmd_baselines() {
 cmd_build() {
     cd "$ROOT"
     if [ ! -f builddir/build.ninja ]; then
-        meson setup builddir -Db_lto=false
+        meson setup builddir -Dlto=false
     fi
     meson compile -C builddir
 }

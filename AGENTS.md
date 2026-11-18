@@ -287,9 +287,9 @@ Optionally use the `lld` linker for faster final links
 `meson compile -C builddir` in one shot — use it instead of typing
 the two commands separately.
 
-A plain `meson setup` builds with link-time optimisation (`b_lto=true`),
+A plain `meson setup` builds with link-time optimisation (the `lto` option),
 which relinks the whole engine on every change. `scripts/dev.sh build`
-configures `-Db_lto=false` for the edit-compile loop; pass it yourself
+configures `-Dlto=false` for the edit-compile loop; pass it yourself
 when setting up a development tree by hand. `scripts/pgo-build.sh` makes
 the fully optimised build in `builddir-pgo/`: an instrumented build, a
 training run over `data/render-tests/` and the QuickJS microbench, then

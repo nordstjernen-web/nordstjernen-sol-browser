@@ -62,7 +62,7 @@ release_build_or_die() {
 }
 
 if [ ! -d "$BUILDDIR" ]; then
-    meson setup "$BUILDDIR" --buildtype=release -Db_lto="${NS_BUILD_LTO:-true}" \
+    meson setup "$BUILDDIR" --buildtype=release -Db_lto="${NS_BUILD_LTO:-true}" -Dlto="${NS_BUILD_LTO:-true}" \
         -Db_ndebug=true --strip \
         ${NS_BUILD_DATE:+-Dbuild_date="$NS_BUILD_DATE"} \
         ${WEBGPU_SETUP_ARGS[@]+"${WEBGPU_SETUP_ARGS[@]}"}
