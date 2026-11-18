@@ -1,5 +1,6 @@
 # Build artifacts
 /build/
+/builddir-pgo/
 /dist/
 /data/screenshots/*.png
 /obj-*/

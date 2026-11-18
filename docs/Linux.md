@@ -131,7 +131,25 @@ With rustup but no default toolchain, point meson at one:
     ./builddir/src/gtk/nordstjernen
 
 `./scripts/dev.sh build` runs `meson setup` (only if needed) and
-`meson compile -C builddir` in one shot.
+`meson compile -C builddir` in one shot. It configures `-Db_lto=false`:
+a plain `meson setup` builds with link-time optimisation, which is what
+a release wants and makes every relink slow.
+
+## Optimised build — LTO and PGO
+
+Release builds use `-O3`, link-time optimisation and the hardening flags
+by default. Profile-guided optimisation needs a training run, so it is a
+separate step:
+
+    scripts/pgo-build.sh                 # builds into builddir-pgo/
+    BUILDDIR=release-build scripts/pgo-build.sh -Dwebgpu=disabled
+
+The script builds instrumented binaries (`-Dpgo=generate`), renders
+`data/render-tests/` headless and runs the QuickJS microbench with them,
+then rebuilds from the recorded profile (`-Dpgo=use`). It works with GCC
+and with Clang (which also needs `llvm-profdata`). Extra arguments go to
+`meson setup`. Only the C code is profiled; the Rust parsers are built as
+before.
 
 ## Package — portable zip
 
