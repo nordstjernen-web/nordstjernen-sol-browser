@@ -4223,7 +4223,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                                     ns_element_get_attr(n, "disabled") != NULL);
             if (!is_placeholder && disp_end > val_start &&
                 ns_element_get_attr(n, "disabled") == NULL &&
-                ns_node_spellcheck_used(n) && ns_node_spellcheck_armed(n)) {
+                focused && ns_node_spellcheck_used(n) && ns_node_spellcheck_armed(n)) {
                 ns_inline_attr sc = { .kind = NS_INLINE_SPELLCHECK,
                                       .start = val_start,
                                       .len = disp_end - val_start, .dom = n };
@@ -8549,12 +8549,14 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
     }
     if (ellip)
-        ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
+        ns_pango_layout_set_ellipsize(layout,
+                                      ns_paint_ellipsize_mode(parent_style));
     {
         int clamp = ns_style_line_clamp(parent_style);
         if (clamp) {
             ns_pango_layout_set_height(layout, -clamp);
-            ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
+            ns_pango_layout_set_ellipsize(layout,
+                                      ns_paint_ellipsize_mode(parent_style));
         }
     }
     NsPangoAttrList *i18n = ns_pango_attr_list_new();
@@ -8781,7 +8783,8 @@ inline_box_hit_layout(const ns_box *box, const ns_style *parent_style,
         if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
     }
     if (ns_paint_text_ellipsizes(parent_style))
-        ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
+        ns_pango_layout_set_ellipsize(layout,
+                                      ns_paint_ellipsize_mode(parent_style));
     ns_paint_layout_set_inline_text(layout, box->text);
     NsPangoAttrList *i18n = ns_pango_attr_list_new();
     ns_paint_apply_wrap_attrs(i18n, box, parent_style);

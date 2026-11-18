@@ -75,6 +75,8 @@ typedef struct {
     int               font_weight;
     gboolean          font_italic;
     int               text_anchor;
+    int               text_baseline;
+    guint             text_decoration;
     gboolean          hidden;
     gboolean          stroke_first;
     gboolean          non_scaling_stroke;
@@ -697,6 +699,57 @@ svg_state_apply_color_attr(svg_state *st, const ns_node *n)
     }
 }
 
+enum {
+    SVG_BASELINE_ALPHABETIC,
+    SVG_BASELINE_MIDDLE,
+    SVG_BASELINE_CENTRAL,
+    SVG_BASELINE_HANGING,
+    SVG_BASELINE_TEXT_TOP,
+    SVG_BASELINE_TEXT_BOTTOM,
+    SVG_BASELINE_MATHEMATICAL,
+};
+
+enum {
+    SVG_DECORATION_UNDERLINE    = 1 << 0,
+    SVG_DECORATION_OVERLINE     = 1 << 1,
+    SVG_DECORATION_LINE_THROUGH = 1 << 2,
+};
+
+static int
+svg_baseline_of(const char *s, int fallback)
+{
+    static const struct { const char *name; int kind; } names[] = {
+        { "auto",             SVG_BASELINE_ALPHABETIC },
+        { "alphabetic",       SVG_BASELINE_ALPHABETIC },
+        { "baseline",         SVG_BASELINE_ALPHABETIC },
+        { "middle",           SVG_BASELINE_MIDDLE },
+        { "central",          SVG_BASELINE_CENTRAL },
+        { "hanging",          SVG_BASELINE_HANGING },
+        { "text-before-edge", SVG_BASELINE_TEXT_TOP },
+        { "text-top",         SVG_BASELINE_TEXT_TOP },
+        { "before-edge",      SVG_BASELINE_TEXT_TOP },
+        { "text-after-edge",  SVG_BASELINE_TEXT_BOTTOM },
+        { "text-bottom",      SVG_BASELINE_TEXT_BOTTOM },
+        { "after-edge",       SVG_BASELINE_TEXT_BOTTOM },
+        { "ideographic",      SVG_BASELINE_TEXT_BOTTOM },
+        { "mathematical",     SVG_BASELINE_MATHEMATICAL },
+    };
+    for (gsize i = 0; s && i < G_N_ELEMENTS(names); i++)
+        if (g_ascii_strcasecmp(s, names[i].name) == 0) return names[i].kind;
+    return fallback;
+}
+
+static guint
+svg_decoration_of(const char *s)
+{
+    guint lines = 0;
+    if (!s) return 0;
+    if (strstr(s, "underline"))    lines |= SVG_DECORATION_UNDERLINE;
+    if (strstr(s, "overline"))     lines |= SVG_DECORATION_OVERLINE;
+    if (strstr(s, "line-through")) lines |= SVG_DECORATION_LINE_THROUGH;
+    return lines;
+}
+
 static void
 svg_state_apply_attrs(svg_state *st, const ns_node *n, double basis)
 {
@@ -724,6 +777,10 @@ svg_state_apply_attrs(svg_state *st, const ns_node *n, double basis)
         st->clip_rule = (g_ascii_strcasecmp(v, "evenodd") == 0)
             ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING;
     if ((v = svg_prop(n, "text-anchor"))) st->text_anchor = svg_anchor_of(v);
+    if ((v = svg_prop(n, "dominant-baseline")))
+        st->text_baseline = svg_baseline_of(v, st->text_baseline);
+    if ((v = svg_prop(n, "text-decoration")))
+        st->text_decoration |= svg_decoration_of(v);
     if ((v = svg_prop(n, "font-family"))) {
         g_free(st->font_family);
         st->font_family = g_strdup(v);
@@ -801,6 +858,10 @@ svg_state_apply_node(svg_ctx *ctx, svg_state *st, const ns_node *n)
         st->clip_rule = (g_ascii_strcasecmp(kw, "evenodd") == 0)
             ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING;
     if ((kw = ns_style_keyword(s, NS_CSS_TEXT_ANCHOR)))  st->text_anchor = svg_anchor_of(kw);
+    if ((kw = ns_style_keyword(s, NS_CSS_DOMINANT_BASELINE)))
+        st->text_baseline = svg_baseline_of(kw, st->text_baseline);
+    if ((kw = ns_style_keyword(s, NS_CSS_TEXT_DECORATION)))
+        st->text_decoration |= svg_decoration_of(kw);
     if ((kw = ns_style_keyword(s, NS_CSS_PAINT_ORDER)))
         st->stroke_first = g_ascii_strncasecmp(kw, "stroke", 6) == 0;
     if ((kw = ns_style_keyword(s, NS_CSS_STROKE_DASHARRAY)))
@@ -2263,36 +2324,42 @@ svg_apply_clip(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     ctx->depth--;
 }
 
-static NsPangoLayout *
-svg_text_layout(svg_ctx *ctx, const ns_node *n, const svg_state *st,
-                double *out_x, double *out_top, double *out_w, double *out_h)
+typedef struct {
+    NsPangoLayout *layout;
+    const ns_node *node;
+    svg_state      st;
+    double         x, baseline;
+    double         width, ascent, descent;
+    double         stretch;
+    glong          n_chars;
+} svg_text_run;
+
+typedef struct {
+    svg_ctx  *ctx;
+    GArray   *runs;
+    double    x, y;
+    double    chunk_x;
+    guint     chunk_first;
+    guint     chunk_serial;
+    int       chunk_anchor;
+    gboolean  pending_space;
+    gboolean  any_text;
+} svg_text_flow;
+
+static gboolean svg_is_hidden(svg_ctx *ctx, const ns_node *n);
+
+static gboolean
+svg_text_span_tag(const ns_node *n)
 {
-    char *text = ns_node_collect_text(n);
-    if (!text || !*text) { g_free(text); return NULL; }
+    return n->kind == NS_NODE_ELEMENT && n->name &&
+           (strcmp(n->name, "tspan") == 0 || strcmp(n->name, "a") == 0 ||
+            strcmp(n->name, "textPath") == 0);
+}
 
-    gsize len = strlen(text);
-    GString *flat = g_string_sized_new(len);
-    gboolean prev_ws = TRUE;
-    for (gsize i = 0; i < len; i++) {
-        char c = text[i];
-        if (svg_is_ws(c)) {
-            if (!prev_ws) g_string_append_c(flat, ' ');
-            prev_ws = TRUE;
-        } else {
-            g_string_append_c(flat, c);
-            prev_ws = FALSE;
-        }
-    }
-    g_free(text);
-    while (flat->len > 0 && flat->str[flat->len - 1] == ' ')
-        g_string_truncate(flat, flat->len - 1);
-    if (flat->len == 0) { g_string_free(flat, TRUE); return NULL; }
-
-    double x = svg_attr_length(n, "x", ctx->vw, st->font_size, 0);
-    double y = svg_attr_length(n, "y", ctx->vh, st->font_size, 0);
-    x += svg_attr_length(n, "dx", ctx->vw, st->font_size, 0);
-    y += svg_attr_length(n, "dy", ctx->vh, st->font_size, 0);
-
+static NsPangoLayout *
+svg_text_run_layout(svg_ctx *ctx, const svg_state *st, const char *text,
+                    gsize len)
+{
     NsPangoLayout *layout = ns_pango_cairo_create_layout(ctx->cr);
     NsPangoFontDescription *desc = ns_pango_font_description_new();
     char *fam = ns_css_font_family_for_pango(st->font_family ? st->font_family
@@ -2306,33 +2373,232 @@ svg_text_layout(svg_ctx *ctx, const ns_node *n, const svg_state *st,
         ns_pango_font_description_set_style(desc, NS_PANGO_STYLE_ITALIC);
     ns_pango_layout_set_font_description(layout, desc);
     ns_pango_font_description_free(desc);
-    ns_pango_layout_set_text(layout, flat->str, (int)flat->len);
-    g_string_free(flat, TRUE);
-
-    int wpx = 0, hpx = 0;
-    ns_pango_layout_get_pixel_size(layout, &wpx, &hpx);
-    if (st->text_anchor == 1)      x -= wpx / 2.0;
-    else if (st->text_anchor == 2) x -= wpx;
-    int baseline = ns_pango_layout_get_baseline(layout) / NS_PANGO_SCALE;
-
-    *out_x = x;
-    *out_top = y - baseline;
-    *out_w = wpx;
-    *out_h = hpx;
+    ns_pango_layout_set_text(layout, text, (int)len);
     return layout;
+}
+
+static void
+svg_text_run_measure(svg_text_run *run)
+{
+    int w = 0, h = 0;
+    ns_pango_layout_get_size(run->layout, &w, &h);
+    run->width = (double)w / NS_PANGO_SCALE;
+    run->ascent = (double)ns_pango_layout_get_baseline(run->layout) /
+                  NS_PANGO_SCALE;
+    run->descent = (double)h / NS_PANGO_SCALE - run->ascent;
+}
+
+static double
+svg_text_baseline_shift(const svg_text_run *run, int kind)
+{
+    double x_height = run->st.font_size * 0.5;
+    switch (kind) {
+    case SVG_BASELINE_MIDDLE:       return x_height / 2.0;
+    case SVG_BASELINE_CENTRAL:      return (run->ascent - run->descent) / 2.0;
+    case SVG_BASELINE_HANGING:      return run->ascent * 0.8;
+    case SVG_BASELINE_TEXT_TOP:     return run->ascent;
+    case SVG_BASELINE_TEXT_BOTTOM:  return -run->descent;
+    case SVG_BASELINE_MATHEMATICAL: return run->ascent * 0.5;
+    default:                        return 0;
+    }
+}
+
+static void
+svg_text_flow_add(svg_text_flow *flow, const ns_node *owner,
+                  const svg_state *st, const char *text, gsize len)
+{
+    svg_text_run run = { 0 };
+    run.layout = svg_text_run_layout(flow->ctx, st, text, len);
+    run.node = owner;
+    svg_state_copy(&run.st, st);
+    run.stretch = 1.0;
+    run.n_chars = g_utf8_strlen(text, (gssize)len);
+    svg_text_run_measure(&run);
+    int kind = svg_baseline_of(svg_prop(owner, "alignment-baseline"),
+                               st->text_baseline);
+    run.x = flow->x;
+    run.baseline = flow->y + svg_text_baseline_shift(&run, kind);
+    flow->x += run.width;
+    g_array_append_val(flow->runs, run);
+}
+
+static void
+svg_text_flow_text(svg_text_flow *flow, const ns_node *owner,
+                   const svg_state *st, const char *text)
+{
+    GString *flat = g_string_new(NULL);
+    gboolean carried_space = flow->pending_space;
+    for (const char *c = text; c && *c; c++) {
+        if (svg_is_ws(*c)) {
+            flow->pending_space = flow->any_text;
+            continue;
+        }
+        if (carried_space && flat->len == 0 && st->text_decoration) {
+            svg_state plain = *st;
+            plain.text_decoration = 0;
+            svg_text_flow_add(flow, owner, &plain, " ", 1);
+        } else if (flow->pending_space) {
+            g_string_append_c(flat, ' ');
+        }
+        carried_space = FALSE;
+        flow->pending_space = FALSE;
+        flow->any_text = TRUE;
+        g_string_append_c(flat, *c);
+    }
+    if (flat->len > 0) svg_text_flow_add(flow, owner, st, flat->str, flat->len);
+    g_string_free(flat, TRUE);
+}
+
+static void
+svg_text_flow_close_chunk(svg_text_flow *flow)
+{
+    double advance = flow->x - flow->chunk_x;
+    double shift = flow->chunk_anchor == 1 ? -advance / 2.0
+                 : flow->chunk_anchor == 2 ? -advance : 0;
+    for (guint i = flow->chunk_first; i < flow->runs->len; i++)
+        g_array_index(flow->runs, svg_text_run, i).x += shift;
+    flow->x += shift;
+    flow->chunk_first = flow->runs->len;
+    flow->chunk_serial++;
+}
+
+static void
+svg_text_flow_fit_length(svg_text_flow *flow, const ns_node *el,
+                         const svg_state *st, guint first, double start)
+{
+    if (!svg_attr(el, "textLength")) return;
+    double target = svg_attr_length(el, "textLength", flow->ctx->vw,
+                                    st->font_size, 0);
+    double natural = flow->x - start;
+    if (target <= 0 || natural <= 0 || first >= flow->runs->len) return;
+    const char *adjust = svg_attr(el, "lengthAdjust");
+    gboolean glyphs = adjust &&
+                      g_ascii_strcasecmp(adjust, "spacingAndGlyphs") == 0;
+    glong chars = 0;
+    for (guint i = first; i < flow->runs->len; i++)
+        chars += g_array_index(flow->runs, svg_text_run, i).n_chars;
+    if (!glyphs && chars == 0) return;
+    double spacing = glyphs ? 0 : (target - natural) / (double)chars;
+    double pen = start;
+    for (guint i = first; i < flow->runs->len; i++) {
+        svg_text_run *run = &g_array_index(flow->runs, svg_text_run, i);
+        double gap = run->x - (i > first ? (run - 1)->x + (run - 1)->width
+                                         : start);
+        if (glyphs) {
+            run->stretch = target / natural;
+            run->x = start + (run->x - start) * run->stretch;
+            continue;
+        }
+        NsPangoAttrList *attrs = ns_pango_attr_list_new();
+        ns_pango_attr_list_insert(attrs, ns_pango_attr_letter_spacing_new(
+            (int)lround(spacing * NS_PANGO_SCALE)));
+        ns_pango_layout_set_attributes(run->layout, attrs);
+        ns_pango_attr_list_unref(attrs);
+        svg_text_run_measure(run);
+        run->x = pen + gap;
+        pen = run->x + run->width;
+    }
+    flow->x = glyphs ? start + target : pen;
+}
+
+static void
+svg_text_flow_element(svg_text_flow *flow, const ns_node *el,
+                      const svg_state *st, gboolean root, int depth)
+{
+    svg_ctx *ctx = flow->ctx;
+    if (root || svg_attr(el, "x")) {
+        if (!root) svg_text_flow_close_chunk(flow);
+        flow->x = svg_attr_length(el, "x", ctx->vw, st->font_size, 0);
+        flow->chunk_anchor = st->text_anchor;
+        flow->pending_space = FALSE;
+        flow->x += svg_attr_length(el, "dx", ctx->vw, st->font_size, 0);
+        flow->chunk_x = flow->x;
+    } else {
+        flow->x += svg_attr_length(el, "dx", ctx->vw, st->font_size, 0);
+    }
+    if (root || svg_attr(el, "y"))
+        flow->y = svg_attr_length(el, "y", ctx->vh, st->font_size, 0);
+    flow->y += svg_attr_length(el, "dy", ctx->vh, st->font_size, 0);
+
+    guint first = flow->runs->len;
+    guint serial = flow->chunk_serial;
+    double start = flow->x;
+    for (const ns_node *c = el->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_TEXT) {
+            svg_text_flow_text(flow, el, st, c->text);
+        } else if (svg_text_span_tag(c) && depth < NS_SVG_MAX_DEPTH &&
+                   !svg_is_hidden(ctx, c)) {
+            svg_state inner;
+            svg_state_copy(&inner, st);
+            inner.instanced = TRUE;
+            svg_state_apply_node(ctx, &inner, c);
+            inner.instanced = st->instanced;
+            svg_text_flow_element(flow, c, &inner, FALSE, depth + 1);
+            svg_state_clear(&inner);
+        }
+    }
+    if (serial == flow->chunk_serial)
+        svg_text_flow_fit_length(flow, el, st, first, start);
+}
+
+static GArray *
+svg_text_runs(svg_ctx *ctx, const ns_node *n, const svg_state *st)
+{
+    svg_text_flow flow = { .ctx = ctx };
+    flow.runs = g_array_new(FALSE, TRUE, sizeof(svg_text_run));
+    svg_text_flow_element(&flow, n, st, TRUE, 0);
+    svg_text_flow_close_chunk(&flow);
+    return flow.runs;
+}
+
+static void
+svg_text_runs_free(GArray *runs)
+{
+    for (guint i = 0; i < runs->len; i++) {
+        svg_text_run *run = &g_array_index(runs, svg_text_run, i);
+        g_object_unref(run->layout);
+        svg_state_clear(&run->st);
+    }
+    g_array_free(runs, TRUE);
+}
+
+static void
+svg_text_run_path(svg_ctx *ctx, const svg_text_run *run)
+{
+    cairo_t *cr = ctx->cr;
+    cairo_save(cr);
+    cairo_translate(cr, run->x, run->baseline - run->ascent);
+    cairo_scale(cr, run->stretch, 1.0);
+    cairo_move_to(cr, 0, 0);
+    ns_pango_cairo_layout_path(cr, run->layout);
+    double thickness = MAX(run->st.font_size / 14.0, 0.5);
+    static const struct { guint line; double em_above_baseline; } lines[] = {
+        { SVG_DECORATION_UNDERLINE,    -0.12 },
+        { SVG_DECORATION_LINE_THROUGH,  0.28 },
+        { SVG_DECORATION_OVERLINE,      0.90 },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(lines); i++)
+        if (run->st.text_decoration & lines[i].line)
+            cairo_rectangle(cr, 0,
+                            run->ascent -
+                            lines[i].em_above_baseline * run->st.font_size -
+                            thickness / 2.0,
+                            run->width, thickness);
+    cairo_restore(cr);
 }
 
 static void
 svg_render_text(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 {
-    double x, top, w, h;
-    NsPangoLayout *layout = svg_text_layout(ctx, n, st, &x, &top, &w, &h);
-    if (!layout) return;
-    cairo_move_to(ctx->cr, x, top);
-    ns_pango_cairo_layout_path(ctx->cr, layout);
-    g_object_unref(layout);
-    if (svg_hit_current_path(ctx, n, st)) return;
-    svg_paint_current_path(ctx, st);
+    GArray *runs = svg_text_runs(ctx, n, st);
+    for (guint i = 0; i < runs->len; i++) {
+        const svg_text_run *run = &g_array_index(runs, svg_text_run, i);
+        if (run->st.hidden) continue;
+        svg_text_run_path(ctx, run);
+        if (!svg_hit_current_path(ctx, run->node, &run->st))
+            svg_paint_current_path(ctx, &run->st);
+    }
+    svg_text_runs_free(runs);
 }
 
 typedef struct {
@@ -3201,12 +3467,15 @@ static void
 svg_measure_text(svg_ctx *ctx, const ns_node *n, const svg_state *st,
                  svg_extent *own)
 {
-    double x, top, w, h;
-    NsPangoLayout *layout = svg_text_layout(ctx, n, st, &x, &top, &w, &h);
-    if (!layout) return;
-    g_object_unref(layout);
-    svg_extent_add_point(own, x, top);
-    svg_extent_add_point(own, x + w, top + h);
+    GArray *runs = svg_text_runs(ctx, n, st);
+    for (guint i = 0; i < runs->len; i++) {
+        const svg_text_run *run = &g_array_index(runs, svg_text_run, i);
+        double top = run->baseline - run->ascent;
+        svg_extent_add_point(own, run->x, top);
+        svg_extent_add_point(own, run->x + run->width * run->stretch,
+                             top + run->ascent + run->descent);
+    }
+    svg_text_runs_free(runs);
 }
 
 static void

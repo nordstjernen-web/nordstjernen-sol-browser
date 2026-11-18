@@ -541,7 +541,7 @@ ns_ws_worker_curl(gpointer data)
         long code = 0;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
         char *msg = NULL;
-        if (code != 0 && code != 101)
+        if (code != 101)
             msg = g_strdup_printf(
                 "WebSocket handshake failed (HTTP %ld)", code);
         else if (ws->protocol && !ns_ws_protocol_requested(ws))

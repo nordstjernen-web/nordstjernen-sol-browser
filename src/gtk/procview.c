@@ -828,6 +828,35 @@ ns_proc_url_same_origin(const char *a, const char *b)
     return same;
 }
 
+static gboolean
+pv_url_is_web(const char *url)
+{
+    return url && (g_ascii_strncasecmp(url, "http://", 7) == 0 ||
+                   g_ascii_strncasecmp(url, "https://", 8) == 0);
+}
+
+static gboolean
+pv_url_has_prefix(const char *url, const char *prefix)
+{
+    return g_ascii_strncasecmp(url, prefix, strlen(prefix)) == 0;
+}
+
+static gboolean
+pv_reported_url_plausible(const char *requested, const char *reported)
+{
+    static const char *const local[] = { "file:", "data:", "view-source:" };
+    if (!requested || !reported) return FALSE;
+    if (pv_url_is_web(requested)) return pv_url_is_web(reported);
+    for (gsize i = 0; i < G_N_ELEMENTS(local); i++)
+        if (pv_url_has_prefix(requested, local[i]))
+            return pv_url_has_prefix(reported, local[i]);
+    if (!pv_url_has_prefix(requested, "about:"))
+        return !pv_url_has_prefix(reported, "about:");
+    gsize page = strcspn(requested, "?#");
+    return page == strcspn(reported, "?#") &&
+           g_ascii_strncasecmp(requested, reported, page) == 0;
+}
+
 static void request_tick(NsProcView *v);
 
 static gboolean
@@ -1292,7 +1321,9 @@ worker_main(gpointer data)
                 res->pw = pg.page_width;
                 res->ph = pg.page_height;
                 res->title = g_strdup(pg.title ? pg.title : "");
-                res->url = g_strdup(pg.url ? pg.url : req->url);
+                res->url = g_strdup(
+                    pv_reported_url_plausible(req->url, pg.url) ? pg.url
+                                                                : req->url);
                 res->nav = pg.nav ? g_strdup(pg.nav) : NULL;
                 res->security = pg.security;
                 res->remote_ip = pg.remote_ip ? g_strdup(pg.remote_ip) : NULL;

@@ -149,6 +149,7 @@ NsPangoWrapMode ns_paint_min_content_wrap(NsPangoAttrList *attrs,
 void ns_paint_i18n_memo_begin(void);
 void ns_paint_i18n_memo_end(void);
 gboolean ns_paint_text_ellipsizes(const ns_style *style);
+int ns_paint_ellipsize_mode(const ns_style *style);
 void ns_paint_layout_set_inline_text(NsPangoLayout *layout, const char *text);
 
 double ns_paint_css_line_height_px(const ns_style *style);

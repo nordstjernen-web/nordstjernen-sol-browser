@@ -3,6 +3,19 @@ Changelog:
 
 1.0.50-dev:
 ======
+* SVG `<text>` is laid out span by span: each `<tspan>` keeps its own
+  position (`x`, `y`, `dx`, `dy`), font and paint, so multi-line and
+  multi-colour labels in charts and diagrams render as written. Adds
+  `dominant-baseline`, `textLength` / `lengthAdjust`, underline and
+  line-through, and per-chunk `text-anchor`.
+* `text-overflow: ellipsis` cuts the line end in `direction: rtl`
+  blocks instead of always the right edge.
+* A single-line text input shows spelling marks only while focused.
+* `crypto.subtle.importKey()` rejects SPKI and PKCS#8 data with
+  trailing bytes.
+* Security: a WebSocket opens only on a 101 response, and the shell no
+  longer accepts a renderer's claim that a web load ended on an
+  internal `about:` page.
 * Moving the pointer, pressing a button or moving focus restyles only
   the elements a `:hover`, `:active`, `:focus` or `:focus-within` rule
   can reach. A stylesheet with `:has(:hover)`, a sibling rule such as

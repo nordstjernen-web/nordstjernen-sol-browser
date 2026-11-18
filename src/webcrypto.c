@@ -261,13 +261,19 @@ static EVP_PKEY *
 ns_crypto_pkey_from_der(const char *format, const guint8 *data, gsize len)
 {
     const unsigned char *p = data;
+    const unsigned char *end = data + len;
     if (!g_strcmp0(format, "spki")) {
-        return d2i_PUBKEY(NULL, &p, (long)len);
+        EVP_PKEY *pk = d2i_PUBKEY(NULL, &p, (long)len);
+        if (pk && p != end) {
+            EVP_PKEY_free(pk);
+            return NULL;
+        }
+        return pk;
     }
     if (!g_strcmp0(format, "pkcs8")) {
         PKCS8_PRIV_KEY_INFO *p8 = d2i_PKCS8_PRIV_KEY_INFO(NULL, &p, (long)len);
         if (!p8) return NULL;
-        EVP_PKEY *pk = EVP_PKCS82PKEY(p8);
+        EVP_PKEY *pk = p == end ? EVP_PKCS82PKEY(p8) : NULL;
         PKCS8_PRIV_KEY_INFO_free(p8);
         return pk;
     }
