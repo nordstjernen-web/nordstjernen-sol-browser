@@ -10,7 +10,6 @@ project(
     'optimization=3',
     'b_ndebug=true',
     'b_pie=true',
-    'b_lto=true',
   ],
   meson_version: '>=1.3',
 )
@@ -73,11 +72,30 @@ add_project_link_arguments(
 
 ns_buildtype = get_option('buildtype')
 ns_is_release = (ns_buildtype == 'release' or ns_buildtype == 'minsize')
-# Every build profile gets -O3 and link-time optimisation (default_options
-# optimization=3 and b_lto=true) plus dead-section pruning; -Db_lto=false
-# gives the faster edit-compile loop that scripts/dev.sh uses, and -Dpgo adds
+# Every build profile gets -O3 (default_options optimization=3), link-time
+# optimisation and dead-section pruning. LTO is added here rather than through
+# b_lto: fat LTO objects keep working with a plain ar and with a linker that
+# has no LTO plugin, where they link as ordinary objects, while b_lto fails
+# outright on such a toolchain (clang with GNU ld on Alpine). Clang has no fat
+# objects outside ELF, so clang on Windows builds without LTO. -Dlto=false gives
+# the faster edit-compile loop that scripts/dev.sh uses, and -Dpgo adds
 # profile-guided optimisation (scripts/pgo-build.sh). Dev/non-release builds
 # keep -g3 + frame pointers so step debugging still works under -O3.
+ns_lto = get_option('lto') and not get_option('b_lto')
+ns_lto_args = []
+if ns_lto and host_machine.system() == 'darwin'
+  ns_lto_args = ['-flto']
+elif ns_lto and cc.get_id() == 'gcc'
+  ns_lto_args = ['-flto=auto', '-ffat-lto-objects']
+elif ns_lto and cc.get_id() == 'clang' and host_machine.system() != 'windows'
+  ns_lto_args = ['-flto', '-ffat-lto-objects']
+endif
+ns_lto = ns_lto_args.length() > 0 and cc.has_multi_arguments(ns_lto_args) and cc.has_multi_link_arguments(ns_lto_args)
+if ns_lto
+  add_project_arguments(ns_lto_args, language: 'c')
+  add_project_link_arguments(ns_lto_args, language: 'c')
+endif
+ns_has_lto = ns_lto or get_option('b_lto')
 add_project_arguments(
   cc.get_supported_arguments(['-ffunction-sections', '-fdata-sections']),
   language: 'c',
@@ -123,7 +141,7 @@ if ns_pgo != 'off'
 endif
 message('nordstjernen build profile: ' +
         (ns_is_release ? 'release (stripped + hardened' : 'development (debug symbols + frame pointer + hardened') +
-        (get_option('b_lto') ? ' + LTO' : '') +
+        (ns_has_lto ? ' + LTO' : '') +
         (ns_pgo == 'off' ? '' : ' + PGO ' + ns_pgo) + ')')
 
 ns_profile_claude = get_option('profile') == 'claude'

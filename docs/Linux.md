@@ -131,7 +131,7 @@ With rustup but no default toolchain, point meson at one:
     ./builddir/src/gtk/nordstjernen
 
 `./scripts/dev.sh build` runs `meson setup` (only if needed) and
-`meson compile -C builddir` in one shot. It configures `-Db_lto=false`:
+`meson compile -C builddir` in one shot. It configures `-Dlto=false`:
 a plain `meson setup` builds with link-time optimisation, which is what
 a release wants and makes every relink slow.
 
