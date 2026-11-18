@@ -38,6 +38,10 @@ Changelog:
   inserts next to another document's script. A frame whose `blur`
   handler ran while the embedding page called `focus()` could read
   that page through its script element and write markup into it.
+* Security: a `MutationObserver` with `subtree` no longer reports
+  mutations inside framed documents or shadow trees below its target.
+  A page observing its own document used to receive the nodes of a
+  cross-origin frame and could read that document through them.
 * Security: a WebSocket opens only on a 101 response, and the shell no
   longer accepts a renderer's claim that a web load ended on an
   internal `about:` page.
