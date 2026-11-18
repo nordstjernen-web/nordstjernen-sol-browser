@@ -25,6 +25,10 @@ Changelog:
   source check the source length against the tightly packed size the
   upload reads, so `UNPACK_ROW_LENGTH` cannot make the driver read past
   the end of the buffer.
+* Security: the animation list behind `getAnimations()` returns only
+  animations on elements of the calling document. A page could use it
+  to obtain elements of a cross-origin frame, or a frame those of the
+  page embedding it, and read that document through them.
 * Security: a WebSocket opens only on a 101 response, and the shell no
   longer accepts a renderer's claim that a web load ended on an
   internal `about:` page.

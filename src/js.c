@@ -288,6 +288,8 @@ static void ns_sw_post_fetch_request(ns_worker_host *host, guint id,
                                      const char *const *headers,
                                      const guint8 *body, gsize body_len);
 static void ns_js_flush_document_write(ns_js *js);
+static gboolean ns_js_node_in_realm(ns_js *js, JSContext *realm,
+                                    const ns_node *node);
 static void ns_js_flush_layout(ns_js *js);
 static void ns_js_flush_style(ns_js *js);
 static void ns_js_module_prefetch_release(const ns_js *js);
@@ -20576,6 +20578,8 @@ typedef struct {
     JSContext *ctx;
     JSValue    arr;
     guint      n;
+    ns_js     *js;
+    gboolean   whole_document;
 } ns_anim_list_ctx;
 
 static void
@@ -20583,6 +20587,8 @@ ns_anim_list_visit(const ns_anim_info *info, gpointer user)
 {
     ns_anim_list_ctx *lc = user;
     if (info->node && (info->node->flags & NS_NODE_UA_OVERLAY)) return;
+    if (lc->whole_document && !ns_js_node_in_realm(lc->js, lc->ctx, info->node))
+        return;
     JSValue o = ns_anim_info_to_js(lc->ctx, info);
     JS_SetPropertyStr(lc->ctx, o, "el", ns_make_element(lc->ctx, info->node));
     JS_SetPropertyUint32(lc->ctx, lc->arr, lc->n++, o);
@@ -20601,7 +20607,7 @@ ns_anim_list_native(JSContext *ctx, JSValueConst this_val,
         ? ns_unwrap_element(argv[0]) : NULL;
     if (argc >= 1 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0]) && !node)
         return arr;
-    ns_anim_list_ctx lc = { ctx, arr, 0 };
+    ns_anim_list_ctx lc = { ctx, arr, 0, js, node == NULL };
     ns_anim_visit(js->anim, node, ns_anim_list_visit, &lc);
     return arr;
 }
@@ -51878,6 +51884,22 @@ ns_js_is_frame_document_edge(const ns_node *child, const ns_node *parent)
            (ns_node_is_tag(parent, NS_TAG_IFRAME) ||
             ns_node_is_tag(parent, NS_TAG_FRAME) ||
             (ns_node_is_tag(parent, NS_TAG_OBJECT) || ns_node_is_pdf_embed(parent)));
+}
+
+static const ns_node *
+ns_js_embedding_frame(const ns_node *node)
+{
+    for (const ns_node *child = node, *p = node ? node->parent : NULL; p;
+         child = p, p = p->parent)
+        if (ns_js_is_frame_document_edge(child, p)) return p;
+    return NULL;
+}
+
+static gboolean
+ns_js_node_in_realm(ns_js *js, JSContext *realm, const ns_node *node)
+{
+    return js && realm && node &&
+           ns_js_embedding_frame(node) == ns_js_frame_of_realm(js, realm);
 }
 
 static const char *
