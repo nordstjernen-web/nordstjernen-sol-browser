@@ -381,6 +381,7 @@ static void ns_js_record_attr_change(ns_js *js, ns_node *target,
 static void ns_js_record_character_data(ns_js *js, ns_node *target, const char *old_value);
 static void ns_node_iters_pre_remove(ns_js *js, ns_node *removed);
 static gboolean ns_mut_target_covers(const ns_mut_target *t, ns_node *node);
+static const ns_node *ns_dom_tree_parent(const ns_node *n);
 static void ns_nodelist_decorate(JSContext *ctx, JSValueConst arr);
 static JSValue ns_nodelist_from_array(JSContext *ctx, JSValue arr);
 static char *ns_js_doc_base_url(ns_js *js);
@@ -32387,7 +32388,8 @@ ns_mut_target_covers(const ns_mut_target *t, ns_node *node)
     if (!t || !t->target || !node) return FALSE;
     if (t->target == node) return TRUE;
     if (!t->subtree) return FALSE;
-    for (ns_node *p = node->parent; p; p = p->parent)
+    for (const ns_node *p = ns_dom_tree_parent(node); p;
+         p = ns_dom_tree_parent(p))
         if (p == t->target) return TRUE;
     return FALSE;
 }
