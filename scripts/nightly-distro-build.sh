@@ -7,7 +7,7 @@
 # alpine.
 set -euo pipefail
 
-DISTRO=${1:?usage: nightly-distro-build.sh <debian|ubuntu|fedora|opensuse|alpine>}
+DISTRO=${1:?usage: nightly-distro-build.sh <debian|ubuntu|fedora|opensuse|alpine> [--deps-only]}
 export VERSION=${VERSION:-}
 export DEBIAN_FRONTEND=noninteractive
 export CC=${CC:-cc}
@@ -115,6 +115,13 @@ esac
 
 sh "$(dirname "$0")/ensure-rust.sh"
 export PATH="$HOME/.cargo/bin:$PATH"
+
+# --deps-only: stop once the build dependencies and Rust are installed, for
+# jobs that build something else from them (the release AppImage).
+if [ "${2:-}" = --deps-only ]; then
+    echo "nightly-distro-build($DISTRO): dependencies installed"
+    exit 0
+fi
 
 git config --global --add safe.directory "$(pwd)" || true
 

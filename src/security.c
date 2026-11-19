@@ -592,8 +592,14 @@ ns_security_sandbox_init(const char *self_exe)
         g_info("landlock: PR_SET_NO_NEW_PRIVS failed: %s", g_strerror(errno));
     }
 
+    /* On NixOS and Guix every library, font and configuration file lives
+     * in the store, and /etc, /run/current-system and the user profile
+     * hold only symlinks into it.  Landlock grants what a path resolves
+     * to, so without the store fontconfig finds no fonts and GTK no
+     * modules.  The store is read-only and world-readable by design. */
     static const char *const system_exec_dirs[] = {
-        "/usr", "/usr/local", "/lib", "/lib64", NULL,
+        "/usr", "/usr/local", "/lib", "/lib64",
+        "/nix/store", "/gnu/store", NULL,
     };
     static const char *const system_read_dirs[] = {
         "/etc", "/var/lib/ca-certificates", "/var/cache/fontconfig",

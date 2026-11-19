@@ -119,6 +119,77 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The x86_64 AppImage, built on Debian 13: the oldest release that ships
+  # the libraries Nordstjernen needs (see meson.build), so it runs there and
+  # on anything newer. An AppImage uses the host's glibc and the libraries
+  # every desktop has (X11, Wayland, fontconfig, freetype, harfbuzz,
+  # fribidi) and bundles the rest.
+  appimage:
+    name: AppImage
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 90
+
+    steps:
+      - name: Install git
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends git ca-certificates
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ env.TAG }}
+
+      - name: Install build dependencies
+        # dpkg-dev, file and librsvg2-* are for linuxdeploy's GTK plugin
+        # and the icon.
+        run: |
+          bash scripts/nightly-distro-build.sh debian --deps-only
+          apt-get install -y --no-install-recommends             dpkg-dev file librsvg2-bin librsvg2-common shared-mime-info
+
+      - name: Build the AppImage
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          bash scripts/pack-appimage.sh
+
+      - name: Check the version and smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          images=(dist/nordstjernen-*-x86_64.AppImage)
+          if [ "${#images[@]}" -ne 1 ]; then
+            echo "::error::expected one AppImage in dist/, found ${#images[@]}"
+            exit 1
+          fi
+          want="dist/nordstjernen-${TAG}-x86_64.AppImage"
+          if [ "${images[0]}" != "$want" ]; then
+            echo "::error::built ${images[0]}, but the tag is $TAG (meson.build version differs)"
+            exit 1
+          fi
+          # The container runs as root, which the browser refuses without
+          # opt-in. It opens local files only from Downloads and system
+          # folders, so the test page goes in Downloads.
+          mkdir -p "$HOME/Downloads"
+          page="$HOME/Downloads/appimage-smoke.html"
+          printf '%s
+' '<!doctype html><title>smoke</title><h1>AppImage smoke test</h1>'             '<p id=p>static</p>'             "<script>document.getElementById('p').textContent = 'script ran: ' + (1 + 2);</script>"             > "$page"
+          out=$(NS_ALLOW_ROOT=1 "$want" --appimage-extract-and-run --headless                   --dump=text --settle-ms=500 "file://$page" 2>/dev/null)
+          echo "$out"
+          grep -q 'AppImage smoke test' <<<"$out"
+          grep -q 'script ran: 3' <<<"$out"
+
+      - name: Upload the AppImage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 7
+
   # The Developer ID signed, notarised and stapled .dmg. macos.yml in release
   # mode fails on a missing secret or any signing/notarisation error instead
   # of falling back to an ad-hoc bundle.
@@ -135,7 +206,7 @@ jobs:
   # jobs once macOS is fixed and the .dmg joins the same draft.
   publish:
     name: Attach to a draft release
-    needs: [linux, macos]
+    needs: [linux, macos, appimage]
     if: ${{ !cancelled() && needs.linux.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -185,7 +256,7 @@ jobs:
         run: |
           cd dist
           shopt -s nullglob
-          packages=(*.deb *.rpm *.zip *.dmg)
+          packages=(*.deb *.rpm *.zip *.AppImage *.dmg)
           listable=(*.deb *.zip)
           if command -v rpm >/dev/null 2>&1; then listable+=(*.rpm); fi
           if [ ${#listable[@]} -gt 0 ]; then
@@ -209,10 +280,15 @@ jobs:
               --draft --verify-tag --title "$TAG" \
               --notes-file ../release-notes.md --repo "$GITHUB_REPOSITORY"
           fi
+          if [ "${{ needs.appimage.result }}" != success ]; then
+            echo "::error::The AppImage job failed (${{ needs.appimage.result }});"                  "the draft has no AppImage. Fix it and re-run the failed jobs"                  "before publishing."
+            appimage_failed=1
+          fi
           if [ "${{ needs.macos.result }}" != success ]; then
             echo "::error::The macOS job did not produce a notarised .dmg" \
                  "(${{ needs.macos.result }}); the draft has only the Linux" \
                  "packages. Fix it and re-run the failed jobs before publishing."
             exit 1
           fi
+          [ -z "${appimage_failed:-}" ] || exit 1
           echo "Draft release $TAG has its packages; review and publish it."
