@@ -5318,6 +5318,7 @@ ns_invalidate_wrapper(ns_node *n)
     if (js && js->js_image_loads)
         g_hash_table_remove(js->js_image_loads, n);
     ns_canvas_state_forget_node(js, n);
+    if (js && js->anim) ns_anim_forget_node(js->anim, n);
     if (js && js->focus_nav_start == n) js->focus_nav_start = NULL;
     if (js && js->focused_node == n) js->focused_node = NULL;
     if (js && js->hover_node == n) js->hover_node = NULL;
