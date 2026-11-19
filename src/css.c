@@ -3599,6 +3599,50 @@ calc_unit_value(const char *unit, double num, ns_calc_term *out)
     return TRUE;
 }
 
+/* Parses a whole calc() argument string into one term. */
+static gboolean
+calc_term_of_text(const char *text, ns_calc_term *out, int depth)
+{
+    const char *q = text, *end = text + strlen(text);
+    if (!calc_expr_parse(&q, end, out, depth + 1)) return FALSE;
+    calc_skip_ws(&q, end);
+    return q == end;
+}
+
+/* A round() nested in a larger calc() has to become one linear term, and
+ * rounding a percentage is not linear: its value was taken with the
+ * percentage measured against the viewport, whatever the property refers
+ * to.  When the step is a pixel or less, as in the pixel-snapping idiom
+ * `calc(0.02px + round(nearest, 100% + 0.2px, 1px))`, the rounded value is
+ * within that step of its argument, so the argument itself stands in for
+ * it and its percentage is resolved where the value is used. */
+static gboolean
+calc_round_is_pixel_snap(const char *name, const char *args,
+                         const char *close, ns_calc_term *out, int depth)
+{
+    if (g_ascii_strcasecmp(name, "round") != 0 || depth > 8) return FALSE;
+    char *parts[4] = {0};
+    int n = calc_split_args(args, close, parts, G_N_ELEMENTS(parts));
+    int vi = n > 0 && (g_ascii_strcasecmp(parts[0], "nearest") == 0 ||
+                       g_ascii_strcasecmp(parts[0], "up") == 0 ||
+                       g_ascii_strcasecmp(parts[0], "down") == 0 ||
+                       g_ascii_strcasecmp(parts[0], "to-zero") == 0) ? 1 : 0;
+    ns_calc_term a, b;
+    memset(&a, 0, sizeof a);
+    memset(&b, 0, sizeof b);
+    gboolean snap = n == vi + 2 &&
+        calc_term_of_text(parts[vi], &a, depth) &&
+        calc_term_of_text(parts[vi + 1], &b, depth) &&
+        !a.is_number && !b.is_number && a.fn == 0 && b.fn == 0 &&
+        a.pct != 0 &&
+        b.pct == 0 && b.em == 0 && b.rem == 0 && b.lh == 0 &&
+        b.vw == 0 && b.vh == 0 && b.vmin == 0 && b.vmax == 0 &&
+        b.px > 0 && b.px <= 1.0;
+    if (snap) *out = a;
+    for (int i = 0; i < n; i++) g_free(parts[i]);
+    return snap;
+}
+
 static gboolean
 calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
                    int depth)
@@ -3645,6 +3689,10 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
         const char *args = p + funcs[i].len + 1;
         const char *close = match_close_paren(args, end);
         if (!close) return FALSE;
+        if (calc_round_is_pixel_snap(funcs[i].name, args, close, out, depth)) {
+            *pp = close + 1;
+            return TRUE;
+        }
         char *frag = g_strndup(p, (gsize)(close + 1 - p));
         ns_css_value *v = parse_calc(frag);
         g_free(frag);
