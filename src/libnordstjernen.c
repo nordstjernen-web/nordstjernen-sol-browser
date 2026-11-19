@@ -6048,6 +6048,7 @@ ns_browser_close(ns_browser *browser)
     if (browser->js) {
         ns_js_set_layout_root(browser->js, NULL);
         ns_js_set_style_table(browser->js, NULL);
+        ns_js_set_anim(browser->js, NULL);
     }
     if (browser->anim) ns_anim_free(browser->anim);
     ns_smil_free(browser->smil);

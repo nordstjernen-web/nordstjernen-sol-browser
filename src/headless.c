@@ -2388,6 +2388,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         if (js)            ns_js_set_style_flush_cb(js, NULL);
         if (js)            ns_js_set_layout_root(js, NULL);
         if (js)            ns_js_set_style_table(js, NULL);
+        if (js)            ns_js_set_anim(js, NULL);
         if (anim)          ns_anim_free(anim);
         ns_smil_free(smil);
         if (layout)        { ns_paint_3d_invalidate(); ns_box_free(layout); }
@@ -2544,6 +2545,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     g_free(nav_cap.pending_url);
     headless_nav_capture_clear_post(&nav_cap);
     ns_paint_set_anim(NULL);
+    if (js)            ns_js_set_anim(js, NULL);
     if (anim)          ns_anim_free(anim);
     ns_smil_free(smil);
     if (js)            ns_js_set_layout_root(js, NULL);
