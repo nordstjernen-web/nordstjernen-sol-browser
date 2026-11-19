@@ -3,6 +3,12 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Docs: SECURITY.md is now a short reporting FAQ that covers all three
+  browsers of the project (Nordstjernen Sol, Northstar and Southstar).
+  The threat model and defence description move to
+  `docs/security-model.md`, which now says that remote control also
+  starts when its setting is switched on, that the in-tree QuickJS and
+  Pango forks are in scope, and lists three more known gaps.
 * Security: Web Authentication lower-cases the relying party ID and
   drops a trailing dot before checking it against the public suffix
   list. A page under a public suffix could ask for the suffix itself,

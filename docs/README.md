@@ -5,7 +5,8 @@ top-level [README.md](../README.md); the development plan is
 [NORDSTJERNEN.md](../NORDSTJERNEN.md); the AI working rules are in
 [CLAUDE.md](../CLAUDE.md) (Claude) and [AGENTS.md](../AGENTS.md) (Codex).
 Release notes are in [Changelog.md](../Changelog.md), vulnerability
-reporting in [SECURITY.md](../SECURITY.md), and licensing in
+reporting in [SECURITY.md](../SECURITY.md), the threat model and defences in
+[security-model.md](security-model.md), and licensing in
 [License.md](../License.md) and
 [THIRD-PARTY-LICENSES.md](../THIRD-PARTY-LICENSES.md).
 
