@@ -55,11 +55,6 @@ Nordstjernen Sol's threat model, sandbox and defences are described in
 [docs/security-model.md](docs/security-model.md). Northstar and Southstar
 document theirs in their own repositories.
 
-## Do you have a bounty program?
-
-No. Nordstjernen is a small independent project and pays no bounties.
-Reporters are credited in the changelog.
-
 ## How are fixes published?
 
 Each fix is committed with a `Security-Fix:` trailer naming the bug, and
