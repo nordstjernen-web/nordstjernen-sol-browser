@@ -17,6 +17,32 @@ struct ns_gl_context {
     HGLRC rc;
 };
 
+/* Once a second GL context has been made current anywhere in the process
+ * (GTK's own renderer does this), libepoxy on Windows calls every WGL and
+ * GL function through a per-thread table.  A thread's table is all zeros
+ * until epoxy_handle_external_wglMakeCurrent() runs on it, so the first
+ * wglCreateContext() on the engine thread jumped to address 0.  This fills
+ * the table for the calling thread; it is called again after every
+ * wglMakeCurrent(), so the GL entry points are resolved for the context
+ * now current. */
+static void
+ns_gl_epoxy_thread_ready(void)
+{
+    static GPrivate ready;
+    if (!g_private_get(&ready)) {
+        epoxy_handle_external_wglMakeCurrent();
+        g_private_set(&ready, GINT_TO_POINTER(1));
+    }
+}
+
+static BOOL
+ns_gl_make_current(HDC dc, HGLRC rc)
+{
+    BOOL ok = wglMakeCurrent(dc, rc);
+    epoxy_handle_external_wglMakeCurrent();
+    return ok;
+}
+
 static const wchar_t *
 ns_gl_window_class(void)
 {
@@ -53,6 +79,7 @@ ns_gl_set_pixel_format(HDC dc)
 ns_gl_context *
 ns_gl_context_create(void)
 {
+    ns_gl_epoxy_thread_ready();
     HWND window = CreateWindowExW(0, ns_gl_window_class(), L"", WS_POPUP,
                                   0, 0, 1, 1, NULL, NULL,
                                   GetModuleHandleW(NULL), NULL);
@@ -66,7 +93,7 @@ ns_gl_context_create(void)
     }
 
     HGLRC legacy = wglCreateContext(dc);
-    if (!legacy || !wglMakeCurrent(dc, legacy)) {
+    if (!legacy || !ns_gl_make_current(dc, legacy)) {
         if (legacy) wglDeleteContext(legacy);
         ReleaseDC(window, dc);
         DestroyWindow(window);
@@ -98,9 +125,9 @@ ns_gl_context_create(void)
         g_message("WebGL: the OpenGL driver lacks WGL_ARB_create_context_robustness, "
                   "so no WebGL context is created");
     }
-    wglMakeCurrent(NULL, NULL);
+    ns_gl_make_current(NULL, NULL);
     wglDeleteContext(legacy);
-    if (!rc || !wglMakeCurrent(dc, rc)) {
+    if (!rc || !ns_gl_make_current(dc, rc)) {
         if (rc) wglDeleteContext(rc);
         ReleaseDC(window, dc);
         DestroyWindow(window);
@@ -118,25 +145,28 @@ gboolean
 ns_gl_context_make_current(ns_gl_context *c)
 {
     if (!c) return FALSE;
+    ns_gl_epoxy_thread_ready();
     if (wglGetCurrentContext() == c->rc && wglGetCurrentDC() == c->dc)
         return TRUE;
-    return wglMakeCurrent(c->dc, c->rc) ? TRUE : FALSE;
+    return ns_gl_make_current(c->dc, c->rc) ? TRUE : FALSE;
 }
 
 void
 ns_gl_context_release(ns_gl_context *c)
 {
     if (!c) return;
+    ns_gl_epoxy_thread_ready();
     if (wglGetCurrentContext() == c->rc)
-        wglMakeCurrent(NULL, NULL);
+        ns_gl_make_current(NULL, NULL);
 }
 
 void
 ns_gl_context_destroy(ns_gl_context *c)
 {
     if (!c) return;
+    ns_gl_epoxy_thread_ready();
     if (wglGetCurrentContext() == c->rc)
-        wglMakeCurrent(NULL, NULL);
+        ns_gl_make_current(NULL, NULL);
     wglDeleteContext(c->rc);
     ReleaseDC(c->window, c->dc);
     DestroyWindow(c->window);
