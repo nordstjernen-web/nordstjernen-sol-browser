@@ -3,6 +3,15 @@ Changelog:
 
 1.0.50-dev:
 ======
+* A page's referrer policy is honoured: the `Referrer-Policy` response
+  header and `<meta name="referrer">` of a document limit the `Referer`
+  header of the requests it makes. The stricter of the page's policy
+  and the browser setting applies.
+* Security: `EventSource` sends cookies to another origin only with
+  `withCredentials: true`, and such a stream is then accepted only when
+  the server names the page's origin in `Access-Control-Allow-Origin`
+  and sends `Access-Control-Allow-Credentials: true`. Cookies were sent
+  on every connection and a wildcard origin was accepted.
 * Security: with `tls_allow_insecure_override` on, a page loaded over
   an untrusted certificate gets an opaque origin. It cannot read or
   write the site's cookies, `localStorage` or IndexedDB, so a network

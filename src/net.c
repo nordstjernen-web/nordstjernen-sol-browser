@@ -1055,6 +1055,135 @@ ns_net_referer_for(const char *url, const char *top_url,
     return out;
 }
 
+typedef enum {
+    NS_PAGE_REFERRER_UNSET = 0,
+    NS_PAGE_REFERRER_NONE,
+    NS_PAGE_REFERRER_SAME_ORIGIN,
+    NS_PAGE_REFERRER_ORIGIN,
+    NS_PAGE_REFERRER_ORIGIN_WHEN_CROSS,
+    NS_PAGE_REFERRER_FULL,
+} ns_page_referrer;
+
+static ns_page_referrer
+ns_page_referrer_from_token(const char *token)
+{
+    static const struct { const char *name; ns_page_referrer policy; } known[] = {
+        { "no-referrer",                     NS_PAGE_REFERRER_NONE },
+        { "never",                           NS_PAGE_REFERRER_NONE },
+        { "same-origin",                     NS_PAGE_REFERRER_SAME_ORIGIN },
+        { "origin",                          NS_PAGE_REFERRER_ORIGIN },
+        { "strict-origin",                   NS_PAGE_REFERRER_ORIGIN },
+        { "origin-when-cross-origin",        NS_PAGE_REFERRER_ORIGIN_WHEN_CROSS },
+        { "origin-when-crossorigin",         NS_PAGE_REFERRER_ORIGIN_WHEN_CROSS },
+        { "strict-origin-when-cross-origin", NS_PAGE_REFERRER_ORIGIN_WHEN_CROSS },
+        { "default",                         NS_PAGE_REFERRER_ORIGIN_WHEN_CROSS },
+        { "no-referrer-when-downgrade",      NS_PAGE_REFERRER_FULL },
+        { "unsafe-url",                      NS_PAGE_REFERRER_FULL },
+        { "always",                          NS_PAGE_REFERRER_FULL },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(known); i++)
+        if (g_ascii_strcasecmp(token, known[i].name) == 0)
+            return known[i].policy;
+    return NS_PAGE_REFERRER_UNSET;
+}
+
+static ns_page_referrer
+ns_page_referrer_parse(const char *value)
+{
+    ns_page_referrer policy = NS_PAGE_REFERRER_UNSET;
+    g_auto(GStrv) tokens = g_strsplit(value ? value : "", ",", -1);
+    for (char **t = tokens; *t; t++) {
+        ns_page_referrer parsed = ns_page_referrer_from_token(g_strstrip(*t));
+        if (parsed != NS_PAGE_REFERRER_UNSET) policy = parsed;
+    }
+    return policy;
+}
+
+typedef struct {
+    gconstpointer    owner;
+    ns_page_referrer policy;
+} ns_net_referrer_entry;
+
+static GMutex      g_referrer_lock;
+static GHashTable *g_referrer_by_origin;
+
+void
+ns_net_referrer_policy_register(gconstpointer owner, const char *doc_url,
+                                const char *value)
+{
+    ns_page_referrer policy = ns_page_referrer_parse(value);
+    g_autofree char *origin = doc_url ? ns_url_origin_from(doc_url) : NULL;
+    if (policy == NS_PAGE_REFERRER_UNSET || !origin || !*origin ||
+        strcmp(origin, "null") == 0)
+        return;
+    ns_net_referrer_entry *e = g_new0(ns_net_referrer_entry, 1);
+    e->owner = owner;
+    e->policy = policy;
+    g_mutex_lock(&g_referrer_lock);
+    if (!g_referrer_by_origin)
+        g_referrer_by_origin = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                     g_free, g_free);
+    g_hash_table_replace(g_referrer_by_origin, g_steal_pointer(&origin), e);
+    g_mutex_unlock(&g_referrer_lock);
+}
+
+void
+ns_net_referrer_policy_unregister(gconstpointer owner)
+{
+    g_mutex_lock(&g_referrer_lock);
+    if (g_referrer_by_origin) {
+        GHashTableIter it;
+        gpointer k, v;
+        g_hash_table_iter_init(&it, g_referrer_by_origin);
+        while (g_hash_table_iter_next(&it, &k, &v))
+            if (((ns_net_referrer_entry *)v)->owner == owner)
+                g_hash_table_iter_remove(&it);
+    }
+    g_mutex_unlock(&g_referrer_lock);
+}
+
+static ns_page_referrer
+ns_net_referrer_policy_of(const char *doc_url)
+{
+    g_autofree char *origin = ns_url_origin_from(doc_url);
+    if (!origin || !*origin) return NS_PAGE_REFERRER_UNSET;
+    g_mutex_lock(&g_referrer_lock);
+    ns_net_referrer_entry *e = g_referrer_by_origin
+        ? g_hash_table_lookup(g_referrer_by_origin, origin) : NULL;
+    ns_page_referrer policy = e ? e->policy : NS_PAGE_REFERRER_UNSET;
+    g_mutex_unlock(&g_referrer_lock);
+    return policy;
+}
+
+static char *
+ns_net_referer_for_request(const char *url, const char *top_url,
+                           ns_referer_policy configured)
+{
+    char *referer = ns_net_referer_for(url, top_url, configured);
+    if (!referer) return NULL;
+    gboolean same_origin = ns_url_same_origin(top_url, url);
+    switch (ns_net_referrer_policy_of(top_url)) {
+    case NS_PAGE_REFERRER_UNSET:
+    case NS_PAGE_REFERRER_FULL:
+        return referer;
+    case NS_PAGE_REFERRER_SAME_ORIGIN:
+        if (same_origin) return referer;
+        break;
+    case NS_PAGE_REFERRER_ORIGIN_WHEN_CROSS:
+        if (same_origin) return referer;
+        G_GNUC_FALLTHROUGH;
+    case NS_PAGE_REFERRER_ORIGIN: {
+        g_free(referer);
+        g_autofree char *origin = ns_url_origin_from(top_url);
+        return origin ? g_strdup_printf("%s/", origin) : NULL;
+    }
+    case NS_PAGE_REFERRER_NONE:
+        break;
+    }
+    g_free(referer);
+    return NULL;
+}
+
 static char *
 ns_url_site_from(const char *url)
 {
@@ -6883,7 +7012,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         }
     }
 
-    char *referer = ns_net_referer_for(url, top_url,
+    char *referer = ns_net_referer_for_request(url, top_url,
         cfg ? cfg->referer_policy : NS_REFERER_STRICT_ORIGIN_WHEN_CROSS);
     char *origin_slot = ns_url_origin_from(url);
     gboolean origin_held = FALSE;
