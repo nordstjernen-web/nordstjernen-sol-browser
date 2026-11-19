@@ -127,6 +127,9 @@ void ns_net_set_blob_resolver(ns_net_blob_resolver resolver, gpointer user_data)
 void ns_net_csp_register(gconstpointer owner, const char *doc_url,
                          const char *const *headers);
 void ns_net_csp_unregister(gconstpointer owner);
+void ns_net_referrer_policy_register(gconstpointer owner, const char *doc_url,
+                                     const char *value);
+void ns_net_referrer_policy_unregister(gconstpointer owner);
 void ns_net_connection_allowlist_register(gconstpointer owner,
                                           const char *doc_url,
                                           const char *header,

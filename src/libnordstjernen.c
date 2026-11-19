@@ -1415,6 +1415,38 @@ static void browser_js_form_submit(const ns_node *form, const ns_node *submitter
 static char *g_pending_permissions_policy;
 static char *g_pending_connection_allowlist;
 static gboolean g_pending_untrusted_transport;
+static char *g_pending_referrer_policy;
+
+static const char *
+browser_find_meta_referrer(const ns_node *node, int depth)
+{
+    if (depth > 64) return NULL;
+    const char *found = NULL;
+    for (const ns_node *c = node ? node->first_child : NULL; c;
+         c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            g_ascii_strcasecmp(c->name, "meta") == 0) {
+            const char *name = ns_element_get_attr(c, "name");
+            const char *content = ns_element_get_attr(c, "content");
+            if (name && g_ascii_strcasecmp(name, "referrer") == 0 &&
+                content && *content)
+                found = content;
+        }
+        const char *nested = browser_find_meta_referrer(c, depth + 1);
+        if (nested) found = nested;
+    }
+    return found;
+}
+
+static void
+browser_register_referrer_policy(const ns_node *doc, const char *url)
+{
+    g_autofree char *header = g_steal_pointer(&g_pending_referrer_policy);
+    const char *meta = browser_find_meta_referrer(doc, 0);
+    g_autofree char *combined = g_strjoin(",", header ? header : "",
+                                          meta ? meta : "", NULL);
+    ns_net_referrer_policy_register(doc, url, combined);
+}
 
 static ns_browser *
 browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
@@ -1435,6 +1467,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
                                    ? fragment : NULL);
 
     browser_register_early_csp(doc, url, csp_header);
+    browser_register_referrer_policy(doc, url);
     if (ns_config_get()->speculative_preload)
         ns_engine_speculative_preload(doc, base, FALSE);
 
@@ -1979,6 +2012,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     g_free(g_pending_connection_allowlist);
     g_pending_connection_allowlist =
         ns_net_raw_header_values(resp->raw_headers, "Connection-Allowlist");
+    g_free(g_pending_referrer_policy);
+    g_pending_referrer_policy =
+        ns_net_raw_header_values(resp->raw_headers, "Referrer-Policy");
 
     char *doc_charset = NULL;
     const ns_config *parse_cfg = ns_config_get();
@@ -6034,6 +6070,7 @@ ns_browser_close(ns_browser *browser)
 {
     if (!browser) return;
     ns_net_csp_unregister(browser->doc);
+    ns_net_referrer_policy_unregister(browser->doc);
     if (browser->media_events_source)
         g_source_remove(browser->media_events_source);
     if (browser->img_sessions) {
