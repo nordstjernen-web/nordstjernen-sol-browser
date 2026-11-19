@@ -66429,6 +66429,7 @@ ns_realmdoc_cookie_get(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val; (void)argc; (void)argv; (void)magic;
     ns_js *js = js_from_ctx(ctx);
+    if (ns_js_realm_origin_is_opaque(js, ctx)) return JS_NewString(ctx, "");
     g_autofree char *url = ns_realmdoc_url(ctx, func_data[0]);
     g_autofree char *cookies = url && js
         ? ns_net_cookies_for_js(url, ns_js_top_url(js)) : NULL;
@@ -66443,6 +66444,7 @@ ns_realmdoc_cookie_set(JSContext *ctx, JSValueConst this_val,
     (void)this_val; (void)magic;
     if (argc < 1) return JS_UNDEFINED;
     ns_js *js = js_from_ctx(ctx);
+    if (ns_js_realm_origin_is_opaque(js, ctx)) return JS_UNDEFINED;
     g_autofree char *url = ns_realmdoc_url(ctx, func_data[0]);
     const char *value = JS_ToCString(ctx, argv[0]);
     if (js && url && value && strlen(value) <= 4096)
@@ -76319,11 +76321,17 @@ ns_js_add_csp_header(ns_js *js, const char *header_value)
 }
 
 void
-ns_js_set_document_sandbox(ns_js *js, ns_node *doc, const char *csp_header)
+ns_js_set_document_sandbox(ns_js *js, ns_node *doc, const char *csp_header,
+                           gboolean untrusted_transport)
 {
     if (!js) return;
     g_autofree char *tokens = ns_csp_header_sandbox_tokens(csp_header);
     js->document_sandbox = tokens ? ns_sandbox_from_policy_lines(tokens) : 0;
+    if (untrusted_transport) {
+        unsigned granted = tokens ? js->document_sandbox : ~0u;
+        js->document_sandbox =
+            (granted | NS_SANDBOX_ACTIVE) & ~NS_SANDBOX_ALLOW_SAME_ORIGIN;
+    }
     if (!ns_js_document_origin_is_opaque(js)) return;
     if (doc) doc->flags |= NS_NODE_SANDBOX_OPAQUE;
     ns_storage_load_for(js, js->current_url);

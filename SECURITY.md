@@ -171,7 +171,8 @@ blocked and passive mixed content upgraded. Private Network Access stops
 a page from reaching a more private address space than its own, which
 also defeats DNS rebinding. A certificate error can be overridden (off by
 default) only for a top-level, non-HSTS navigation, which then carries no
-cookies. A navigation to a URL flagged by Safe Browsing stops at a
+cookies; the resulting document has an opaque origin, without access to
+the site's cookies or storage. A navigation to a URL flagged by Safe Browsing stops at a
 warning page.
 
 ### Origins, cookies and storage

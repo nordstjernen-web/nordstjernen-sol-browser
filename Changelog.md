@@ -3,6 +3,11 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Security: with `tls_allow_insecure_override` on, a page loaded over
+  an untrusted certificate gets an opaque origin. It cannot read or
+  write the site's cookies, `localStorage` or IndexedDB, so a network
+  attacker presenting a bad certificate no longer reaches data stored
+  by the real site.
 * Windows: the hourglass cursor shown while a page loads follows the
   display scaling setting (48 px at 150%, 64 px at 200%) instead of
   staying 32 px next to system cursors that scale.
