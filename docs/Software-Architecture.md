@@ -466,7 +466,7 @@ runtime, cross-thread messaging by structured clone), `localStorage`/
 **Temporal** (in the engine, `src/quickjs-bellard/temporal/`), and the
 observer APIs.
 
-**WebAssembly** runs on **WAMR** (`src/wamr/`, the fast interpreter
+**WebAssembly** runs on **WAMR** (`subprojects/wamr.wrap`, the fast interpreter
 with reference-types and bulk-memory, no JIT/AOT); `src/wasm.c` binds the
 `WebAssembly` JS API over it.
 

@@ -59,7 +59,9 @@ unavailable in OBS:
 
 - `-Dwebgpu=disabled` — needs external wgpu-native.
 - PDF.js, the PDF viewer, is `Source1` (`pdfjs-dist-6.5.438.tgz` from the npm
-  registry). Upload it beside the spec; `%prep` copies it into
+  registry), and Wuffs and WAMR are `Source2` and `Source3` (the GitHub tag
+  archives named by `subprojects/wuffs.wrap` and `subprojects/wamr.wrap`).
+  Upload them beside the spec; `%prep` copies them into
   `subprojects/packagecache/` so meson does not need the network.
 
 The package is built for 64-bit targets only (`ExcludeArch: %ix86

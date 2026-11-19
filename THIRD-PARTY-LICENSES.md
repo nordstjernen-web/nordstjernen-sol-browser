@@ -21,8 +21,8 @@ project's own license terms.
 ### Wuffs — Apache License 2.0
 
 > Memory-safe PNG / GIF / BMP / JPEG decoders, transpiled from the
-> Wuffs language to C. Vendored as the single-file release in
-> `subprojects/wuffs/wuffs-v0.4.c`.
+> Wuffs language to C. The pinned upstream release is fetched at
+> build time through `subprojects/wuffs.wrap`.
 > <https://github.com/google/wuffs-mirror-release-c>
 >
 > Copyright (c) 2017 The Wuffs Authors.
@@ -103,15 +103,16 @@ warranty. See <http://creativecommons.org/publicdomain/zero/1.0/>.
 
 ### WebAssembly Micro Runtime (WAMR) — Apache License 2.0 with LLVM exceptions
 
-> WebAssembly runtime. Vendored in `src/wamr/`.
+> WebAssembly runtime. The pinned upstream release is fetched at build
+> time through `subprojects/wamr.wrap`.
 > <https://github.com/bytecodealliance/wasm-micro-runtime>
 >
 > Copyright (c) The WebAssembly Micro Runtime contributors.
 
 Licensed under the Apache License, Version 2.0, with LLVM exceptions.
 See the Wuffs section above for the base Apache 2.0 text; the full
-license including the LLVM exceptions is reproduced in
-`src/wamr/LICENSE`.
+license including the LLVM exceptions is in the `LICENSE` file of the
+WAMR release.
 
 ---
 

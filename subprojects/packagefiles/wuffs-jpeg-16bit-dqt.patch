@@ -1,0 +1,43 @@
+--- a/release/c/wuffs-v0.4.c
++++ b/release/c/wuffs-v0.4.c
+@@ -56084,26 +56084,35 @@
+       }
+       v_q = ((uint8_t)(v_c8 & 15u));
+       if (((uint8_t)(v_c8 >> 4u)) == 1u) {
+-        status = wuffs_base__make_status(wuffs_jpeg__error__unsupported_precision);
+-        goto exit;
++        if (self->private_impl.f_payload_length < 128u) {
++          status = wuffs_base__make_status(wuffs_jpeg__error__bad_dqt_marker);
++          goto exit;
++        }
++        self->private_impl.f_payload_length -= 128u;
++        v_q |= 16u;
+       } else if ((((uint8_t)(v_c8 >> 4u)) > 1u) || (self->private_impl.f_payload_length < 64u)) {
+         status = wuffs_base__make_status(wuffs_jpeg__error__bad_dqt_marker);
+         goto exit;
++      } else {
++        self->private_impl.f_payload_length -= 64u;
+       }
+-      self->private_impl.f_payload_length -= 64u;
+       v_i = 0u;
+       while (v_i < 64u) {
+         v_i += 1u;
+         {
+           WUFFS_BASE__COROUTINE_SUSPENSION_POINT(2);
+-          if (WUFFS_BASE__UNLIKELY(iop_a_src == io2_a_src)) {
++          if (WUFFS_BASE__UNLIKELY((io2_a_src - iop_a_src) < ((v_q & 16u) ? 2 : 1))) {
+             status = wuffs_base__make_status(wuffs_base__suspension__short_read);
+             goto suspend;
+           }
+           uint16_t t_1 = *iop_a_src++;
+-          self->private_impl.f_quant_tables[v_q][WUFFS_JPEG__UNZIG[v_i]] = t_1;
++          if (v_q & 16u) {
++            t_1 = (uint16_t)((t_1 << 8u) | *iop_a_src++);
++          }
++          self->private_impl.f_quant_tables[v_q & 15u][WUFFS_JPEG__UNZIG[v_i]] = t_1;
+         }
+       }
++      v_q &= 15u;
+       self->private_impl.f_seen_dqt[v_q] = true;
+       if (self->private_impl.f_sof_marker == 0u) {
+         v_i = 0u;

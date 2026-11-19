@@ -48,19 +48,26 @@ optdepends=(
   'hunspell-en_us: English dictionary for spell checking'
 )
 _pdfjs=pdfjs-dist-6.5.438.tgz
+_wuffs=wuffs-0.4.0-alpha.12.tar.gz
+_wamr=wasm-micro-runtime-WAMR-2.4.5.tar.gz
 source=("$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/$pkgver.tar.gz"
-        "$_pdfjs::https://registry.npmjs.org/pdfjs-dist/-/$_pdfjs")
-noextract=("$_pdfjs")
+        "$_pdfjs::https://registry.npmjs.org/pdfjs-dist/-/$_pdfjs"
+        "$_wuffs::https://github.com/google/wuffs/archive/refs/tags/v0.4.0-alpha.12.tar.gz"
+        "$_wamr::https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-2.4.5.tar.gz")
+noextract=("$_pdfjs" "$_wuffs" "$_wamr")
 sha256sums=('3b6f6c87ff2fe40fed905c0b88422d4f2d3e65d7cf9cd89a907b5038d3c5bf6a'
-            '7461aefcd27c4ef0dd76f9ca5760f09466eb6b3f934432670c12132e7b3d6faa')
+            '7461aefcd27c4ef0dd76f9ca5760f09466eb6b3f934432670c12132e7b3d6faa'
+            '0c1c84aa93fcaeda523ed517848b1555e72e679c37780aaa2db8d7e5b8ff78f1'
+            '1ab09d51099f276ca4a1d6629f6b589aab2bd0caa01445e05031a4bed22c199b')
 
 _srcdir=nordstjernen-sol-browser-$pkgver
 
 prepare() {
-  # The PDF viewer is PDF.js, which meson takes from this pinned tarball
-  # (subprojects/pdfjs-dist.wrap) instead of downloading it during the build.
-  install -Dm644 "$srcdir/$_pdfjs" \
-    "$_srcdir/subprojects/packagecache/$_pdfjs"
+  # PDF.js, Wuffs and WAMR come from these pinned tarballs (the wraps in
+  # subprojects/) instead of being downloaded during the build.
+  for f in "$_pdfjs" "$_wuffs" "$_wamr"; do
+    install -Dm644 "$srcdir/$f" "$_srcdir/subprojects/packagecache/$f"
+  done
 }
 
 build() {

@@ -249,9 +249,10 @@ than letting them drift.
 
 PNG/APNG, GIF, BMP, and JPEG bytes are decoded through
 [Wuffs](https://github.com/google/wuffs), a memory-safe
-transpiled-to-C image-decoder library. The single-file release is
-vendored at `subprojects/wuffs/wuffs-v0.4.c` and built as a static
-subproject. `src/image.c::ns_image_decode_bytes` is the whole chain:
+transpiled-to-C image-decoder library. Meson fetches the pinned
+upstream release through `subprojects/wuffs.wrap`, applies the one local
+patch from `subprojects/packagefiles/`, and builds its single-file
+`release/c/wuffs-v0.4.c` as a static subproject; nothing is committed. `src/image.c::ns_image_decode_bytes` is the whole chain:
 ICO (`src/image_ico.c`), then `ns_image_decode_wuffs`, then WebP
 (`src/image_webp.c`), then AVIF when built, then SVG in-engine
 (`src/svg.c`). Nothing follows — gdk-pixbuf no longer decodes page

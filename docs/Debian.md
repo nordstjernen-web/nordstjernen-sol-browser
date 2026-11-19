@@ -136,20 +136,22 @@ hand-listed or bundled. The GStreamer plugin packages
 `decodebin` picks at runtime. `ca-certificates` and a hunspell dictionary
 are `Recommends` too.
 
-## The PDF viewer in an offline build
+## Downloaded sources in an offline build
 
-The PDF viewer is PDF.js, which meson downloads through
-`subprojects/pdfjs-dist.wrap`. sbuild and pbuilder have no network, so
-fetch the pinned tarball into `debian/vendor/` before making the source
-package:
+Meson downloads three pinned upstream tarballs through wraps: PDF.js
+(`subprojects/pdfjs-dist.wrap`), the Wuffs image decoders
+(`subprojects/wuffs.wrap`) and the WAMR WebAssembly runtime
+(`subprojects/wamr.wrap`, patched from `subprojects/packagefiles/`).
+sbuild and pbuilder have no network, so fetch the tarballs into
+`debian/vendor/` before making the source package:
 
-    scripts/fetch-pdfjs.sh
+    scripts/fetch-wrap-sources.sh
 
-The script checks the tarball against the SHA-256 in the wrap file.
-`debian/source/include-binaries` lets the source package carry it, and
-`debian/rules` copies it into `subprojects/packagecache/` before meson
-runs. Without it the package still builds, and a PDF then shows a notice
-with a download link instead of the viewer. `debian/vendor/` is not
+The script checks each tarball against the SHA-256 in its wrap file.
+`debian/source/include-binaries` lets the source package carry them, and
+`debian/rules` copies them into `subprojects/packagecache/` before meson
+runs. Wuffs is required. Without PDF.js the package still builds, and a
+PDF then shows a notice with a download link instead of the viewer. `debian/vendor/` is not
 committed.
 
 For Debian `main` this is not enough: the tarball holds minified

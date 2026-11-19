@@ -152,9 +152,10 @@ than letting them drift.
 
 PNG/APNG, GIF, BMP, and JPEG bytes are decoded through
 [Wuffs](https://github.com/google/wuffs), a memory-safe
-transpiled-to-C image-decoder library. The single-file release is
-vendored at `subprojects/wuffs/wuffs-v0.4.c` and built as a static
-subproject. `src/image.c::ns_image_decode_bytes` runs the decoders
+transpiled-to-C image-decoder library. Meson fetches the pinned
+upstream release through `subprojects/wuffs.wrap`, applies the one local
+patch from `subprojects/packagefiles/`, and builds its single-file
+`release/c/wuffs-v0.4.c` as a static subproject; nothing is committed. `src/image.c::ns_image_decode_bytes` runs the decoders
 in order: ICO (`src/image_ico.c`) → Wuffs (PNG/APNG, GIF, BMP, JPEG)
 → WebP via libwebp (`src/image_webp.c`) → AVIF via libavif when built with it
 (`src/image_avif.c`, optional) → SVG in-engine (`src/svg.c`). Nothing
@@ -210,10 +211,11 @@ headers resolve.
 ### WebAssembly: WAMR
 
 The `WebAssembly` JS API (`compile`, `instantiate`, `Memory`,
-`Table`, `Global`, externref) is implemented in `src/wasm.c` over a
-vendored subset of the [WebAssembly Micro Runtime
+`Table`, `Global`, externref) is implemented in `src/wasm.c` over the
+[WebAssembly Micro Runtime
 (WAMR)](https://github.com/bytecodealliance/wasm-micro-runtime)
-interpreter at `src/wamr/`. It runs wasm-bindgen bundles. See
+interpreter, fetched through `subprojects/wamr.wrap` and patched from
+`subprojects/packagefiles/`. It runs wasm-bindgen bundles. See
 `docs/webassembly.md`.
 
 System packages required on Debian/Ubuntu:

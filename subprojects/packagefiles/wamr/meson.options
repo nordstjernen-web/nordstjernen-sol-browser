@@ -1,0 +1,2 @@
+option('simd', type: 'boolean', value: false,
+       description: 'Build the WebAssembly SIMD proposal through SIMDe.')

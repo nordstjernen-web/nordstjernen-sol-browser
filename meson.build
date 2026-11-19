@@ -645,7 +645,7 @@ if wasm_feature.allowed()
     endif
     have_wasm_simd = simde_dep.found()
   endif
-  subdir('src/wamr')
+  libwamr = subproject('wamr', default_options: {'simd': have_wasm_simd}).get_variable('libwamr')
   have_wasm = true
 else
   libwamr = declare_dependency()

@@ -50,6 +50,8 @@ compile_commands.json
 /subprojects/wgpu-native-*/
 /subprojects/simde-*/
 /subprojects/pdfjs-dist-*/
+/subprojects/wuffs-*/
+/subprojects/wasm-micro-runtime-*/
 /debian/vendor/
 
 # CMake (in case)
