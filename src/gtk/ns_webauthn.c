@@ -220,14 +220,24 @@ origin_is_trustworthy(const char *scheme, const char *host)
             g_str_has_suffix(host, ".localhost"));
 }
 
+static char *
+dns_name_normalized(const char *name)
+{
+    char *lower = g_ascii_strdown(name, -1);
+    gsize len = strlen(lower);
+    if (len > 1 && lower[len - 1] == '.') lower[len - 1] = '\0';
+    return lower;
+}
+
 static gboolean
-rp_id_allowed(const char *host, const char *rp_id)
+rp_id_allowed(const char *page_host, const char *rp_id)
 {
     if (!rp_id || !*rp_id) return FALSE;
-    if (g_ascii_strcasecmp(host, rp_id) == 0) return TRUE;
+    g_autofree char *host = dns_name_normalized(page_host);
+    if (strcmp(host, rp_id) == 0) return TRUE;
     gsize hl = strlen(host), rl = strlen(rp_id);
     if (rl >= hl || host[hl - rl - 1] != '.' ||
-        g_ascii_strcasecmp(host + hl - rl, rp_id) != 0)
+        strcmp(host + hl - rl, rp_id) != 0)
         return FALSE;
     static const psl_ctx_t *psl;
     if (!psl) psl = psl_latest(NULL);
@@ -306,12 +316,12 @@ start_request(NsWebAuthn *w, const char *page_url, RjValue *req, guint id)
         error = "NotAllowedError";
         message = "Another Web Authentication request is in progress.";
     }
-    const char *rp_id = NULL;
+    g_autofree char *rp_id = NULL;
     if (!error) {
         const RjValue *rp = create ? rj_get(options, "rp") : NULL;
-        rp_id = create ? (rp ? rj_get_str(rp, "id") : NULL)
-                       : rj_get_str(options, "rpId");
-        if (!rp_id) rp_id = host;
+        const char *asked = create ? (rp ? rj_get_str(rp, "id") : NULL)
+                                   : rj_get_str(options, "rpId");
+        rp_id = dns_name_normalized(asked ? asked : host);
         if (!rp_id_allowed(host, rp_id)) {
             error = "SecurityError";
             message = "The relying party ID is not a registrable domain suffix "
@@ -334,7 +344,7 @@ start_request(NsWebAuthn *w, const char *page_url, RjValue *req, guint id)
     op->request = req;
     g_mutex_init(&op->call.lock);
     op->call.create = create;
-    op->call.rp_id = g_ascii_strdown(rp_id, -1);
+    op->call.rp_id = g_steal_pointer(&rp_id);
     op->call.options = options;
     op->call.client_data = client_data_json(create,
                                             rj_get_str(options, "challenge"),
