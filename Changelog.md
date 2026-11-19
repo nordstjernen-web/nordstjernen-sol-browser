@@ -3,6 +3,14 @@ Changelog:
 
 1.0.50-dev:
 ======
+* `polyfills.js` loses 500 lines of fallbacks the engine already provides
+  natively in windows and workers: the ES2022–2024 `Array`, `Object`,
+  `Promise`, `Map` and `String` methods, `Symbol.dispose`, `URL.parse` and
+  `URL.canParse`, `URLSearchParams`, `AbortController`/`AbortSignal`,
+  `structuredClone`, `queueMicrotask` and `Event.composedPath`, plus a
+  second, simpler `MediaMetadata`/`navigator.mediaSession` fallback that
+  the full one always pre-empted. Their guards were never true, so
+  nothing changes for pages.
 * Wuffs and WAMR are no longer committed. Meson fetches the pinned
   upstream releases (Wuffs 0.4.0-alpha.12, WAMR 2.4.5) through
   `subprojects/wuffs.wrap` and `subprojects/wamr.wrap` and applies the

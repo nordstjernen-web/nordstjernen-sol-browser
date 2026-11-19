@@ -209,116 +209,6 @@
         return list;
     }
 
-    function encodeKV(s) {
-        return encodeURIComponent(String(s == null ? '' : s)).replace(/%20/g, '+');
-    }
-    function decodeKV(s) {
-        return decodeURIComponent(String(s == null ? '' : s).replace(/\+/g, ' '));
-    }
-
-    function USP(init) {
-        if (!(this instanceof USP)) return new USP(init);
-        this._p = [];
-        if (init == null) return;
-        if (init instanceof USP) {
-            for (var i = 0; i < init._p.length; i++)
-                this._p.push([init._p[i][0], init._p[i][1]]);
-            return;
-        }
-        if (typeof init === 'string') {
-            var s = init.charAt(0) === '?' ? init.slice(1) : init;
-            if (!s) return;
-            var parts = s.split('&');
-            for (var j = 0; j < parts.length; j++) {
-                if (!parts[j]) continue;
-                var eq = parts[j].indexOf('=');
-                if (eq < 0) this._p.push([decodeKV(parts[j]), '']);
-                else this._p.push([decodeKV(parts[j].slice(0, eq)),
-                                   decodeKV(parts[j].slice(eq + 1))]);
-            }
-            return;
-        }
-        if (typeof init === 'object') {
-            if (typeof init.length === 'number' &&
-                typeof init !== 'function') {
-                for (var k = 0; k < init.length; k++) {
-                    var pair = init[k];
-                    if (pair && typeof pair.length === 'number' && pair.length >= 2)
-                        this._p.push([String(pair[0]), String(pair[1])]);
-                }
-                return;
-            }
-            var keys = Object.keys(init);
-            for (var n = 0; n < keys.length; n++)
-                this._p.push([keys[n], String(init[keys[n]])]);
-        }
-    }
-    USP.prototype.append = function (k, v) { this._p.push([String(k), String(v)]); };
-    USP.prototype.delete = function (k) {
-        k = String(k);
-        this._p = this._p.filter(function (p) { return p[0] !== k; });
-    };
-    USP.prototype.get = function (k) {
-        k = String(k);
-        for (var i = 0; i < this._p.length; i++)
-            if (this._p[i][0] === k) return this._p[i][1];
-        return null;
-    };
-    USP.prototype.getAll = function (k) {
-        k = String(k);
-        var out = [];
-        for (var i = 0; i < this._p.length; i++)
-            if (this._p[i][0] === k) out.push(this._p[i][1]);
-        return out;
-    };
-    USP.prototype.has = function (k) { return this.get(k) !== null; };
-    USP.prototype.set = function (k, v) {
-        k = String(k); v = String(v);
-        var found = false, out = [];
-        for (var i = 0; i < this._p.length; i++) {
-            if (this._p[i][0] === k) {
-                if (!found) { out.push([k, v]); found = true; }
-            } else out.push(this._p[i]);
-        }
-        if (!found) out.push([k, v]);
-        this._p = out;
-    };
-    USP.prototype.sort = function () {
-        this._p.sort(function (a, b) {
-            return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
-        });
-    };
-    USP.prototype.toString = function () {
-        var parts = [];
-        for (var i = 0; i < this._p.length; i++)
-            parts.push(encodeKV(this._p[i][0]) + '=' + encodeKV(this._p[i][1]));
-        return parts.join('&');
-    };
-    USP.prototype.forEach = function (fn, thisArg) {
-        for (var i = 0; i < this._p.length; i++)
-            fn.call(thisArg, this._p[i][1], this._p[i][0], this);
-    };
-    USP.prototype.keys = function () {
-        var arr = this._p.map(function (p) { return p[0]; });
-        return arr[Symbol.iterator]();
-    };
-    USP.prototype.values = function () {
-        var arr = this._p.map(function (p) { return p[1]; });
-        return arr[Symbol.iterator]();
-    };
-    USP.prototype.entries = function () {
-        var arr = this._p.map(function (p) { return [p[0], p[1]]; });
-        return arr[Symbol.iterator]();
-    };
-    if (typeof Symbol !== 'undefined' && Symbol.iterator) {
-        USP.prototype[Symbol.iterator] = USP.prototype.entries;
-    }
-    Object.defineProperty(USP.prototype, 'size', {
-        get: function () { return this._p.length; },
-        configurable: true
-    });
-    defineCtor('URLSearchParams', USP);
-
     function normHeader(k) { return String(k).toLowerCase(); }
     var HTTP_WS = /^[\t\n\r ]+|[\t\n\r ]+$/g;
     var HDR_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
@@ -784,12 +674,6 @@
         value: 'File', configurable: true
     });
     defineCtor('File', File);
-
-    if (typeof global.queueMicrotask !== 'function') {
-        defineCtor('queueMicrotask', function (cb) {
-            Promise.resolve().then(cb);
-        });
-    }
 
     function ndMediaTask(fn) {
         if (typeof queueMicrotask === 'function') queueMicrotask(fn);
@@ -1936,21 +1820,6 @@
         global.URL.__ndMediaSourceObjectURL = true;
     }
 
-    if (typeof global.URL === 'function' &&
-        typeof global.URL.canParse !== 'function') {
-        global.URL.canParse = function (url, base) {
-            try { new global.URL(url, base); return true; }
-            catch (e) { return false; }
-        };
-    }
-    if (typeof global.URL === 'function' &&
-        typeof global.URL.parse !== 'function') {
-        global.URL.parse = function (url, base) {
-            try { return new global.URL(url, base); }
-            catch (e) { return null; }
-        };
-    }
-
     function XMLSerializer() {
         if (!(this instanceof XMLSerializer)) return new XMLSerializer();
     }
@@ -2162,114 +2031,6 @@
         return xmlSerializeNode(node, null, map, { value: 1 });
     };
     replaceCtor('XMLSerializer', XMLSerializer);
-
-    function AbortSignal() {
-        if (!(this instanceof AbortSignal)) return new AbortSignal();
-        this.aborted = false;
-        this.reason = undefined;
-        this._cbs = [];
-        this.onabort = null;
-    }
-    if (typeof global.EventTarget === 'function' && global.EventTarget.prototype) {
-        try { Object.setPrototypeOf(AbortSignal.prototype, global.EventTarget.prototype); }
-        catch (e) {}
-    }
-    AbortSignal.prototype.addEventListener = function (type, cb) {
-        if (type !== 'abort' || typeof cb !== 'function') return;
-        this._cbs.push(cb);
-    };
-    AbortSignal.prototype.removeEventListener = function (type, cb) {
-        if (type !== 'abort') return;
-        var i = this._cbs.indexOf(cb);
-        if (i >= 0) this._cbs.splice(i, 1);
-    };
-    AbortSignal.prototype.dispatchEvent = function (ev) {
-        if (ev && ev.type === 'abort') this._fire(ev);
-        return true;
-    };
-    AbortSignal.prototype.throwIfAborted = function () {
-        if (this.aborted) {
-            var r = this.reason;
-            if (r === undefined) {
-                var e = typeof DOMException === 'function'
-                    ? new DOMException('This operation was aborted', 'AbortError')
-                    : new Error('AbortError');
-                e.name = 'AbortError';
-                r = e;
-            }
-            throw r;
-        }
-    };
-    AbortSignal.prototype._fire = function (ev) {
-        if (typeof this.onabort === 'function') {
-            try { this.onabort.call(this, ev); } catch (e) {}
-        }
-        var cbs = this._cbs.slice();
-        for (var i = 0; i < cbs.length; i++) {
-            try { cbs[i].call(this, ev); } catch (e) {}
-        }
-    };
-    AbortSignal.abort = function (reason) {
-        var s = new AbortSignal();
-        s.aborted = true;
-        s.reason = reason === undefined
-            ? (typeof DOMException === 'function'
-                ? new DOMException('This operation was aborted', 'AbortError')
-                : new Error('AbortError'))
-            : reason;
-        return s;
-    };
-    AbortSignal.timeout = function (ms) {
-        var s = new AbortSignal();
-        setTimeout(function () {
-            if (!s.aborted) {
-                s.aborted = true;
-                var e = typeof DOMException === 'function'
-                    ? new DOMException('The operation timed out.', 'TimeoutError')
-                    : new Error('TimeoutError');
-                e.name = 'TimeoutError';
-                s.reason = e;
-                s._fire({type: 'abort', target: s});
-            }
-        }, ms);
-        return s;
-    };
-    AbortSignal.any = function (signals) {
-        var s = new AbortSignal();
-        function onAny(src) {
-            if (s.aborted) return;
-            s.aborted = true;
-            s.reason = src ? src.reason : undefined;
-            s._fire({type: 'abort', target: s});
-        }
-        if (signals) {
-            var sigList = Array.isArray(signals) ? signals : Array.from(signals);
-            for (var i = 0; i < sigList.length; i++) {
-                var sig = sigList[i];
-                if (!sig) continue;
-                if (sig.aborted) { onAny(sig); break; }
-                (function (item) {
-                    if (typeof item.addEventListener === 'function')
-                        item.addEventListener('abort', function () { onAny(item); });
-                })(sig);
-            }
-        }
-        return s;
-    };
-    defineCtor('AbortSignal', AbortSignal);
-
-    function AbortController() {
-        if (!(this instanceof AbortController)) return new AbortController();
-        this.signal = new AbortSignal();
-    }
-    AbortController.prototype.abort = function (reason) {
-        var s = this.signal;
-        if (s.aborted) return;
-        s.aborted = true;
-        s.reason = reason === undefined ? new Error('AbortError') : reason;
-        s._fire({type: 'abort', target: s});
-    };
-    defineCtor('AbortController', AbortController);
 
     try {
         var probe = global.document && global.document.createElement('div');
@@ -4570,215 +4331,8 @@
         try { global.caches = Object.create(CacheStorage.prototype); } catch (e) {}
     }
 
-    if (typeof Object.hasOwn !== 'function') {
-        Object.hasOwn = function (obj, prop) {
-            if (obj == null) throw new TypeError('Object.hasOwn: null/undefined');
-            return Object.prototype.hasOwnProperty.call(Object(obj), prop);
-        };
-    }
 
-    if (typeof Object.fromEntries !== 'function') {
-        Object.fromEntries = function (iter) {
-            var out = {};
-            if (iter == null) throw new TypeError('Object.fromEntries: null/undefined');
-            var it = iter[Symbol.iterator] ? iter[Symbol.iterator]() : null;
-            if (it) {
-                for (var step = it.next(); !step.done; step = it.next()) {
-                    var pair = step.value;
-                    if (pair == null) throw new TypeError('Object.fromEntries: bad pair');
-                    out[String(pair[0])] = pair[1];
-                }
-            } else if (typeof iter.length === 'number') {
-                for (var i = 0; i < iter.length; i++) {
-                    var p = iter[i];
-                    if (p == null) continue;
-                    out[String(p[0])] = p[1];
-                }
-            } else {
-                var keys = Object.keys(iter);
-                for (var k = 0; k < keys.length; k++) out[keys[k]] = iter[keys[k]];
-            }
-            return out;
-        };
-    }
 
-    if (typeof Promise.withResolvers !== 'function') {
-        Promise.withResolvers = function () {
-            var resolve, reject;
-            var promise = new Promise(function (res, rej) {
-                resolve = res; reject = rej;
-            });
-            return { promise: promise, resolve: resolve, reject: reject };
-        };
-    }
-
-    if (typeof Promise.any !== 'function') {
-        Promise.any = function (iter) {
-            var arr = [];
-            var it = iter[Symbol.iterator] ? iter[Symbol.iterator]() : null;
-            if (it) {
-                for (var step = it.next(); !step.done; step = it.next()) arr.push(step.value);
-            } else {
-                for (var i = 0; i < iter.length; i++) arr.push(iter[i]);
-            }
-            return new Promise(function (resolve, reject) {
-                if (arr.length === 0) {
-                    var err = new Error('All promises were rejected');
-                    err.name = 'AggregateError';
-                    err.errors = [];
-                    reject(err);
-                    return;
-                }
-                var errors = new Array(arr.length);
-                var remaining = arr.length;
-                arr.forEach(function (p, idx) {
-                    Promise.resolve(p).then(resolve, function (e) {
-                        errors[idx] = e;
-                        if (--remaining === 0) {
-                            var aerr = new Error('All promises were rejected');
-                            aerr.name = 'AggregateError';
-                            aerr.errors = errors;
-                            reject(aerr);
-                        }
-                    });
-                });
-            });
-        };
-    }
-
-    if (typeof Promise.allSettled !== 'function') {
-        Promise.allSettled = function (iter) {
-            var arr = [];
-            var it = iter[Symbol.iterator] ? iter[Symbol.iterator]() : null;
-            if (it) {
-                for (var step = it.next(); !step.done; step = it.next()) arr.push(step.value);
-            } else {
-                for (var i = 0; i < iter.length; i++) arr.push(iter[i]);
-            }
-            return Promise.all(arr.map(function (p) {
-                return Promise.resolve(p).then(
-                    function (v) { return { status: 'fulfilled', value: v }; },
-                    function (e) { return { status: 'rejected',  reason: e }; }
-                );
-            }));
-        };
-    }
-
-    if (typeof Array.prototype.findLast !== 'function') {
-        defineMethod(Array.prototype, 'findLast', function (pred, thisArg) {
-            for (var i = this.length - 1; i >= 0; i--)
-                if (pred.call(thisArg, this[i], i, this)) return this[i];
-            return undefined;
-        });
-    }
-    if (typeof Array.prototype.findLastIndex !== 'function') {
-        defineMethod(Array.prototype, 'findLastIndex', function (pred, thisArg) {
-            for (var i = this.length - 1; i >= 0; i--)
-                if (pred.call(thisArg, this[i], i, this)) return i;
-            return -1;
-        });
-    }
-    if (typeof Array.prototype.toSorted !== 'function') {
-        defineMethod(Array.prototype, 'toSorted', function (cmp) {
-            return this.slice().sort(cmp);
-        });
-    }
-    if (typeof Array.prototype.toReversed !== 'function') {
-        defineMethod(Array.prototype, 'toReversed', function () {
-            return this.slice().reverse();
-        });
-    }
-    if (typeof Array.prototype.toSpliced !== 'function') {
-        defineMethod(Array.prototype, 'toSpliced', function (start, count) {
-            var copy = this.slice();
-            var args = Array.prototype.slice.call(arguments);
-            copy.splice.apply(copy, args);
-            return copy;
-        });
-    }
-    if (typeof Array.prototype.with !== 'function') {
-        defineMethod(Array.prototype, 'with', function (idx, value) {
-            var len = this.length;
-            if (idx < 0) idx += len;
-            if (idx < 0 || idx >= len) throw new RangeError('with: index out of range');
-            var copy = this.slice();
-            copy[idx] = value;
-            return copy;
-        });
-    }
-
-    if (typeof Object.groupBy !== 'function') {
-        Object.groupBy = function (iter, keyFn) {
-            var out = Object.create(null);
-            var idx = 0;
-            var arr = iter && typeof iter.length === 'number' && typeof iter !== 'string'
-                ? iter : Array.from(iter);
-            for (var i = 0; i < arr.length; i++) {
-                var key = keyFn(arr[i], idx++);
-                if (!Object.prototype.hasOwnProperty.call(out, key)) out[key] = [];
-                out[key].push(arr[i]);
-            }
-            return out;
-        };
-    }
-    if (typeof Map !== 'undefined' && typeof Map.groupBy !== 'function') {
-        Map.groupBy = function (iter, keyFn) {
-            var m = new Map();
-            var idx = 0;
-            var arr = iter && typeof iter.length === 'number' && typeof iter !== 'string'
-                ? iter : Array.from(iter);
-            for (var i = 0; i < arr.length; i++) {
-                var key = keyFn(arr[i], idx++);
-                if (!m.has(key)) m.set(key, []);
-                m.get(key).push(arr[i]);
-            }
-            return m;
-        };
-    }
-
-    if (typeof String.prototype.replaceAll !== 'function') {
-        defineMethod(String.prototype, 'replaceAll', function (search, replacement) {
-            if (search instanceof RegExp) {
-                if (!search.global)
-                    throw new TypeError('replaceAll called with a non-global RegExp');
-                return this.replace(search, replacement);
-            }
-            var s = String(this);
-            var needle = String(search);
-            if (needle === '') {
-                if (typeof replacement === 'function') {
-                    var out = '';
-                    for (var i = 0; i <= s.length; i++) {
-                        out += String(replacement('', i, s));
-                        if (i < s.length) out += s.charAt(i);
-                    }
-                    return out;
-                }
-                return Array.prototype.join.call(s, replacement) + replacement;
-            }
-            var parts = s.split(needle);
-            if (typeof replacement === 'function') {
-                var pos = 0, idx = 0;
-                var result = '';
-                for (var j = 0; j < parts.length; j++) {
-                    result += parts[j];
-                    if (j < parts.length - 1) {
-                        pos += parts[j].length;
-                        result += String(replacement(needle, pos, s));
-                        pos += needle.length;
-                    }
-                }
-                return result;
-            }
-            return parts.join(String(replacement));
-        });
-    }
-
-    if (typeof globalThis.structuredClone !== 'function') {
-        defineCtor('structuredClone', function (value) {
-            return structClone(value, new Map());
-        });
-    }
     function structClone(v, seen) {
         if (v == null || typeof v !== 'object') return v;
         if (seen.has(v)) return seen.get(v);
@@ -7750,16 +7304,6 @@
 
     if (ndWorkerScope) return;
 
-    if (typeof Symbol !== 'undefined') {
-        if (typeof Symbol.dispose === 'undefined') {
-            try { Symbol.dispose = Symbol('Symbol.dispose'); } catch (e) {}
-        }
-        if (typeof Symbol.asyncDispose === 'undefined') {
-            try { Symbol.asyncDispose = Symbol('Symbol.asyncDispose'); } catch (e) {}
-        }
-    }
-
-
     if (typeof QuotaExceededError !== 'function') {
         var QuotaErr = function (message, options) {
             if (!(this instanceof QuotaErr)) return new QuotaErr(message, options);
@@ -7777,19 +7321,6 @@
         defineCtor('QuotaExceededError', QuotaErr);
     }
 
-
-    if (typeof Event !== 'undefined' && Event.prototype &&
-        typeof Event.prototype.composedPath !== 'function') {
-        defineMethod(Event.prototype, 'composedPath', function () {
-            var path = [];
-            var node = this.target || this.currentTarget;
-            while (node) {
-                path.push(node);
-                node = node.parentNode || null;
-            }
-            return path;
-        });
-    }
 
     (function () {
         var nav = global.navigator;
@@ -8798,37 +8329,6 @@
                     if (typeof callback === 'function') callback('default');
                     return Promise.resolve('default');
                 })
-            });
-        } catch (e) {}
-    }
-
-    if (typeof global.MediaMetadata !== 'function') {
-        try {
-            defineCtor('MediaMetadata', function (init) {
-                init = init || {};
-                this.title = String(init.title || '');
-                this.artist = String(init.artist || '');
-                this.album = String(init.album || '');
-                this.artwork = Array.isArray(init.artwork) ? init.artwork.slice() : [];
-            });
-        } catch (e) {}
-    }
-
-    if (navigator && !navigator.mediaSession) {
-        try {
-            Object.defineProperty(navigator, 'mediaSession', {
-                configurable: true, enumerable: true,
-                value: {
-                    metadata: null,
-                    playbackState: 'none',
-                    setActionHandler: function (action, handler) {
-                        this['_handler_' + String(action)] =
-                            typeof handler === 'function' ? handler : null;
-                    },
-                    setPositionState: function (state) {
-                        this._positionState = state || null;
-                    }
-                }
             });
         } catch (e) {}
     }
