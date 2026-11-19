@@ -10,6 +10,10 @@
 
 G_BEGIN_DECLS
 
+/* The source with page functions that some GLSL compilers mistake for
+ * built-ins renamed, or NULL when there are none; the caller frees it. */
+char *ns_glsl_unshadow(const char *src, size_t len);
+
 char *ns_glsl_validate(const char *src, size_t len, int webgl_version,
                        gboolean fragment);
 
