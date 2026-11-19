@@ -35,25 +35,31 @@ release of each browser is supported.
 Anything that lets a web page, or the network, get past what the browser
 promises. For example:
 
-- memory-safety bugs in the project's own code, including its forks of
-  QuickJS and Pango and its Rust HTML and URL parsers;
-- escapes from a renderer sandbox, where the browser has one;
-- bypasses of the same-origin policy, or of cookie or cache partitioning;
+- memory-safety bugs in the project's own code, including the projects it
+  has forked into its tree, and panics a web page can trigger;
+- escapes from the browser's sandbox (Landlock and seccomp on Linux,
+  Seatbelt on macOS, the process mitigations on Windows);
+- bypasses of the same-origin policy, CORS, or cookie or cache
+  partitioning;
 - bypasses of HSTS, mixed-content blocking, CSP or iframe sandboxing;
-- URL-bar spoofing.
+- URL-bar spoofing;
+- a web page reaching one of the browser's local control interfaces, such
+  as remote control or WebDriver.
 
 Not in scope:
 
-- bugs in third-party libraries the project uses unmodified, such as
-  libcurl, GTK, GLib, Wuffs, libwebp, FFmpeg or SQLite; please report
-  those upstream;
+- bugs in third-party libraries a browser uses unmodified, such as GTK,
+  GLib, FFmpeg, FreeType or SQLite; please report those upstream;
 - features a browser does not implement;
 - Spectre-class side channels;
-- attacks that already need local code execution as the user.
+- attacks that already need local code execution as the user;
+- anything that needs a debugging switch such as `NS_NO_SANDBOX`.
 
-Nordstjernen Sol's threat model, sandbox and defences are described in
-[docs/security-model.md](docs/security-model.md). Northstar and Southstar
-document theirs in their own repositories.
+Each browser describes its threat model, sandbox and known gaps in its own
+`docs/security-model.md`:
+[Nordstjernen Sol](https://github.com/nordstjernen-web/nordstjernen-sol-browser/blob/main/docs/security-model.md),
+[Northstar](https://github.com/nordstjernen-web/northstar-web-browser/blob/main/docs/security-model.md),
+[Southstar](https://github.com/nordstjernen-web/southstar-browser/blob/main/docs/security-model.md).
 
 ## How are fixes published?
 
