@@ -3,6 +3,10 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Security: Web Authentication lower-cases the relying party ID and
+  drops a trailing dot before checking it against the public suffix
+  list. A page under a public suffix could ask for the suffix itself,
+  spelled `Co.Uk`, and have it accepted as the relying party ID.
 * A page's referrer policy is honoured: the `Referrer-Policy` response
   header and `<meta name="referrer">` of a document limit the `Referer`
   header of the requests it makes. The stricter of the page's policy
