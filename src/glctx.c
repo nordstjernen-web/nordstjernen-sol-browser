@@ -121,12 +121,25 @@ ns_gl_context_create(void)
             0,
         };
         rc = wglCreateContextAttribsARB(dc, NULL, attrs);
-    } else {
-        g_message("WebGL: the OpenGL driver lacks WGL_ARB_create_context_robustness, "
-                  "so no WebGL context is created");
     }
-    ns_gl_make_current(NULL, NULL);
-    wglDeleteContext(legacy);
+    if (rc) {
+        ns_gl_make_current(NULL, NULL);
+        wglDeleteContext(legacy);
+    } else {
+        /* AMD's Windows OpenGL driver, among others, has no robustness
+         * extension.  The context created above is used as it is: the
+         * WebGL binding checks every draw call's vertex, index and
+         * uniform buffer ranges itself, so a shader cannot read past a
+         * buffer either way.  What is lost is lose-context-on-reset. */
+        static gsize noted = 0;
+        if (g_once_init_enter(&noted)) {
+            g_message("WebGL: the OpenGL driver lacks WGL_ARB_create_context_robustness; "
+                      "using an ordinary context, buffer ranges are checked by the browser");
+            g_once_init_leave(&noted, 1);
+        }
+        rc = legacy;
+        ns_gl_make_current(NULL, NULL);
+    }
     if (!rc || !ns_gl_make_current(dc, rc)) {
         if (rc) wglDeleteContext(rc);
         ReleaseDC(window, dc);
