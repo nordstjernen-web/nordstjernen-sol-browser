@@ -151,8 +151,11 @@ target origin.
 ### GPU (`src/glsl_validate.c`, `src/webgpu.c`)
 
 Every WebGL shader is checked against the WebGL rules and compiled by
-glslang before the driver sees it; the GL context is created with robust
-buffer access or not at all. WebGPU shaders are validated by naga in
+glslang before the driver sees it, and every draw is checked against the
+vertex, index and uniform buffer ranges it reads. The GL context is created
+with robust buffer access where the driver offers it, and on Linux and the
+BSDs not at all otherwise; on Windows an ordinary context is used when the
+driver lacks the extension. WebGPU shaders are validated by naga in
 wgpu-native, which adds bounds checks; only the Vulkan, Metal and D3D12
 backends are enabled. Both APIs can be switched off in Settings.
 

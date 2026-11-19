@@ -3,6 +3,19 @@ Changelog:
 
 1.0.50-dev:
 ======
+* WebGL on Windows works with OpenGL drivers that lack
+  `WGL_ARB_create_context_robustness`, such as AMD's. Draw calls were
+  already checked against vertex and index buffer ranges; the checks now
+  also cover instance divisors in WebGL 1 and WebGL 2 uniform buffer
+  ranges, so an ordinary context is used when a robust one cannot be had.
+  An out-of-range draw is an `INVALID_OPERATION`.
+* WebGL shaders may define functions named `average`, `addSaturate` and
+  the other `GL_INTEL_shader_integer_functions2` names. glslang 16 and
+  AMD's OpenGL compiler took them for built-ins in GLSL ES 3.00 shaders,
+  and every three.js material failed to compile.
+* Windows: WebGL contexts made on a thread other than the one GTK renders
+  on fill libepoxy's per-thread function tables first, so they no longer
+  call through a null pointer.
 * Docs: SECURITY.md is now a short reporting FAQ that covers all three
   browsers of the project (Nordstjernen Sol, Northstar and Southstar).
   The threat model and defence description move to

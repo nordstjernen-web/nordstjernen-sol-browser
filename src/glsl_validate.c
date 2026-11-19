@@ -267,6 +267,63 @@ ns_glsl_es100_limits(glslang_resource_t *res)
     res->limits.general_attribute_matrix_vector_indexing = false;
 }
 
+/* glslang 16 declares the GL_INTEL_shader_integer_functions2 built-ins for
+ * every GLSL ES 3.00 shader, whether or not the extension is enabled, and
+ * then rejects a shader that defines a function of the same name.  AMD's
+ * Windows OpenGL compiler does the same.  Every three.js material defines
+ * average(), so no three.js scene compiled.  A WebGL shader cannot enable
+ * that extension, so the names belong to the page: ns_glsl_unshadow()
+ * renames them where they are used as functions, both in the copy glslang
+ * validates and in the source the driver compiles.  Uniform and attribute
+ * names are left alone, so reflection still finds them, and
+ * getShaderSource() returns the page's own text. */
+static const char *const ns_glsl_shadowed_builtins[] = {
+    "absoluteDifference", "addSaturate", "average", "averageRounded",
+    "countLeadingZeros", "countTrailingZeros", "multiply32x16",
+    "subtractSaturate",
+};
+
+static gboolean
+ns_glsl_ident_char(char c)
+{
+    return g_ascii_isalnum(c) || c == '_';
+}
+
+char *
+ns_glsl_unshadow(const char *src, size_t len)
+{
+    GString *out = NULL;
+    size_t copied = 0, i = 0;
+    while (i < len) {
+        if (!ns_glsl_ident_char(src[i])) { i++; continue; }
+        if (g_ascii_isdigit(src[i])) {
+            while (i < len && ns_glsl_ident_char(src[i])) i++;
+            continue;
+        }
+        size_t start = i;
+        while (i < len && ns_glsl_ident_char(src[i])) i++;
+        size_t n = i - start, k = i;
+        while (k < len && (src[k] == ' ' || src[k] == '	')) k++;
+        if (k >= len || src[k] != '(') continue;
+        gboolean shadowed = FALSE;
+        for (gsize b = 0; b < G_N_ELEMENTS(ns_glsl_shadowed_builtins); b++) {
+            const char *name = ns_glsl_shadowed_builtins[b];
+            if (strlen(name) == n && memcmp(src + start, name, n) == 0) {
+                shadowed = TRUE;
+                break;
+            }
+        }
+        if (!shadowed) continue;
+        if (!out) out = g_string_sized_new(len + 64);
+        g_string_append_len(out, src + copied, (gssize)(start - copied));
+        g_string_append(out, "nsPage_");
+        copied = start;
+    }
+    if (!out) return NULL;
+    g_string_append_len(out, src + copied, (gssize)(len - copied));
+    return g_string_free(out, FALSE);
+}
+
 static void
 ns_glsl_run_glslang(ns_glsl_scan *s, gboolean fragment)
 {

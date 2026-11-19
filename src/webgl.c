@@ -944,6 +944,37 @@ wgl_elem_max_index(const uint8_t *data, size_t len, GLintptr offset,
     return TRUE;
 }
 
+/* WebGL 2: every uniform block of the program must have a buffer bound
+ * whose range covers the block's data size, or the draw is an
+ * INVALID_OPERATION.  This is what keeps a shader from reading past the end
+ * of a uniform buffer; the driver's robust buffer access is not relied on. */
+static gboolean
+wgl_uniform_blocks_covered(ns_webgl *g, GLuint prog)
+{
+    if (g->version < 2) return TRUE;
+    GLint blocks = 0;
+    glGetProgramiv(prog, GL_ACTIVE_UNIFORM_BLOCKS, &blocks);
+    for (GLint i = 0; i < blocks; i++) {
+        GLint binding = 0, data_size = 0;
+        glGetActiveUniformBlockiv(prog, (GLuint)i, GL_UNIFORM_BLOCK_BINDING,
+                                  &binding);
+        glGetActiveUniformBlockiv(prog, (GLuint)i,
+                                  GL_UNIFORM_BLOCK_DATA_SIZE, &data_size);
+        GLint buffer = 0;
+        GLint64 start = 0, size = 0;
+        glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, (GLuint)binding, &buffer);
+        glGetInteger64i_v(GL_UNIFORM_BUFFER_START, (GLuint)binding, &start);
+        glGetInteger64i_v(GL_UNIFORM_BUFFER_SIZE, (GLuint)binding, &size);
+        if (buffer <= 0 || start < 0 || size < 0) return FALSE;
+        uint64_t total = wgl_buffer_size(g, (GLuint)buffer);
+        uint64_t avail = (uint64_t)start >= total ? 0 : total - (uint64_t)start;
+        /* A range bound with bindBufferBase has size 0: the whole buffer. */
+        if (size > 0 && (uint64_t)size < avail) avail = (uint64_t)size;
+        if (data_size < 0 || (uint64_t)data_size > avail) return FALSE;
+    }
+    return TRUE;
+}
+
 static gboolean
 wgl_attribs_cover(ns_webgl *g, int64_t vertex_last, int64_t instances)
 {
@@ -951,6 +982,10 @@ wgl_attribs_cover(ns_webgl *g, int64_t vertex_last, int64_t instances)
     GLint prog = 0;
     glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
     if (prog <= 0) {
+        g->injected_error = GL_INVALID_OPERATION;
+        return FALSE;
+    }
+    if (!wgl_uniform_blocks_covered(g, (GLuint)prog)) {
         g->injected_error = GL_INVALID_OPERATION;
         return FALSE;
     }
@@ -963,16 +998,17 @@ wgl_attribs_cover(ns_webgl *g, int64_t vertex_last, int64_t instances)
         glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &enabled);
         if (!enabled) continue;
         glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &buffer);
-        if (buffer <= 0) return FALSE;
+        if (buffer <= 0) goto out_of_range;
         glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_SIZE, &size);
         glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_TYPE, &type);
         glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &stride);
-        if (g->version >= 2)
-            glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_DIVISOR, &divisor);
+        /* ANGLE_instanced_arrays sets divisors in WebGL 1 too, through
+         * the same glVertexAttribDivisor(), so they are read for both. */
+        glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_DIVISOR, &divisor);
         void *pointer = NULL;
         glGetVertexAttribPointerv(index, GL_VERTEX_ATTRIB_ARRAY_POINTER, &pointer);
         int ebytes = wgl_attr_elem_bytes((GLenum)type, size);
-        if (ebytes <= 0 || stride < 0) return FALSE;
+        if (ebytes <= 0 || stride < 0) goto out_of_range;
         int64_t last = divisor == 0 ? vertex_last
                                     : (instances - 1) / (int64_t)(GLuint)divisor;
         if (last < 0) continue;
@@ -981,10 +1017,16 @@ wgl_attribs_cover(ns_webgl *g, int64_t vertex_last, int64_t instances)
         if (__builtin_mul_overflow(eff, (uint64_t)last, &need) ||
             __builtin_add_overflow(need, (uint64_t)(uintptr_t)pointer, &need) ||
             __builtin_add_overflow(need, (uint64_t)ebytes, &need))
-            return FALSE;
-        if (need > wgl_buffer_size(g, (GLuint)buffer)) return FALSE;
+            goto out_of_range;
+        if (need > wgl_buffer_size(g, (GLuint)buffer)) goto out_of_range;
     }
     return TRUE;
+
+out_of_range:
+    /* An enabled array the program reads that has no buffer, or whose
+     * buffer is too short for the vertices or instances drawn. */
+    g->injected_error = GL_INVALID_OPERATION;
+    return FALSE;
 }
 
 static int
@@ -2340,6 +2382,13 @@ wgl_shaderSource(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
             char *rewritten = wgl_rewrite_draw_id(src);
             const GLchar *p = rewritten ? rewritten : src;
             GLint plen = rewritten ? (GLint)strlen(rewritten) : (GLint)slen;
+            char *unshadowed = ns_glsl_unshadow(p, (size_t)plen);
+            if (unshadowed) {
+                g_free(rewritten);
+                rewritten = unshadowed;
+                p = rewritten;
+                plen = (GLint)strlen(rewritten);
+            }
             char *rejection = ns_glsl_validate(p, (size_t)plen, g->version,
                                                wgl_shader_is_fragment(name));
             wgl_shader_remember(g, name, src, slen, rejection);
