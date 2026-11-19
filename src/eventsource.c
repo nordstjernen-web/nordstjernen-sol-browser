@@ -21,6 +21,7 @@ struct ns_es {
     char     *top_url;
     ns_csp   *csp;
     char     *last_event_id;
+    gboolean  with_credentials;
     gint64    reconnect_ms;
     GThread  *thread;
     GMutex    lock;
@@ -159,6 +160,7 @@ typedef struct {
     gboolean    fatal;
     gboolean    is_event_stream;
     char       *allow_origin;
+    gboolean    allow_credentials;
     char       *location;
     const char *url;
 } ns_es_parse;
@@ -260,9 +262,10 @@ ns_es_cors_allows(const ns_es_parse *p)
     const char *origin = p->es->origin;
     if (origin && ns_url_same_origin(origin, p->url))
         return TRUE;
-    return p->allow_origin &&
-           (strcmp(p->allow_origin, "*") == 0 ||
-            (origin && strcmp(p->allow_origin, origin) == 0));
+    if (!p->allow_origin) return FALSE;
+    gboolean exact = origin && strcmp(p->allow_origin, origin) == 0;
+    if (p->es->with_credentials) return exact && p->allow_credentials;
+    return exact || strcmp(p->allow_origin, "*") == 0;
 }
 
 static gboolean
@@ -303,6 +306,7 @@ ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
         p->status = code;
         p->is_event_stream = FALSE;
         g_clear_pointer(&p->allow_origin, g_free);
+        p->allow_credentials = FALSE;
         g_clear_pointer(&p->location, g_free);
     } else if (total >= 9 && ns_es_status_redirects(p->status) &&
                !g_ascii_strncasecmp(buffer, "Location:", 9)) {
@@ -312,6 +316,10 @@ ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
                !g_ascii_strncasecmp(buffer, "Access-Control-Allow-Origin:", 28)) {
         g_free(p->allow_origin);
         p->allow_origin = g_strstrip(g_strndup(buffer + 28, total - 28));
+    } else if (total >= 33 &&
+               !g_ascii_strncasecmp(buffer, "Access-Control-Allow-Credentials:", 33)) {
+        g_autofree char *value = g_strstrip(g_strndup(buffer + 33, total - 33));
+        p->allow_credentials = strcmp(value, "true") == 0;
     } else if (total >= 13 &&
                !g_ascii_strncasecmp(buffer, "Content-Type:", 13)) {
         if (g_strstr_len(buffer, total, "text/event-stream"))
@@ -377,7 +385,8 @@ ns_es_connect_once(ns_es *es, const char *url, gboolean *opened_out,
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, NS_USER_AGENT);
-    ns_net_curl_apply_cookies(curl, url, es->origin, es->top_url);
+    if (es->with_credentials || ns_url_same_origin(es->origin, url))
+        ns_net_curl_apply_cookies(curl, url, es->origin, es->top_url);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     ns_net_apply_curl_tls(curl);
     ns_net_apply_curl_proxy(curl, url);
@@ -514,9 +523,11 @@ ns_es_worker(gpointer data)
 ns_es *
 ns_es_new(const char *url, const char *origin, const char *top_url,
           const char *last_event_id, const char *const *csp_headers,
+          gboolean with_credentials,
           const ns_es_callbacks *cbs, gpointer user_data)
 {
     ns_es *es = g_new0(ns_es, 1);
+    es->with_credentials = with_credentials;
     es->url = g_strdup(url);
     es->origin = g_strdup(origin);
     es->top_url = top_url ? g_strdup(top_url) : NULL;

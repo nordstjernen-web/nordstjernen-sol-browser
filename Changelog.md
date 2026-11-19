@@ -3,6 +3,11 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Security: `EventSource` sends cookies to another origin only with
+  `withCredentials: true`, and such a stream is then accepted only when
+  the server names the page's origin in `Access-Control-Allow-Origin`
+  and sends `Access-Control-Allow-Credentials: true`. Cookies were sent
+  on every connection and a wildcard origin was accepted.
 * Security: with `tls_allow_insecure_override` on, a page loaded over
   an untrusted certificate gets an opaque origin. It cannot read or
   write the site's cookies, `localStorage` or IndexedDB, so a network

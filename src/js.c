@@ -27165,7 +27165,8 @@ ns_window_eventsource_ctor(JSContext *ctx, JSValueConst this_val,
     g_auto(GStrv) csp_headers = ns_js_csp_headers_dup(js);
     s->es = ns_es_new(target, origin && *origin ? origin : "null",
                       ns_js_top_url(js), NULL,
-                      (const char *const *)csp_headers, &cbs, s);
+                      (const char *const *)csp_headers, with_credentials,
+                      &cbs, s);
     g_free(origin);
     g_free(target);
 
