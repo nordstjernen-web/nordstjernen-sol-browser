@@ -10,7 +10,7 @@ fonts, media and PDFs. The user, the kernel and the filesystem outside the
 sandbox allow-list are trusted.
 
 **In scope:** memory-safety bugs in our code, including the in-tree forks
-of QuickJS (`src/quickjs-bellard/`, `src/quickjs/`) and Pango
+of QuickJS (`src/quickjs-bellard/`) and Pango
 (`src/web-text-lib/`) and the Rust HTML and URL parsers; Linux sandbox
 escapes (Landlock or seccomp); bypasses of the macOS Seatbelt profile or
 the Windows process mitigations; same-origin, cookie and cache
@@ -125,8 +125,8 @@ disables the set.
 
 ### JavaScript
 
-QuickJS is an interpreter (default: the fork of Bellard's engine in
-`src/quickjs-bellard/`; alternative: quickjs-ng in `src/quickjs/`). Every
+QuickJS is an interpreter (the fork of Bellard's engine in
+`src/quickjs-bellard/`). Every
 top-level navigation gets a fresh runtime, so nothing from the previous
 document's JavaScript survives into the next. DOM wrappers are
 invalidated when their node is freed.

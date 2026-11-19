@@ -3,6 +3,11 @@ Changelog:
 
 1.0.50-dev:
 ======
+* The quickjs-ng fork (`src/quickjs/`) and the `-Dquickjs` build option
+  are gone; the in-tree fork of Bellard's QuickJS is the only JavaScript
+  engine. About 183,000 lines leave the tree, along with the scripts that
+  only served the removed fork. `scripts/test262-run.sh` now runs
+  test262 on the remaining engine.
 * WebGL on Windows works with OpenGL drivers that lack
   `WGL_ARB_create_context_robustness`, such as AMD's. Draw calls were
   already checked against vertex and index buffer ranges; the checks now

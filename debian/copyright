@@ -32,18 +32,12 @@ Files: subprojects/wuffs/*
 Copyright: 2017 The Wuffs Authors
 License: Apache-2.0
 
-Files: src/quickjs/*
+Files: src/quickjs-bellard/*
 Copyright: 2017-2026 Fabrice Bellard
-           2017-2024 Charlie Gordon
-           2023-2026 Ben Noordhuis
-           2023-2026 Saúl Ibarra Corretgé
-           2023-2026 quickjs-ng contributors
+           2017-2025 Charlie Gordon
 License: Expat
 
-Files: src/quickjs/quickjs-intl-cldr-data.h
-       src/quickjs/quickjs-intl-locale-data.h
-       src/quickjs/quickjs-temporal-caldata.h
-       src/quickjs/quickjs-temporal-winzones.h
+Files: src/quickjs-bellard/intl/locale-data.c
 Copyright: 2016-2025 Unicode, Inc.
 License: Unicode-3.0
 

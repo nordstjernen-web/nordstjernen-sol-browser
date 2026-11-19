@@ -120,8 +120,7 @@ system.
   across layouts, so a run reaches HarfBuzz once instead of three times.
   Android uses the system Pango.
 - **JavaScript** — the QuickJS interpreter: an in-tree, heap-hardened fork of
-  Fabrice Bellard's QuickJS with `Temporal` and `Intl` without ICU, or the
-  in-tree quickjs-ng fork with `-Dquickjs=quickjs-ng`
+  Fabrice Bellard's QuickJS with `Temporal` and `Intl` without ICU
   ([docs/quickjs.md](docs/quickjs.md)). It runs the DOM, Shadow DOM, custom
   elements (including customized built-ins and `ElementInternals`), observer
   APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`, `OffscreenCanvas`),
@@ -255,8 +254,8 @@ Building therefore needs `rustc` 1.100 or newer; meson compiles the crates
 with plain `rustc`, no Cargo.
 
 **Vendored in-tree**, with no submodules:
-[QuickJS](https://github.com/quickjs-ng/quickjs) (quickjs-ng
-fork, no JIT), [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime)
+[QuickJS](https://github.com/bellard/quickjs) (fork of
+Bellard's engine, no JIT), [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime)
 (WebAssembly interpreter), [Wuffs](https://github.com/google/wuffs)
 (memory-safe image decoding), [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
 (MPEG-1 video and MP2 audio), [minimp3](https://github.com/lieff/minimp3)

@@ -425,10 +425,9 @@ plugin-loaded decoder.
 
 The engine is an in-tree fork of Fabrice Bellard's **QuickJS**
 (`src/quickjs-bellard/`), a compact **bytecode interpreter with no JIT**.
-`-Dquickjs=quickjs-ng` builds the same binding on the in-tree fork of
-quickjs-ng 0.18.0 (`src/quickjs/`) instead; the binding is written against
-the quickjs-ng API, which Bellard's engine gets from its own browser hooks
-and the `src/ns_quickjs.h` adapter ([quickjs.md](quickjs.md)). Each browsing
+The binding is written against the quickjs-ng-style API, which the
+engine gets from its own browser hooks and the `src/ns_quickjs.h` adapter
+([quickjs.md](quickjs.md)). Each browsing
 context gets one `JSRuntime` + `JSContext`, created in `ns_js_new`
 (`src/js.c:57052`) with a 2 GB memory cap (`js_memory_cap_mb`) and a
 5 MB stack.
@@ -463,8 +462,8 @@ SQLite-backed native backend with the W3C object model built in
 **EventSource**, **Web Workers** (each a separate `GThread` with its own
 runtime, cross-thread messaging by structured clone), `localStorage`/
 `sessionStorage`, Canvas 2D (Cairo, `src/js_canvas.c`), an ICU-free
-**Intl** generated from CLDR (in the engine, `src/quickjs/quickjs-intl*.c`),
-**Temporal** (in the engine, `src/quickjs/quickjs-temporal*.c`), and the
+**Intl** generated from CLDR (in the engine, `src/quickjs-bellard/intl/`),
+**Temporal** (in the engine, `src/quickjs-bellard/temporal/`), and the
 observer APIs.
 
 **WebAssembly** runs on **WAMR** (`src/wamr/`, the fast interpreter
@@ -668,8 +667,8 @@ See [webgl.md](webgl.md), [webgpu.md](webgpu.md).
 ## 15. Build, embedding, and platforms
 
 - **Build system:** meson + ninja. Optional features (`gtk`, `wasm`,
-  `audio`, `webgpu`, `avif`, `jxl`, `web-text-lib`) are meson feature flags,
-  and `quickjs` is a combo option; ccache is picked up
+  `audio`, `webgpu`, `avif`, `jxl`, `web-text-lib`) are meson feature flags;
+  ccache is picked up
   automatically. The vendored QuickJS, WAMR, and web-text-lib trees are loaded
   via `subdir()` and expose declared dependencies directly, not as
   subprojects. The Rust parser crates (`src/html5_rs/`, `src/url_rs/`)
@@ -778,9 +777,7 @@ rather than reimplementing them. The result is a much smaller codebase
 from-scratch JS engine, and the distinctive HTTP/JSON+shared-memory IPC
 boundary. Both projects share the same north star — a readable,
 independent, standards-first browser that is not a rebrand of an existing
-engine. There is a source-level JS feature comparison between the two
-engines in
-[quickjs-libjs-compare.md](quickjs-libjs-compare.md).
+engine.
 
 ### Where Nordstjernen is deliberately different
 
@@ -817,4 +814,3 @@ engines in
 - [media.md](media.md), [webgl.md](webgl.md), [webgpu.md](webgpu.md),
   [webassembly.md](webassembly.md) — media and accelerated content
 - [Embedding.md](Embedding.md) — the C embedding API
-- [quickjs-libjs-compare.md](quickjs-libjs-compare.md) — QuickJS vs LibJS

@@ -4,7 +4,7 @@
 #
 # Builds (or reuses) a separate --buildtype=release tree in $BUILDDIR so the
 # shipped binary has NDEBUG defined — third-party assertions in vendored deps
-# like quickjs-ng are compiled out, and the optimiser runs at -O3.
+# like QuickJS are compiled out, and the optimiser runs at -O3.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)

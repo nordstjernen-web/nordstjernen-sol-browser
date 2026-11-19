@@ -1,24 +1,5 @@
 python = import('python').find_installation()
 
-qjsc_prog = find_program('qjsc', required: false)
-qjs_prog  = find_program('qjs',  required: false)
-
-if not meson.is_cross_build() and not quickjs_original and qjsc_prog.found() and qjs_prog.found()
-  # files() so the script path is absolute — a raw '../scripts/...' string would
-  # be resolved relative to the build dir and break out-of-tree builds.
-  verify_polyfills_py = files('../scripts/verify-polyfills.py')
-  polyfills_verify = custom_target(
-    'polyfills-verify',
-    input: ['../data/js/polyfills.js', '../scripts/verify-polyfills.js'],
-    output: 'polyfills.verified',
-    command: [
-      python, verify_polyfills_py,
-      qjsc_prog, qjs_prog, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
-    ],
-    build_by_default: true,
-  )
-endif
-
 # The engine's own scripts run in every realm and every worker. A native
 # build compiles them to bytecode once, here, so a new process reads
 # bytecode instead of parsing 670 KB of JavaScript before the page starts.
@@ -31,10 +12,7 @@ foreach name, src : {'polyfills': '../data/js/polyfills.js',
       name + '.bc',
       input: src,
       output: name + '.bc',
-      command: quickjs_original
-        ? [bqjs_bcgen, '<' + name + '>', '@INPUT@', '@OUTPUT@']
-        : [qjsc_exe, '-b', '-C', '-H', '-n', '<' + name + '>',
-           '-o', '@OUTPUT@', '@INPUT@'],
+      command: [bqjs_bcgen, '<' + name + '>', '@INPUT@', '@OUTPUT@'],
     )
     engine_bundles += {name: custom_target(
       name + '.h',
@@ -191,10 +169,8 @@ nordstjernen_engine_sources += files(
   'wasm.c',
   'webaudio.c',
   'webgl.c',
+  'ns_quickjs.c',
 )
-if quickjs_original
-  nordstjernen_engine_sources += files('ns_quickjs.c')
-endif
 
 # GTK-free helpers used by the desktop executable but not the engine UI:
 # the crash watchdog. Kept in src/ as common

@@ -94,8 +94,8 @@ Key choices:
   engines (QuickJS — Expat; WAMR — Apache-2.0 with
   LLVM exception), the vendored single-file libraries (Wuffs —
   Apache-2.0; pl_mpeg — Expat; minimp3 — CC0-1.0), the wgpu-native
-  headers (BSD-3-Clause; Expat or Apache-2.0) and the CLDR/ICU4X data
-  tables in `src/quickjs/` (Unicode-3.0). `Files-Excluded` drops the
+  headers (BSD-3-Clause; Expat or Apache-2.0) and the CLDR data tables
+  in `src/quickjs-bellard/intl/` (Unicode-3.0). `Files-Excluded` drops the
   Android port's prebuilt `gradle-wrapper.jar` when `uscan` repacks the
   upstream tarball.
 

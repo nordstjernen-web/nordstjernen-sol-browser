@@ -279,7 +279,7 @@ representative line.
 | `scheduler.postTask()` / `yield()` | supported in JS | `data/js/polyfills.js:8809`, `:8837` |
 | Intersection/Resize/Mutation observers, `AbortController`, Pointer Events, `scrollend`, Navigation API, Trusted Types, `structuredClone` | supported | `src/js.c:32680`, `:33433`, `:31611`; `polyfills.js:8612`, `:8730` |
 | `scrollsnapchange` | name only | `src/js.c:60947` |
-| Temporal, `Intl.DurationFormat` | engine-provided (`Intl.DurationFormat` found only in the quickjs-ng fork, `src/quickjs/quickjs-intl-duration.c`) | not checked on the default engine |
+| Temporal, `Intl.DurationFormat` | engine-provided | `src/quickjs-bellard/temporal/`, `src/quickjs-bellard/intl/durationformat.c` |
 | Web Crypto incl. Ed25519/X25519, WebAuthn | supported | `src/webcrypto.c`, `polyfills.js:15249` |
 | `Partitioned` cookies | missing | no case-insensitive hit in `src/cookies.c` or `src/net.c` |
 | `Permissions-Policy`, `Clear-Site-Data` response headers | missing | no hits |
@@ -471,9 +471,9 @@ load ShadyDOM at all; check whether this is still needed.
 `'"<[a-z0-9-]+>"'`), with 647 C-string lines containing `function(` or
 `var x =`. They get no syntax check until runtime, cannot be linted, and
 need C escaping. The project already has the fix:
-`scripts/embed-text.py` embeds `data/js/*.js`, and
-`scripts/verify-polyfills.py` compiles `polyfills.js` with `qjsc` at build
-time (`src/meson.build:12-28`). Move the larger snippets into `data/js/`
+`scripts/embed-text.py` embeds `data/js/*.js`, and a native build
+compiles `polyfills.js` to bytecode with `quickjs-bellard-bcgen`, which
+fails on a syntax error (`src/meson.build`). Move the larger snippets into `data/js/`
 and run the same check on them. Effort M (mechanical), risk low. It also
 shrinks the 74k-line file, which bears on the "readable by a single human"
 constraint.
@@ -582,7 +582,7 @@ definition of done.
 | 7 | `@starting-style` (4.1) | `src/css.c`, `src/anim.c` | M | medium | The popover and dialog entry-animation examples from `ui-behaviors/animate-element-entry-exit.md` |
 | 8 | Used `color-scheme`, scheme-aware system colors and `light-dark()` (4.3) | `src/css.c`, `src/css_color.c`, `src/paint.c` | M-L | medium | Page with only the `color-scheme` meta; `about:` pages; form controls in both schemes |
 | 9 | Audio helper network policy (5.1) | `src/audio/main.c`, `src/gtk/procview.c`, `src/net.c` | M | medium | `--debug=net` plus a proxy while playing `.mp3`/`.opus` |
-| 10 | Move embedded JS out of `src/js.c` (5.3) | `src/js.c`, `data/js/*.js`, `src/meson.build`, `scripts/verify-polyfills.py` | M | low | Build (syntax check runs at build time); smoke-launch; `scripts/wpt-fast.sh` |
+| 10 | Move embedded JS out of `src/js.c` (5.3) | `src/js.c`, `data/js/*.js`, `src/meson.build` | M | low | Build (syntax check runs at build time); smoke-launch; `scripts/wpt-fast.sh` |
 | 11 | Shared number-format and overflow helpers (5.7) | `src/css_color.c`, `src/css_filter.c`, `src/css_shape.c`, `src/css_anchor.c`, `src/layout.c`, `src/paint.c` | S | low | `data/render-tests/calc-serialization.html`, `filters.html` |
 | 12 | Translate the `about:` pages (3.3) | `src/net.c`, `src/history.c`, `src/safebrowsing.c`, `data/i18n/*.lang` | M | low | Launch with a non-English `LANG` |
 | 13 | `fetchpriority` to request urgency; `Partitioned` cookies | `src/net.c`, `src/engine.c`, `src/cookies.c` | M | low | `--debug=net` on a page with a `fetchpriority="high"` image; a `Set-Cookie` with `Partitioned` |
