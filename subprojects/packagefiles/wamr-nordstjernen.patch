@@ -1,0 +1,344 @@
+--- a/core/iwasm/common/wasm_memory.c
++++ b/core/iwasm/common/wasm_memory.c
+@@ -5,7 +5,9 @@
+ 
+ #include "wasm_runtime_common.h"
+ #include "../interpreter/wasm_runtime.h"
++#if WASM_ENABLE_AOT != 0
+ #include "../aot/aot_runtime.h"
++#endif
+ #include "mem_alloc.h"
+ #include "wasm_memory.h"
+ 
+@@ -36,6 +38,19 @@
+ static enlarge_memory_error_callback_t enlarge_memory_error_cb;
+ static void *enlarge_memory_error_user_data;
+ 
++static void (*enlarge_memory_success_cb)(WASMModuleInstanceCommon *module_inst,
++                                         void *user_data);
++static void *enlarge_memory_success_user_data;
++
++void
++wasm_runtime_set_enlarge_mem_success_callback(
++    void (*callback)(WASMModuleInstanceCommon *module_inst, void *user_data),
++    void *user_data)
++{
++    enlarge_memory_success_cb = callback;
++    enlarge_memory_success_user_data = user_data;
++}
++
+ #if WASM_MEM_ALLOC_WITH_USER_DATA != 0
+ static void *allocator_user_data = NULL;
+ #endif
+@@ -1704,6 +1719,9 @@
+ 
+     wasm_runtime_set_mem_bound_check_bytes(memory, total_size_new);
+ 
++    if (module && enlarge_memory_success_cb)
++        enlarge_memory_success_cb(module, enlarge_memory_success_user_data);
++
+ return_func:
+     if (!ret && module && enlarge_memory_error_cb) {
+         WASMExecEnv *exec_env = NULL;
+--- a/core/iwasm/common/wasm_runtime_common.c
++++ b/core/iwasm/common/wasm_runtime_common.c
+@@ -4331,6 +4331,99 @@
+ #endif
+ }
+ 
++bool
++wasm_runtime_link_import_global(WASMModuleCommon *const module,
++                                int32 import_index, const wasm_val_t *value)
++{
++#if WASM_ENABLE_INTERP != 0
++    if (module && value && module->module_type == Wasm_Module_Bytecode) {
++        WASMModule *wasm_module = (WASMModule *)module;
++        WASMImport *wasm_import;
++
++        if ((uint32)import_index >= wasm_module->import_count)
++            return false;
++        wasm_import = &wasm_module->imports[import_index];
++        if (wasm_import->kind != WASM_IMPORT_EXPORT_KIND_GLOBAL)
++            return false;
++        switch (value->kind) {
++            case WASM_I32:
++                wasm_import->u.global.global_data_linked.i32 = value->of.i32;
++                break;
++            case WASM_I64:
++                wasm_import->u.global.global_data_linked.i64 = value->of.i64;
++                break;
++            case WASM_F32:
++                wasm_import->u.global.global_data_linked.f32 = value->of.f32;
++                break;
++            case WASM_F64:
++                wasm_import->u.global.global_data_linked.f64 = value->of.f64;
++                break;
++            default:
++                return false;
++        }
++        wasm_import->u.global.is_linked = true;
++        return true;
++    }
++#endif
++    (void)module;
++    (void)import_index;
++    (void)value;
++    return false;
++}
++
++int32
++wasm_runtime_get_data_segment_count(WASMModuleCommon *const module)
++{
++#if WASM_ENABLE_INTERP != 0
++    if (module && module->module_type == Wasm_Module_Bytecode) {
++        return (int32)((WASMModule *)module)->data_seg_count;
++    }
++#endif
++    return -1;
++}
++
++bool
++wasm_runtime_get_data_segment_range(WASMModuleCommon *const module,
++                                    int32 index, uint64 *out_offset,
++                                    uint32 *out_length)
++{
++#if WASM_ENABLE_INTERP != 0
++    if (module && out_offset && out_length
++        && module->module_type == Wasm_Module_Bytecode) {
++        WASMModule *wasm_module = (WASMModule *)module;
++        WASMDataSeg *data_seg;
++
++        if ((uint32)index >= wasm_module->data_seg_count)
++            return false;
++        data_seg = wasm_module->data_segments[index];
++#if WASM_ENABLE_BULK_MEMORY != 0
++        if (data_seg->is_passive) {
++            *out_offset = 0;
++            *out_length = 0;
++            return true;
++        }
++#endif
++        switch (data_seg->base_offset.init_expr_type) {
++            case INIT_EXPR_TYPE_I32_CONST:
++                *out_offset = (uint64)(uint32)data_seg->base_offset.u.unary.v.i32;
++                break;
++            case INIT_EXPR_TYPE_I64_CONST:
++                *out_offset = (uint64)data_seg->base_offset.u.unary.v.i64;
++                break;
++            default:
++                return false;
++        }
++        *out_length = data_seg->data_length;
++        return true;
++    }
++#endif
++    (void)module;
++    (void)index;
++    (void)out_offset;
++    (void)out_length;
++    return false;
++}
++
+ int32
+ wasm_runtime_get_export_count(WASMModuleCommon *const module)
+ {
+@@ -4624,6 +4717,7 @@
+ #endif
+ #if WASM_ENABLE_REF_TYPES != 0
+         case VALUE_TYPE_EXTERNREF:
++            return WASM_EXTERNREF;
+ #endif
+         case VALUE_TYPE_VOID:
+         default:
+@@ -4865,7 +4959,7 @@
+                 if (!wasm_externref_ref2obj(externref_idx, &externref_obj))
+                     goto fail;
+ 
+-                bh_memcpy_s(argv_dst, sizeof(uintptr_t), argv_src,
++                bh_memcpy_s(argv_dst, sizeof(uintptr_t), &externref_obj,
+                             sizeof(uintptr_t));
+                 break;
+             }
+--- a/core/iwasm/include/wasm_export.h
++++ b/core/iwasm/include/wasm_export.h
+@@ -1545,6 +1545,42 @@
+                              wasm_import_t *import_type);
+ 
+ /**
++ * Provide the value for an imported global so instantiation links it,
++ * as if it had been resolved against a built-in module. Bytecode
++ * modules only.
++ *
++ * @param module the WASM module
++ * @param import_index index into the module's import section, which
++ *        must refer to a global import
++ * @param value the value to link the global to; the kind must match
++ *        the declared type
++ *
++ * @return true on success
++ */
++WASM_RUNTIME_API_EXTERN bool
++wasm_runtime_link_import_global(const wasm_module_t module,
++                                int32_t import_index,
++                                const wasm_val_t *value);
++
++/**
++ * Get the number of data segments in a WASM module. Bytecode modules
++ * only; returns -1 otherwise.
++ */
++WASM_RUNTIME_API_EXTERN int32_t
++wasm_runtime_get_data_segment_count(const wasm_module_t module);
++
++/**
++ * Get the linear memory range an active data segment initializes.
++ * Passive segments report a zero-length range. Returns false for
++ * segments whose offset is not a constant expression, or for
++ * non-bytecode modules.
++ */
++WASM_RUNTIME_API_EXTERN bool
++wasm_runtime_get_data_segment_range(const wasm_module_t module,
++                                    int32_t index, uint64_t *out_offset,
++                                    uint32_t *out_length);
++
++/**
+  * Get the number of export items for a WASM module
+  *
+  * @param module the WASM module
+--- a/core/iwasm/interpreter/wasm_interp_fast.c
++++ b/core/iwasm/interpreter/wasm_interp_fast.c
+@@ -5057,6 +5057,12 @@
+                     PUT_I64_TO_ADDR((uint32 *)(frame_lp + local_offset),
+                                     GET_I64_FROM_ADDR(frame_lp + addr1));
+                 }
++#if WASM_ENABLE_SIMDE != 0
++                else if (local_type == VALUE_TYPE_V128) {
++                    PUT_V128_TO_ADDR((uint32 *)(frame_lp + local_offset),
++                                     GET_V128_FROM_ADDR(frame_lp + addr1));
++                }
++#endif
+ #if WASM_ENABLE_GC != 0
+                 else if (wasm_is_type_reftype(local_type)) {
+                     PUT_REF_TO_ADDR((uint32 *)(frame_lp + local_offset),
+--- a/core/iwasm/interpreter/wasm_loader.c
++++ b/core/iwasm/interpreter/wasm_loader.c
+@@ -6509,7 +6509,25 @@
+         }
+     }
+ 
+-    if (!module->possible_memory_grow) {
++    bool has_exported_memory = false;
++    for (i = 0; i < module->export_count; i++) {
++        if (module->exports[i].kind == EXPORT_KIND_MEMORY) {
++            has_exported_memory = true;
++        }
++        else if (module->exports[i].kind == EXPORT_KIND_TABLE) {
++            uint32 table_idx = module->exports[i].index;
++            if (table_idx < module->import_table_count)
++                module->import_tables[table_idx]
++                    .u.table.table_type.possible_grow = true;
++            else if (table_idx - module->import_table_count
++                     < module->table_count)
++                module->tables[table_idx - module->import_table_count]
++                    .table_type.possible_grow = true;
++        }
++    }
++
++    if (!module->possible_memory_grow && !has_exported_memory
++        && module->import_memory_count == 0) {
+ #if WASM_ENABLE_SHRUNK_MEMORY != 0
+         if (aux_data_end_global && aux_heap_base_global
+             && aux_stack_top_global) {
+--- a/core/iwasm/interpreter/wasm_runtime.c
++++ b/core/iwasm/interpreter/wasm_runtime.c
+@@ -1634,6 +1634,8 @@
+     return func;
+ }
+ 
++bool ns_wamr_host_calls_ctors = false;
++
+ static bool
+ execute_post_instantiate_functions(WASMModuleInstance *module_inst,
+                                    bool is_sub_inst, WASMExecEnv *exec_env_main)
+@@ -1658,7 +1660,7 @@
+      * the environment at most once, and that none of their other exports
+      * are accessed before that call.
+      */
+-    if (!is_sub_inst && module->import_wasi_api) {
++    if (!is_sub_inst && !ns_wamr_host_calls_ctors && module->import_wasi_api) {
+         initialize_func =
+             lookup_post_instantiate_func(module_inst, "_initialize");
+     }
+@@ -1666,7 +1668,7 @@
+ 
+     /* Execute possible "__post_instantiate" function if wasm app is
+        compiled by emsdk's early version */
+-    if (!is_sub_inst) {
++    if (!is_sub_inst && !ns_wamr_host_calls_ctors) {
+         post_inst_func =
+             lookup_post_instantiate_func(module_inst, "__post_instantiate");
+     }
+@@ -1674,7 +1676,7 @@
+ #if WASM_ENABLE_BULK_MEMORY != 0
+     /* Only execute the memory init function for main instance since
+        the data segments will be dropped once initialized */
+-    if (!is_sub_inst
++    if (!is_sub_inst && !ns_wamr_host_calls_ctors
+ #if WASM_ENABLE_LIBC_WASI != 0
+         && !module->import_wasi_api
+ #endif
+--- a/core/shared/platform/linux/platform_internal.h
++++ b/core/shared/platform/linux/platform_internal.h
+@@ -31,7 +31,10 @@
+ #include <sys/stat.h>
+ #include <sys/mman.h>
+ #include <sys/time.h>
++#if !defined(__ANDROID__) && !defined(__OpenBSD__) && !defined(__NetBSD__) \
++    && !defined(__FreeBSD__)
+ #include <sys/timeb.h>
++#endif
+ #include <sys/uio.h>
+ #include <sys/ioctl.h>
+ #include <sys/socket.h>
+--- a/core/shared/platform/windows/platform_init.c
++++ b/core/shared/platform/windows/platform_init.c
+@@ -12,26 +12,14 @@
+ os_thread_sys_destroy();
+ 
+ int
+-init_winsock();
+-
+-void
+-deinit_winsock();
+-
+-int
+ bh_platform_init()
+ {
+-    if (init_winsock() != 0) {
+-        return -1;
+-    }
+-
+     return os_thread_sys_init();
+ }
+ 
+ void
+ bh_platform_destroy()
+ {
+-    deinit_winsock();
+-
+     os_thread_sys_destroy();
+ }
+ 
+--- a/core/shared/platform/windows/platform_internal.h
++++ b/core/shared/platform/windows/platform_internal.h
+@@ -98,7 +98,11 @@
+ void
+ os_mem_decommit(void *ptr, size_t size);
+ 
++#if defined(__GNUC__)
++#define os_thread_local_attribute __thread
++#else
+ #define os_thread_local_attribute __declspec(thread)
++#endif
+ 
+ #define strncasecmp _strnicmp
+ #define strcasecmp _stricmp

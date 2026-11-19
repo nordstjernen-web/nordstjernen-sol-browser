@@ -3,8 +3,14 @@
 Nordstjernen carries in-tree forks of upstream C libraries that we
 modify freely for browser integration:
 
-- **QuickJS** (`src/quickjs/`) — forked from
-  [quickjs-ng](https://github.com/quickjs-ng/quickjs).
+- **QuickJS** (`src/quickjs-bellard/`) — forked from Fabrice Bellard's
+  [QuickJS](https://github.com/bellard/quickjs).
+
+Until 2026-11 the tree also carried a fork of
+[quickjs-ng](https://github.com/quickjs-ng/quickjs) in `src/quickjs/`,
+built with `-Dquickjs=quickjs-ng`; it was removed. The entries below headed
+"QuickJS" without "Bellard's" or "original" are refreshes of that fork and
+are history.
 
 The HTML and URL parsers are no longer a vendored fork. They are the
 project's own safe-Rust crates, `src/html5_rs/` and `src/url_rs/`, kept in
@@ -28,11 +34,11 @@ is classified:
 - **merge** — both touched it → 3-way merge (`git merge-file ours BASE
   theirs`), reviewing every hunk.
 
-Sources are listed explicitly in each `meson.build` (`src/quickjs/meson.build`),
-so new upstream files in unused areas are simply
-not compiled; the build is the final gate. After a refresh of either QuickJS,
-build both `-Dquickjs` configurations and fix the adapter if the binding
-changed (see [`quickjs.md`](quickjs.md)).
+Sources are listed explicitly in each `meson.build`
+(`src/quickjs-bellard/meson.build`), so new upstream files in unused areas
+are simply not compiled; the build is the final gate. After a QuickJS
+refresh, fix the adapter if the binding no longer compiles (see
+[`quickjs.md`](quickjs.md), which also has the step-by-step refresh).
 
 The QuickJS fork carries the heap hardening described in
 [`heap-hardening.md`](heap-hardening.md), which touches `quickjs.c` in a
@@ -56,8 +62,9 @@ Fork-local pieces a QuickJS refresh touches, by file:
 | `quickjs-cage.c`, `quickjs-cage.h` | the cage allocator; no upstream counterpart |
 | `quickjs-cptr.h`, `quickjs-hardening.h` | compressed fields, masking, pointer and context tables; included from `quickjs.c` |
 | `list.h` | neighbour checks in `__list_add` and `list_del` |
-| `quickjs.h` | `JS_CAGE_BOXING` layout, `js_cage_pointer_base`, `JS_SetHeapCage`, `JS_Cage*` |
-| `quickjs.c` | the two include lines; the trusted block path in the arena front end; `JS_NewRuntime`'s cage heap; `JS_SetOpaque` / `JS_GetOpaque` table paths and the Intl tag; the context-table indices in realm fields; the code-table indices in C function, closure, job and module records; the WeakRef sentinel; the hand conversions around compressed fields (`JSMapState.hash_buckets`, renamed from upstream's `hash_table` so the rewrite script can tell it from `JSObjectList`'s, its element-typed `sizeof`, the iterator-helper buffer resized through a local, `JS_WriteRegExp` taking a pointer, `js_resize_cptr_array` at the module-table resize sites, and the requested-module resolution in the bytecode reader storing through a local); the auto-init opaque encoding (`js_autoinit_encode_opaque` / `js_autoinit_get_opaque`, the function-list `JSInternTable`); and the `js_cload` / `js_cstore` / `js_abuf_data` / `js_ta_ptr` rewrites the script reproduces |
+| `quickjs.h` | `JS_CAGE_BOXING` layout, `JS_SetHeapCage`, `JS_Cage*`, and the browser hooks |
+| `quickjs.c` | the cage, pointer-table and trusted-block paths, the `js_cload` / `js_cstore` rewrites the script reproduces, the carried security fixes, and the browser hooks at the end of the file |
+| `quickjs-libc.c` | SharedArrayBuffer memory for the host tools taken from the cage |
 | `meson.build` | `quickjs-cage.c` in the sources |
 
 ## 2026-11-12 — Lexbor 145872a → e651d6b

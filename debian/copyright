@@ -12,10 +12,11 @@ Comment:
  in Debian's main component. The NSL-1.0 alternative is documented below for
  completeness; it is not DFSG-free on its own.
  .
- The in-tree third-party engines (QuickJS, WAMR), vendored
- single-file libraries (Wuffs, pl_mpeg, minimp3), the wgpu-native headers and
- the Unicode-derived data tables carry their own free licenses, reproduced
- from THIRD-PARTY-LICENSES.md below.
+ The in-tree QuickJS fork, the vendored single-file libraries (pl_mpeg,
+ minimp3), the wgpu-native headers, the Unicode-derived data tables, and the
+ pinned upstream tarballs of Wuffs and WAMR that debian/vendor/ carries for
+ the offline build carry their own free licenses, reproduced from
+ THIRD-PARTY-LICENSES.md below.
  .
  The prebuilt Gradle wrapper of the Android port is excluded from the source
  package; it is not used by the Debian build.
@@ -28,26 +29,24 @@ Files: data/org.nordstjernen.WebBrowser.metainfo.xml
 Copyright: 2026 Andreas Røsdal
 License: CC0-1.0
 
-Files: subprojects/wuffs/*
+Files: debian/vendor/wuffs-*
+       subprojects/packagefiles/wuffs/*
+       subprojects/packagefiles/wuffs-*.patch
 Copyright: 2017 The Wuffs Authors
 License: Apache-2.0
 
-Files: src/quickjs/*
+Files: src/quickjs-bellard/*
 Copyright: 2017-2026 Fabrice Bellard
-           2017-2024 Charlie Gordon
-           2023-2026 Ben Noordhuis
-           2023-2026 Saúl Ibarra Corretgé
-           2023-2026 quickjs-ng contributors
+           2017-2025 Charlie Gordon
 License: Expat
 
-Files: src/quickjs/quickjs-intl-cldr-data.h
-       src/quickjs/quickjs-intl-locale-data.h
-       src/quickjs/quickjs-temporal-caldata.h
-       src/quickjs/quickjs-temporal-winzones.h
+Files: src/quickjs-bellard/intl/locale-data.c
 Copyright: 2016-2025 Unicode, Inc.
 License: Unicode-3.0
 
-Files: src/wamr/*
+Files: debian/vendor/wasm-micro-runtime-*
+       subprojects/packagefiles/wamr/*
+       subprojects/packagefiles/wamr-*.patch
 Copyright: 2019 Intel Corporation
            The WebAssembly Micro Runtime contributors
 License: Apache-2.0 with LLVM exception

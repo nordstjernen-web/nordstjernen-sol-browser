@@ -620,15 +620,9 @@ if use_web_text_lib
   libpangoft2 = web_text_fc_dep
 endif
 
-if get_option('quickjs') == 'quickjs'
-  subdir('src/quickjs-bellard')
-  message('JS engine: quickjs (in-tree fork of Bellard\'s QuickJS ' +
-          bqjs_version + ', full DOM bindings)')
-else
-  subdir('src/quickjs')
-  message('JS engine: quickjs-ng (in-tree quickjs-ng fork, full DOM bindings)')
-endif
-quickjs_original = get_option('quickjs') == 'quickjs'
+subdir('src/quickjs-bellard')
+message('JS engine: quickjs (in-tree fork of Bellard\'s QuickJS ' +
+        bqjs_version + ', full DOM bindings)')
 
 wasm_unsupported_cpu = host_machine.cpu_family() == 'x86'
 if get_option('wasm').enabled() and wasm_unsupported_cpu
@@ -651,7 +645,7 @@ if wasm_feature.allowed()
     endif
     have_wasm_simd = simde_dep.found()
   endif
-  subdir('src/wamr')
+  libwamr = subproject('wamr', default_options: {'simd': have_wasm_simd}).get_variable('libwamr')
   have_wasm = true
 else
   libwamr = declare_dependency()

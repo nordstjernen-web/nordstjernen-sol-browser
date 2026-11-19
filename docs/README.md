@@ -31,9 +31,9 @@ reporting in [SECURITY.md](../SECURITY.md), the threat model and defences in
 - [Embedding.md](Embedding.md) — embedding the engine in a C application.
 - [engine-protocol.md](engine-protocol.md) — the versioned shell/renderer contract: handshake, endpoints, side channels.
 - [Direction.md](Direction.md) — who the browser is for, what sets it apart, and the architectural commitments.
-- [quickjs.md](quickjs.md) — the two in-tree JavaScript engines: the default fork of Fabrice Bellard's QuickJS and the quickjs-ng fork (`-Dquickjs=quickjs-ng`).
+- [quickjs.md](quickjs.md) — the in-tree JavaScript engine, a fork of Fabrice Bellard's QuickJS: its local changes, browser hooks, the adapter and how to check a change.
 - [quickjs-bellard-default.md](quickjs-bellard-default.md) — what changed when Bellard's QuickJS became the default: the in-tree fork, the heap hardening port, the browser hooks, verification and cost.
-- [vendored-engine-updates.md](vendored-engine-updates.md) — pulling upstream into the in-tree QuickJS forks.
+- [vendored-engine-updates.md](vendored-engine-updates.md) — pulling upstream into the in-tree engines.
 
 ## Architecture & internals
 
@@ -55,8 +55,6 @@ reporting in [SECURITY.md](../SECURITY.md), the threat model and defences in
 - [webassembly.md](webassembly.md) — the WebAssembly JS API over WAMR.
 - [extensions.md](extensions.md) — the scoped WebExtensions support (content scripts and a slice of `browser.*`).
 - [i18n.md](i18n.md) — rendering text in any script, and UI translation through the in-tree catalogue (no gettext).
-- [quickjs-ecma-specification-compliance.md](quickjs-ecma-specification-compliance.md) — browser-side ECMAScript compliance work on the in-tree QuickJS fork.
-- [quickjs-libjs-compare.md](quickjs-libjs-compare.md) — QuickJS (and what Nordstjernen adds natively) compared with Ladybird's LibJS.
 
 ## Testing & benchmarks
 

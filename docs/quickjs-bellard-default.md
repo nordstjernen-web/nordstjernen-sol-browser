@@ -2,15 +2,11 @@
 
 Since 1.0.47 the default JavaScript engine is an in-tree fork of Fabrice
 Bellard's [QuickJS](https://github.com/bellard/quickjs) in
-`src/quickjs-bellard/`. The quickjs-ng fork in `src/quickjs/` stays in the
-tree and is one configure flag away:
+`src/quickjs-bellard/`. The quickjs-ng fork that was the default before
+stayed in `src/quickjs/` behind `-Dquickjs=quickjs-ng` until 2026-11, when
+it was removed; Bellard's engine is now the only one.
 
-```sh
-meson setup builddir                        # Bellard's QuickJS
-meson setup builddir -Dquickjs=quickjs-ng   # the quickjs-ng fork
-```
-
-This page records what changed and what is still different. The day to
+This page records what changed when the default moved. The day to
 day reference is [`quickjs.md`](quickjs.md); the hardening design is
 [`heap-hardening.md`](heap-hardening.md).
 
@@ -25,11 +21,11 @@ the sources. The wrap, `subprojects/packagefiles/quickjs*` and
 `scripts/bump-bellard-quickjs.sh` are gone; a refresh is a merge
 ([`quickjs.md`](quickjs.md), "Moving to a newer upstream commit").
 
-**The default flipped.** `-Dquickjs` defaults to `quickjs`. CI, the
-packaging scripts and the Android build take the default, so they build
-Bellard's engine; `-Dquickjs=quickjs-ng` is built locally.
+**The default flipped.** `-Dquickjs` defaulted to `quickjs`, so CI, the
+packaging scripts and the Android build built Bellard's engine. The option
+went away with the quickjs-ng fork.
 
-**Heap hardening was ported.** Every stage the quickjs-ng fork has is in
+**Heap hardening was ported.** Every stage the quickjs-ng fork had is in
 Bellard's engine:
 
 | Stage | In Bellard's engine |
@@ -72,7 +68,7 @@ in Bellard's engine"), in two steps:
   `Error.captureStackTrace`, `caller`/`arguments` on non-strict functions,
   and engine scripts embedded as bytecode.
 
-With those, a probe page gives the same answers on both engines: an
+With those, a probe page gave the same answers on both engines: an
 `XMLHttpRequest` has no own properties and coerces `timeout`, engine
 members print as native code, an interface method called on a foreign
 receiver throws, the embedder's helpers are not enumerable on `window`,
@@ -88,7 +84,7 @@ and `Intl` follows the browser's language.
 | test262 (`run-test262 -a`, commit pinned by upstream's Makefile) | 19 errors of 53021, the same 19 as unmodified upstream, at each hardening stage: cage and caged values; compressed fields; pointer tables and bounded lookups. 18 after the second batch of hooks: no new failure, and `staging/sm/Function/function-bind.js` passes because a native function whose name is not an identifier now prints as a computed key |
 | engine tests (`test_closure`, `test_language`, `test_loop`, `test_bigint`, `test_builtin`, `test_std`, `test_worker`, `test_intl`) | pass |
 | `scripts/dev.sh smoke` | all ten fixtures match their baselines |
-| DOM dump of the 65 pages in `data/fixtures/`, `data/render-tests/` and `docs/demos/` | identical to the quickjs-ng build |
+| DOM dump of the 65 pages in `data/fixtures/`, `data/render-tests/` and `docs/demos/` | identical to the quickjs-ng build of the time |
 | CSP page calling `eval` and `new Function` | `EvalError` on both engines |
 
 Not covered: live sites (the build machine had no outbound web access),
@@ -102,7 +98,7 @@ allocations, a 300 000-entry Map, 200 000 string concatenations) takes
 about 570 to 650 ms on the hardened engine against 360 to 480 ms on
 unmodified upstream, on one 4-core container. Most of that is the arena
 bypass: with the cage active every block comes from the cage allocator
-instead of upstream's in-band arena. The quickjs-ng fork pays the same
+instead of upstream's in-band arena. The quickjs-ng fork paid the same
 kind of cost (`heap-hardening.md`, "Benchmarks"). Sitebench against live
 sites has not been run on this engine yet.
 
@@ -111,13 +107,13 @@ with most of the time in the kernel: the runner creates and destroys a
 runtime per test, and each one commits and decommits cage chunks. A
 renderer creates a handful of runtimes in its lifetime.
 
-## Still different from the quickjs-ng build
+## Differences from the quickjs-ng build
 
-Listed in [`quickjs.md`](quickjs.md), "Known differences on Bellard's
-engine": the format of `error.stack`, `Error.prepareStackTrace` and
+Listed in [`quickjs.md`](quickjs.md), "Known differences from other
+engines": the format of `error.stack`, `Error.prepareStackTrace` and
 `Error.stackTraceLimit`, `ShadowRealm`, and the breadth of `Intl`.
 
 Of the hardening review findings in `heap-hardening.md`, M1 does not
 apply to Bellard's engine: its engine-private name table and bitmap are
 trusted blocks outside the cage, and the brand of a native function lives
-in its code pointer table entry. M2 applies to both.
+in its code pointer table entry. M2 applies.

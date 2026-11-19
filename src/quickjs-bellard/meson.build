@@ -1,4 +1,4 @@
-# Fabrice Bellard's QuickJS, forked in-tree for -Dquickjs=quickjs (the default). Exposes libquickjs and the qjs-bellard host tool.
+# Fabrice Bellard's QuickJS, forked in-tree as the browser's JavaScript engine. Exposes libquickjs and the qjs-bellard host tool.
 
 bqjs_fs = import('fs')
 bqjs_version = bqjs_fs.read('VERSION').strip()
@@ -61,8 +61,7 @@ bqjs_lib = static_library('quickjs-bellard',
 
 libquickjs = declare_dependency(
   link_with: bqjs_lib,
-  compile_args: ['-DNS_QUICKJS_ORIGINAL',
-                 '-DCONFIG_TEMPORAL_INTL',
+  compile_args: ['-DCONFIG_TEMPORAL_INTL',
                  '-DNS_QUICKJS_ORIGINAL_VERSION="' + bqjs_version + '"'],
   dependencies: bqjs_sys_deps,
   include_directories: include_directories('.', is_system: true),

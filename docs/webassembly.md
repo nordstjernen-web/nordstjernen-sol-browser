@@ -74,10 +74,12 @@ an interpreter is several times faster than the scalar one.
 
 ## Vendored runtime
 
-`src/wamr/` holds the WAMR subset (interpreter, loader, common runtime,
-platform layers for Linux/macOS/Windows), built by a hand-written
-`meson.build` like the other in-tree libraries (QuickJS,
-Wuffs). It is a fork we patch freely; local changes so far:
+Meson fetches the pinned WAMR release through `subprojects/wamr.wrap`.
+`subprojects/packagefiles/wamr/` overlays the hand-written `meson.build`
+that builds the subset we use (interpreter, loader, common runtime,
+platform layers for Linux/macOS/Windows) and `ns_wamr.c`, the accessors
+into WAMR internals; `subprojects/packagefiles/wamr-nordstjernen.patch`
+carries the local changes, which we make freely. So far:
 
 - `wasm_func_type_get_result_valkind` returned garbage for externref
   results, which broke native-symbol signature checks for every

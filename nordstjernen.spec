@@ -20,6 +20,10 @@ Source0:        https://github.com/nordstjernen-web/nordstjernen-sol-browser/arc
 # PDF.js (Apache-2.0), the PDF viewer. meson takes it from this pinned
 # tarball (subprojects/pdfjs-dist.wrap) instead of downloading it.
 Source1:        https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.5.438.tgz
+# Wuffs (Apache-2.0 OR MIT) and WAMR (Apache-2.0 WITH LLVM-exception), from
+# subprojects/wuffs.wrap and subprojects/wamr.wrap.
+Source2:        https://github.com/google/wuffs/archive/refs/tags/v0.4.0-alpha.12.tar.gz#/wuffs-0.4.0-alpha.12.tar.gz
+Source3:        https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-2.4.5.tar.gz#/wasm-micro-runtime-WAMR-2.4.5.tar.gz
 ExcludeArch:    %ix86 %arm
 
 BuildRequires:  gcc
@@ -74,7 +78,7 @@ secure, and readable by a single person end to end.
 %prep
 %autosetup -n nordstjernen-sol-browser-%{version}
 mkdir -p subprojects/packagecache
-cp %{SOURCE1} subprojects/packagecache/
+cp %{SOURCE1} %{SOURCE2} %{SOURCE3} subprojects/packagecache/
 
 %build
 %meson \

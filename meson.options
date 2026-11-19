@@ -6,8 +6,6 @@ option('lto', type: 'boolean', value: true,
        description: 'Link-time optimisation of the C code through fat LTO objects, which still link (without LTO) on a toolchain whose ar or linker has no LTO plugin. Turn it off for a faster edit-compile loop; scripts/dev.sh does.')
 option('pgo', type: 'combo', choices: ['off', 'generate', 'use'], value: 'off',
        description: 'Profile-guided optimisation of the C code. "generate" builds instrumented binaries that record a profile into the build directory as they run; "use" rebuilds from that profile in the same build directory. scripts/pgo-build.sh runs both steps with the training run in between. Meson\'s own b_pgo cannot be used because it rejects the Rust parser targets.')
-option('quickjs', type: 'combo', choices: ['quickjs', 'quickjs-ng'], value: 'quickjs',
-       description: 'Which QuickJS the JavaScript binding runs on. "quickjs" (default) builds the in-tree fork of Fabrice Bellard\'s QuickJS in src/quickjs-bellard/, which carries the heap hardening and the browser hooks. "quickjs-ng" builds the in-tree quickjs-ng fork in src/quickjs/. See docs/quickjs.md.')
 option('gtk', type: 'feature', value: 'auto',
        description: 'Build the GTK 4 desktop shell (on by default when GTK 4 is present). Disable for a renderer-only build that needs no GTK 4 toolkit at all.')
 option('wasm', type: 'feature', value: 'auto',

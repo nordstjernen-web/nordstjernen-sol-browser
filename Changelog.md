@@ -3,6 +3,20 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Wuffs and WAMR are no longer committed. Meson fetches the pinned
+  upstream releases (Wuffs 0.4.0-alpha.12, WAMR 2.4.5) through
+  `subprojects/wuffs.wrap` and `subprojects/wamr.wrap` and applies the
+  local changes from `subprojects/packagefiles/`; the built sources are
+  byte-identical to the old copies. About 173,000 lines leave the tree.
+  Offline package builds take the tarballs from `subprojects/packagecache/`:
+  `scripts/fetch-wrap-sources.sh` (formerly `fetch-pdfjs.sh`) fetches all
+  three wrap sources for Debian, and the RPM, Arch and Alpine recipes list
+  them as sources.
+* The quickjs-ng fork (`src/quickjs/`) and the `-Dquickjs` build option
+  are gone; the in-tree fork of Bellard's QuickJS is the only JavaScript
+  engine. About 183,000 lines leave the tree, along with the scripts that
+  only served the removed fork. `scripts/test262-run.sh` now runs
+  test262 on the remaining engine.
 * WebGL on Windows works with OpenGL drivers that lack
   `WGL_ARB_create_context_robustness`, such as AMD's. Draw calls were
   already checked against vertex and index buffer ranges; the checks now

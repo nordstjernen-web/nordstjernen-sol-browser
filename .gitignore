@@ -45,13 +45,13 @@ build.ninja
 compile_commands.json
 
 # Meson auto-downloaded subprojects (wrap files only are committed).
-# The default QuickJS lives in src/, not subprojects/; the
-# original QuickJS (-Dquickjs=quickjs) is fetched into subprojects/quickjs/.
 /subprojects/packagecache/
-/subprojects/quickjs/
+/src/quickjs-bellard/test262/
 /subprojects/wgpu-native-*/
 /subprojects/simde-*/
 /subprojects/pdfjs-dist-*/
+/subprojects/wuffs-*/
+/subprojects/wasm-micro-runtime-*/
 /debian/vendor/
 
 # CMake (in case)

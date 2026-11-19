@@ -1,4 +1,4 @@
-/* Nordstjernen — the quickjs-ng API the engine is written against, on either QuickJS.
+/* Nordstjernen — the quickjs-ng-style API the engine is written against, over Bellard's QuickJS.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: LicenseRef-NSL-1.0 OR GPL-3.0-or-later
  */
@@ -7,8 +7,6 @@
 #define NS_QUICKJS_H
 
 #include <quickjs.h>
-
-#ifdef NS_QUICKJS_ORIGINAL
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -83,12 +81,5 @@ JS_GetArrayBufferViewBuffer(JSContext *ctx, JSValueConst obj,
     ns_quickjs_new_array_buffer(ctx, buf, len, max_len, realloc_func, opaque, shared)
 #define JS_NewTypedArray(ctx, argc, argv, type) \
     ns_quickjs_new_typed_array(ctx, argc, argv, type)
-
-#else
-
-typedef bool ns_js_bool;
-typedef JSContext ns_js_interrupt_arg;
-
-#endif
 
 #endif

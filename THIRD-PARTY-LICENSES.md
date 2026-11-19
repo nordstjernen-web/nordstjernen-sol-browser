@@ -21,8 +21,8 @@ project's own license terms.
 ### Wuffs — Apache License 2.0
 
 > Memory-safe PNG / GIF / BMP / JPEG decoders, transpiled from the
-> Wuffs language to C. Vendored as the single-file release in
-> `subprojects/wuffs/wuffs-v0.4.c`.
+> Wuffs language to C. The pinned upstream release is fetched at
+> build time through `subprojects/wuffs.wrap`.
 > <https://github.com/google/wuffs-mirror-release-c>
 >
 > Copyright (c) 2017 The Wuffs Authors.
@@ -39,14 +39,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 implied. See the License for the specific language governing permissions
 and limitations under the License.
 
-### quickjs-ng — MIT License
+### QuickJS — MIT License
 
-> JavaScript engine.
-> <https://github.com/quickjs-ng/quickjs>
+> JavaScript engine. Vendored and modified in `src/quickjs-bellard/`
+> (license in `src/quickjs-bellard/LICENSE`).
+> <https://github.com/bellard/quickjs>
 >
 > Copyright (c) 2017-2026 Fabrice Bellard
 > Copyright (c) 2017-2026 Charlie Gordon
-> Copyright (c) 2023-2026 the quickjs-ng contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the
@@ -76,7 +76,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 > Copyright (c) The Rust Project Developers
 
 Licensed under either the MIT License or the Apache License, Version
-2.0, at your option. See the quickjs-ng section above for the MIT license
+2.0, at your option. See the QuickJS section above for the MIT license
 text and the Wuffs section above for the Apache License notice.
 
 ### pl_mpeg — MIT License
@@ -87,7 +87,7 @@ text and the Wuffs section above for the Apache License notice.
 >
 > Copyright (c) 2019 Dominic Szablewski
 
-Licensed under the MIT License. See the quickjs-ng section above for the
+Licensed under the MIT License. See the QuickJS section above for the
 license text (same license).
 
 ### minimp3 — CC0 1.0 Universal (public domain dedication)
@@ -103,15 +103,16 @@ warranty. See <http://creativecommons.org/publicdomain/zero/1.0/>.
 
 ### WebAssembly Micro Runtime (WAMR) — Apache License 2.0 with LLVM exceptions
 
-> WebAssembly runtime. Vendored in `src/wamr/`.
+> WebAssembly runtime. The pinned upstream release is fetched at build
+> time through `subprojects/wamr.wrap`.
 > <https://github.com/bytecodealliance/wasm-micro-runtime>
 >
 > Copyright (c) The WebAssembly Micro Runtime contributors.
 
 Licensed under the Apache License, Version 2.0, with LLVM exceptions.
 See the Wuffs section above for the base Apache 2.0 text; the full
-license including the LLVM exceptions is reproduced in
-`src/wamr/LICENSE`.
+license including the LLVM exceptions is in the `LICENSE` file of the
+WAMR release.
 
 ---
 
@@ -134,16 +135,14 @@ licences, shipped in the package's `wasm/` directory: OpenJPEG
 
 ---
 
-### ICU4X calendar data and CLDR time zone names — Unicode License v3
+### CLDR locale data — Unicode License v3
 
-> Chinese, Korean and Umm al-Qura year tables
-> (`src/quickjs/quickjs-temporal-caldata.h`, packed from ICU4X by
-> `scripts/gen-temporal-calendar-data.py`) and the Windows-to-IANA time
-> zone table (`src/quickjs/quickjs-temporal-winzones.h`, from CLDR
-> `windowsZones.xml` by `scripts/gen-temporal-windows-zones.py`).
-> <https://github.com/unicode-org/icu4x>, <https://github.com/unicode-org/cldr>
+> The `Intl` locale tables of the JavaScript engine
+> (`src/quickjs-bellard/intl/locale-data.c`, generated from CLDR by
+> QuickJS's `gen-locale-data.js`).
+> <https://github.com/unicode-org/cldr>
 >
-> Copyright © 2016-2025 Unicode, Inc.
+> Copyright © 1991-2025 Unicode, Inc.
 
 Licensed under the Unicode License v3,
 <https://www.unicode.org/license.txt>. Permission is granted to use, copy,
@@ -247,7 +246,7 @@ THIS SOFTWARE.
 >
 > Copyright (c) 2014-2024 Tim Rühsen
 
-Licensed under the MIT License. See the quickjs-ng section above for the
+Licensed under the MIT License. See the QuickJS section above for the
 full text (same license).
 
 ### SQLite — public domain
@@ -267,7 +266,7 @@ non-commercial, without restriction.
 >
 > Copyright (c) 2013-2014 Intel Corporation
 
-Licensed under the MIT License. See the quickjs-ng section above for the
+Licensed under the MIT License. See the QuickJS section above for the
 full text (same license).
 
 ### zlib — zlib License
@@ -400,12 +399,6 @@ These are linked only when present on the build host (meson
   wgpu-native's own MIT-or-Apache-2.0 terms. The library itself is never
   vendored — it is located at build time and, in the release bundles,
   ships beside the executable.
-- **QuickJS** — MIT, © 2017-2026 Fabrice Bellard and Charlie Gordon.
-  <https://github.com/bellard/quickjs>. Vendored and modified in
-  `src/quickjs-bellard/` (license in `src/quickjs-bellard/LICENSE`) and
-  linked statically into the default build; `-Dquickjs=quickjs-ng` links
-  the quickjs-ng fork instead. Its license text is the MIT text in the
-  quickjs-ng section above.
 
 ---
 

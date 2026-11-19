@@ -63,7 +63,7 @@ nothing imported.
 - No `TODO`/`FIXME`/`XXX` markers — file a real task instead.
 - Bundled external projects are exempt from this comments policy.
   In particular, do not reformat or strip comments from
-  `src/quickjs/`, or `subprojects/` just to satisfy Nordstjernen style.
+  `src/quickjs-bellard/` or `subprojects/` just to satisfy Nordstjernen style.
 
 ## Autonomous mode — read this every session
 
@@ -113,31 +113,23 @@ meson compile -C builddir
 ./builddir/src/gtk/nordstjernen
 ```
 
-Two QuickJS engines are integrated into the main tree, and the `quickjs`
-meson option picks one (`docs/quickjs.md`):
+The JavaScript engine is `src/quickjs-bellard/`, an in-tree fork of
+Fabrice Bellard's [QuickJS](https://github.com/bellard/quickjs) carrying
+the heap hardening, the browser hooks, and upstream's `Intl` and
+`Temporal` (`docs/quickjs.md`). We modify it freely. It is not a meson
+subproject: its `meson.build` is loaded via `subdir()` from the top-level
+and exposes `libquickjs` as a declared dependency directly in the parent
+scope.
 
-- `quickjs` (default): `src/quickjs-bellard/`, a fork of Fabrice Bellard's
-  [QuickJS](https://github.com/bellard/quickjs). It carries the heap
-  hardening and the browser hooks, and upstream's `Intl` and `Temporal`.
-- `quickjs-ng`: `src/quickjs/`, a fork of
-  [quickjs-ng](https://github.com/quickjs-ng/quickjs) with the same
-  hardening and hooks and its own `Intl`/`Temporal`.
-
-We modify both freely. Neither is a meson subproject: each directory's
-`meson.build` is loaded via `subdir()` from the top-level and exposes
-`libquickjs` as a declared dependency directly in the parent scope.
-
-### Two engines, one binding
+### The engine binding
 
 - **Engine code includes `"ns_quickjs.h"`, never `<quickjs.h>`.** The
-  binding is written against the quickjs-ng API. On Bellard's engine
-  (`NS_QUICKJS_ORIGINAL`) the engine exports the browser hooks itself and
-  `src/ns_quickjs.h` / `src/ns_quickjs.c` supply the rest.
-- **A new quickjs-ng-only call goes into Bellard's engine or the adapter**,
-  not behind an `#ifdef` at the call site: the default build fails to
+  binding is written against the quickjs-ng-style API; the engine exports
+  the browser hooks itself and `src/ns_quickjs.h` / `src/ns_quickjs.c`
+  supply the rest.
+- **A quickjs-ng-style call the engine lacks goes into the engine or the
+  adapter**, not behind an `#ifdef` at the call site: the build fails to
   compile until it exists.
-- CI builds the default only: build `-Dquickjs=quickjs-ng` locally after
-  binding changes (`docs/quickjs.md`, "Checking a change").
 
 ### HTML engine: in-tree Rust HTML5 parser
 
@@ -160,9 +152,10 @@ than letting them drift.
 
 PNG/APNG, GIF, BMP, and JPEG bytes are decoded through
 [Wuffs](https://github.com/google/wuffs), a memory-safe
-transpiled-to-C image-decoder library. The single-file release is
-vendored at `subprojects/wuffs/wuffs-v0.4.c` and built as a static
-subproject. `src/image.c::ns_image_decode_bytes` runs the decoders
+transpiled-to-C image-decoder library. Meson fetches the pinned
+upstream release through `subprojects/wuffs.wrap`, applies the one local
+patch from `subprojects/packagefiles/`, and builds its single-file
+`release/c/wuffs-v0.4.c` as a static subproject; nothing is committed. `src/image.c::ns_image_decode_bytes` runs the decoders
 in order: ICO (`src/image_ico.c`) → Wuffs (PNG/APNG, GIF, BMP, JPEG)
 → WebP via libwebp (`src/image_webp.c`) → AVIF via libavif when built with it
 (`src/image_avif.c`, optional) → SVG in-engine (`src/svg.c`). Nothing
@@ -218,10 +211,11 @@ headers resolve.
 ### WebAssembly: WAMR
 
 The `WebAssembly` JS API (`compile`, `instantiate`, `Memory`,
-`Table`, `Global`, externref) is implemented in `src/wasm.c` over a
-vendored subset of the [WebAssembly Micro Runtime
+`Table`, `Global`, externref) is implemented in `src/wasm.c` over the
+[WebAssembly Micro Runtime
 (WAMR)](https://github.com/bytecodealliance/wasm-micro-runtime)
-interpreter at `src/wamr/`. It runs wasm-bindgen bundles. See
+interpreter, fetched through `subprojects/wamr.wrap` and patched from
+`subprojects/packagefiles/`. It runs wasm-bindgen bundles. See
 `docs/webassembly.md`.
 
 System packages required on Debian/Ubuntu:

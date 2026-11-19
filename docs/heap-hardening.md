@@ -26,13 +26,13 @@ Each change is benchmarked before it merges and kept as small and
 isolated from upstream as the design allows, so security fixes from
 upstream keep merging cleanly.
 
-Both in-tree engines carry the hardening: the default, the fork of
-Bellard's QuickJS in `src/quickjs-bellard/`, and the quickjs-ng fork in
-`src/quickjs/`. The stages were built in the quickjs-ng fork and ported;
-this document describes the design with the fork's file and function
-names, and [`quickjs-bellard-default.md`](quickjs-bellard-default.md)
+The engine, the fork of Bellard's QuickJS in `src/quickjs-bellard/`,
+carries the hardening. The stages were first built in a quickjs-ng fork
+(`src/quickjs/`, removed in 2026-11) and ported; this document describes
+the design, and [`quickjs-bellard-default.md`](quickjs-bellard-default.md)
 lists, stage by stage, how Bellard's engine implements it and where it
-differs. The files have the same names in both directories.
+differed from that fork, whose function names some entries below still
+use.
 
 ## Status
 
@@ -57,7 +57,7 @@ worth; the stages here limit how a bug becomes a compromise.
 
 The invariants below are what the engine and the bindings must keep.
 
-**The cage** (`src/quickjs/quickjs-cage.c`). `JS_NewRuntime()` reserves
+**The cage** (`src/quickjs-bellard/quickjs-cage.c`). `JS_NewRuntime()` reserves
 one 4 GB range per process on first use (halving to 1 GB when address
 space is short), aligned to its size, with 32 GB inaccessible guard
 regions on both sides. Each runtime (page, worker, extension host) gets
@@ -100,7 +100,7 @@ serializer receive it through `js_abuf_owned_data()`, which masks it and
 keeps `NULL` as `NULL`, so a forged buffer can only hand a hook cage
 memory, which the cage allocator validates.
 
-**Tables outside the cage** (`src/quickjs/quickjs-hardening.h`).
+**Tables outside the cage** (`src/quickjs-bellard/quickjs-hardening.h`).
 
 - External pointer table: `JS_SetOpaque` on a host class stores the
   pointer in an entry tagged with the class id; the object holds the
@@ -159,7 +159,7 @@ cage offset, so no property slot, array element, stack slot, constant
 pool entry or argument can name memory outside the cage.
 
 **Compressed fields.** Pointer fields inside cage structures are
-declared `JS_CPTR(T)` (`src/quickjs/quickjs-cptr.h`), read through
+declared `JS_CPTR(T)` (`src/quickjs-bellard/quickjs-cptr.h`), read through
 `js_cload(T, field)` and written through `js_cstore(field, ptr)`. The
 encoder **fails closed**: a pointer from outside the cage aborts with a
 message naming it instead of being truncated into a random in-cage
@@ -207,7 +207,7 @@ the table keeps the ones still open.
 | H2b | The `magic` of C functions, data records and closures, which many builtins use as an index into their own tables, was in-cage data the function trusted; so were the declared argument count and the `this` brand, whose index into `rt->brand_classes` was unchecked | out-of-bounds reads in builtin tables, brand check disabled | fixed: the code-table entry holds them |
 | H3 | The context table is process-wide and `js_ctx_get` did not check that a context belongs to the caller's runtime | page code running in another runtime's realm (a worker on another thread, the extension host) | fixed: `js_ctx_get(rt, idx)` aborts on a foreign context |
 | H4 | `JSArrayBuffer.data` was masked on access but handed unmasked to the realloc and free hooks, `sab_free` and the SharedArrayBuffer serializer | free of an out-of-cage pointer | fixed: every hand-off is masked |
-| M1 | The engine-private name table and bitmap, the policy that hides embedder names from page scripts, are cage allocations | policy rewrite | open in the quickjs-ng fork; Bellard's engine keeps them in trusted blocks |
+| M1 | The engine-private name table and bitmap, the policy that hides embedder names from page scripts, are cage allocations | policy rewrite | does not apply: Bellard's engine keeps them in trusted blocks |
 | M2 | Runtimes share the cage, and `js_cage_free` releases into the owning runtime's heap without a lock, so a forged pointer to another runtime's object races on that heap's metadata | metadata race outside the cage | open |
 
 ### Inventory
@@ -307,14 +307,14 @@ reach.
 The fork-local code is kept out of `quickjs.c` where it can be, and the
 rewrites that cannot be are reproducible:
 
-- `src/quickjs/quickjs-cptr.h` holds the compressed-field machinery and
-  the fail-closed encoder, `src/quickjs/quickjs-hardening.h` the cage
+- `src/quickjs-bellard/quickjs-cptr.h` holds the compressed-field
+  machinery and the fail-closed encoder,
+  `src/quickjs-bellard/quickjs-hardening.h` the cage
   masking and the three tables. `quickjs.c` includes each at one line.
   `quickjs-cage.c` is a separate file, and `list.h` carries the
   safe-linking checks.
 - `scripts/quickjs-cage-rewrite.py` is the single list of compressed
-  fields, with one table per engine (`--engine quickjs` or
-  `--engine quickjs-ng`; both when omitted). `--check` reports every raw access to one of them outside
+  fields (`BELLARD_FIELDS`). `--check` reports every raw access to one of them outside
   comments and exits non-zero; `--apply` rewrites them in place,
   idempotently, and reports the address-taking and slot-move sites that
   need a hand. After a refresh: 3-way merge `quickjs.c`, declare any new

@@ -1,0 +1,10 @@
+[wrap-file]
+directory = wuffs-0.4.0-alpha.12
+source_url = https://github.com/google/wuffs/archive/refs/tags/v0.4.0-alpha.12.tar.gz
+source_filename = wuffs-0.4.0-alpha.12.tar.gz
+source_hash = 0c1c84aa93fcaeda523ed517848b1555e72e679c37780aaa2db8d7e5b8ff78f1
+patch_directory = wuffs
+diff_files = wuffs-jpeg-16bit-dqt.patch
+
+[provide]
+wuffs = wuffs_dep
