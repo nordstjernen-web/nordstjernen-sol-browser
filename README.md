@@ -70,7 +70,7 @@ The shared test suites, run locally:
 |-------|---------|
 | WPT `css/` (6,991 test files, October 2026) | 110,540 of 151,048 subtests (73.2 %) |
 | WPT `html/`, `dom/`, `url/` and related (4,899 test files, October 2026) | 151,974 of 166,164 subtests (91.5 %) |
-| [test262](https://github.com/tc39/test262) on the QuickJS engine (test262 of October 2026) | all 82,248 tests (0 failures) |
+| [test262](https://github.com/tc39/test262) on the QuickJS engine (the revision upstream QuickJS pins, November 2026) | 53,003 of 53,021 tests (18 known failures) |
 
 **Security.** Each tab's engine runs in its own renderer process behind an
 IPC and shared-memory boundary. On Linux the renderer is sandboxed with
@@ -86,9 +86,10 @@ and about:nordstjernen shows which parser and sandbox layers are active. See
 [docs/security-model.md](docs/security-model.md); to report a vulnerability,
 see [SECURITY.md](SECURITY.md).
 
-**Minimalism.** The core engine is about 268,000 lines of project C and
-headers, excluding vendored libraries and generated assets — small enough for
-one person to read and audit end to end.
+**Minimalism.** The browser is about 296,000 lines of project C and headers
+(about 275,000 for the engine without the GTK shell), excluding vendored
+libraries and generated assets — small enough for one person to read and
+audit end to end.
 [docs/Software-Architecture.md](docs/Software-Architecture.md) maps the whole
 system.
 
@@ -158,7 +159,7 @@ system.
   on macOS, over OpenGL 4.1; [docs/webgl.md](docs/webgl.md)); experimental
   `navigator.gpu` over wgpu-native, on by default and switchable in Settings
   ([docs/webgpu.md](docs/webgpu.md)); the core WebAssembly JS API (MVP,
-  reference types, bulk memory and SIMD) on a vendored WAMR interpreter
+  reference types, bulk memory and SIMD) on the WAMR interpreter
   ([docs/webassembly.md](docs/webassembly.md)).
 - **MathML** — a minimalist presentation-MathML renderer for fractions,
   roots, scripts, under/over and tables, laid out inline on the text baseline.
@@ -255,17 +256,24 @@ with plain `rustc`, no Cargo.
 
 **Vendored in-tree**, with no submodules:
 [QuickJS](https://github.com/bellard/quickjs) (fork of
-Bellard's engine, no JIT), [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime)
-(WebAssembly interpreter), [Wuffs](https://github.com/google/wuffs)
-(memory-safe image decoding), [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
+Bellard's engine, no JIT), [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
 (MPEG-1 video and MP2 audio), [minimp3](https://github.com/lieff/minimp3)
-(MP3) and web-text-lib (the Pango fork). Unless they are installed, the first
-`meson setup` downloads two pinned subprojects:
+(MP3) and web-text-lib (the Pango fork).
+
+**Downloaded by meson.** Unless they are installed, the first `meson setup`
+fetches pinned upstream releases through the wraps in `subprojects/` and
+checks their SHA-256; Wuffs and WAMR get their local patches from
+`subprojects/packagefiles/`. They are [Wuffs](https://github.com/google/wuffs)
+(memory-safe image decoding, always needed),
+[WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) (the
+WebAssembly interpreter; `-Dwasm=disabled` drops it),
+[PDF.js](https://mozilla.github.io/pdf.js/) (`-Dpdfjs=disabled`),
 [wgpu-native](https://github.com/gfx-rs/wgpu-native) for WebGPU, linked
-statically (`-Dwebgpu=disabled` drops it), and the header-only
+statically (`-Dwebgpu=disabled`), and the header-only
 [SIMDe](https://github.com/simd-everywhere/simde) for WebAssembly SIMD
-(`-Dwasm_simd=disabled` drops it). With both disabled the build needs no
-network.
+(`-Dwasm_simd=disabled`). For a build without network, fetch the Wuffs,
+WAMR and PDF.js tarballs ahead of time with
+`scripts/fetch-wrap-sources.sh subprojects/packagecache`.
 
 **Required system libraries:**
 

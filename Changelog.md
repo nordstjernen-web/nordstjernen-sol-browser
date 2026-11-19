@@ -3,6 +3,10 @@ Changelog:
 
 1.0.50-dev:
 ======
+* README: the test262 row reports Bellard's QuickJS (18 known failures of
+  53,021); the old 0-of-82,248 figure was the removed quickjs-ng fork's.
+  The line count, the WebAssembly runtime and the dependency section
+  (Wuffs, WAMR and PDF.js are downloaded by meson wraps) are updated.
 * `polyfills.js` loses 500 lines of fallbacks the engine already provides
   natively in windows and workers: the ES2022–2024 `Array`, `Object`,
   `Promise`, `Map` and `String` methods, `Symbol.dispose`, `URL.parse` and
