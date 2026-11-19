@@ -83,7 +83,8 @@ builds have no renderer sandbox yet. Neither the JavaScript nor the
 WebAssembly engine has a JIT. An optional memory-safe Rust parser for the
 renderer's IPC messages is built with `-Dipc_rust=enabled` (off by default),
 and about:nordstjernen shows which parser and sandbox layers are active. See
-[SECURITY.md](SECURITY.md).
+[docs/security-model.md](docs/security-model.md); to report a vulnerability,
+see [SECURITY.md](SECURITY.md).
 
 **Minimalism.** The core engine is about 268,000 lines of project C and
 headers, excluding vendored libraries and generated assets — small enough for

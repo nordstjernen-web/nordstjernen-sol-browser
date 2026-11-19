@@ -88,7 +88,7 @@ the next `/render` or `/tick` reply as an `X-*` header (or a field of the
 
 The shell validates every side-channel value before acting on it (allowed
 schemes, allowed actions, allowed paths; see
-[SECURITY.md](../SECURITY.md), "Process isolation"). The renderer is the
+[security-model.md](security-model.md), "Architecture"). The renderer is the
 untrusted side of this boundary.
 
 ## Capabilities

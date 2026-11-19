@@ -1,13 +1,7 @@
-# Security policy
+# Nordstjernen Sol security model
 
-Nordstjernen is a small independent web browser. Security fixes ship from
-`main`; only the latest tagged release is supported.
-
-## Reporting
-
-E-mail andreas.rosdal@hotmail.com with the version (About dialog), your
-OS, a minimal reproducer (URL or self-contained HTML) and your assessment
-of the impact.
+How Nordstjernen Sol defends against hostile web content. To report a
+vulnerability, see [SECURITY.md](../SECURITY.md).
 
 ## Threat model
 
@@ -15,15 +9,17 @@ The attacker controls everything fetched: HTML, CSS, JavaScript, images,
 fonts, media and PDFs. The user, the kernel and the filesystem outside the
 sandbox allow-list are trusted.
 
-**In scope:** memory-safety bugs in our C code; Linux sandbox escapes
-(Landlock or seccomp); bypasses of the macOS Seatbelt profile or the
-Windows process mitigations; same-origin, cookie and cache partitioning
-bypasses; HSTS, mixed-content, CSP and iframe-sandbox bypasses; URL-bar
-spoofing.
+**In scope:** memory-safety bugs in our code, including the in-tree forks
+of QuickJS (`src/quickjs-bellard/`, `src/quickjs/`) and Pango
+(`src/web-text-lib/`) and the Rust HTML and URL parsers; Linux sandbox
+escapes (Landlock or seccomp); bypasses of the macOS Seatbelt profile or
+the Windows process mitigations; same-origin, cookie and cache
+partitioning bypasses; HSTS, mixed-content, CSP and iframe-sandbox
+bypasses; URL-bar spoofing.
 
-**Out of scope:** bugs in third-party libraries (libcurl, GTK, GLib,
-QuickJS, Wuffs, libwebp, libavif, libjxl, PDF.js, FFmpeg,
-SQLite, glslang, wgpu-native, OS media decoders, …) — report upstream;
+**Out of scope:** bugs in third-party libraries used unmodified (libcurl,
+GTK, GLib, Wuffs, libwebp, libavif, libjxl, PDF.js, FFmpeg, SQLite,
+glslang, wgpu-native, OS media decoders, …) — report upstream;
 features we do not implement (WebRTC, EME/DRM, JIT, AI web APIs, COOP/COEP
 cross-origin isolation); Spectre-class side channels; attacks that already
 need local code execution as the user. WebGL, experimental WebGPU,
@@ -172,8 +168,13 @@ a page from reaching a more private address space than its own, which
 also defeats DNS rebinding. A certificate error can be overridden (off by
 default) only for a top-level, non-HSTS navigation, which then carries no
 cookies; the resulting document has an opaque origin, without access to
-the site's cookies or storage. A navigation to a URL flagged by Safe Browsing stops at a
-warning page.
+the site's cookies or storage. Once the setting is on, the override is
+applied automatically to every such navigation, with no per-site prompt.
+
+A navigation to a URL flagged by Safe Browsing stops at a warning page.
+Safe Browsing is on by default. Google's hash-prefix lists are kept on the
+device, and only when an address matches one is a 4-byte prefix of its
+hash sent to Google, never the address itself.
 
 ### Origins, cookies and storage
 
@@ -188,6 +189,9 @@ warning page.
   `frame-ancestors`, `worker-src` and `upgrade-insecure-requests`,
   including nonces, hashes and `'unsafe-eval'` / `'wasm-unsafe-eval'`.
   Subresource Integrity is checked before scripts and stylesheets apply.
+- A document's `Referrer-Policy` header and `<meta name="referrer">`
+  limit the `Referer` its requests carry; the stricter of that policy and
+  the browser setting applies.
 - The URL bar shows hosts in Punycode, so homographs are visible.
 - Profile directories are `0700` and files `0600` (ACL-restricted on
   Windows). Cache file names are SHA-256 hashes.
@@ -217,16 +221,19 @@ confirmation.
 
 ### Automation servers
 
-Neither listens unless the browser is started with its flag. Both bind
-loopback only.
+Both bind loopback only.
 
-- `--webdriver` (`src/gtk/webdriver.c`) rejects requests with a
+- `--webdriver` (`src/gtk/webdriver.c`) listens only when the browser is
+  started with that flag. It rejects requests with a
   non-loopback `Host`, any `Origin` header, or a content type a web page
   could send without a CORS preflight. There is no further
   authentication: anything local that reaches the port controls the
   browser.
 - `--remote-control` (`src/gtk/remotectl.c`) requires a random token
-  stored in the state directory, which renderers cannot read.
+  stored in the state directory, which renderers cannot read. It listens
+  when started with its flag, and also whenever the `remote_control`
+  setting is on: switched on in Settings (after the confirmation dialog)
+  or written to the config file while the browser runs.
 
 ## Known gaps
 
@@ -238,6 +245,14 @@ loopback only.
 - The settings page is rendered by the renderer. The shell writes the
   config and shows every non-cosmetic change in a confirmation dialog,
   but that dialog is the only barrier against a compromised renderer.
+- The shell loads its built-in history page for any `about:history`
+  navigation, including one a renderer asks for.
+- Under `--headless` a document loaded through the certificate override
+  keeps the site's origin; only the windowed browser gives it an opaque
+  one.
+- The `referrerpolicy` attribute, `rel=noreferrer` and the
+  `referrerPolicy` option of `fetch()` do not yet limit the `Referer`
+  header.
 - FFmpeg in the renderer probes with every demuxer the system library
   ships, not an allow-list.
 - On kernels without `LANDLOCK_RESTRICT_SELF_TSYNC`, threads that
