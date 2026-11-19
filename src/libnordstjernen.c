@@ -1414,6 +1414,7 @@ static void browser_js_form_submit(const ns_node *form, const ns_node *submitter
 
 static char *g_pending_permissions_policy;
 static char *g_pending_connection_allowlist;
+static gboolean g_pending_untrusted_transport;
 
 static ns_browser *
 browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
@@ -1505,7 +1506,8 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_connection_allowlist(b->js, base,
                                        g_pending_connection_allowlist);
         g_clear_pointer(&g_pending_connection_allowlist, g_free);
-        ns_js_set_document_sandbox(b->js, doc, csp_header);
+        ns_js_set_document_sandbox(b->js, doc, csp_header,
+                                   g_pending_untrusted_transport);
         browser_apply_meta_csp(b->js, doc, 0);
         const ns_config *run_cfg = ns_config_get();
         if (!run_cfg || run_cfg->javascript_enabled)
@@ -2007,11 +2009,13 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         ns_engine_navigation_timing(resp);
     ns_response_free(resp);
 
+    g_pending_untrusted_transport = sec == NS_SEC_INVALID;
     ns_browser *b = browser_build_from_doc(doc, base, viewport_width,
                                            viewport_height, settle_ms,
                                            bfcache_ok, refresh_hdr, doc_language,
                                            csp_header, doc_charset, url,
                                            &navigation_timing);
+    g_pending_untrusted_transport = FALSE;
     if (b) {
         b->security = sec;
         b->remote_ip = ip;
