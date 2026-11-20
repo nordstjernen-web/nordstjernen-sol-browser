@@ -60,6 +60,18 @@
   </branding>
 
   <releases>
+    <release version="1.0.50" date="2026-11-20">
+      <description>
+        <p>HTML parser, CSS, security and interface release.</p>
+        <ul>
+          <li>Pages are parsed while they download by a faster HTML parser with no quadratic paths, and a DOM node takes a third less memory.</li>
+          <li>CSS gains @counter-style, flow-relative floats and margins, env() everywhere, and sticky boxes, inline-blocks and SVG text are placed like other browsers.</li>
+          <li>Many security fixes, among them cross-origin pixel reads, WebGL bounds checks, WebSocket handshakes and the page referrer policy.</li>
+          <li>VP9 and AV1 video decode on the GPU on Windows and macOS, and WebGL works with more Windows OpenGL drivers.</li>
+          <li>A new animated logo, a larger start page, and a right-click menu that always opens at full size.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.49" date="2026-11-16">
       <description>
         <p>Layout, rendering, audio and packaging release.</p>
