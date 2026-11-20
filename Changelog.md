@@ -3,6 +3,14 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Web Audio AudioParam automation works: `setValueAtTime()`, the linear
+  and exponential ramps, `setTargetAtTime()`, `setValueCurveAtTime()`
+  and the cancel methods were no-ops, so LogicEmu's music note component
+  played at gain 0 and stayed silent. Params are evaluated at the start
+  of each rendered chunk, and passed events are dropped. Assigning
+  `value` cancels pending automation, and a ramp with no earlier event
+  starts at the current time. A realtime oscillator now carries its
+  phase from chunk to chunk, so a changing frequency no longer clicks.
 * WPT harness: `--wpt-batch` keeps one headless browser running and reads
   test URLs from stdin (optionally prefixed with a timeout in ms), printing
   `WPT BEGIN`/`WPT END rc=N` around each report; cookies, the HTTP cache and

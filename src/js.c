@@ -14641,14 +14641,6 @@ ns_media_set_media_keys(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_audio_return_this(JSContext *ctx, JSValueConst this_val,
-                     int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    return JS_DupValue(ctx, this_val);
-}
-
-static JSValue
 ns_audio_node_connect(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
@@ -14733,17 +14725,7 @@ ns_audio_make_param(JSContext *ctx, double value)
     JS_SetPropertyStr(ctx, p, "defaultValue", JS_NewFloat64(ctx, value));
     JS_SetPropertyStr(ctx, p, "minValue",     JS_NewFloat64(ctx, -3.4e38));
     JS_SetPropertyStr(ctx, p, "maxValue",     JS_NewFloat64(ctx, 3.4e38));
-    static const ns_fn_def methods[] = {
-        { "setValueAtTime", 2 },
-        { "linearRampToValueAtTime", 2 },
-        { "exponentialRampToValueAtTime", 2 },
-        { "setTargetAtTime", 3 },
-        { "setValueCurveAtTime", 3 },
-        { "cancelScheduledValues", 1 },
-        { "cancelAndHoldAtTime", 1 },
-    };
-    ns_bind_fns(ctx, p, ns_audio_return_this,
-                methods, G_N_ELEMENTS(methods));
+    ns_webaudio_bind_param(ctx, p);
     return p;
 }
 
@@ -14831,8 +14813,22 @@ ns_audio_create_node(JSContext *ctx, JSValueConst this_val,
     const char *kind = magic >= 0 && magic < (int)G_N_ELEMENTS(kinds)
                      ? kinds[magic] : "gain";
     JSValue n = ns_audio_make_node(ctx, kind);
-    if (JS_IsObject(this_val))
+    if (JS_IsObject(this_val)) {
         JS_SetPropertyStr(ctx, n, "context", JS_DupValue(ctx, this_val));
+        /* Params find the context's clock through _ac, so automation that
+         * has no earlier event can start at the current time. */
+        static const char *const params[] = {
+            "gain", "frequency", "detune", "playbackRate", "offset", "pan",
+            "Q", "delayTime", "threshold", "knee", "ratio", "attack",
+            "release",
+        };
+        for (gsize i = 0; i < G_N_ELEMENTS(params); i++) {
+            JSValue p = JS_GetPropertyStr(ctx, n, params[i]);
+            if (JS_IsObject(p))
+                JS_SetPropertyStr(ctx, p, "_ac", JS_DupValue(ctx, this_val));
+            JS_FreeValue(ctx, p);
+        }
+    }
     return n;
 }
 

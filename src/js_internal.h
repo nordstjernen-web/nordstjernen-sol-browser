@@ -476,6 +476,7 @@ void     ns_js_run_in_realm(ns_js *js, JSContext *realm, void (*fn)(gpointer),
 double ns_webaudio_schedule_floor(ns_js *js, JSContext *ctx,
                                   JSValueConst audio_ctx);
 void     ns_webaudio_rt_free(ns_js *js);
+void     ns_webaudio_bind_param(JSContext *ctx, JSValueConst param);
 void ns_js_promise_reject(JSContext *ctx, JSValue resolvers[2], const char *message);
 JSValue ns_js_realm_event(JSContext *ctx, JSValueConst target, const char *type);
 const ns_node *ns_unwrap_element(JSValueConst val);
