@@ -3,6 +3,9 @@ Changelog:
 
 1.0.50:
 ======
+* `android/scripts/build-deps.sh` hands meson the rustc found first on the
+  shell's PATH by absolute path, so on Windows a rustup toolchain with the
+  Android targets wins over MSYS2's own rustc (which has no Android std).
 * The right-click menu no longer scrolls or vanishes. When GTK lays it out
   taller than it measured it, the menu grows to its full height instead of
   showing a scrollbar, and near the bottom of the window or screen it opens
