@@ -7,7 +7,12 @@ Changelog:
   that macOS ships (`CROSS[@]: unbound variable`: an empty array expanded
   under `set -u`), and the macOS workflow then built without FFmpeg, so
   WebM was skipped there. The script now expands the array in a form bash
-  3.2 accepts.
+  3.2 accepts. Past that, the build failed to link on Apple silicon
+  (`_ff_tx_codelet_list_float_x86` undefined): the script passed
+  `--enable-x86asm` on every architecture, and on arm64 FFmpeg then
+  compiled references to x86 code it never builds. It no longer passes
+  it; FFmpeg still uses nasm on x86 by default, and `NS_FFMPEG_NOASM=1`
+  still turns it off.
 * Windows and macOS: VP9 and AV1 video decode on the GPU through FFmpeg's
   hardware decoders, D3D11VA on Windows and VideoToolbox on macOS. The
   bundled LGPL FFmpeg gains the `vp9_d3d11va`/`av1_d3d11va` and
