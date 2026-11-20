@@ -3,6 +3,11 @@ Changelog:
 
 1.0.50-dev:
 ======
+* New animated logo on about:start and about:about: the 2027 artwork (a
+  serif N crossed by the north star inside a golden orbit) with a pulsing
+  star, a comet circling the orbit and twinkling background stars, as a
+  36-frame, 128 px looping GIF (`nordstjernen.gif` and the embedded copy
+  in `src/about_logo_gif.h`).
 * Web Audio AudioParam automation works: `setValueAtTime()`, the linear
   and exponential ramps, `setTargetAtTime()`, `setValueCurveAtTime()`
   and the cancel methods were no-ops, so LogicEmu's music note component
