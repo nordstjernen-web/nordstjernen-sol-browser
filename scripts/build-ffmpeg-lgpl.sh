@@ -91,7 +91,7 @@ cd "$SRC"
     --enable-protocol=file \
     "${GPU[@]}" \
     $ASM_FLAG \
-    "${CROSS[@]}" \
+    ${CROSS[@]+"${CROSS[@]}"} \
     ${FFMPEG_EXTRA_CONFIGURE:-}
 
 make -j"$JOBS"

@@ -3,6 +3,11 @@ Changelog:
 
 1.0.50-dev:
 ======
+* macOS: `scripts/build-ffmpeg-lgpl.sh` stopped at once under the bash 3.2
+  that macOS ships (`CROSS[@]: unbound variable`: an empty array expanded
+  under `set -u`), and the macOS workflow then built without FFmpeg, so
+  WebM was skipped there. The script now expands the array in a form bash
+  3.2 accepts.
 * Windows and macOS: VP9 and AV1 video decode on the GPU through FFmpeg's
   hardware decoders, D3D11VA on Windows and VideoToolbox on macOS. The
   bundled LGPL FFmpeg gains the `vp9_d3d11va`/`av1_d3d11va` and
