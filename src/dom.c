@@ -2640,6 +2640,20 @@ ns_select_picks_first_option(const ns_node *select)
 }
 
 gboolean
+ns_option_in_dropdown(const ns_node *option)
+{
+    if (!ns_node_is_tag(option, NS_TAG_OPTION)) return FALSE;
+    if (ns_node_is_tag(option->parent, NS_TAG_DATALIST)) return TRUE;
+    const ns_node *select = ns_option_select(option);
+    if (!select || ns_element_get_attr(select, "multiple")) return FALSE;
+    const char *size = ns_element_get_attr(select, "size");
+    if (!size) return TRUE;
+    char *end = NULL;
+    long v = strtol(size, &end, 10);
+    return end == size || v <= 1;
+}
+
+gboolean
 ns_option_selectable(const ns_node *option)
 {
     if (ns_element_get_attr(option, "disabled")) return FALSE;

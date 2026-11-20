@@ -3,6 +3,17 @@ Changelog:
 
 1.0.50-dev:
 ======
+* An open drop-down list (a `<select>`'s options or `<datalist>`
+  suggestions) is painted above the rest of the page, and its rows take
+  clicks there, as a native popup does. A later positioned element drew
+  over it: LogicEmu's title band hid part of its colour scheme menu, and
+  the hidden rows could not be picked.
+* A fixed element with a transform is no longer cut off. Its layer was
+  sized from where the element sits before the transform moves it, so
+  a dialog centred with `top: 50%; transform: translate(-50%, -50%)` lost
+  its top half: LogicEmu's import box showed no text.
+* `scripts/build-logo-gif.sh` passes `-loop 0` and the frame files to
+  `convert` as separate arguments again; a missing space had joined them.
 * macOS: `scripts/build-ffmpeg-lgpl.sh` stopped at once under the bash 3.2
   that macOS ships (`CROSS[@]: unbound variable`: an empty array expanded
   under `set -u`), and the macOS workflow then built without FFmpeg, so
