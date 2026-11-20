@@ -102,6 +102,35 @@ references of a reference are not followed. Nordstjernen's PNG is as
 tall as the document; both images are padded to 800x600 with the
 page's own background colour before they are compared.
 
+## Running the whole suite
+
+`scripts/wpt-full.py` runs every testharness.js URL listed in the
+checkout's `MANIFEST.json` — about 40,000, including `.worker`,
+`.sharedworker` and `.serviceworker` variants, `?variant` URLs, and the
+`.https.`/`.h2.` tests, which go to the HTTPS and HTTP/2 ports. Generate
+the manifest once with `./wpt manifest`, start `./wpt serve`, then:
+
+```sh
+scripts/wpt-full.py --wpt-root=~/wpt --jobs=8 --results=full.jsonl
+scripts/wpt-full.py --wpt-root=~/wpt --results=dom.jsonl dom url
+scripts/wpt-full.py --summary-only --wpt-root=~/wpt --results=full.jsonl --tsv=full.tsv
+```
+
+Each job keeps one browser running in `--wpt-batch` mode and feeds it
+URLs, restarting it every `--batch-size` tests (default 200), after a
+crash, or when a test overruns its deadline; `--no-batch` starts a
+fresh process per test instead. Tests marked `<meta name=timeout
+content=long>` get `--long-timeout-ms` (default 30000), the others
+`--timeout-ms` (default 10000, testharness.js's own default). The
+results file gets one JSON line per URL as it finishes, and a rerun
+with the same `--results` skips the URLs already in it, so an
+interrupted run resumes. The default bases are
+`http://localhost:8000`, `https://localhost:8443` and
+`https://localhost:9000`, which work without hosts entries, since libcurl
+resolves `*.localhost` itself; serve with
+`{"browser_host": "localhost", "check_subdomains": false}` and, for
+HTTPS, point `CURL_CA_BUNDLE` at a bundle that includes the server's CA.
+
 ## Related scripts
 
 - `scripts/wpt-score.sh --wpt-root=DIR [PATH...]` — runs the tracked
@@ -144,6 +173,18 @@ subtest passed; `1` — at least one subtest failed, timed out, or did
 not run (or the harness errored); `2` — the page never produced results
 before the timeout (testharness.js missing, or tests hung).
 
+`--wpt` runs in private mode, so cookies, localStorage and IndexedDB
+written by tests stay in memory and never reach the profile, and it
+does not settle before polling for results (pass `--settle-ms=N` to
+restore a fixed wait).
+
+`--wpt-batch` keeps the browser running and reads one test per line
+from stdin, optionally prefixed with a timeout in milliseconds
+(`10000 http://localhost:8000/dom/nodes/Node-cloneNode.html`). It
+prints `WPT BATCH READY` once, then `WPT BEGIN URL`, the usual report,
+and `WPT END rc=N` for each test, and clears cookies, the HTTP cache
+and preloads between tests.
+
 ## How it works
 
 `--wpt` makes the headless driver inject a hook script
@@ -162,3 +203,11 @@ Because registration happens before the test script executes, even
 tests that complete synchronously during parsing are captured. No
 modification of the WPT checkout (e.g. replacing
 `testharnessreport.js`) is needed.
+
+Once registered, the hook calls `setup({explicit_timeout: true})`, as
+wptrunner does, so the harness's own 10 s / 60 s timer is off and the
+driver's `--wpt-timeout-ms` is the only deadline. When it passes, the
+driver calls testharness.js's `timeout()`: the harness marks the
+unfinished subtests TIMEOUT and reports, so a stuck file still yields
+the results of the subtests that did finish. Only a page whose harness
+never loaded ends with the bare `WPT HARNESS TIMEOUT` line.

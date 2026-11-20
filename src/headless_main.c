@@ -20,6 +20,7 @@
 #include "bytecode_cache.h"
 #include "cache.h"
 #include "config.h"
+#include "cookies.h"
 #include "debuglog.h"
 #include "engine.h"
 #include "font.h"
@@ -160,6 +161,50 @@ headless_report_perf(void)
 #endif
 }
 
+static void
+headless_reset_between_tests(void)
+{
+    ns_cookie_store_clear();
+    ns_cache_clear();
+    ns_net_preload_clear();
+    for (int i = 0; i < 1000 && g_main_context_iteration(NULL, FALSE); i++)
+        ;
+}
+
+static int
+headless_run_wpt_batch(ns_headless_opts *hopts)
+{
+    char line[8192];
+    int default_timeout_ms = hopts->wpt_timeout_ms;
+    int worst = 0;
+    fprintf(stdout, "WPT BATCH READY\n");
+    fflush(stdout);
+    while (fgets(line, sizeof line, stdin)) {
+        g_strstrip(line);
+        if (!*line) continue;
+        char *url = line;
+        int timeout_ms = default_timeout_ms;
+        char *space = strchr(line, ' ');
+        if (space && g_ascii_isdigit(line[0])) {
+            *space = '\0';
+            int parsed = atoi(line);
+            if (parsed > 0) timeout_ms = parsed;
+            url = g_strchug(space + 1);
+        }
+        ns_headless_opts one = *hopts;
+        one.url = url;
+        one.wpt_timeout_ms = timeout_ms;
+        fprintf(stdout, "WPT BEGIN %s\n", url);
+        fflush(stdout);
+        int rc = ns_headless_run(&one);
+        fprintf(stdout, "WPT END rc=%d\n", rc);
+        fflush(stdout);
+        if (rc > worst) worst = rc;
+        headless_reset_between_tests();
+    }
+    return worst;
+}
+
 static int
 headless_run(ns_headless_opts *hopts)
 {
@@ -185,7 +230,8 @@ headless_run(ns_headless_opts *hopts)
         g_free(abs_path);
         if (file_url) hopts->url = file_url;
     }
-    int rc = ns_headless_run(hopts);
+    int rc = hopts->wpt_batch ? headless_run_wpt_batch(hopts)
+                              : ns_headless_run(hopts);
     if (hopts->debug_levels & (1u << NS_DLOG_NET))
         headless_report_perf();
     g_free(file_url);
@@ -211,6 +257,7 @@ static int
 headless_parse(int argc, char **argv, ns_headless_opts *hopts)
 {
     gboolean dump_set = FALSE;
+    gboolean settle_set = FALSE;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
         if (g_str_has_prefix(a, "--proxy=")) {
@@ -254,11 +301,14 @@ headless_parse(int argc, char **argv, ns_headless_opts *hopts)
         } else if (g_str_has_prefix(a, "--viewport-height=")) {
             headless_parse_int(a + 18, 1, 100000, &hopts->viewport_height);
         } else if (g_str_has_prefix(a, "--settle-ms=")) {
-            headless_parse_int(a + 12, 0, 600000, &hopts->settle_ms);
+            settle_set = headless_parse_int(a + 12, 0, 600000, &hopts->settle_ms);
         } else if (g_str_has_prefix(a, "--time-ms=")) {
             headless_parse_int(a + 10, 0, 600000, &hopts->time_ms);
         } else if (g_strcmp0(a, "--wpt") == 0) {
             hopts->wpt = TRUE;
+        } else if (g_strcmp0(a, "--wpt-batch") == 0) {
+            hopts->wpt = TRUE;
+            hopts->wpt_batch = TRUE;
         } else if (g_strcmp0(a, "--timing") == 0) {
             hopts->timing = TRUE;
         } else if (g_str_has_prefix(a, "--wpt-timeout-ms=")) {
@@ -283,7 +333,19 @@ headless_parse(int argc, char **argv, ns_headless_opts *hopts)
     }
     if (!dump_set && (hopts->inspect || hopts->inspect_at || hopts->wpt))
         hopts->dump = NS_DUMP_NONE;
+    if (hopts->wpt && !settle_set)
+        hopts->settle_ms = 0;
     return 0;
+}
+
+static gboolean
+headless_wpt_wanted(int argc, char **argv)
+{
+    for (int i = 1; i < argc; i++)
+        if (g_strcmp0(argv[i], "--wpt") == 0 ||
+            g_strcmp0(argv[i], "--wpt-batch") == 0)
+            return TRUE;
+    return FALSE;
 }
 
 int
@@ -293,6 +355,8 @@ ns_headless_main(int argc, char **argv)
     headless_attach_parent_console();
 #endif
     char *self_exe = headless_self_exe(argc > 0 ? argv[0] : NULL);
+    if (headless_wpt_wanted(argc, argv))
+        g_setenv("NS_PRIVATE", "1", TRUE);
     ns_i18n_init(self_exe);
     ns_config_init();
     ns_security_win32_mitigations_init(FALSE);

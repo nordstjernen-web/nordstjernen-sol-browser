@@ -3,6 +3,19 @@ Changelog:
 
 1.0.50-dev:
 ======
+* WPT harness: `--wpt-batch` keeps one headless browser running and reads
+  test URLs from stdin (optionally prefixed with a timeout in ms), printing
+  `WPT BEGIN`/`WPT END rc=N` around each report; cookies, the HTTP cache and
+  preloads are cleared between tests. `--wpt` now runs in private mode, so
+  test cookies, localStorage and IndexedDB never reach the user's profile,
+  and skips the fixed 400 ms settle (the result poll already ticks timers,
+  frames and layout). The hook switches testharness.js to
+  `explicit_timeout` and, at the driver's deadline, calls its `timeout()`,
+  so a stuck test reports its finished subtests instead of nothing. The new
+  `scripts/wpt-full.py` runs every testharness URL in a checkout's
+  `MANIFEST.json` (workers, variants, HTTPS and HTTP/2 included) in
+  parallel through those batch browsers, resumably; short tests cost about
+  0.1 s instead of 0.8 s, and per-file results match the old harness.
 * An open drop-down list (a `<select>`'s options or `<datalist>`
   suggestions) is painted above the rest of the page, and its rows take
   clicks there, as a native popup does. A later positioned element drew
