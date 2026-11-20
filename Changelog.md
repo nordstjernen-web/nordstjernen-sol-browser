@@ -3,6 +3,14 @@ Changelog:
 
 1.0.50-dev:
 ======
+* The right-click menu no longer scrolls or vanishes. When GTK lays it out
+  taller than it measured it, the menu grows to its full height instead of
+  showing a scrollbar, and near the bottom of the window or screen it opens
+  upwards rather than being squeezed into the room below the pointer
+  (which on Windows left a thin strip or no menu at all). The main menu
+  button gets the same fit.
+* about:start shows a larger logo (60 px) above the title
+  "Nordstjernen Browser".
 * New animated logo on about:start and about:about: the 2027 artwork (a
   serif N crossed by the north star inside a golden orbit) with a pulsing
   star, a comet circling the orbit and twinkling background stars, as a

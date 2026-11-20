@@ -176,7 +176,7 @@ static const char k_about_start_template[] =
     "<style>\n" NS_ABOUT_BASE_CSS
     ".ntp{max-width:640px;margin:0 auto;padding:12vh 24px 48px;"
     "display:flex;flex-direction:column;align-items:center}\n"
-    ".mark-img{width:48px;height:48px;border-radius:13px}\n"
+    ".mark-img{width:60px;height:60px;border-radius:16px}\n"
     ".brand{display:flex;flex-direction:column;align-items:center;gap:10px}\n"
     ".brand h1{margin:0;font-size:20px;font-weight:600;color:var(--muted);"
     "letter-spacing:-.01em}\n"
@@ -239,7 +239,7 @@ static const char k_about_start_template[] =
     ".sites{grid-template-columns:repeat(3,minmax(0,1fr))}}\n"
     "</style></head>"
     "<body><main class=\"ntp\">"
-    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen</h1></div>"
+    "<div class=\"brand\">__ND_LOGO_MARK__<h1>Nordstjernen Browser</h1></div>"
     "<form class=\"search\" id=\"dsearch\" role=\"search\">"
     "<svg width=\"20\" height=\"20\" viewBox=\"0 0 16 16\" fill=\"none\""
     " stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\""

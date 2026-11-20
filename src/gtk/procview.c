@@ -4857,11 +4857,46 @@ on_popover_menu_mapped(GtkWidget *pop, gpointer user_data)
     g_idle_add(popover_present_idle, g_object_ref(pop));
 }
 
+static GtkScrolledWindow *
+popover_menu_scroller(GtkWidget *widget)
+{
+    for (GtkWidget *child = gtk_widget_get_first_child(widget); child;
+         child = gtk_widget_get_next_sibling(child)) {
+        if (GTK_IS_SCROLLED_WINDOW(child))
+            return GTK_SCROLLED_WINDOW(child);
+        GtkScrolledWindow *found = popover_menu_scroller(child);
+        if (found)
+            return found;
+    }
+    return NULL;
+}
+
+static void
+on_popover_menu_content_changed(GtkAdjustment *adj, gpointer data)
+{
+    GtkScrolledWindow *sw = data;
+    double content = gtk_adjustment_get_upper(adj);
+    double shown = gtk_adjustment_get_page_size(adj);
+    if (shown <= 0 || content <= shown + 0.5)
+        return;
+    int needed = (int)ceil(content);
+    if (needed <= gtk_scrolled_window_get_min_content_height(sw))
+        return;
+    gtk_scrolled_window_set_min_content_height(sw, needed);
+    GtkWidget *pop = gtk_widget_get_ancestor(GTK_WIDGET(sw), GTK_TYPE_POPOVER);
+    if (pop)
+        g_idle_add(popover_present_idle, g_object_ref(pop));
+}
+
 void
 ns_popover_menu_fit(GtkWidget *popover)
 {
     if (!GTK_IS_POPOVER(popover)) return;
     g_signal_connect(popover, "map", G_CALLBACK(on_popover_menu_mapped), NULL);
+    GtkScrolledWindow *sw = popover_menu_scroller(popover);
+    if (sw)
+        g_signal_connect(gtk_scrolled_window_get_vadjustment(sw), "changed",
+                         G_CALLBACK(on_popover_menu_content_changed), sw);
 }
 
 static GMenu *
@@ -4929,6 +4964,46 @@ ctx_page_menu(NsProcView *v)
     return menu;
 }
 
+static int
+ctx_room_below_on_screen(NsProcView *v, int room_in_window)
+{
+#ifdef G_OS_WIN32
+    POINT cursor;
+    if (!GetCursorPos(&cursor)) return room_in_window;
+    MONITORINFO info = { .cbSize = sizeof info };
+    HMONITOR mon = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+    if (!mon || !GetMonitorInfoW(mon, &info)) return room_in_window;
+    int scale = gtk_widget_get_scale_factor(v->area);
+    UINT dpi = GetDpiForSystem();
+    double px_per_unit = dpi > 0 ? dpi / 96.0 : (double)MAX(scale, 1);
+    int room_on_screen = (int)((info.rcWork.bottom - cursor.y) / px_per_unit);
+    return MIN(room_in_window, room_on_screen);
+#else
+    (void)v;
+    return room_in_window;
+#endif
+}
+
+enum { CTX_MENU_CHROME_PX = 48 };
+
+static GtkPositionType
+ctx_menu_side(NsProcView *v, GtkWidget *popover)
+{
+    int natural = 0;
+    GtkScrolledWindow *sw = popover_menu_scroller(popover);
+    GtkWidget *items = sw ? gtk_scrolled_window_get_child(sw) : NULL;
+    if (items)
+        gtk_widget_measure(items, GTK_ORIENTATION_VERTICAL, -1,
+                           NULL, &natural, NULL, NULL);
+    int needed = natural + CTX_MENU_CHROME_PX;
+    int area_height = gtk_widget_get_height(v->area);
+    int room_below = ctx_room_below_on_screen(v, area_height - (int)v->ctx_y);
+    int room_above = (int)v->ctx_y;
+    if (needed > room_below && room_above > room_below)
+        return GTK_POS_TOP;
+    return GTK_POS_BOTTOM;
+}
+
 static void
 show_context_menu(NsProcView *v, const char *href, int edit)
 {
@@ -4944,6 +5019,8 @@ show_context_menu(NsProcView *v, const char *href, int edit)
     gtk_widget_set_parent(v->ctx_popover, v->area);
     ns_popover_menu_fit(v->ctx_popover);
     gtk_popover_set_has_arrow(GTK_POPOVER(v->ctx_popover), FALSE);
+    gtk_popover_set_position(GTK_POPOVER(v->ctx_popover),
+                             ctx_menu_side(v, v->ctx_popover));
     gtk_popover_set_pointing_to(GTK_POPOVER(v->ctx_popover),
         &(GdkRectangle){ (int)v->ctx_x, (int)v->ctx_y, 1, 1 });
     gtk_popover_popup(GTK_POPOVER(v->ctx_popover));
