@@ -147,7 +147,8 @@ jobs:
         # and the icon.
         run: |
           bash scripts/nightly-distro-build.sh debian --deps-only
-          apt-get install -y --no-install-recommends             dpkg-dev file librsvg2-bin librsvg2-common shared-mime-info
+          apt-get install -y --no-install-recommends \
+            dpkg-dev file librsvg2-bin librsvg2-common shared-mime-info
 
       - name: Build the AppImage
         run: |
@@ -175,9 +176,12 @@ jobs:
           # folders, so the test page goes in Downloads.
           mkdir -p "$HOME/Downloads"
           page="$HOME/Downloads/appimage-smoke.html"
-          printf '%s
-' '<!doctype html><title>smoke</title><h1>AppImage smoke test</h1>'             '<p id=p>static</p>'             "<script>document.getElementById('p').textContent = 'script ran: ' + (1 + 2);</script>"             > "$page"
-          out=$(NS_ALLOW_ROOT=1 "$want" --appimage-extract-and-run --headless                   --dump=text --settle-ms=500 "file://$page" 2>/dev/null)
+          printf '%s\n' '<!doctype html><title>smoke</title><h1>AppImage smoke test</h1>' \
+            '<p id=p>static</p>' \
+            "<script>document.getElementById('p').textContent = 'script ran: ' + (1 + 2);</script>" \
+            > "$page"
+          out=$(NS_ALLOW_ROOT=1 "$want" --appimage-extract-and-run --headless \
+                  --dump=text --settle-ms=500 "file://$page" 2>/dev/null)
           echo "$out"
           grep -q 'AppImage smoke test' <<<"$out"
           grep -q 'script ran: 3' <<<"$out"
