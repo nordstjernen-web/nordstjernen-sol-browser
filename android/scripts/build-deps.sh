@@ -105,6 +105,7 @@ CC_MESON="${CC}"
 CXX_MESON="${CXX}"
 AR_MESON="${AR}"
 STRIP_MESON="${STRIP}"
+RUSTC_MESON="$(command -v "${RUSTC:-rustc}")" || { echo "rustc not found" >&2; exit 1; }
 TOOLCHAIN_SYSROOT="${TOOLCHAIN}/sysroot"
 TOOLCHAIN_SYSROOT_MESON="${TOOLCHAIN_SYSROOT}"
 SYSROOT_PKGCONFIG_MESON="${SYSROOT_PKGCONFIG}"
@@ -114,6 +115,7 @@ case "$(uname -s)" in
         CXX_MESON="$(cygpath -m "${CXX}")"
         AR_MESON="$(cygpath -m "${AR}")"
         STRIP_MESON="$(cygpath -m "${STRIP}")"
+        RUSTC_MESON="$(cygpath -m "${RUSTC_MESON}")"
         TOOLCHAIN_SYSROOT_MESON="$(cygpath -m "${TOOLCHAIN_SYSROOT}")"
         [ -n "${SYSROOT_PKGCONFIG}" ] &&
             SYSROOT_PKGCONFIG_MESON="$(cygpath -m "${SYSROOT_PKGCONFIG}")"
@@ -124,7 +126,7 @@ cat > "${CROSS}" <<EOF
 [binaries]
 c = '${CC_MESON}'
 cpp = '${CXX_MESON}'
-rust = ['rustc', '--target', '${RUST_TARGET}']
+rust = ['${RUSTC_MESON}', '--target', '${RUST_TARGET}']
 ar = '${AR_MESON}'
 strip = '${STRIP_MESON}'
 pkg-config = 'pkg-config'
