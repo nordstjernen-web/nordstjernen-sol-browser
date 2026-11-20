@@ -58,6 +58,42 @@ ns_os_aac_available(void)
     return 1;
 }
 
+static pthread_once_t g_gpu_once = PTHREAD_ONCE_INIT;
+static int            g_gpu_vp9;
+static int            g_gpu_av1;
+
+static int
+vt_gpu_decodes(CMVideoCodecType type)
+{
+    if (__builtin_available(macOS 11.0, *))
+        VTRegisterSupplementalVideoDecoderIfAvailable(type);
+    return VTIsHardwareDecodeSupported(type) ? 1 : 0;
+}
+
+static void
+vt_gpu_probe(void)
+{
+    if (getenv("NS_MEDIA_NO_HW_DECODER")) return;
+    g_gpu_vp9 = vt_gpu_decodes(kCMVideoCodecType_VP9);
+    g_gpu_av1 = vt_gpu_decodes(kCMVideoCodecType_AV1);
+}
+
+const char *
+ns_os_gpu_decode_api(void)
+{
+    return "videotoolbox";
+}
+
+int
+ns_os_gpu_decodes(const char *codec, int bit_depth)
+{
+    if (!codec || bit_depth > 10) return 0;
+    pthread_once(&g_gpu_once, vt_gpu_probe);
+    if (strcmp(codec, "vp9") == 0) return g_gpu_vp9;
+    if (strcmp(codec, "av1") == 0) return g_gpu_av1;
+    return 0;
+}
+
 static void
 vt_queue_push(ns_os_vdec *d, ns_os_frame *f)
 {

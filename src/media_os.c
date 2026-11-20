@@ -305,6 +305,13 @@ ns_os_vdec_new_hw(const char *codec, const uint8_t *extradata,
 
 #endif
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+
+const char *ns_os_gpu_decode_api(void) { return NULL; }
+int ns_os_gpu_decodes(const char *codec, int bit_depth) { (void)codec; (void)bit_depth; return 0; }
+
+#endif
+
 #ifdef NS_MEDIA_OS_NONE
 
 void ns_os_media_preinit(void) { }

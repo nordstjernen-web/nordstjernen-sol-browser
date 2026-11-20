@@ -62,9 +62,10 @@ How libav is obtained differs by platform, to keep it redistributable:
   `gstreamer-plugin-openh264` package may lag behind its `libopenh264` and is
   not needed.
 - **macOS / Windows** vendor a **minimal, LGPL-only FFmpeg** built from source
-  (`scripts/build-ffmpeg-lgpl.sh`), carrying just the matroska/ogg demuxers and
-  the native VP8/VP9/Theora/Opus/Vorbis decoders — no GPL parts, no external codec
-  libraries.
+  (`scripts/build-ffmpeg-lgpl.sh`), carrying just the matroska/ogg demuxers,
+  the native VP8/VP9/Theora/Opus/Vorbis decoders and the VP9/AV1 GPU decoders
+  (D3D11VA on Windows, VideoToolbox on macOS; see below) — no GPL parts, no
+  external codec libraries.
 - **Android** does not cross-build FFmpeg, so the inline libav WebM path is
   unavailable there; MP4/H.264 plays through the in-tree demuxer below.
 
@@ -115,10 +116,11 @@ skips the OS decoders, and `NS_MEDIA_OS_CODECS_ONLY=1` makes
 `isTypeSupported()` reject the video codecs only libav decodes (VP8/VP9/AV1),
 so a site such as YouTube serves H.264.
 
-YouTube itself prefers VP9 or AV1 when the browser accepts them, so on Linux
-and Windows (where libav decodes those) it keeps using them; the OS H.264
-path is what plays MP4/HLS video elsewhere on the web, and YouTube on builds
-without libav's VP9/AV1. Encrypted media (EME/Widevine) is not supported.
+YouTube itself prefers VP9 or AV1 when the browser accepts them. Where an OS
+H.264 decoder exists and VP9/AV1 would decode in software, `isTypeSupported()`
+rejects VP8/VP9/AV1 (unless `NS_MEDIA_SOFTWARE_CODECS=1`), so such sites serve
+H.264, which the GPU decodes; VP9 and AV1 are accepted when a hardware decoder
+for them exists (below). Encrypted media (EME/Widevine) is not supported.
 
 ### Hardware VP9, AV1 and HEVC through GStreamer
 
@@ -138,6 +140,37 @@ newer, Mesa's `libva` drivers for AMD. `NS_MEDIA_NO_HW_DECODER=1` keeps these
 codecs on libav, and `NS_MEDIA_GST_SOFTWARE_DECODER=1` lets the path accept
 a software GStreamer decoder, which exercises it on machines without a
 hardware decoder.
+
+### Hardware VP9 and AV1 through FFmpeg on Windows and macOS
+
+On Windows and macOS, VP9 and AV1 decode on the GPU through FFmpeg's own
+hardware decoders: **D3D11VA** on Windows and **VideoToolbox** on macOS. The
+bundled LGPL FFmpeg carries the `vp9_d3d11va`/`av1_d3d11va` and
+`vp9_videotoolbox`/`av1_videotoolbox` hwaccels, plus FFmpeg's native AV1
+decoder, which only decodes on a GPU. `src/media_os_mf.c` and
+`src/media_os_vt.c` report whether the GPU can decode each codec
+(`ns_os_gpu_decodes`): on Windows the D3D11 video device lists the
+`VP9_VLD_Profile0` or `AV1_VLD_Profile0` decoder profile with NV12 output; on
+macOS `VTIsHardwareDecodeSupported` says yes, after
+`VTRegisterSupplementalVideoDecoderIfAvailable` has loaded Apple's VP9
+decoder.
+
+When it can, `src/video_decode.c` opens the decoder with a process-wide
+hardware device (`av_hwdevice_ctx_create`) and copies each decoded frame back
+to memory (`av_hwframe_transfer_data`) for the usual swscale conversion. The
+renderer is a separate process from the shell, so frames are copied back
+either way. `canPlayType()` and `isTypeSupported()` then accept `vp09` and
+`av01` even where an OS H.264 decoder exists, so YouTube serves VP9 or AV1 and
+its resolutions above 1080p.
+
+A stream the GPU cannot take (VP9 profile 2 on a GPU without 10-bit VP9, say)
+falls back to FFmpeg's software VP9 decoder when FFmpeg negotiates the pixel
+format, and so does a GPU decoder that fails before its first frame. AV1 has
+no software decoder in the bundled FFmpeg, so it is only reported as playable
+when the GPU decodes it. `NS_MEDIA_NO_HW_DECODER=1` turns this path off. The
+`media` entries of the debug log name the decoder each stream uses
+("vp9 1920x1080 decoding on the GPU through d3d11va"); `NS_LOG_FILE=<path>`
+writes them to a file.
 
 ## Audio
 

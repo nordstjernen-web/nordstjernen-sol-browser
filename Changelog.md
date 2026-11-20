@@ -3,6 +3,26 @@ Changelog:
 
 1.0.50-dev:
 ======
+* macOS: `scripts/build-ffmpeg-lgpl.sh` stopped at once under the bash 3.2
+  that macOS ships (`CROSS[@]: unbound variable`: an empty array expanded
+  under `set -u`), and the macOS workflow then built without FFmpeg, so
+  WebM was skipped there. The script now expands the array in a form bash
+  3.2 accepts.
+* Windows and macOS: VP9 and AV1 video decode on the GPU through FFmpeg's
+  hardware decoders, D3D11VA on Windows and VideoToolbox on macOS. The
+  bundled LGPL FFmpeg gains the `vp9_d3d11va`/`av1_d3d11va` and
+  `vp9_videotoolbox`/`av1_videotoolbox` hwaccels and FFmpeg's native AV1
+  decoder, and the renderer copies each GPU frame back for the usual
+  conversion. Where the GPU has the decoder (a D3D11 `VP9_VLD_Profile0` or
+  `AV1_VLD_Profile0` profile, or `VTIsHardwareDecodeSupported`),
+  `canPlayType()` and `MediaSource.isTypeSupported()` accept `vp09` and
+  `av01`, so YouTube serves VP9 or AV1, with its resolutions above 1080p,
+  instead of H.264.
+  Before, both platforms refused VP9 whenever the OS had an H.264 decoder,
+  and decoded it in software otherwise; AV1 did not play at all. A stream
+  the GPU cannot take falls back to software VP9, and
+  `NS_MEDIA_NO_HW_DECODER=1` turns the path off. AV1 is no longer reported
+  as playable where the only AV1 decoder is FFmpeg's GPU-only one.
 * Windows and macOS packages: the minimal LGPL FFmpeg that
   `scripts/build-ffmpeg-lgpl.sh` builds moves from 9.0.2 to 9.1
   (libavcodec 63.24, libavformat 63.16, libavutil 61.19). The library
