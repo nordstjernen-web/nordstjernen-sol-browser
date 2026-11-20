@@ -271,6 +271,7 @@ const ns_node *ns_select_chosen_option(const ns_node *select);
 ns_node       *ns_option_select(const ns_node *option);
 gboolean       ns_select_picks_first_option(const ns_node *select);
 gboolean       ns_option_selectable(const ns_node *option);
+gboolean       ns_option_in_dropdown(const ns_node *option);
 char       *ns_option_value_dup(const ns_node *option);
 char       *ns_option_text_dup(const ns_node *option);
 char       *ns_option_label_dup(const ns_node *option);

@@ -133,7 +133,7 @@ for (( f = 0; f < frames; f++ )); do
         -o "$work/f$(printf '%02d' "$f").png"
 done
 
-convert -delay 6 -loop 0"$work"/f*.png "$work/raw.gif"
+convert -delay 6 -loop 0 "$work"/f*.png "$work/raw.gif"
 gifsicle -O3 --colors 64 "$work/raw.gif" -o "$out"
 echo "wrote $out ($(stat -c%s "$out") bytes)"
 

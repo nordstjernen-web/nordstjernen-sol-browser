@@ -71,6 +71,16 @@ typedef struct paint_layers_state {
 
 static paint_layers_state g_layers;
 static const ns_box *g_paint_sticky_static_box;
+
+typedef struct {
+    const ns_box  *box;
+    cairo_matrix_t ctm;
+    double         x, y, w, h;
+} paint_dropdown;
+
+static cairo_t  *g_paint_dropdown_cr;
+static GArray   *g_paint_dropdowns;
+static gboolean  g_paint_dropdown_pass;
 static guint g_paint_video_layer_gen;
 static double g_paint_video_tile_y;
 
@@ -6318,7 +6328,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 
     if (b->attrs) {
         double opt_minx = 1e9, opt_maxx = -1e9, opt_miny = 1e9, opt_maxy = -1e9;
-        int opt_count = 0, opt_nsel = 0;
+        int opt_count = 0, opt_nsel = 0, opt_popup = 0;
         struct { double x0, y0, x1, y1; } opt_sel[64];
         for (guint i = 0; i < b->attrs->len; i++) {
             const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, i);
@@ -6340,6 +6350,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 if (ry0 < opt_miny) opt_miny = ry0;
                 if (ry1 > opt_maxy) opt_maxy = ry1;
                 opt_count++;
+                if (ns_option_in_dropdown(r->dom)) opt_popup++;
                 if (ns_element_get_attr(r->dom, "selected") && opt_nsel < 64) {
                     opt_sel[opt_nsel].x0 = rx0; opt_sel[opt_nsel].y0 = ry0;
                     opt_sel[opt_nsel].x1 = rx1; opt_sel[opt_nsel].y1 = ry1;
@@ -6515,6 +6526,13 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             cairo_set_line_width(cr, 1.0);
             cairo_stroke(cr);
             cairo_restore(cr);
+            if (opt_popup > 0 && !g_paint_dropdown_pass &&
+                g_paint_dropdowns && cr == g_paint_dropdown_cr) {
+                paint_dropdown d = { .box = b, .x = px, .y = py,
+                                     .w = pw, .h = ph };
+                cairo_get_matrix(cr, &d.ctm);
+                g_array_append_val(g_paint_dropdowns, d);
+            }
         }
     }
 
@@ -12423,6 +12441,35 @@ paint_top_layer(cairo_t *cr, const ns_box *root, const char *highlight)
 }
 
 static void
+paint_dropdowns_begin(cairo_t *cr)
+{
+    if (g_paint_dropdowns) g_array_free(g_paint_dropdowns, TRUE);
+    g_paint_dropdowns = g_array_new(FALSE, FALSE, sizeof(paint_dropdown));
+    g_paint_dropdown_cr = cr;
+}
+
+static void
+paint_open_dropdowns(cairo_t *cr, const char *highlight)
+{
+    GArray *list = g_paint_dropdowns;
+    g_paint_dropdowns = NULL;
+    g_paint_dropdown_cr = NULL;
+    if (!list) return;
+    g_paint_dropdown_pass = TRUE;
+    for (guint i = 0; i < list->len; i++) {
+        const paint_dropdown *d = &g_array_index(list, paint_dropdown, i);
+        cairo_save(cr);
+        cairo_set_matrix(cr, &d->ctm);
+        cairo_rectangle(cr, d->x, d->y, d->w, d->h);
+        cairo_clip(cr);
+        paint_inline(cr, d->box, highlight);
+        cairo_restore(cr);
+    }
+    g_paint_dropdown_pass = FALSE;
+    g_array_free(list, TRUE);
+}
+
+static void
 paint_document(cairo_t *cr, const ns_box *root, const char *highlight_query,
                const struct ns_selection *sel)
 {
@@ -12436,10 +12483,13 @@ paint_document(cairo_t *cr, const ns_box *root, const char *highlight_query,
     paint_cache_clip(cr);
     if (sel)
         g_paint_sel_runs = ns_selection_ranges(root, sel);
+    gboolean dropdowns = g_layers.mode != PAINT_LAYERS_PLAN;
+    if (dropdowns) paint_dropdowns_begin(cr);
     g_paint_skip_box = top_layer_box(root);
     paint_walk(cr, root, highlight_query);
     g_paint_skip_box = NULL;
     paint_top_layer(cr, root, highlight_query);
+    if (dropdowns) paint_open_dropdowns(cr, highlight_query);
     g_clear_pointer(&g_paint_sel_runs, g_hash_table_destroy);
     g_paint_have_clip = FALSE;
     g_paint_have_viewport = FALSE;
@@ -12626,7 +12676,9 @@ ns_paint_vp_layer(cairo_t *cr, const ns_box *root,
     cairo_matrix_multiply(&m, &layer->rel, &base);
     cairo_set_matrix(cr, &m);
     g_paint_flush_box = layer->box;
+    paint_dropdowns_begin(cr);
     paint_walk(cr, layer->box, highlight_query);
+    paint_open_dropdowns(cr, highlight_query);
     g_paint_flush_box = saved_flush;
     cairo_restore(cr);
     g_paint_sticky_static_box = NULL;

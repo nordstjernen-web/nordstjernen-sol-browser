@@ -8801,6 +8801,8 @@ inline_box_hit_layout(const ns_box *box, const ns_style *parent_style,
     return layout;
 }
 
+static gboolean g_form_hit_dropdown_only;
+
 static const ns_node *
 inline_box_form_hit(const ns_box *box, double local_x, double local_y,
                     const ns_style *parent_style)
@@ -8830,7 +8832,8 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
                     &g_array_index(box->inline_atomics, ns_inline_atomic, i);
                 if (!a->box || idx < a->byte_off || idx >= a->byte_off + 3)
                     continue;
-                if (node_is_form_hit_target(a->box->dom))
+                if (!g_form_hit_dropdown_only &&
+                    node_is_form_hit_target(a->box->dom))
                     atomic_hit = a->box->dom;
             }
         }
@@ -8840,6 +8843,8 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
                     &g_array_index(box->attrs, ns_inline_attr, i);
                 if (!inline_attr_is_form_hit(r->kind)) continue;
                 if (!r->dom) continue;
+                if (g_form_hit_dropdown_only &&
+                    !ns_option_in_dropdown(r->dom)) continue;
                 const ns_style *rs = r->style ? r->style : parent_style;
                 if (style_blocks_hit_testing(rs)) continue;
                 if (idx < r->start || idx >= r->start + r->len) continue;
@@ -8854,6 +8859,8 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
                 &g_array_index(box->attrs, ns_inline_attr, i);
             if (!inline_attr_is_form_hit(r->kind)) continue;
             if (!r->dom) continue;
+            if (g_form_hit_dropdown_only &&
+                !ns_option_in_dropdown(r->dom)) continue;
             const ns_style *rs = r->style ? r->style : parent_style;
             if (style_blocks_hit_testing(rs)) continue;
             NsPangoRectangle r0, r1;
@@ -9706,7 +9713,7 @@ ns_form_hit_walk(const ns_box *box, double x, double y,
     if (!box_hit_untransform_point(box, &x, &y)) return NULL;
     const ns_style *child_inherited = box->style ? box->style : inherited;
     const ns_node *self_hit = NULL;
-    if (node_is_form_hit_target(box->dom) &&
+    if (!g_form_hit_dropdown_only && node_is_form_hit_target(box->dom) &&
         box_border_contains(box, x, y) &&
         !box_blocks_hit_testing(box))
         self_hit = box->dom;
@@ -9715,7 +9722,8 @@ ns_form_hit_walk(const ns_box *box, double x, double y,
             box, x - box->x, y - box->y, child_inherited);
         if (m) return m;
     }
-    if (box_clips_children(box) && !box_padding_contains(box, x, y))
+    if (!g_form_hit_dropdown_only && box_clips_children(box) &&
+        !box_padding_contains(box, x, y))
         return NULL;
     if (ns_paint_3d_registered(box)) return self_hit;
     double cx = x + box->scroll_x;
@@ -21892,6 +21900,18 @@ ns_box_hit_form_dom(const ns_box *root, double x, double y)
     return ns_form_hit_walk(root, x, y, NULL);
 }
 
+static const ns_node *
+open_dropdown_option_hit(const ns_box *root, double x, double y)
+{
+    if (!g_open_select_for_layout && !g_datalist_open_for_layout)
+        return NULL;
+    gboolean saved = g_form_hit_dropdown_only;
+    g_form_hit_dropdown_only = TRUE;
+    const ns_node *m = ns_form_hit_walk(root, x, y, NULL);
+    g_form_hit_dropdown_only = saved;
+    return m && ns_option_in_dropdown(m) ? m : NULL;
+}
+
 static const ns_inline_attr *
 box_field_text_attr(const ns_box *box, const ns_node *field)
 {
@@ -22494,6 +22514,7 @@ ns_box_sticky_offset(const ns_box *b, double vp_x0, double vp_y0,
 static gboolean
 box_moves_when_painted(const ns_box *b)
 {
+    if (box_has_transform_style(b)) return TRUE;
     if (!b->style || !box_paint_unbounded(b)) return FALSE;
     const ns_css_value *pos = b->style->values[NS_CSS_POSITION];
     return !keyword_is(pos, "fixed") && !keyword_is(pos, "sticky");
@@ -23177,6 +23198,8 @@ ns_box_hit_element(const ns_box *root, double x, double y,
 const ns_node *
 ns_box_hit_node(const ns_box *root, double x, double y)
 {
+    const ns_node *dropdown_row = open_dropdown_option_hit(root, x, y);
+    if (dropdown_row) return dropdown_row;
     double local_x = 0, local_y = 0;
     const ns_box *hit = NULL;
     const ns_node *target = ns_box_hit_element(root, x, y, &hit, &local_x,
