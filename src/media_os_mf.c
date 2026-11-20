@@ -48,6 +48,18 @@ static const GUID ns_IID_ID3D11Texture2D =
 static const GUID ns_IID_IMFDXGIBuffer =
     { 0xe7174cfa, 0x1c9e, 0x48b1,
       { 0x88, 0x66, 0x62, 0x62, 0x26, 0xbf, 0xc2, 0x58 } };
+static const GUID ns_IID_ID3D11VideoDevice =
+    { 0x10ec4d5b, 0x975a, 0x4689,
+      { 0xb9, 0xe4, 0xd0, 0xaa, 0xc3, 0x0f, 0xe3, 0x33 } };
+static const GUID ns_DXVA_ModeVP9_VLD_Profile0 =
+    { 0x463707f8, 0xa1d0, 0x4585,
+      { 0x87, 0x6d, 0x83, 0xaa, 0x6d, 0x60, 0xb8, 0x9e } };
+static const GUID ns_DXVA_ModeVP9_VLD_10bit_Profile2 =
+    { 0xa4c749ef, 0x6ecf, 0x48aa,
+      { 0x84, 0x48, 0x50, 0xa7, 0xa1, 0x16, 0x5f, 0xf7 } };
+static const GUID ns_DXVA_ModeAV1_VLD_Profile0 =
+    { 0xb8be4ccb, 0xcf53, 0x46ba,
+      { 0x8d, 0x59, 0xd6, 0xb8, 0xa6, 0xda, 0x5d, 0x2a } };
 
 static struct {
     ns_mf_startup_fn    startup;
@@ -308,17 +320,14 @@ vdec_pick_output(ns_os_vdec *d)
 static INIT_ONCE             g_d3d_once = INIT_ONCE_STATIC_INIT;
 static IMFDXGIDeviceManager *g_d3d_manager;
 
-static BOOL CALLBACK
-mf_d3d_startup(PINIT_ONCE once, PVOID param, PVOID *ctx)
+static ID3D11Device *
+mf_create_video_device(void)
 {
-    (void)once; (void)param; (void)ctx;
-    if (getenv("NS_MEDIA_NO_HW_DECODER") || !g_mf.create_dxgi_manager)
-        return TRUE;
     HMODULE d3d11 = LoadLibraryW(L"d3d11.dll");
     ns_d3d11_create_fn create = d3d11
         ? (ns_d3d11_create_fn)(void *)GetProcAddress(d3d11, "D3D11CreateDevice")
         : NULL;
-    if (!create) return TRUE;
+    if (!create) return NULL;
     static const D3D_FEATURE_LEVEL levels[] = {
         D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
         D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0,
@@ -333,7 +342,18 @@ mf_d3d_startup(PINIT_ONCE once, PVOID param, PVOID *ctx)
                     D3D11_CREATE_DEVICE_VIDEO_SUPPORT, levels + 1,
                     (UINT)(sizeof levels / sizeof levels[0]) - 1,
                     D3D11_SDK_VERSION, &dev, NULL, NULL);
-    if (FAILED(hr) || !dev) return TRUE;
+    if (FAILED(hr)) return NULL;
+    return dev;
+}
+
+static BOOL CALLBACK
+mf_d3d_startup(PINIT_ONCE once, PVOID param, PVOID *ctx)
+{
+    (void)once; (void)param; (void)ctx;
+    if (getenv("NS_MEDIA_NO_HW_DECODER") || !g_mf.create_dxgi_manager)
+        return TRUE;
+    ID3D11Device *dev = mf_create_video_device();
+    if (!dev) return TRUE;
     ID3D10Multithread *mt = NULL;
     if (SUCCEEDED(ID3D11Device_QueryInterface(dev, &ns_IID_ID3D10Multithread,
                                               (void **)&mt))) {
@@ -350,6 +370,73 @@ mf_d3d_startup(PINIT_ONCE once, PVOID param, PVOID *ctx)
         IMFDXGIDeviceManager_Release(mgr);
     ID3D11Device_Release(dev);
     return TRUE;
+}
+
+static INIT_ONCE g_gpu_once = INIT_ONCE_STATIC_INIT;
+static int       g_gpu_vp9;
+static int       g_gpu_vp9_10bit;
+static int       g_gpu_av1;
+static int       g_gpu_av1_10bit;
+
+static int
+mf_gpu_outputs(ID3D11VideoDevice *video, const GUID *profile, DXGI_FORMAT format)
+{
+    BOOL supported = FALSE;
+    return SUCCEEDED(ID3D11VideoDevice_CheckVideoDecoderFormat(
+               video, profile, format, &supported)) && supported;
+}
+
+static void
+mf_gpu_note_profile(ID3D11VideoDevice *video, UINT index)
+{
+    GUID profile;
+    if (FAILED(ID3D11VideoDevice_GetVideoDecoderProfile(video, index, &profile)))
+        return;
+    if (IsEqualGUID(&profile, &ns_DXVA_ModeVP9_VLD_Profile0)) {
+        g_gpu_vp9 |= mf_gpu_outputs(video, &profile, DXGI_FORMAT_NV12);
+    } else if (IsEqualGUID(&profile, &ns_DXVA_ModeVP9_VLD_10bit_Profile2)) {
+        g_gpu_vp9_10bit |= mf_gpu_outputs(video, &profile, DXGI_FORMAT_P010);
+    } else if (IsEqualGUID(&profile, &ns_DXVA_ModeAV1_VLD_Profile0)) {
+        g_gpu_av1 |= mf_gpu_outputs(video, &profile, DXGI_FORMAT_NV12);
+        g_gpu_av1_10bit |= mf_gpu_outputs(video, &profile, DXGI_FORMAT_P010);
+    }
+}
+
+static BOOL CALLBACK
+mf_gpu_probe(PINIT_ONCE once, PVOID param, PVOID *ctx)
+{
+    (void)once; (void)param; (void)ctx;
+    if (getenv("NS_MEDIA_NO_HW_DECODER")) return TRUE;
+    ID3D11Device *dev = mf_create_video_device();
+    if (!dev) return TRUE;
+    ID3D11VideoDevice *video = NULL;
+    if (SUCCEEDED(ID3D11Device_QueryInterface(dev, &ns_IID_ID3D11VideoDevice,
+                                              (void **)&video))) {
+        UINT n = ID3D11VideoDevice_GetVideoDecoderProfileCount(video);
+        for (UINT i = 0; i < n; i++)
+            mf_gpu_note_profile(video, i);
+        ID3D11VideoDevice_Release(video);
+    }
+    ID3D11Device_Release(dev);
+    return TRUE;
+}
+
+const char *
+ns_os_gpu_decode_api(void)
+{
+    return "d3d11va";
+}
+
+int
+ns_os_gpu_decodes(const char *codec, int bit_depth)
+{
+    if (!codec || bit_depth > 10) return 0;
+    InitOnceExecuteOnce(&g_gpu_once, mf_gpu_probe, NULL, NULL);
+    if (strcmp(codec, "vp9") == 0)
+        return bit_depth > 8 ? g_gpu_vp9_10bit : g_gpu_vp9;
+    if (strcmp(codec, "av1") == 0)
+        return bit_depth > 8 ? g_gpu_av1_10bit : g_gpu_av1;
+    return 0;
 }
 
 static int

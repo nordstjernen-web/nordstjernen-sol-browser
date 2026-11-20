@@ -5,7 +5,9 @@
 # macOS and Windows packages without the GPL obligations of a stock FFmpeg.
 # It also demuxes MP4 and parses H.264/AAC but carries no H.264 or AAC
 # decoder: those streams are decoded by the operating system (Media
-# Foundation, VideoToolbox; see src/media_os.h).
+# Foundation, VideoToolbox; see src/media_os.h). VP9 and AV1 can also decode
+# on the GPU, through D3D11VA on Windows and VideoToolbox on macOS; FFmpeg's
+# AV1 decoder only decodes on the GPU, so AV1 needs one.
 #
 # `--disable-gpl --disable-nonfree --disable-version3` keeps the result LGPL
 # v2.1+, and `--disable-autodetect` guarantees no external codec library
@@ -64,6 +66,12 @@ ASM_FLAG=--enable-x86asm
 CROSS=()
 [ -n "${NS_FFMPEG_HOST:-}" ] && CROSS+=(--cross-prefix="${NS_FFMPEG_HOST}-" --enable-cross-compile)
 
+GPU=(--enable-hwaccel=vp9_d3d11va,vp9_d3d11va2,av1_d3d11va,av1_d3d11va2,vp9_videotoolbox,av1_videotoolbox)
+case "${NS_FFMPEG_HOST:-}:$(uname -s)" in
+    *mingw*:* | *:*_NT*) GPU+=(--enable-d3d11va) ;;
+    *darwin*:* | :Darwin) GPU+=(--enable-videotoolbox) ;;
+esac
+
 cd "$SRC"
 # shellcheck disable=SC2086
 ./configure \
@@ -78,9 +86,10 @@ cd "$SRC"
     --enable-avformat --enable-avcodec --enable-avutil \
     --enable-swscale --enable-swresample \
     --enable-demuxer=matroska,ogg,mov,flac,wav \
-    --enable-decoder=vp8,vp9,theora,opus,vorbis,flac,pcm_s16le,pcm_s24le,pcm_u8,pcm_f32le \
-    --enable-parser=vp8,vp9,vp3,opus,vorbis,flac,h264,aac \
+    --enable-decoder=vp8,vp9,av1,theora,opus,vorbis,flac,pcm_s16le,pcm_s24le,pcm_u8,pcm_f32le \
+    --enable-parser=vp8,vp9,av1,vp3,opus,vorbis,flac,h264,aac \
     --enable-protocol=file \
+    "${GPU[@]}" \
     $ASM_FLAG \
     "${CROSS[@]}" \
     ${FFMPEG_EXTRA_CONFIGURE:-}
