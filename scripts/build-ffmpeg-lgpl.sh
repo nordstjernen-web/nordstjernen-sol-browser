@@ -5,7 +5,9 @@
 # macOS and Windows packages without the GPL obligations of a stock FFmpeg.
 # It also demuxes MP4 and parses H.264/AAC but carries no H.264 or AAC
 # decoder: those streams are decoded by the operating system (Media
-# Foundation, VideoToolbox; see src/media_os.h).
+# Foundation, VideoToolbox; see src/media_os.h). VP9 and AV1 can also decode
+# on the GPU, through D3D11VA on Windows and VideoToolbox on macOS; FFmpeg's
+# AV1 decoder only decodes on the GPU, so AV1 needs one.
 #
 # `--disable-gpl --disable-nonfree --disable-version3` keeps the result LGPL
 # v2.1+, and `--disable-autodetect` guarantees no external codec library
@@ -16,14 +18,14 @@
 # Prints the prefix on success; point pkg-config at "<prefix>/lib/pkgconfig".
 #
 # Env:
-#   FFMPEG_VERSION   release tag without the leading n (default 9.0.2)
+#   FFMPEG_VERSION   release tag without the leading n (default 9.1)
 #   NS_FFMPEG_NOASM  set to 1 to configure --disable-x86asm (no nasm needed)
 #   NS_FFMPEG_HOST   cross prefix passed as --cross-prefix (e.g. for mingw)
 #   FFMPEG_EXTRA_CONFIGURE  extra configure flags (target-os/arch on cross)
 set -euo pipefail
 
 PREFIX=${1:?usage: build-ffmpeg-lgpl.sh <install-prefix>}
-VER=${FFMPEG_VERSION:-9.0.2}
+VER=${FFMPEG_VERSION:-9.1}
 JOBS=${NS_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -31,8 +33,8 @@ trap 'rm -rf "$WORK"' EXIT
 log() { printf '[ffmpeg-lgpl] %s\n' "$*" >&2; }
 
 case "$VER" in
+    9.1)   SHA256=a7a5c7219a9232e2017f7584922b50e96c1d6d7b55737184f94e394a229d13c7 ;;
     9.0.2) SHA256=84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98 ;;
-    8.1.3) SHA256=bd458826a039b48a9606e794554c75eb4c4984b84173f7afa3128eae89336f2b ;;
     *)     SHA256=${FFMPEG_SHA256:-} ;;
 esac
 [ -n "$SHA256" ] || { log "ERROR: no pinned checksum for FFmpeg ${VER}; set FFMPEG_SHA256"; exit 1; }
@@ -58,11 +60,17 @@ SRC="$WORK/ffmpeg-src"
 mkdir -p "$SRC"
 tar -xzf "$TARBALL" -C "$SRC" --strip-components=1
 
-ASM_FLAG=--enable-x86asm
+ASM_FLAG=
 [ "${NS_FFMPEG_NOASM:-0}" = 1 ] && ASM_FLAG=--disable-x86asm
 
 CROSS=()
 [ -n "${NS_FFMPEG_HOST:-}" ] && CROSS+=(--cross-prefix="${NS_FFMPEG_HOST}-" --enable-cross-compile)
+
+GPU=(--enable-hwaccel=vp9_d3d11va,vp9_d3d11va2,av1_d3d11va,av1_d3d11va2,vp9_videotoolbox,av1_videotoolbox)
+case "${NS_FFMPEG_HOST:-}:$(uname -s)" in
+    *mingw*:* | *:*_NT*) GPU+=(--enable-d3d11va) ;;
+    *darwin*:* | :Darwin) GPU+=(--enable-videotoolbox) ;;
+esac
 
 cd "$SRC"
 # shellcheck disable=SC2086
@@ -78,11 +86,12 @@ cd "$SRC"
     --enable-avformat --enable-avcodec --enable-avutil \
     --enable-swscale --enable-swresample \
     --enable-demuxer=matroska,ogg,mov,flac,wav \
-    --enable-decoder=vp8,vp9,theora,opus,vorbis,flac,pcm_s16le,pcm_s24le,pcm_u8,pcm_f32le \
-    --enable-parser=vp8,vp9,vp3,opus,vorbis,flac,h264,aac \
+    --enable-decoder=vp8,vp9,av1,theora,opus,vorbis,flac,pcm_s16le,pcm_s24le,pcm_u8,pcm_f32le \
+    --enable-parser=vp8,vp9,av1,vp3,opus,vorbis,flac,h264,aac \
     --enable-protocol=file \
+    "${GPU[@]}" \
     $ASM_FLAG \
-    "${CROSS[@]}" \
+    ${CROSS[@]+"${CROSS[@]}"} \
     ${FFMPEG_EXTRA_CONFIGURE:-}
 
 make -j"$JOBS"

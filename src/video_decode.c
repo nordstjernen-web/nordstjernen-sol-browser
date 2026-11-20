@@ -18,12 +18,15 @@
 #ifdef NS_HAVE_LIBAV
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 #endif
 
 #ifdef NS_HAVE_LIBAV
 #define NS_LAV_MAX_THREADS 8
+#define NS_LAV_GPU_ERROR_LIMIT 4
 
 typedef struct {
     AVFormatContext   *fmt;
@@ -51,6 +54,11 @@ typedef struct {
     double             skip_before_pts;
     ns_os_frame        osframe;
     gboolean           os_produced;
+    gboolean           gpu;
+    enum AVPixelFormat gpu_pix_fmt;
+    gboolean           gpu_produced;
+    int                gpu_errors;
+    AVFrame           *gpu_frame;
 } ns_lav;
 #endif
 
@@ -178,6 +186,7 @@ ns_lav_free(ns_lav *L)
     if (!L) return;
     if (L->sws) sws_freeContext(L->sws);
     if (L->frame) av_frame_free(&L->frame);
+    if (L->gpu_frame) av_frame_free(&L->gpu_frame);
     if (L->pkt) av_packet_free(&L->pkt);
     if (L->vdec) avcodec_free_context(&L->vdec);
     if (L->osdec) ns_os_vdec_free(L->osdec);
@@ -236,6 +245,158 @@ ns_lav_open_hw_decoder(ns_lav *L, AVStream *vs)
     return TRUE;
 }
 
+static const AVCodec *
+ns_lav_software_decoder(enum AVCodecID id)
+{
+    const AVCodec *dec = avcodec_find_decoder(id);
+    if (dec && id == AV_CODEC_ID_AV1 && strcmp(dec->name, "av1") == 0)
+        return NULL;
+    return dec;
+}
+
+static const char *
+ns_lav_gpu_codec_name(enum AVCodecID id)
+{
+    switch (id) {
+    case AV_CODEC_ID_VP9: return "vp9";
+    case AV_CODEC_ID_AV1: return "av1";
+    default:              return NULL;
+    }
+}
+
+static enum AVHWDeviceType
+ns_lav_gpu_device_type(void)
+{
+    const char *api = ns_os_gpu_decode_api();
+    return api ? av_hwdevice_find_type_by_name(api) : AV_HWDEVICE_TYPE_NONE;
+}
+
+static const AVCodec *
+ns_lav_gpu_codec(enum AVCodecID id, int bit_depth,
+                 enum AVPixelFormat *out_pix_fmt)
+{
+    const char *name = ns_lav_gpu_codec_name(id);
+    if (!name || !ns_os_gpu_decodes(name, bit_depth)) return NULL;
+    enum AVHWDeviceType type = ns_lav_gpu_device_type();
+    const AVCodec *dec = type != AV_HWDEVICE_TYPE_NONE
+        ? avcodec_find_decoder_by_name(name) : NULL;
+    if (!dec) return NULL;
+    for (int i = 0;; i++) {
+        const AVCodecHWConfig *cfg = avcodec_get_hw_config(dec, i);
+        if (!cfg) return NULL;
+        if ((cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) &&
+            cfg->device_type == type) {
+            if (out_pix_fmt) *out_pix_fmt = cfg->pix_fmt;
+            return dec;
+        }
+    }
+}
+
+static int
+ns_codec_string_field(const char *codec, int index)
+{
+    const char *p = codec;
+    for (int i = 0; i < index; i++) {
+        p = strchr(p, '.');
+        if (!p) return -1;
+        p++;
+    }
+    char *end = NULL;
+    gint64 v = g_ascii_strtoll(p, &end, 10);
+    return end != p && v >= 0 && v < 100 ? (int)v : -1;
+}
+
+static gboolean
+ns_lav_gpu_takes(enum AVCodecID id, const char *codec)
+{
+    int profile = ns_codec_string_field(codec, 1);
+    int depth = ns_codec_string_field(codec, 3);
+    if (id == AV_CODEC_ID_VP9 && (profile == 1 || profile == 3)) return FALSE;
+    if (id == AV_CODEC_ID_AV1 && profile > 0) return FALSE;
+    return ns_lav_gpu_codec(id, depth > 0 ? depth : 8, NULL) != NULL;
+}
+
+static AVBufferRef *
+ns_lav_gpu_device(void)
+{
+    static gsize ready;
+    static AVBufferRef *device;
+    if (g_once_init_enter(&ready)) {
+        enum AVHWDeviceType type = ns_lav_gpu_device_type();
+        if (type != AV_HWDEVICE_TYPE_NONE &&
+            av_hwdevice_ctx_create(&device, type, NULL, NULL, 0) < 0)
+            device = NULL;
+        g_once_init_leave(&ready, 1);
+    }
+    return device;
+}
+
+static enum AVPixelFormat
+ns_lav_gpu_get_format(AVCodecContext *ctx, const enum AVPixelFormat *fmts)
+{
+    const ns_lav *L = ctx->opaque;
+    for (const enum AVPixelFormat *p = fmts; *p != AV_PIX_FMT_NONE; p++)
+        if (*p == L->gpu_pix_fmt) return *p;
+    ns_debug_log_emit(NS_DLOG_INFO, "media",
+                      "%s %dx%d: the GPU cannot decode this stream",
+                      avcodec_get_name(L->codec_id), ctx->width, ctx->height);
+    if (!ns_lav_software_decoder(L->codec_id)) return AV_PIX_FMT_NONE;
+    for (const enum AVPixelFormat *p = fmts; *p != AV_PIX_FMT_NONE; p++) {
+        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(*p);
+        if (desc && !(desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) return *p;
+    }
+    return AV_PIX_FMT_NONE;
+}
+
+static gboolean
+ns_lav_open_gpu_decoder(ns_lav *L, AVStream *vs)
+{
+    enum AVPixelFormat pix_fmt = AV_PIX_FMT_NONE;
+    const AVPixFmtDescriptor *coded = av_pix_fmt_desc_get(vs->codecpar->format);
+    const AVCodec *dec = ns_lav_gpu_codec(L->codec_id,
+                                          coded ? coded->comp[0].depth : 8,
+                                          &pix_fmt);
+    AVBufferRef *device = dec ? ns_lav_gpu_device() : NULL;
+    if (!device) return FALSE;
+    AVCodecContext *ctx = avcodec_alloc_context3(dec);
+    if (!ctx) return FALSE;
+    L->gpu_pix_fmt = pix_fmt;
+    if (avcodec_parameters_to_context(ctx, vs->codecpar) < 0 ||
+        !(ctx->hw_device_ctx = av_buffer_ref(device))) {
+        avcodec_free_context(&ctx);
+        return FALSE;
+    }
+    ctx->opaque = L;
+    ctx->get_format = ns_lav_gpu_get_format;
+    ctx->thread_count = MIN((int)g_get_num_processors(), NS_LAV_MAX_THREADS);
+    ctx->thread_type = FF_THREAD_SLICE;
+    if (avcodec_open2(ctx, dec, NULL) < 0) {
+        avcodec_free_context(&ctx);
+        return FALSE;
+    }
+    L->vdec = ctx;
+    L->gpu = TRUE;
+    ns_debug_log_emit(NS_DLOG_INFO, "media",
+                      "%s %dx%d decoding on the GPU through %s",
+                      avcodec_get_name(L->codec_id), vs->codecpar->width,
+                      vs->codecpar->height, ns_os_gpu_decode_api());
+    return TRUE;
+}
+
+static gboolean
+ns_lav_gpu_download(ns_lav *L)
+{
+    if (!L->gpu_frame && !(L->gpu_frame = av_frame_alloc())) return FALSE;
+    if (av_hwframe_transfer_data(L->gpu_frame, L->frame, 0) < 0 ||
+        av_frame_copy_props(L->gpu_frame, L->frame) < 0) {
+        av_frame_unref(L->gpu_frame);
+        return FALSE;
+    }
+    av_frame_unref(L->frame);
+    av_frame_move_ref(L->frame, L->gpu_frame);
+    return TRUE;
+}
+
 static gboolean
 ns_lav_open_decoder(ns_lav *L, AVStream *vs)
 {
@@ -255,7 +416,8 @@ ns_lav_open_decoder(ns_lav *L, AVStream *vs)
             return TRUE;
         }
     }
-    const AVCodec *dec = avcodec_find_decoder(L->codec_id);
+    if (ns_lav_open_gpu_decoder(L, vs)) return TRUE;
+    const AVCodec *dec = ns_lav_software_decoder(L->codec_id);
     if (!dec) return FALSE;
     L->vdec = avcodec_alloc_context3(dec);
     if (!L->vdec) return FALSE;
@@ -571,9 +733,9 @@ ns_lav_os_frame_to_texture(ns_lav *L, ns_os_frame *f)
 }
 
 static gboolean
-ns_lav_os_fallback(ns_lav *L)
+ns_lav_software_fallback(ns_lav *L)
 {
-    const AVCodec *dec = avcodec_find_decoder(L->codec_id);
+    const AVCodec *dec = ns_lav_software_decoder(L->codec_id);
     if (!dec) return FALSE;
     AVCodecContext *ctx = avcodec_alloc_context3(dec);
     if (!ctx) return FALSE;
@@ -585,9 +747,12 @@ ns_lav_os_fallback(ns_lav *L)
     }
     ns_debug_log_emit(NS_DLOG_WARN, "media",
                       "%s %s decoder failed; falling back to libavcodec",
-                      ns_os_media_backend(), avcodec_get_name(L->codec_id));
-    ns_os_vdec_free(L->osdec);
+                      L->osdec ? ns_os_media_backend() : ns_os_gpu_decode_api(),
+                      avcodec_get_name(L->codec_id));
+    if (L->osdec) ns_os_vdec_free(L->osdec);
     L->osdec = NULL;
+    if (L->vdec) avcodec_free_context(&L->vdec);
+    L->gpu = FALSE;
     L->vdec = ctx;
     double resume = L->skip_before_pts;
     if (resume <= 0.0 || !ns_lav_seek_to(L, resume))
@@ -609,12 +774,21 @@ ns_lav_receive(ns_video_player *player, ns_texture **out_tex, double *out_pts)
             *out_tex = NULL;
             return NS_LAV_FRAME;
         }
-        if (st == NS_OS_ERROR && !L->os_produced && ns_lav_os_fallback(L))
+        if (st == NS_OS_ERROR && !L->os_produced && ns_lav_software_fallback(L))
             return NS_LAV_AGAIN;
         return (st == NS_OS_AGAIN && !L->draining) ? NS_LAV_AGAIN : NS_LAV_EOF;
     }
+    if (L->gpu && !L->gpu_produced && L->gpu_errors >= NS_LAV_GPU_ERROR_LIMIT)
+        return ns_lav_software_fallback(L) ? NS_LAV_AGAIN : NS_LAV_EOF;
     int r = avcodec_receive_frame(L->vdec, L->frame);
+    if (r == 0 && L->gpu && L->frame->format == L->gpu_pix_fmt &&
+        !ns_lav_gpu_download(L)) {
+        av_frame_unref(L->frame);
+        if (L->gpu_produced) return NS_LAV_AGAIN;
+        return ns_lav_software_fallback(L) ? NS_LAV_AGAIN : NS_LAV_EOF;
+    }
     if (r == 0) {
+        if (L->gpu) L->gpu_produced = TRUE;
         *out_pts = (L->frame->pts == AV_NOPTS_VALUE)
             ? player->pending_time
             : (double)L->frame->pts * av_q2d(L->time_base);
@@ -638,7 +812,10 @@ ns_lav_send(ns_lav *L, AVPacket *pkt)
         return ns_os_vdec_send(L->osdec, pkt->data, (size_t)pkt->size,
                                (int64_t)(t * 1e6)) >= 0;
     }
-    return avcodec_send_packet(L->vdec, pkt) != AVERROR(EAGAIN);
+    int r = avcodec_send_packet(L->vdec, pkt);
+    if (L->gpu && r < 0 && r != AVERROR(EAGAIN) && r != AVERROR_EOF)
+        L->gpu_errors++;
+    return r != AVERROR(EAGAIN);
 }
 
 static gboolean
@@ -920,6 +1097,7 @@ ns_video_codec_available(const char *codec)
         const char *hw = id == AV_CODEC_ID_AV1 ? "av1"
                        : id == AV_CODEC_ID_VP9 ? "vp9" : "vp8";
         if (ns_os_hw_video_available(hw)) return TRUE;
+        if (ns_lav_gpu_takes(id, codec)) return TRUE;
         if (ns_os_h264_available() && !g_getenv("NS_MEDIA_SOFTWARE_CODECS"))
             return FALSE;
     }
@@ -927,7 +1105,7 @@ ns_video_codec_available(const char *codec)
         id != AV_CODEC_ID_OPUS && id != AV_CODEC_ID_VORBIS &&
         id != AV_CODEC_ID_MP3)
         return FALSE;
-    return avcodec_find_decoder(id) != NULL;
+    return ns_lav_software_decoder(id) != NULL;
 #elif defined(NS_HAVE_OS_MP4)
     if (!codec) return FALSE;
     if (g_str_has_prefix(codec, "avc1") || g_str_has_prefix(codec, "avc3"))

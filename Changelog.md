@@ -16,6 +16,48 @@ Changelog:
   `MANIFEST.json` (workers, variants, HTTPS and HTTP/2 included) in
   parallel through those batch browsers, resumably; short tests cost about
   0.1 s instead of 0.8 s, and per-file results match the old harness.
+* An open drop-down list (a `<select>`'s options or `<datalist>`
+  suggestions) is painted above the rest of the page, and its rows take
+  clicks there, as a native popup does. A later positioned element drew
+  over it: LogicEmu's title band hid part of its colour scheme menu, and
+  the hidden rows could not be picked.
+* A fixed element with a transform is no longer cut off. Its layer was
+  sized from where the element sits before the transform moves it, so
+  a dialog centred with `top: 50%; transform: translate(-50%, -50%)` lost
+  its top half: LogicEmu's import box showed no text.
+* `scripts/build-logo-gif.sh` passes `-loop 0` and the frame files to
+  `convert` as separate arguments again; a missing space had joined them.
+* macOS: `scripts/build-ffmpeg-lgpl.sh` stopped at once under the bash 3.2
+  that macOS ships (`CROSS[@]: unbound variable`: an empty array expanded
+  under `set -u`), and the macOS workflow then built without FFmpeg, so
+  WebM was skipped there. The script now expands the array in a form bash
+  3.2 accepts. Past that, the build failed to link on Apple silicon
+  (`_ff_tx_codelet_list_float_x86` undefined): the script passed
+  `--enable-x86asm` on every architecture, and on arm64 FFmpeg then
+  compiled references to x86 code it never builds. It no longer passes
+  it; FFmpeg still uses nasm on x86 by default, and `NS_FFMPEG_NOASM=1`
+  still turns it off.
+* Windows and macOS: VP9 and AV1 video decode on the GPU through FFmpeg's
+  hardware decoders, D3D11VA on Windows and VideoToolbox on macOS. The
+  bundled LGPL FFmpeg gains the `vp9_d3d11va`/`av1_d3d11va` and
+  `vp9_videotoolbox`/`av1_videotoolbox` hwaccels and FFmpeg's native AV1
+  decoder, and the renderer copies each GPU frame back for the usual
+  conversion. Where the GPU has the decoder (a D3D11 `VP9_VLD_Profile0` or
+  `AV1_VLD_Profile0` profile, or `VTIsHardwareDecodeSupported`),
+  `canPlayType()` and `MediaSource.isTypeSupported()` accept `vp09` and
+  `av01`, so YouTube serves VP9 or AV1, with its resolutions above 1080p,
+  instead of H.264.
+  Before, both platforms refused VP9 whenever the OS had an H.264 decoder,
+  and decoded it in software otherwise; AV1 did not play at all. A stream
+  the GPU cannot take falls back to software VP9, and
+  `NS_MEDIA_NO_HW_DECODER=1` turns the path off. AV1 is no longer reported
+  as playable where the only AV1 decoder is FFmpeg's GPU-only one.
+* Windows and macOS packages: the minimal LGPL FFmpeg that
+  `scripts/build-ffmpeg-lgpl.sh` builds moves from 9.0.2 to 9.1
+  (libavcodec 63.24, libavformat 63.16, libavutil 61.19). The library
+  majors are unchanged, so the configure line and the libav code stay as
+  they are; the script now pins 9.1 and keeps 9.0.2 as the fallback
+  checksum. Linux builds keep using the distribution's FFmpeg (6.0 or newer).
 * README: the test262 row reports Bellard's QuickJS (18 known failures of
   53,021); the old 0-of-82,248 figure was the removed quickjs-ng fork's.
   The line count, the WebAssembly runtime and the dependency section

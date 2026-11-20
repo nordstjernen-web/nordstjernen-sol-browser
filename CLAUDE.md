@@ -84,7 +84,9 @@ Update Changelog.md
   VideoToolbox/AudioToolbox on macOS (`media_os_vt.c`), MediaCodec on
   Android (`media_os_android.c`) and GStreamer on Linux/BSD
   (`media_os_gst.c`, required on Linux, optional on the BSDs, `-Dgstreamer`;
-  it also takes VP9/AV1/HEVC when a hardware decoder exists). libav only demuxes MP4
+  it also takes VP9/AV1/HEVC when a hardware decoder exists). On Windows and
+  macOS, VP9/AV1 decode on the GPU through FFmpeg's D3D11VA/VideoToolbox
+  hwaccels (`src/video_decode.c`, gated by `ns_os_gpu_decodes`). libav only demuxes MP4
   for them (builds without libav use the in-tree `src/mp4.c` +
   `src/video_mp4.c` instead); don't add an H.264/AAC decoder to the LGPL FFmpeg build. Encrypted
   media (EME/Widevine) is out of scope. Other `<audio>` and other `<video>`

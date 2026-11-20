@@ -51,6 +51,8 @@ int          ns_os_hw_video_available(const char *codec);
 const char  *ns_os_hw_video_decoder_name(const char *codec);
 ns_os_vdec  *ns_os_vdec_new_hw(const char *codec, const uint8_t *extradata,
                                size_t extradata_len, int width, int height);
+const char  *ns_os_gpu_decode_api(void);
+int          ns_os_gpu_decodes(const char *codec, int bit_depth);
 int          ns_os_vdec_send(ns_os_vdec *dec, const uint8_t *data, size_t len,
                              int64_t pts_us);
 ns_os_status ns_os_vdec_receive(ns_os_vdec *dec, ns_os_frame *out);

@@ -346,7 +346,9 @@ bundled in the macOS / Windows releases is built **LGPL-only** — its
 `configure` uses `--disable-gpl --disable-nonfree --disable-version3
 --disable-autodetect`, so it contains no GPL components and no external
 codec libraries; the enabled VP8/VP9/Opus/Vorbis decoders are FFmpeg's
-own LGPL implementations (see `scripts/build-ffmpeg-lgpl.sh`). The full
+own LGPL implementations, and its VP9/AV1 GPU decoding goes through the
+operating system's D3D11VA (Windows) or VideoToolbox (macOS) interfaces
+(see `scripts/build-ffmpeg-lgpl.sh`). The full
 license text is available at:
 
   <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>
