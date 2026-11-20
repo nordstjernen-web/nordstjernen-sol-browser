@@ -60,7 +60,7 @@ SRC="$WORK/ffmpeg-src"
 mkdir -p "$SRC"
 tar -xzf "$TARBALL" -C "$SRC" --strip-components=1
 
-ASM_FLAG=--enable-x86asm
+ASM_FLAG=
 [ "${NS_FFMPEG_NOASM:-0}" = 1 ] && ASM_FLAG=--disable-x86asm
 
 CROSS=()
