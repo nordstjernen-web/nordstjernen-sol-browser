@@ -3,6 +3,12 @@ Changelog:
 
 1.0.50-dev:
 ======
+* Windows and macOS packages: the minimal LGPL FFmpeg that
+  `scripts/build-ffmpeg-lgpl.sh` builds moves from 9.0.2 to 9.1
+  (libavcodec 63.24, libavformat 63.16, libavutil 61.19). The library
+  majors are unchanged, so the configure line and the libav code stay as
+  they are; the script now pins 9.1 and keeps 9.0.2 as the fallback
+  checksum. Linux builds keep using the distribution's FFmpeg (6.0 or newer).
 * README: the test262 row reports Bellard's QuickJS (18 known failures of
   53,021); the old 0-of-82,248 figure was the removed quickjs-ng fork's.
   The line count, the WebAssembly runtime and the dependency section
