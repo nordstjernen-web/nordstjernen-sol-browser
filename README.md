@@ -14,7 +14,7 @@ focused on modern HTML, CSS and JavaScript standards.
 
 ![Nordstjernen 1.0.49 playing a YouTube video](docs/screenshot.png)
 
-**Current release:** **1.0.49** (November 2026) — see [Changelog.md](Changelog.md).
+**Current release:** **1.0.50** (November 2026) — see [Changelog.md](Changelog.md).
 
 ## Download
 

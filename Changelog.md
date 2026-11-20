@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.50-dev:
+1.0.50:
 ======
 * The right-click menu no longer scrolls or vanishes. When GTK lays it out
   taller than it measured it, the menu grows to its full height instead of
