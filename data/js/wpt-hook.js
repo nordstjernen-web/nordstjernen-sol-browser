@@ -55,11 +55,22 @@
         global.__ns_wpt_done = true;
     };
 
+    function takeOverTimeout() {
+        if (typeof global.timeout !== 'function' ||
+            typeof global.setup !== 'function') return;
+        var harnessTimeout = global.timeout;
+        try {
+            global.setup({ explicit_timeout: true });
+            global.__ns_wpt_timeout = function () { harnessTimeout(); };
+        } catch (e) {}
+    }
+
     function arm(fn) {
         if (global.__ns_wpt_seen_harness) return;
         try {
             fn(global.__ns_wpt_oncomplete);
             global.__ns_wpt_seen_harness = true;
+            takeOverTimeout();
         } catch (e) {}
     }
 

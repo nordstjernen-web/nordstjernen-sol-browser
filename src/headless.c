@@ -1173,26 +1173,47 @@ wpt_eval(ns_js *js, const char *src)
     return r;
 }
 
+static gboolean
+wpt_wait_for_results(headless_flush_ctx *fc, int timeout_ms)
+{
+    if (wpt_results_ready(fc->js)) return TRUE;
+    GMainLoop *loop = g_main_loop_new(NULL, FALSE);
+    wpt_wait_state w = { .loop = loop, .fc = fc };
+    settle_state st = { .fc = fc, .last_flush_us = g_get_monotonic_time() };
+    guint raf_id = g_timeout_add(16, settle_raf_tick, &st);
+    guint poll_id = g_timeout_add(50, wpt_poll_cb, &w);
+    guint stop_id = g_timeout_add(timeout_ms, settle_quit_cb, loop);
+    g_main_loop_run(loop);
+    g_source_remove(raf_id);
+    if (w.done) g_source_remove(stop_id);
+    else        g_source_remove(poll_id);
+    g_main_loop_unref(loop);
+    return w.done;
+}
+
+static gboolean
+wpt_force_harness_timeout(headless_flush_ctx *fc)
+{
+    char *forced = wpt_eval(fc->js,
+        "(function () {"
+        "    var f = globalThis.__ns_wpt_timeout;"
+        "    if (typeof f !== \"function\") return \"0\";"
+        "    try { f(); } catch (e) {}"
+        "    return \"1\";"
+        "})()");
+    gboolean ok = forced && strcmp(forced, "1") == 0;
+    g_free(forced);
+    return ok;
+}
+
 static int
 headless_wpt_finish(headless_flush_ctx *fc, const ns_headless_opts *opts)
 {
     if (!fc->js) return 2;
     int timeout_ms = opts->wpt_timeout_ms > 0 ? opts->wpt_timeout_ms : 15000;
-    gboolean done = wpt_results_ready(fc->js);
-    if (!done) {
-        GMainLoop *loop = g_main_loop_new(NULL, FALSE);
-        wpt_wait_state w = { .loop = loop, .fc = fc };
-        settle_state st = { .fc = fc, .last_flush_us = g_get_monotonic_time() };
-        guint raf_id = g_timeout_add(16, settle_raf_tick, &st);
-        guint poll_id = g_timeout_add(50, wpt_poll_cb, &w);
-        guint stop_id = g_timeout_add(timeout_ms, settle_quit_cb, loop);
-        g_main_loop_run(loop);
-        g_source_remove(raf_id);
-        if (w.done) g_source_remove(stop_id);
-        else        g_source_remove(poll_id);
-        g_main_loop_unref(loop);
-        done = w.done;
-    }
+    gboolean done = wpt_wait_for_results(fc, timeout_ms);
+    if (!done && wpt_force_harness_timeout(fc))
+        done = wpt_wait_for_results(fc, 2000);
     if (!done) {
         char *seen = wpt_eval(fc->js,
                               "globalThis.__ns_wpt_seen_harness ? \"1\" : \"0\"");

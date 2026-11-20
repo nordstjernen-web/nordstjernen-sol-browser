@@ -221,6 +221,7 @@ ns_win32_args_need_console(int argc, char **argv)
             g_strcmp0(argv[i], "--version")      == 0 ||
             g_strcmp0(argv[i], "--help")         == 0 ||
             g_strcmp0(argv[i], "--wpt")          == 0 ||
+            g_strcmp0(argv[i], "--wpt-batch")    == 0 ||
             g_str_has_prefix(argv[i], "--dump=") ||
             g_str_has_prefix(argv[i], "--url=")  ||
             g_str_has_prefix(argv[i], "--viewport=") ||
@@ -368,6 +369,7 @@ ns_proc_mode_wanted(int argc, char **argv)
         if (g_strcmp0(a, "--headless") == 0 ||
             g_strcmp0(a, "--print-config") == 0 ||
             g_strcmp0(a, "--wpt") == 0 ||
+            g_strcmp0(a, "--wpt-batch") == 0 ||
             g_str_has_prefix(a, "--dump=") ||
             g_str_has_prefix(a, "--eval=") ||
             g_str_has_prefix(a, "--inspect=") ||

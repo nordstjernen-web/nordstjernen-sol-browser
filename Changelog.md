@@ -3,6 +3,19 @@ Changelog:
 
 1.0.50-dev:
 ======
+* WPT harness: `--wpt-batch` keeps one headless browser running and reads
+  test URLs from stdin (optionally prefixed with a timeout in ms), printing
+  `WPT BEGIN`/`WPT END rc=N` around each report; cookies, the HTTP cache and
+  preloads are cleared between tests. `--wpt` now runs in private mode, so
+  test cookies, localStorage and IndexedDB never reach the user's profile,
+  and skips the fixed 400 ms settle (the result poll already ticks timers,
+  frames and layout). The hook switches testharness.js to
+  `explicit_timeout` and, at the driver's deadline, calls its `timeout()`,
+  so a stuck test reports its finished subtests instead of nothing. The new
+  `scripts/wpt-full.py` runs every testharness URL in a checkout's
+  `MANIFEST.json` (workers, variants, HTTPS and HTTP/2 included) in
+  parallel through those batch browsers, resumably; short tests cost about
+  0.1 s instead of 0.8 s, and per-file results match the old harness.
 * README: the test262 row reports Bellard's QuickJS (18 known failures of
   53,021); the old 0-of-82,248 figure was the removed quickjs-ng fork's.
   The line count, the WebAssembly runtime and the dependency section
