@@ -119,6 +119,12 @@ built-ins rather than as the embedder's functions. Do not call
 upstream's second initialisation leaks the context. `qjs.c` and
 `run-test262.c` no longer do.
 
+`libregexp.c` stores capture indices as 16 bits where upstream uses a byte,
+so a pattern may have 65535 capture groups instead of 255 (upstream issue
+[bellard/quickjs#624](https://github.com/bellard/quickjs/issues/624)):
+bundlers emit patterns with more, such as rspack's CSS chunk test. The
+compiled bytecode's header is 10 bytes, with a 16-bit capture count.
+
 `quickjs-bellard-bcgen` (`bcgen.c`) compiles one engine script to
 hidden-source bytecode; native builds embed `data/js/polyfills.js` and
 `data/js/streaming.js` that way.
