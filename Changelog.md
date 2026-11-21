@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51-dev:
 ======
+* IndexedDB: a single database may now grow to the origin's storage limit
+  (1 GiB) instead of stopping at 256 MiB. SuperTuxKart's Medium texture
+  quality failed to start after Low had been played: both data bundles
+  are cached in one database and the Medium chunks hit the per-database
+  cap. `navigator.storage.estimate()` now reports the origin's real
+  IndexedDB usage and that limit as its quota, instead of 0 and 2 GiB.
 * Remote-control (MCP) screenshots no longer show faint lines across the
   page every 256 device pixels. The capture composited the page tiles at
   CSS-pixel scale, where tile edges fall inside a pixel; it now renders at
