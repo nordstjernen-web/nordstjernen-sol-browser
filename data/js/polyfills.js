@@ -12401,7 +12401,9 @@
             }
         })();
 
-        (function wrapNodeMutations() {
+        Object.defineProperty(global, '__ndInstallRangeMutationHooks', {
+            value: function wrapNodeMutations() {
+            delete global.__ndInstallRangeMutationHooks;
             var el;
             try { el = doc.createElement('span'); } catch (e) { return; }
 
@@ -12451,13 +12453,15 @@
                 var protos = nodeProtosWith(name);
                 for (var i = 0; i < protos.length; i++) {
                     (function (proto) {
-                        var orig = proto[name];
-                        if (typeof orig !== 'function') return;
+                        var desc = Object.getOwnPropertyDescriptor(proto, name);
+                        var orig = desc && desc.value;
+                        if (typeof orig !== 'function' || !desc.configurable) return;
                         var fn = function () { return handler.call(this, orig, arguments); };
                         try { Object.defineProperty(fn, 'length', { value: orig.length, configurable: true }); } catch (e) {}
                         try { Object.defineProperty(fn, 'name', { value: name, configurable: true }); } catch (e) {}
                         Object.defineProperty(proto, name, {
-                            value: fn, writable: true, configurable: true, enumerable: false
+                            value: fn, writable: desc.writable, configurable: true,
+                            enumerable: desc.enumerable
                         });
                     })(protos[i]);
                 }
@@ -12493,7 +12497,9 @@
                 applyInsert(newChild);
                 return ret;
             });
-        })();
+            },
+            writable: true, configurable: true, enumerable: false
+        });
 
         nativeize(NdRange, 'Range');
         try { Object.defineProperty(NdRange, 'length', { value: 0 }); } catch (e) {}

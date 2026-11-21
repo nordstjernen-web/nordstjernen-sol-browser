@@ -70163,6 +70163,20 @@ ns_js_eval_engine_bundle(ns_js *js, ns_engine_bundle *bundle,
 }
 
 static void
+ns_js_install_range_mutation_hooks(JSContext *ctx)
+{
+    JSValue g = JS_GetGlobalObject(ctx);
+    JSValue install = JS_GetPropertyStr(ctx, g, "__ndInstallRangeMutationHooks");
+    if (JS_IsFunction(ctx, install)) {
+        JSValue r = JS_Call(ctx, install, g, 0, NULL);
+        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, r);
+    }
+    JS_FreeValue(ctx, install);
+    JS_FreeValue(ctx, g);
+}
+
+static void
 ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx)
 {
     ns_js_eval_engine_bundle(js, &ns_polyfills_bundle, "<polyfills>");
@@ -70193,6 +70207,7 @@ ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx)
     ns_install_element_shapes(ctx);
     ns_js_brand_node_interfaces(ctx, ns_element_class_id, ns_attr_class_id);
     ns_js_shape_interface_objects(ctx);
+    ns_js_install_range_mutation_hooks(ctx);
 }
 
 static void
