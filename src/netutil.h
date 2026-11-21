@@ -26,6 +26,8 @@ char    *ns_search_url_for(const char *query);
 char    *ns_search_engine_name(void);
 char    *ns_url_from_local_path(const char *path);
 
+gboolean ns_host_is_loopback(const char *host);
+
 G_END_DECLS
 
 #endif

@@ -8,7 +8,7 @@ those reviews did not reach. Two parallel reviewers did the reading: one on
 memory safety, one on web policy, network and the process boundary.
 
 The review itself changed no source file. M1 and C1 were fixed afterwards on
-request; nothing else is fixed.
+request, and C2 after that; nothing else is fixed.
 
 ## 1. Summary
 
@@ -38,7 +38,7 @@ request; nothing else is fixed.
 | M2 | WebGL hands out GL storage that was never initialised | any web page | medium | traced in source; not run |
 | M3 | WebGL2 index validation uses a stale shadow of the element buffer | any web page | medium (high on non-robust contexts) | traced in source; not run |
 | M4 | WebGL buffer sizes tracked by GL name; deleted buffer still attached to a vertex array | any web page | low–medium | plausible; needs driver name reuse |
-| C2 | `127.`-prefixed hostnames treated as loopback in three places | any web page on such a host | medium | traced in source |
+| C2 | `127.`-prefixed hostnames treated as loopback in three places | any web page on such a host | medium | run; fixed |
 | J15 | Style value pointer used after a layout flush that can free it | any web page | medium | traced further; not run |
 
 "Run" means confirmed against a build in this tree, in private mode, on local
@@ -243,7 +243,7 @@ while GL draws from the old one. The tracking gap is traced; name reuse by
 the driver is assumed. Fix: key the tracking on the wrapper object, or keep
 the entry while any vertex array references the buffer.
 
-### C2. `127.`-prefixed hostnames are treated as loopback (medium)
+### C2. `127.`-prefixed hostnames are treated as loopback (medium, fixed)
 
 **Where.** `src/js.c:32809`, `src/js.c:62948`, `src/gtk/procwindow.c:813`,
 each `g_str_has_prefix(host, "127.")`.
@@ -253,8 +253,14 @@ The prefix matches the DNS name `127.example.com` as well as the
 trustworthy origin: it may register a service worker (`src/js.c:32860`),
 passes secure-context gating, and the shell shows it without the "Not
 secure" chip (`procwindow.c:858`). The earlier J17 named only the first
-site. Fix: reuse `ns_host_is_loopback` (`src/net.c:1467`), which parses the
-address.
+site.
+
+**Fix applied.** `ns_host_is_loopback` moved to `src/netutil.c`, shared by
+the engine and the shell, and now parses the host as an address literal:
+`localhost`, `*.localhost`, `127.0.0.0/8` and `::1` qualify. All three sites
+call it. Run through a local proxy: `http://127.example.com/` registered a
+service worker before and is refused with `SecurityError` after;
+`127.0.0.2` and `localhost` still register.
 
 ### J15, upgraded: style value used after a layout flush (medium)
 
@@ -393,10 +399,9 @@ J11, S2, S4, S5 and S6 were not re-checked.
 2. Move AudioParam automation state out of page-writable properties.
 3. **M3**, at least the refusal of WebGL2 on non-robust contexts, then
    **M2**.
-4. **C2**, a three-line change.
-5. **J15**, **N4** and **J16**: the three open raw-pointer lifetimes.
-6. **N3 / J7** and the rest of the tab-wide state class (J6, J8, J9, J14).
-7. Make `__`-prefixed bindings engine-private by default (J10, J13).
-8. Read the parts no review has reached: the CSS cascade and selector
+4. **J15**, **N4** and **J16**: the three open raw-pointer lifetimes.
+5. **N3 / J7** and the rest of the tab-wide state class (J6, J8, J9, J14).
+6. Make `__`-prefixed bindings engine-private by default (J10, J13).
+7. Read the parts no review has reached: the CSS cascade and selector
    matching, `var()` / `calc()`, flex, grid and inline layout, `paint.c`,
    the seccomp filter and download filename handling.

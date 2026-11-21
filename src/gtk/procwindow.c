@@ -807,11 +807,7 @@ static gboolean
 url_is_loopback(const char *url)
 {
     char *host = url ? ns_proc_url_host(url) : NULL;
-    gboolean loopback = host &&
-        (g_ascii_strcasecmp(host, "localhost") == 0 ||
-         g_str_has_suffix(host, ".localhost") ||
-         g_str_has_prefix(host, "127.") || g_str_equal(host, "[::1]") ||
-         g_str_equal(host, "::1"));
+    gboolean loopback = ns_host_is_loopback(host);
     g_free(host);
     return loopback;
 }

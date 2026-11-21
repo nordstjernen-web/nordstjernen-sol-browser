@@ -4,6 +4,7 @@
 #include "netutil.h"
 #include "config.h"
 
+#include <gio/gio.h>
 #include <glib/gstdio.h>
 #include <string.h>
 #include <libpsl.h>
@@ -11,6 +12,23 @@
 #ifdef G_OS_WIN32
 #include <windows.h>
 #endif
+
+gboolean
+ns_host_is_loopback(const char *host)
+{
+    if (!host || !*host) return FALSE;
+    if (g_ascii_strcasecmp(host, "localhost") == 0 ||
+        g_str_has_suffix(host, ".localhost"))
+        return TRUE;
+    size_t len = strlen(host);
+    g_autofree char *literal = host[0] == '[' && host[len - 1] == ']'
+        ? g_strndup(host + 1, len - 2) : g_strdup(host);
+    GInetAddress *addr = g_inet_address_new_from_string(literal);
+    if (!addr) return FALSE;
+    gboolean loopback = g_inet_address_get_is_loopback(addr);
+    g_object_unref(addr);
+    return loopback;
+}
 
 static char *
 build_accept_language_from_locales(void)
