@@ -1,4 +1,5 @@
 python = import('python').find_installation()
+embed_text = files('../scripts/embed-text.py')
 
 # The engine's own scripts run in every realm and every worker. A native
 # build compiles them to bytecode once, here, so a new process reads
@@ -7,29 +8,23 @@ engine_bytecode = not meson.is_cross_build()
 engine_bundles = {}
 foreach name, src : {'polyfills': '../data/js/polyfills.js',
                      'streaming': '../data/js/streaming.js'}
+  embed_input = src
+  embed_args = ['ns_js_' + name + '_src']
   if engine_bytecode
-    bc = custom_target(
+    embed_input = custom_target(
       name + '.bc',
       input: src,
       output: name + '.bc',
       command: [bqjs_bcgen, '<' + name + '>', '@INPUT@', '@OUTPUT@'],
     )
-    engine_bundles += {name: custom_target(
-      name + '.h',
-      input: ['../scripts/embed-text.py', bc],
-      output: name + '.h',
-      command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
-                'ns_js_' + name + '_bc', 'NS_ENGINE_BYTECODE'],
-    )}
-  else
-    engine_bundles += {name: custom_target(
-      name + '.h',
-      input: ['../scripts/embed-text.py', src],
-      output: name + '.h',
-      command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
-                'ns_js_' + name + '_src'],
-    )}
+    embed_args = ['ns_js_' + name + '_bc', 'NS_ENGINE_BYTECODE']
   endif
+  engine_bundles += {name: custom_target(
+    name + '.h',
+    input: [embed_text, embed_input],
+    output: name + '.h',
+    command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@'] + embed_args,
+  )}
 endforeach
 polyfills_h = engine_bundles['polyfills']
 streaming_h = engine_bundles['streaming']
@@ -42,57 +37,41 @@ sb_key_h = custom_target(
   build_always_stale: true,
 )
 
-remote_page_h = custom_target(
-  'remote_page.h',
-  input: ['../scripts/embed-text.py', '../data/js/remote-page.js'],
-  output: 'remote_page.h',
-  command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
-            'ns_remote_page_src'],
-)
-
-webdriver_page_h = custom_target(
-  'webdriver_page.h',
-  input: ['../scripts/embed-text.py', '../data/js/webdriver-page.js'],
-  output: 'webdriver_page.h',
-  command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
-            'ns_webdriver_page_src'],
-)
-
-wpt_hook_h = custom_target(
-  'wpt_hook.h',
-  input: ['../scripts/embed-text.py', '../data/js/wpt-hook.js'],
-  output: 'wpt_hook.h',
-  command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
-            'ns_wpt_hook_src'],
-)
-
-pdf_viewer_embedded = {}
+embedded_text = {
+  'remote_page': ['../data/js/remote-page.js', 'ns_remote_page_src'],
+  'webdriver_page': ['../data/js/webdriver-page.js', 'ns_webdriver_page_src'],
+  'wpt_hook': ['../data/js/wpt-hook.js', 'ns_wpt_hook_src'],
+}
 if have_pdfjs
   subdir('pdfjs')
-  pdf_viewer_embedded = {
-    'pdf_viewer_js': files('../data/js/pdf-viewer.js'),
-    'pdf_viewer_css': files('../data/js/pdf-viewer.css'),
+  embedded_text += {
+    'pdf_viewer_js': ['../data/js/pdf-viewer.js', 'ns_pdf_viewer_js'],
+    'pdf_viewer_css': ['../data/js/pdf-viewer.css', 'ns_pdf_viewer_css'],
   }
 endif
-pdf_viewer_headers = []
-foreach name, src : pdf_viewer_embedded
-  pdf_viewer_headers += custom_target(
+embedded_headers = {}
+foreach name, spec : embedded_text
+  embedded_headers += {name: custom_target(
     name + '.h',
-    input: ['../scripts/embed-text.py', src],
+    input: [embed_text, spec[0]],
     output: name + '.h',
-    command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@', 'ns_' + name],
-  )
+    command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@', spec[1]],
+  )}
 endforeach
+remote_page_h = embedded_headers['remote_page']
+webdriver_page_h = embedded_headers['webdriver_page']
+wpt_hook_h = embedded_headers['wpt_hook']
+pdf_viewer_headers = []
+if have_pdfjs
+  pdf_viewer_headers = [embedded_headers['pdf_viewer_js'],
+                        embedded_headers['pdf_viewer_css']]
+endif
 
 nordstjernen_engine_sources = files(
-  'about_page.c',
   'anim.c',
   'bytecode_cache.c',
-  'bookmarks.c',
   'cache.c',
-  'capability.c',
   'compression_dictionary.c',
-  'config.c',
   'connection_allowlist.c',
   'cookies.c',
   'csp.c',
@@ -108,8 +87,6 @@ nordstjernen_engine_sources = files(
   'css_grammar.c',
   'css_syntax.c',
   'datetime.c',
-  'debuglog.c',
-  'db.c',
   'dom.c',
   'download.c',
   'engine.c',
@@ -120,9 +97,7 @@ nordstjernen_engine_sources = files(
   'font.c',
   'glctx.c',
   'glsl_validate.c',
-  'history.c',
   'html.c',
-  'i18n.c',
   'image.c',
   'smil.c',
   'svg.c',
@@ -133,7 +108,6 @@ nordstjernen_engine_sources = files(
   'layout.c',
   'mathml.c',
   'net.c',
-  'netutil.c',
   'content_decode.c',
   'paint.c',
   'permissions_policy.c',
@@ -142,7 +116,6 @@ nordstjernen_engine_sources = files(
   'render.c',
   'safebrowsing.c',
   'safebrowsing_google.c',
-  'security.c',
   'selection.c',
   'spellcheck.c',
   'texture.c',
@@ -151,7 +124,6 @@ nordstjernen_engine_sources = files(
   'webcrypto.c',
   'ws.c',
   'html_parser.c',
-  'json_string.c',
   'xml.c',
 )
 
@@ -238,100 +210,53 @@ if host_machine.system() == 'windows'
   )
 endif
 
-if is_mobile
-  nordstjernen_deps = [
-    glib,
-    gobject,
-    gio,
-    gmodule,
-    cairo,
-    pango,
-    pangocairo,
-    libcurl,
-    libcrypto,
-    libm,
-    libquickjs,
-    libwebp,
-    libwebpdemux,
-    libwuffs,
-    libplmpeg,
-    libuchardet,
-    ns_parsers_rs_dep,
-    libwamr,
-    sqlite3,
-    zlib,
-  ]
-else
-  nordstjernen_deps = [
-    glib,
-    gobject,
-    gio,
-    cairo,
-    pango,
-    pangocairo,
-    epoxy,
-    glslang_deps,
-    gmodule,
-    libcurl,
-    libcrypto,
-    libm,
-    libquickjs,
-    libwebp,
-    libwebpdemux,
-    libwuffs,
-    libplmpeg,
-    libuchardet,
-    ns_parsers_rs_dep,
-    libwamr,
-    sqlite3,
-    zlib,
-  ]
+ns_win_system_libs = []
+if host_machine.system() == 'windows'
+  foreach name : ['bcrypt', 'advapi32', 'shell32', 'user32', 'ws2_32']
+    ns_win_system_libs += cc.find_library(name)
+  endforeach
+endif
 
-  if have_seccomp
-    nordstjernen_deps += [libseccomp]
-  endif
-
-  if have_avif
-    nordstjernen_deps += [libavif]
-  endif
-
-  if have_jxl
-    nordstjernen_deps += [libjxl]
-  endif
-
-  if have_enchant
-    nordstjernen_deps += [libenchant]
-  endif
-
+nordstjernen_deps = [
+  glib,
+  gobject,
+  gio,
+  gmodule,
+  cairo,
+  pango,
+  pangocairo,
+  libcurl,
+  libcrypto,
+  libm,
+  libquickjs,
+  libwebp,
+  libwebpdemux,
+  libwuffs,
+  libplmpeg,
+  libuchardet,
+  ns_parsers_rs_dep,
+  ns_ipc_rust_dep,
+  libwamr,
+  sqlite3,
+  zlib,
+  libpsl,
+  libfontconfig,
+  libfreetype,
+  libbrotlidec,
+  libzstd,
+  media_os_deps,
+  ns_win_system_libs,
+]
+if have_pangoft2
+  nordstjernen_deps += [libpangoft2]
+endif
+if not is_mobile
+  nordstjernen_deps += [epoxy, glslang_deps, libseccomp, libavif, libjxl,
+                        libenchant]
   if have_libav
     nordstjernen_deps += [libavformat, libavcodec, libavutil, libswscale]
   endif
 endif
-
-if have_fontconfig
-  nordstjernen_deps += [libfontconfig]
-endif
-
-nordstjernen_deps += ns_ipc_rust_dep
-
-if have_pangoft2
-  nordstjernen_deps += [libpangoft2]
-endif
-
-if have_freetype
-  nordstjernen_deps += [libfreetype]
-endif
-
-if libbrotlidec.found()
-  nordstjernen_deps += [libbrotlidec]
-endif
-
-if libzstd.found()
-  nordstjernen_deps += [libzstd]
-endif
-
-nordstjernen_deps += [libpsl]
-nordstjernen_deps += media_os_deps
 
 # macOS WebGL: src/glctx.c creates the offscreen GL context through CGL, whose
 # symbols live in the OpenGL framework. Unused targets drop it via
@@ -358,21 +283,13 @@ if sdl3_dep.found()
                                             default_value: ''))]
 endif
 
-if have_webgpu
-  nordstjernen_deps += [webgpu_dep]
-endif
-
-nordstjernen_win_subsystem = (
-  host_machine.system() == 'windows' ? 'windows' : 'console'
-)
+nordstjernen_deps += [webgpu_dep]
 
 nordstjernen_link_args = []
 if host_machine.system() == 'windows'
   nordstjernen_link_args += cc.get_supported_link_arguments(
     ['-Wl,--stack,8388608'],
   )
-  nordstjernen_link_args += ['-lbcrypt', '-ladvapi32', '-lshell32', '-luser32',
-                             '-lws2_32']
 endif
 
 # NetBSD pkgsrc libunistring (pulled in transitively through the libcurl /
@@ -406,7 +323,7 @@ if host_machine.system() == 'windows'
     'nordstjernen-launcher',
     files('win_launcher.c') + nordstjernen_win_resources,
     win_subsystem: 'windows',
-    link_args: ['-luser32', '-lshell32'],
+    dependencies: [cc.find_library('user32'), cc.find_library('shell32')],
   )
 endif
 
@@ -434,6 +351,7 @@ endif
 libnordstjernen_static = static_library(
   'nordstjernen-static',
   nordstjernen_embed_sources,
+  link_whole: libns_platform,
   dependencies: nordstjernen_deps + ns_sdl_deps,
   c_args: ns_lib_c_args,
   pic: true,
@@ -442,7 +360,7 @@ libnordstjernen_static = static_library(
 
 libnordstjernen_lib = library(
   'nordstjernen',
-  objects: libnordstjernen_static.extract_all_objects(recursive: false),
+  objects: libnordstjernen_static.extract_all_objects(recursive: true),
   dependencies: nordstjernen_deps + ns_sdl_deps,
   link_args: nordstjernen_link_args,
   install: true,
@@ -474,7 +392,6 @@ if not is_mobile
     install: true,
   )
 
-  sdl3_dep = dependency('sdl3', version: '>=3.2.0', required: get_option('audio'))
   if sdl3_dep.found()
     libminimp3 = static_library(
       'minimp3',
@@ -484,14 +401,10 @@ if not is_mobile
       install: false,
     )
 
-    audio_deps = [dependency('libcurl'), sdl3_dep, libplmpeg]
+    audio_deps = [libcurl, sdl3_dep, libplmpeg, libm, ns_win_system_libs]
     if have_libav
       audio_deps += [libavformat, libavcodec, libavutil, libswresample]
     endif
-    # libm is needed by pl_mpeg / minimp3 on Linux and the BSDs; it is part of
-    # the C runtime on macOS and Windows, where find_library('m') is a harmless
-    # no-op.
-    audio_lib_deps = [cc.find_library('m', required: false)]
 
     # On Linux the helper confines itself with the same Landlock + seccomp
     # profile as the renderer once its audio device and network stack are up,
@@ -510,7 +423,7 @@ if not is_mobile
       files('audio/main.c') + audio_sandbox_sources + media_os_sources,
       include_directories: include_directories('audio', '.'),
       link_with: libminimp3,
-      dependencies: audio_deps + audio_lib_deps + media_os_deps,
+      dependencies: audio_deps + media_os_deps,
       link_args: nordstjernen_link_args,
       win_subsystem: 'windows',
       install: true,
@@ -520,12 +433,9 @@ if not is_mobile
   endif
 endif
 
-if not is_mobile and have_gtk
+if have_gtk
   subdir('gtk')
-endif
-
-if not is_mobile and not have_gtk
+elif not is_mobile
   message('GTK 4 shell disabled — building the engine, out-of-process renderer' +
-          ' and embeddable library without GTK. WebGL is unavailable in this' +
-          ' configuration (its GL context is GTK-backed).')
+          ' and embeddable library without GTK.')
 endif
