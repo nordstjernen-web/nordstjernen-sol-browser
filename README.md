@@ -80,9 +80,8 @@ directories; on Windows it runs with process mitigation policies (forced
 ASLR, strict handle checks, restricted image loads, no child processes), and
 the browser drops administrator rights at start-up. The FreeBSD and NetBSD
 builds have no renderer sandbox yet. Neither the JavaScript nor the
-WebAssembly engine has a JIT. An optional memory-safe Rust parser for the
-renderer's IPC messages is built with `-Dipc_rust=enabled` (off by default),
-and about:nordstjernen shows which parser and sandbox layers are active. See
+WebAssembly engine has a JIT. about:nordstjernen shows which sandbox layers
+are active. See
 [docs/security-model.md](docs/security-model.md); to report a vulnerability,
 see [SECURITY.md](SECURITY.md).
 
@@ -309,7 +308,6 @@ WAMR and PDF.js tarballs ahead of time with
 | Enchant | `-Denchant` | spell checking of editable text |
 | pdfjs-dist | `-Dpdfjs` (fetched by a meson wrap, installed to `share/nordstjernen/pdfjs`) | the PDF viewer |
 | wgpu-native | `-Dwebgpu` (the BSDs, musl, Windows on Arm) | WebGPU where wgpu-native publishes no release; not built for Android |
-| Rust IPC parser | `-Dipc_rust` | memory-safe parser for the renderer IPC framing |
 
 ## License
 

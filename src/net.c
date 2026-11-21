@@ -3422,9 +3422,6 @@ about_sandbox_rows(GString *s)
     diag_state(s, "Hardened allocator", st.allocator_hardened,
                st.allocator_hardened ? "Freed memory is poisoned" : "Off");
 #endif
-#ifdef NS_IPC_RUST
-    diag_state(s, "Memory-safe message parser", TRUE, "On");
-#endif
 }
 
 static char *

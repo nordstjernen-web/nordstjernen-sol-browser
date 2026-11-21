@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51-dev:
 ======
+* The optional Rust port of the renderer IPC parser (`-Dipc_rust`,
+  `src/ipc_http_rs/`) is removed. It was off by default, built by no CI
+  job, and had not followed the C parser since it was added: the response
+  struct has six fields it lacked, so a build with the option enabled
+  stopped at start-up on its own struct-size check. The C parser in
+  `src/ipc_http.c` is the only implementation again.
 * Security: WebGL no longer hands a page graphics memory it did not write.
   `bufferData(size)` left every buffer except an element array
   uninitialised, `texStorage2D` / `texStorage3D` and
