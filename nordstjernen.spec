@@ -23,7 +23,7 @@ Source1:        https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.5.438.tgz
 # Wuffs (Apache-2.0 OR MIT) and WAMR (Apache-2.0 WITH LLVM-exception), from
 # subprojects/wuffs.wrap and subprojects/wamr.wrap.
 Source2:        https://github.com/google/wuffs/archive/refs/tags/v0.4.0-alpha.12.tar.gz#/wuffs-0.4.0-alpha.12.tar.gz
-Source3:        https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-2.4.5.tar.gz#/wasm-micro-runtime-WAMR-2.4.5.tar.gz
+Source3:        https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-2.4.6.tar.gz#/wasm-micro-runtime-WAMR-2.4.6.tar.gz
 ExcludeArch:    %ix86 %arm
 
 BuildRequires:  gcc

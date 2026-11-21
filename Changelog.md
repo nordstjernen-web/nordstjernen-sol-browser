@@ -3,6 +3,10 @@ Changelog:
 
 1.0.51:
 ======
+* WebAssembly runs on WAMR 2.4.6, the upstream security release: it
+  bounds-checks guest pointers in `realloc`, `module_malloc` and the
+  libc-builtin `strtol`/`strtoul`, validates the entry signatures used by
+  thread start, and fixes a loader crash on a bad constant expression.
 * Cross-origin isolation: a top-level document served over HTTPS (or
   from localhost) with `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`) is

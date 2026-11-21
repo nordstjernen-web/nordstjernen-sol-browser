@@ -42,7 +42,7 @@
          WASMExecEnv *exec_env = NULL;
 --- a/core/iwasm/common/wasm_runtime_common.c
 +++ b/core/iwasm/common/wasm_runtime_common.c
-@@ -4331,6 +4331,99 @@
+@@ -4418,6 +4418,99 @@
  #endif
  }
  
@@ -142,7 +142,7 @@
  int32
  wasm_runtime_get_export_count(WASMModuleCommon *const module)
  {
-@@ -4624,6 +4717,7 @@
+@@ -4711,6 +4804,7 @@
  #endif
  #if WASM_ENABLE_REF_TYPES != 0
          case VALUE_TYPE_EXTERNREF:
@@ -150,7 +150,7 @@
  #endif
          case VALUE_TYPE_VOID:
          default:
-@@ -4865,7 +4959,7 @@
+@@ -4952,7 +5046,7 @@
                  if (!wasm_externref_ref2obj(externref_idx, &externref_obj))
                      goto fail;
  
@@ -221,7 +221,7 @@
                      PUT_REF_TO_ADDR((uint32 *)(frame_lp + local_offset),
 --- a/core/iwasm/interpreter/wasm_loader.c
 +++ b/core/iwasm/interpreter/wasm_loader.c
-@@ -6509,7 +6509,25 @@
+@@ -6510,7 +6510,25 @@
          }
      }
  

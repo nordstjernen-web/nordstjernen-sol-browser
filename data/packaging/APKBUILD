@@ -37,11 +37,11 @@ makedepends="
 	"
 _pdfjs=pdfjs-dist-6.5.438.tgz
 _wuffs=wuffs-0.4.0-alpha.12.tar.gz
-_wamr=wasm-micro-runtime-WAMR-2.4.5.tar.gz
+_wamr=wasm-micro-runtime-WAMR-2.4.6.tar.gz
 source="$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/$pkgver.tar.gz
 	$_pdfjs::https://registry.npmjs.org/pdfjs-dist/-/$_pdfjs
 	$_wuffs::https://github.com/google/wuffs/archive/refs/tags/v0.4.0-alpha.12.tar.gz
-	$_wamr::https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-2.4.5.tar.gz
+	$_wamr::https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-2.4.6.tar.gz
 	"
 # GitHub names the archive root after the repository, not after $pkgname.
 builddir="$srcdir/nordstjernen-sol-browser-$pkgver"
@@ -74,5 +74,5 @@ sha512sums="
 1a332d71763009d7dacb758c0e4bf0288f5ed39e1d2252804fcc6f5258a20596507bd8503019920eb06a770fa55e5f31da81d899ce109be5ddedd40f25f2951d  nordstjernen-1.0.33.tar.gz
 be0f0fc35c7e0052b2e00303be1b9697970e615f1debdf14a0400da0516173bf61a970e7650aa7397a31c371c6f74ed61ce8352583af2e13fbe7a6e875d171a4  pdfjs-dist-6.5.438.tgz
 8349ab42d0e012365e9dc1e3d2cfafdaf418b52c3d08dc715fdafe93bffa12ec110876a47d7d6c8f24c113d7b3773da7b2f2ee00bedf5428332264984f4465bd  wuffs-0.4.0-alpha.12.tar.gz
-3aadee3befdd9a8f4fb45c13800e98145ef5492843b08715d9d6787dc9261fb345cc9005d9544efb184f53c83dfe495c176d97b0f05c729db76069f3e3aea60e  wasm-micro-runtime-WAMR-2.4.5.tar.gz
+8737b3e92fccb2fab9384485a76f4b8994bcba47ce0452545a6b8205b2d3cd3f8a2869c81fa03a2e1fabcb534838fc4ce937087746b112e48b1ef6386c388dfd  wasm-micro-runtime-WAMR-2.4.6.tar.gz
 "
