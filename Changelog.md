@@ -15,6 +15,10 @@ Changelog:
   starts its fixed-function shaders with
   `#extension GL_EXT_shader_non_constant_global_initializers : enable`, so
   every one of them failed to compile in Qwasm (Quake).
+* `DOMException` carries the legacy code constants (`INDEX_SIZE_ERR` = 1
+  through `DATA_CLONE_ERR` = 25) on the interface and its prototype, as
+  Web IDL defines, in place of non-standard `…Error_CODE` names. Acid3
+  92 → 94.
 * Settings: "Clear browsing data…" works again. It asked through
   `window.confirm()`, which a page cannot show and which returns false,
   so the click did nothing. The button now confirms in place: the first
