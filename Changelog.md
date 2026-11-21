@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.51:
+1.0.51-dev:
 ======
 * Remote-control (MCP) screenshots no longer show faint lines across the
   page every 256 device pixels. The capture composited the page tiles at
