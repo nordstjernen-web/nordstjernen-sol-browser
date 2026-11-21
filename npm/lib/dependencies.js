@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
 const { capture, locateMsys2 } = require('./system');
 
 const MANAGERS = {
@@ -120,11 +121,22 @@ function checkTools(tools, env) {
   return { missing, outdated };
 }
 
+function includeDirectories() {
+  const msys2 = locateMsys2();
+  if (msys2) return [path.join(msys2.root, msys2.directory, 'include')];
+  return ['/usr/include', '/usr/local/include', '/opt/homebrew/include', '/usr/pkg/include'];
+}
+
+function headerInstalled(header) {
+  return includeDirectories().some((directory) => fs.existsSync(path.join(directory, header)));
+}
+
 function checkLibraries(entries, env) {
   const missing = [];
   const outdated = [];
   for (const entry of entries.filter(applies)) {
     const found = capture('pkg-config', ['--modversion', entry.module], env);
+    if (found === null && entry.header && headerInstalled(entry.header)) continue;
     if (found === null) missing.push(entry);
     else if (entry.minimum && !versionAtLeast(found, entry.minimum)) outdated.push({ ...entry, found });
   }
@@ -273,4 +285,4 @@ function preflight(product, env, { onWarning, onError }) {
   return disabledOptions(optionalLibraries);
 }
 
-module.exports = { preflight };
+module.exports = { preflight, versionAtLeast };

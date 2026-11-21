@@ -14,11 +14,22 @@ module.exports = {
   executable: process.platform === 'win32' ? 'bin/nordstjernen.exe' : 'bin/nordstjernen',
   mesonOptions: ['--buildtype=release'],
   windowsEnv: { CC: 'clang' },
-  supportedDistributions: 'Ubuntu 24.04, Debian 13, Fedora 40, openSUSE Tumbleweed, Arch Linux, Alpine 3.21 or newer',
+  supportedDistributions: 'Ubuntu 25.04, Debian 13, Fedora 42, openSUSE Tumbleweed, Arch Linux, Alpine 3.21 or newer',
   macRelease: {
     asset: `nordstjernen-${version}-macos-arm64.dmg`,
     app: 'Nordstjernen.app',
     executable: 'Nordstjernen.app/Contents/MacOS/Nordstjernen',
+  },
+  linuxRelease: {
+    asset: `nordstjernen-${version}-x86_64.AppImage`,
+    arch: 'x64',
+    glibc: '2.39',
+    executable: 'AppRun',
+    hostLibraries: [
+      'libX11.so.6', 'libX11-xcb.so.1', 'libxcb.so.1', 'libwayland-client.so.0', 'libdrm.so.2',
+      'libfontconfig.so.1', 'libfreetype.so.6', 'libharfbuzz.so.0', 'libfribidi.so.0',
+      'libcom_err.so.2', 'libstdc++.so.6',
+    ],
   },
 
   tools: [
@@ -29,6 +40,10 @@ module.exports = {
       apt: 'ninja-build', dnf: 'ninja-build', zypper: 'ninja', pacman: 'ninja', apk: 'samurai', brew: 'ninja', msys: 'ninja' },
     { label: 'pkg-config', probe: ['pkg-config', 'pkgconf'],
       apt: 'pkgconf', dnf: 'pkgconf', zypper: 'pkgconf', pacman: 'pkgconf', apk: 'pkgconf', brew: 'pkgconf', msys: 'pkgconf' },
+    { label: 'rustc', probe: ['rustc'], minimum: '1.100',
+      upgrade: ['A current Rust can be installed for your user with rustup (https://rustup.rs):', '',
+        "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"],
+      apt: 'rustc', dnf: 'rust', zypper: 'rust', pacman: 'rust', apk: 'rust', brew: 'rust', msys: 'rust' },
     { label: 'tar', probe: ['tar'],
       apt: 'tar', dnf: 'tar', zypper: 'tar', pacman: 'tar', apk: 'tar', msysBase: 'tar' },
     { label: 'a C compiler (gcc or clang)', probe: ['cc', 'gcc', 'clang'], compiler: true,
@@ -40,7 +55,7 @@ module.exports = {
     { module: 'gtk4', minimum: process.platform === 'win32' ? '4.22.1' : '4.14',
       apt: 'libgtk-4-dev', pacman: 'gtk4', brew: 'gtk4', msys: 'gtk4' },
     { module: 'epoxy', apt: 'libepoxy-dev', pacman: 'libepoxy', brew: 'libepoxy', msys: 'libepoxy' },
-    { module: 'libcurl', minimum: '8.5', apt: 'libcurl4-openssl-dev', pacman: 'curl', brew: 'curl', msys: 'curl' },
+    { module: 'libcurl', minimum: '8.11', apt: 'libcurl4-openssl-dev', pacman: 'curl', brew: 'curl', msys: 'curl' },
     { module: 'libcrypto', apt: 'libssl-dev', pacman: 'openssl', brew: 'openssl@3', msys: 'openssl' },
     { module: 'libssl', apt: 'libssl-dev', pacman: 'openssl', brew: 'openssl@3', msys: 'openssl' },
     { module: 'uchardet', apt: 'libuchardet-dev', pacman: 'uchardet', brew: 'uchardet', msys: 'uchardet' },
@@ -69,7 +84,7 @@ module.exports = {
   ],
 
   optional: [
-    { module: 'glslang', feature: 'WebGL', mesonOption: 'glslang',
+    { module: 'glslang', header: 'glslang/Include/glslang_c_interface.h', feature: 'WebGL', mesonOption: 'glslang',
       apt: 'glslang-dev', pacman: 'glslang', brew: 'glslang', msys: 'glslang' },
     { module: 'sdl3', minimum: '3.2.0', feature: 'audio playback', apt: 'libsdl3-dev', pacman: 'sdl3', brew: 'sdl3', msys: 'sdl3' },
     { module: 'gstreamer-1.0', minimum: '1.20', unix: true, feature: 'H.264 video and AAC audio', mesonOption: 'gstreamer',
