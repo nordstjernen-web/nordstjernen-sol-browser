@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Grid Areas and Fit-Content Flex</title>
+<style>
+body { margin: 0; padding: 0; }
+/* Minified area rows (as lightningcss emits them): ". .main. ." is five
+   cells, so main lands in the 300px middle column. */
+.wrap { display: grid; width: 600px; grid-template-areas: ". .main. .";
+        grid-template-columns: 10px 140px 300px 140px 10px; }
+.wrap > div { grid-area: main; height: 20px; }
+/* A single-line row flex container's min-content is the sum of its items,
+   so fit-content overflows the 300px parent instead of shrinking items. */
+.clip { width: 300px; overflow: hidden; }
+.track { display: flex; width: fit-content; }
+.track > div { width: 200px; height: 20px; margin-right: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap"><div></div></div>
+<div class="clip"><div class="track"><div></div><div></div></div></div>
+</body>
+</html>

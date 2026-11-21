@@ -3,6 +3,18 @@ Changelog:
 
 1.0.51:
 ======
+* `grid-template-areas` rows are split into cells as the grid spec
+  tokenizes them, so a minified row such as `". .main. ."` is five
+  cells, not four with a `.main.` name. lichess.org's page grid is
+  written that way, and its lobby was squeezed into a narrow column
+  drawn over the side panel, with the game boards missing. Areas that
+  are not rectangles, or that use characters outside names and `.`, now
+  make the declaration invalid, and `element.style` gives the rows in
+  their canonical form.
+* A `url()` in a custom property keeps the author's quoting when it is
+  made absolute. Scripts read such values back as text: lichess.org cuts
+  `url(` and `)` off its piece variables, and the quotes we added landed
+  in the image address, so no chess piece loaded.
 * Networking: an HTTP/1.x response with neither `Content-Length` nor
   `Transfer-Encoding` ends at connection close, so a TLS server that closes
   without `close_notify` no longer turns the whole page into a fetch error

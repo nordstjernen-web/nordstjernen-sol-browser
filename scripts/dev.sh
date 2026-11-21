@@ -51,6 +51,7 @@ layout data/fixtures/geo-flex.html
 layout data/fixtures/geo-grid.html
 layout data/fixtures/geo-position.html
 layout data/fixtures/geo-box.html
+layout data/fixtures/geo-areas-fit.html
 EOF
 }
 
