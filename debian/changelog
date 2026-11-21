@@ -1,3 +1,9 @@
+nordstjernen-browser (1.0.51~dev-1) UNRELEASED; urgency=medium
+
+  * Development snapshot of 1.0.51, matching the meson project version.
+
+ -- Andreas Røsdal <andreas.rosdal@gmail.com>  Sat, 21 Nov 2026 12:00:00 +0100
+
 nordstjernen-browser (1.0.50-1) UNRELEASED; urgency=medium
 
   * New upstream release 1.0.50.
