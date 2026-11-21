@@ -71368,6 +71368,30 @@ ns_js_make_data_module(JSContext *ctx, const char *module_name,
     return m;
 }
 
+static JSValue
+ns_import_meta_resolve(JSContext *ctx, JSValueConst this_val, int argc,
+                       JSValueConst *argv, int magic, JSValue *data)
+{
+    (void)this_val; (void)magic;
+    JSValue spec = JS_ToString(ctx, argc > 0 ? argv[0] : JS_UNDEFINED);
+    if (JS_IsException(spec)) return spec;
+    const char *specifier = JS_ToCString(ctx, spec);
+    const char *base = JS_ToCString(ctx, data[0]);
+    JS_FreeValue(ctx, spec);
+    char *resolved = specifier && base
+        ? ns_js_module_normalize(ctx, base, specifier, js_from_ctx(ctx)) : NULL;
+    if (specifier) JS_FreeCString(ctx, specifier);
+    if (base) JS_FreeCString(ctx, base);
+    if (!resolved) {
+        if (!JS_HasException(ctx))
+            JS_ThrowTypeError(ctx, "import.meta.resolve: cannot resolve");
+        return JS_EXCEPTION;
+    }
+    JSValue out = JS_NewString(ctx, resolved);
+    js_free(ctx, resolved);
+    return out;
+}
+
 static int
 ns_js_module_set_import_meta(JSContext *ctx, JSValueConst module,
                              gboolean is_main)
@@ -71387,6 +71411,13 @@ ns_js_module_set_import_meta(JSContext *ctx, JSValueConst module,
                               JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, meta, "main", JS_NewBool(ctx, is_main),
                               JS_PROP_C_W_E);
+    JSValue base = JS_NewString(ctx, name);
+    JSValue resolve = JS_NewCFunctionData(ctx, ns_import_meta_resolve, 1, 0, 1,
+                                          &base);
+    JS_DefinePropertyValueStr(ctx, resolve, "name",
+                              JS_NewString(ctx, "resolve"), JS_PROP_CONFIGURABLE);
+    JS_DefinePropertyValueStr(ctx, meta, "resolve", resolve, JS_PROP_C_W_E);
+    JS_FreeValue(ctx, base);
     JS_FreeValue(ctx, meta);
     JS_FreeCString(ctx, name);
     return 0;
@@ -71927,6 +71958,7 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
          g_str_has_prefix(module_name, "http://"))) {
         JS_ThrowTypeError(ctx, "module blocked by the document's policy: %s",
                           module_name);
+        if (js) js->module_fetch_failures++;
         return NULL;
     }
     ns_perf_resource_info info = {
@@ -71945,10 +71977,13 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
     ns_response *resp = ns_js_fetch_subresource(js, module_name, top_url,
         (const char *const *)headers->pdata, &err, "script", &info);
     g_ptr_array_free(headers, TRUE);
-    if (!resp || resp->error || !resp->body || resp->body->len == 0 ||
-        resp->body->len > NS_MAX_SCRIPT_BYTES) {
+    gboolean bad_status = resp && !resp->error &&
+                          (resp->status < 200 || resp->status > 299);
+    if (!resp || resp->error || bad_status ||
+        (resp->body && resp->body->len > NS_MAX_SCRIPT_BYTES)) {
         const char *why = err ? err->message :
-            (resp && resp->error ? resp->error : "fetch failed");
+            (resp && resp->error ? resp->error
+             : bad_status ? "HTTP error status" : "fetch failed");
         if (js && js->log_cb) {
             char *line = g_strdup_printf("module %s: %s", module_name, why);
             js->log_cb(line, js->log_user_data);
@@ -71957,6 +71992,7 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
         if (resp) ns_response_free(resp);
         g_clear_error(&err);
         JS_ThrowTypeError(ctx, "module fetch failed: %s", module_name);
+        if (js) js->module_fetch_failures++;
         return NULL;
     }
     if (!cors_allows(opaque_origin, top_url,
@@ -71967,6 +72003,7 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
                           "this document (no Access-Control-Allow-Origin)",
                           module_name);
         ns_response_free(resp);
+        if (js) js->module_fetch_failures++;
         return NULL;
     }
     if (!module_mime_acceptable(resp->content_type, kind)) {
@@ -71975,11 +72012,13 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
                           module_name,
                           resp->content_type ? resp->content_type : "(none)");
         ns_response_free(resp);
+        if (js) js->module_fetch_failures++;
         return NULL;
     }
-    if (js) js->module_load_bytes += resp->body->len;
-    char *copy = g_strndup((const char *)resp->body->data, resp->body->len);
-    gsize copy_len = resp->body->len;
+    gsize copy_len = resp->body ? resp->body->len : 0;
+    if (js) js->module_load_bytes += copy_len;
+    char *copy = g_strndup(resp->body ? (const char *)resp->body->data : "",
+                           copy_len);
     ns_response_free(resp);
     if (kind != NS_MODULE_JAVASCRIPT) {
         JSModuleDef *m = ns_js_make_data_module(ctx, module_name,
@@ -72021,7 +72060,7 @@ ns_js_log_module_failure(ns_js *js, JSContext *ctx, const char *what,
     JS_FreeCString(ctx, msg);
 }
 
-static void
+static gboolean
 ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
 {
     ns_budget_guard bg = {0};
@@ -72031,6 +72070,7 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
     gboolean profile = ns_js_profile_enabled();
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
     js->eval_depth++;
+    int fetch_failures = js->module_fetch_failures;
     JSValue fn = ns_js_compile_module_cached(ctx, copy, len,
                                              origin ? origin : "module");
     if (!JS_IsException(fn) &&
@@ -72041,6 +72081,7 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
     js->ignore_destructive_writes++;
     JSValue v = JS_IsException(fn) ? fn : JS_EvalFunction(ctx, fn);
     js->ignore_destructive_writes--;
+    gboolean graph_fetched = js->module_fetch_failures == fetch_failures;
     g_free(copy);
     js->eval_depth--;
     if (js->eval_depth == 0) {
@@ -72066,6 +72107,7 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
     JS_FreeValue(ctx, v);
     ns_js_microtask_checkpoint(js);
     ns_js_budget_pop(js, &bg);
+    return graph_fetched;
 }
 
 typedef enum ns_script_schedule {
@@ -72366,22 +72408,23 @@ ns_js_eval_realm_classic(JSContext *realm, const char *source, gsize length,
     return value;
 }
 
-static void
+static gboolean
 ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
                          gsize length, const char *origin,
                          gboolean is_module)
 {
+    gboolean graph_fetched = TRUE;
     JSContext *realm = ns_js_node_realm_context(js, script);
     if (!realm || realm == js->ctx) {
         if (is_module) {
-            ns_js_eval_module(js, source, length, origin);
+            graph_fetched = ns_js_eval_module(js, source, length, origin);
         } else {
             ns_node *previous_script = js->current_script;
             js->current_script = script;
             ns_js_eval(js, source, length, origin);
             js->current_script = previous_script;
         }
-        return;
+        return graph_fetched;
     }
 
     ns_node *document = NULL;
@@ -72402,7 +72445,7 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
     if (is_module) {
         JSContext *previous_module_ctx = js->module_ctx;
         js->module_ctx = realm;
-        ns_js_eval_module(js, source, length, origin);
+        graph_fetched = ns_js_eval_module(js, source, length, origin);
         js->module_ctx = previous_module_ctx;
     } else {
         ns_budget_guard budget = {0};
@@ -72442,6 +72485,7 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
     ns_frame_url_leave(js, &fu);
     js->current_script = previous_script;
     js->current_doc = previous_doc;
+    return graph_fetched;
 }
 
 static gboolean
@@ -72623,11 +72667,10 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
                 if (!is_module &&
                     ns_js_script_response_is_opaque(js, n, abs_url, resp))
                     ns_js_mute_script_errors(js, abs_url);
-                ns_js_eval_script_source(js, n,
+                loaded = ns_js_eval_script_source(js, n,
                                          decoded ? decoded : src_data,
                                          decoded ? decoded_len : src_len,
                                          abs_url, is_module);
-                loaded = TRUE;
             } else {
                 loaded = TRUE;
             }
@@ -72657,7 +72700,9 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         }
         return;
     }
-    ns_js_eval_script_source(js, n, text->str, text->len, origin, is_module);
+    if (!ns_js_eval_script_source(js, n, text->str, text->len, origin,
+                                  is_module))
+        ns_js_dispatch_resource_event(js, n, "error");
 }
 
 typedef struct ns_parser_held {

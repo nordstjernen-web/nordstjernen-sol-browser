@@ -3,6 +3,15 @@ Changelog:
 
 1.0.51:
 ======
+* Module scripts follow the fetch rules of the HTML spec. A module or
+  `import()` whose response has an HTTP error status (404, 500, …) now
+  fails instead of being run, so `import()` rejects and an error page
+  served as JavaScript or JSON is never executed. A `<script
+  type="module">` whose module graph cannot be fetched (a missing or
+  refused dependency, a wrong MIME type, a CORS failure) fires `error`
+  at the element instead of nothing, and an empty module file is a
+  valid, empty module. `import.meta.resolve()` resolves a specifier
+  against the module's URL and the import map.
 * `<iframe loading="lazy">` frames load. A lazy frame that started off
   screen was hidden by the user-agent style sheet until it loaded, so it
   had no box, never came into view and stayed blank for good, even when
