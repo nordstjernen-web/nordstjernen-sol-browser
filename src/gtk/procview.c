@@ -6338,6 +6338,51 @@ ns_proc_view_remote_geometry(NsProcView *v, int *width, int *height,
     *scale = s;
 }
 
+static cairo_status_t
+screenshot_png_sink(void *closure, const unsigned char *data,
+                    unsigned int length)
+{
+    g_byte_array_append(closure, data, length);
+    return CAIRO_STATUS_SUCCESS;
+}
+
+static GBytes *
+screenshot_png_at(GdkTexture *tex, int width, int height)
+{
+    int tw = gdk_texture_get_width(tex);
+    int th = gdk_texture_get_height(tex);
+    if (tw == width && th == height)
+        return gdk_texture_save_to_png_bytes(tex);
+    cairo_surface_t *src =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, tw, th);
+    if (cairo_surface_status(src) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(src);
+        return NULL;
+    }
+    cairo_surface_flush(src);
+    gdk_texture_download(tex, cairo_image_surface_get_data(src),
+                         (gsize)cairo_image_surface_get_stride(src));
+    cairo_surface_mark_dirty(src);
+    cairo_surface_t *dst =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+    cairo_t *cr = cairo_create(dst);
+    cairo_scale(cr, (double)width / tw, (double)height / th);
+    cairo_set_source_surface(cr, src, 0, 0);
+    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+    cairo_paint(cr);
+    cairo_destroy(cr);
+    GByteArray *buf = g_byte_array_new();
+    cairo_status_t status =
+        cairo_surface_write_to_png_stream(dst, screenshot_png_sink, buf);
+    cairo_surface_destroy(dst);
+    cairo_surface_destroy(src);
+    if (status != CAIRO_STATUS_SUCCESS || !buf->len) {
+        g_byte_array_free(buf, TRUE);
+        return NULL;
+    }
+    return g_byte_array_free_to_bytes(buf);
+}
+
 GBytes *
 ns_proc_view_remote_screenshot(NsProcView *v, int *out_w, int *out_h)
 {
@@ -6352,20 +6397,25 @@ ns_proc_view_remote_screenshot(NsProcView *v, int *out_w, int *out_h)
     double s = cur_scale(v);
     int cw = MAX(1, (int)(w / s + 0.5));
     int ch = MAX(1, (int)(h / s + 0.5));
+    double ds = device_scale(v);
+    int dw = MAX(1, (int)(w * ds + 0.5));
+    int dh = MAX(1, (int)(h * ds + 0.5));
     GtkSnapshot *snap = gtk_snapshot_new();
-    gtk_snapshot_scale(snap, (float)cw / (float)w, (float)ch / (float)h);
+    gtk_snapshot_scale(snap, (float)dw / (float)w, (float)dh / (float)h);
     ns_proc_view_area_snapshot(v->area, snap);
     GskRenderNode *node = gtk_snapshot_free_to_node(snap);
     if (!node)
         return NULL;
-    graphene_rect_t bounds = GRAPHENE_RECT_INIT(0, 0, (float)cw, (float)ch);
+    graphene_rect_t bounds = GRAPHENE_RECT_INIT(0, 0, (float)dw, (float)dh);
     GdkTexture *tex = gsk_renderer_render_texture(renderer, node, &bounds);
     gsk_render_node_unref(node);
     if (!tex)
         return NULL;
-    GBytes *png = gdk_texture_save_to_png_bytes(tex);
-    *out_w = gdk_texture_get_width(tex);
-    *out_h = gdk_texture_get_height(tex);
+    GBytes *png = screenshot_png_at(tex, cw, ch);
     g_object_unref(tex);
+    if (!png)
+        return NULL;
+    *out_w = cw;
+    *out_h = ch;
     return png;
 }
