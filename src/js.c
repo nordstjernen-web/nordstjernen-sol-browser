@@ -30678,25 +30678,12 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
     ns_bind_fn(ctx, clients, "openWindow", ns_returns_resolved_undefined, 1);
     JS_SetPropertyStr(ctx, global, "clients", clients);
 
-    JSValue caches_obj = JS_NewObject(ctx);
-    ns_bind_fn(ctx, caches_obj, "open",   ns_cache_open, 1);
-    ns_bind_fn(ctx, caches_obj, "has",    ns_returns_resolved_false, 1);
-    ns_bind_fn(ctx, caches_obj, "delete", ns_returns_resolved_false, 1);
-    ns_bind_fn(ctx, caches_obj, "keys",   ns_returns_resolved_empty_array, 0);
-    ns_bind_fn(ctx, caches_obj, "match",  ns_returns_resolved_undefined, 2);
-    JS_SetPropertyStr(ctx, global, "caches", caches_obj);
-
     ns_bind_ctor(ctx, global, "ExtendableEvent",        ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "FetchEvent",             ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "ExtendableMessageEvent", ns_window_event_ctor, 2);
     static const char *const sw_events[] = { "ExtendableEvent", "FetchEvent",
                                              "ExtendableMessageEvent" };
     ns_realm_protos_record_names(ctx, sw_events, G_N_ELEMENTS(sw_events));
-    ns_bind_ctor(ctx, global, "Response", ns_window_response_ctor, 0);
-    ns_bind_ctor(ctx, global, "Request",  ns_window_request_ctor,  1);
-    ns_fetch_install_interface(ctx, global, "Response");
-    ns_fetch_install_interface(ctx, global, "Request");
-    ns_fetch_install_static_response(ctx);
 
     ns_bind_fn(ctx, global, "__nd_sw_fetch_result", ns_sw_fetch_result, 6);
     static const char *fetch_dispatch_src =
@@ -32150,6 +32137,8 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     JS_NewClass(JS_GetRuntime(ctx), ns_worker_class_id, &ns_worker_class);
 
     JSValue sw = JS_NewObjectClass(ctx, ns_worker_class_id);
+    JSValue reg_global = JS_GetGlobalObject(ctx);
+    ns_sw_set_proto_from(ctx, sw, reg_global, "ServiceWorker");
     JS_SetPropertyStr(ctx, sw, "scriptURL",     JS_NewString(ctx, abs_url));
     JS_SetPropertyStr(ctx, sw, "state",         JS_NewString(ctx, "installing"));
     JS_SetPropertyStr(ctx, sw, "onstatechange", JS_NULL);
@@ -32160,6 +32149,8 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     ns_bind_fn(ctx, sw, "postMessage",   ns_worker_post_message, 1);
 
     JSValue reg = JS_NewObject(ctx);
+    ns_sw_set_proto_from(ctx, reg, reg_global, "ServiceWorkerRegistration");
+    JS_FreeValue(ctx, reg_global);
     JS_SetPropertyStr(ctx, reg, "scope",          JS_NewString(ctx, scope));
     JS_SetPropertyStr(ctx, reg, "installing",     JS_DupValue(ctx, sw));
     JS_SetPropertyStr(ctx, reg, "waiting",        JS_NULL);
@@ -32246,8 +32237,33 @@ ns_sw_get_registration(JSContext *ctx, JSValueConst this_val,
 }
 
 static void
+ns_sw_install_window_interfaces(JSContext *ctx)
+{
+    static const char *const names[] = {
+        "ServiceWorker", "ServiceWorkerRegistration", "NavigationPreloadManager",
+    };
+    JSValue global = JS_GetGlobalObject(ctx);
+    for (gsize i = 0; i < G_N_ELEMENTS(names); i++) {
+        JSValue existing = JS_GetPropertyStr(ctx, global, names[i]);
+        gboolean present = JS_IsFunction(ctx, existing);
+        JS_FreeValue(ctx, existing);
+        if (present) continue;
+        ns_bind_ctor(ctx, global, names[i], ns_illegal_constructor, 0);
+        if (i < 2) {
+            JSValue ctor = JS_GetPropertyStr(ctx, global, names[i]);
+            JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+            ns_sw_set_proto_from(ctx, proto, global, "EventTarget");
+            JS_FreeValue(ctx, proto);
+            JS_FreeValue(ctx, ctor);
+        }
+    }
+    JS_FreeValue(ctx, global);
+}
+
+static void
 ns_sw_install_container(JSContext *ctx, JSValueConst navigator)
 {
+    ns_sw_install_window_interfaces(ctx);
     JSValue container = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, container, "controller", JS_NULL);
     JS_SetPropertyStr(ctx, container, "oncontrollerchange", JS_NULL);

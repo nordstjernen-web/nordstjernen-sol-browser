@@ -24,6 +24,12 @@ Changelog:
   made absolute. Scripts read such values back as text: lichess.org cuts
   `url(` and `)` off its piece variables, and the quotes we added landed
   in the image address, so no chess piece loaded.
+* Service workers: `ServiceWorker`, `ServiceWorkerRegistration` and
+  `NavigationPreloadManager` are window interfaces, so testharness.js
+  recognises a registered worker and `fetch_tests_from_worker` runs the
+  `.any.serviceworker.html` variants (686 tests that all timed out). The
+  service worker scope keeps the real Cache Storage, `Request` and
+  `Response` instead of replacing them with stubs.
 * Networking: an HTTP/1.x response with neither `Content-Length` nor
   `Transfer-Encoding` ends at connection close, so a TLS server that closes
   without `close_notify` no longer turns the whole page into a fetch error
