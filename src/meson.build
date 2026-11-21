@@ -235,7 +235,6 @@ nordstjernen_deps = [
   libplmpeg,
   libuchardet,
   ns_parsers_rs_dep,
-  ns_ipc_rust_dep,
   libwamr,
   sqlite3,
   zlib,

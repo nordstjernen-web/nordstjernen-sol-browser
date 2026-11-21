@@ -563,10 +563,6 @@ if meson.get_compiler('rust').version().version_compare('<1.100')
   error('Nordstjernen needs rustc 1.100 or newer for its HTML and URL parsers (found @0@).'.format(
         meson.get_compiler('rust').version()))
 endif
-ns_ipc_rust = get_option('ipc_rust').enabled()
-if ns_ipc_rust
-  add_project_arguments('-DNS_IPC_RUST=1', language: 'c')
-endif
 media_os_sources = files('src/media_os.c')
 if media_os_backend != 'none'
   media_os_sources += files('src/media_os_' + media_os_backend + '.c')
@@ -708,7 +704,7 @@ ns_parsers_rs_raw = static_library('ns_parsers_rs_raw', 'src/parsers_rs/lib.rs',
   link_with: [ns_url_rs, ns_html5_rs],
 )
 
-ns_rust_isolate_std = have_webgpu or ns_ipc_rust
+ns_rust_isolate_std = have_webgpu
 ns_rust_system_libs = []
 ns_rust_system_lib_names = []
 if host_machine.system() == 'windows'
@@ -738,27 +734,6 @@ if ns_rust_isolate_std
 else
   ns_parsers_rs_dep = declare_dependency(link_with: ns_parsers_rs_raw,
                                          dependencies: ns_rust_system_libs)
-endif
-
-ns_ipc_rust_dep = []
-if ns_ipc_rust
-  ns_ipc_rust_raw = static_library('ns_ipc_http_rs_raw',
-    'src/ipc_http_rs/lib.rs',
-    rust_abi: 'c',
-    rust_args: ['-C', 'panic=abort'],
-    override_options: ['rust_std=2021'],
-  )
-  if ns_rust_isolate_std
-    ns_ipc_rust_lib = custom_target('ns_ipc_http_rs',
-      input: ns_ipc_rust_raw,
-      output: 'libns_ipc_http_rs.a',
-      command: ns_rust_localize_command + ['ns_ipc_rs_*', 'http_write_*', 'json_*'],
-    )
-  else
-    ns_ipc_rust_lib = ns_ipc_rust_raw
-  endif
-  ns_ipc_rust_dep = declare_dependency(link_with: ns_ipc_rust_lib,
-                                       dependencies: ns_rust_system_libs)
 endif
 
 subdir('src')

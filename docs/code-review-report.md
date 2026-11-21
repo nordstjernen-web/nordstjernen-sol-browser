@@ -255,7 +255,7 @@ options.
 | U9 | `src/libnordstjernen.h:104,110,241` | Exported, called only inside `libnordstjernen.c`, undocumented | Document or make `static` |
 | U10 | `src/about_style.h:108` `NS_ABOUT_ICON_ERROR` | Macro never expanded | Delete |
 | U11 | `data/packaging/nordstjernen.spec` | Third RPM spec, at 1.0.29, referenced by nothing | Delete |
-| U12 | `src/ipc_http_rs/lib.rs` (678 lines), `-Dipc_rust` | Second implementation of `src/ipc_http.c`; built by no CI job, so it can drift unnoticed | Add one CI job or remove |
+| U12 | `src/ipc_http_rs/lib.rs` (678 lines), `-Dipc_rust` | Second implementation of `src/ipc_http.c`; built by no CI job, so it can drift unnoticed | Removed |
 | U13 | `scripts/build-logo-gif.sh`, `scripts/gen-android-icon.py`, `scripts/gen-windows-icon.py` | Referenced nowhere | Document or delete |
 
 Stale documentation:
@@ -417,7 +417,7 @@ Summary: no Mozilla library is a clear win as a new linked dependency today.
 cubeb is the only C one that fits, and it solves no present problem. PDF.js
 is the exception: it is not linked at all, it runs as script, and the trial
 in section 11 shows it working. Most of the rest are Rust crates that need
-cargo, which the tree deliberately avoids (`-Dipc_rust` uses no crates).
+cargo, which the tree deliberately avoids (the in-tree Rust uses no crates).
 
 ## 9. Suggested order of work
 
