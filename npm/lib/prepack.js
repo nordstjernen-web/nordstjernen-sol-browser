@@ -1,11 +1,11 @@
-// prepack.js: checks the version names a release tag, records the release source tarball's SHA-256, and copies the licence files in.
+// prepack.js: checks the version names a release tag, records the SHA-256 of the source tarball and the prebuilt release assets, and copies the licence files in.
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
-const { product, SOURCE_URL, SOURCE_CHECKSUM_FILE } = require('./install');
+const { product, SOURCE_URL, RELEASE_URL, SOURCE_CHECKSUM_FILE, parseChecksums } = require('./install');
 
 function fail(message) {
   console.error(message);
@@ -24,8 +24,21 @@ async function main() {
   const response = await fetch(SOURCE_URL);
   if (!response.ok) fail(`GET ${SOURCE_URL}: HTTP ${response.status}`);
   const sha256 = crypto.createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex');
-  fs.writeFileSync(SOURCE_CHECKSUM_FILE, `${JSON.stringify({ version: product.version, sha256 }, null, 2)}\n`);
   console.error(`source tarball ${product.version}: sha256 ${sha256}`);
+
+  const releaseAssets = [product.linuxRelease, product.macRelease].filter(Boolean).map((release) => release.asset);
+  const assets = {};
+  if (releaseAssets.length) {
+    const sums = await fetch(`${RELEASE_URL}/SHA256SUMS`);
+    if (!sums.ok) fail(`GET ${RELEASE_URL}/SHA256SUMS: HTTP ${sums.status}`);
+    const listed = parseChecksums(await sums.text());
+    for (const asset of releaseAssets) {
+      if (!listed[asset]) fail(`${asset} is not listed in the ${product.version} SHA256SUMS`);
+      assets[asset] = listed[asset];
+      console.error(`${asset}: sha256 ${listed[asset]}`);
+    }
+  }
+  fs.writeFileSync(SOURCE_CHECKSUM_FILE, `${JSON.stringify({ version: product.version, sha256, assets }, null, 2)}\n`);
 
   for (const file of product.licenseFiles) {
     fs.copyFileSync(path.join(repo, file), path.join(__dirname, '..', file));

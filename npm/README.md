@@ -25,9 +25,9 @@ sudo npm install -g --allow-scripts=nordstjernen-browser nordstjernen-browser
 
 | System | What happens |
 | --- | --- |
-| Linux on x86_64 with glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and newer) | The release AppImage is downloaded from GitHub, checked against the release's `SHA256SUMS` and unpacked, so no FUSE is needed. It uses the system's glibc, libstdc++, X11, Wayland, fontconfig, FreeType, HarfBuzz and FriBiDi, which every desktop has, and bundles GTK 4, FFmpeg and the rest. If those libraries are missing or the AppImage does not start, the browser is built from source instead. |
+| Linux on x86_64 with glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and newer) | The release AppImage is downloaded from GitHub, checked against the SHA-256 recorded in this package and unpacked, so no FUSE is needed. It uses the system's glibc, libstdc++, X11, Wayland, fontconfig, FreeType, HarfBuzz and FriBiDi, which every desktop has, and bundles GTK 4, FFmpeg and the rest. If those libraries are missing, the download fails or the AppImage does not start, the browser is built from source instead. |
 | Other Linux, BSD, Intel macOS | Nordstjernen is built from the release source on your machine with meson and ninja, against your system's GTK 4, FFmpeg and other libraries. The source tarball is checked against the SHA-256 recorded in this package. The build takes several minutes and shows its progress in the terminal. |
-| macOS on Apple silicon | The Developer ID signed and notarised release build is downloaded from GitHub and checked against the release's `SHA256SUMS`. |
+| macOS on Apple silicon | The Developer ID signed and notarised release build is downloaded from GitHub and checked against the SHA-256 recorded in this package. |
 | Windows | Nordstjernen is built from the release source with [MSYS2](https://www.msys2.org)'s UCRT64 clang, meson and ninja, against MSYS2's GTK 4 and FFmpeg. The signed build is in the [Microsoft Store](https://apps.microsoft.com/detail/9NW8T7W5Z4PL). |
 
 The browser is installed inside the npm package, so `sudo npm uninstall -g
