@@ -171,6 +171,25 @@ gboolean ns_js_sandbox_allows_form_navigation(ns_js *js, const ns_node *form,
                                               const char *target,
                                               gboolean user_activated);
 gboolean ns_js_navigate_form_frame(ns_js *js, const ns_node *form, const char *url);
+typedef struct ns_js_form_submission {
+    gboolean is_post;
+    gboolean is_dialog;
+    char    *action;
+    char    *target;
+    char    *body;
+    gsize    body_len;
+    char    *content_type;
+} ns_js_form_submission;
+
+gboolean ns_js_form_prepare_submission(ns_js *js, const ns_node *form,
+                                       const ns_node *submitter,
+                                       ns_js_form_submission *out);
+void     ns_js_form_submission_clear(ns_js_form_submission *sub);
+char    *ns_js_form_get_action_url(const char *action, const char *query);
+gboolean ns_js_form_submit_into_frame(ns_js *js, const ns_node *form,
+                                      const char *target, const char *url,
+                                      char *body, gsize body_len,
+                                      const char *content_type);
 ns_node *ns_js_named_frame(ns_js *js, const ns_node *from, const char *name);
 gboolean ns_js_navigate_frame(ns_js *js, ns_node *frame, const char *url);
 gboolean ns_js_post_frame(ns_js *js, ns_node *frame, const char *url,

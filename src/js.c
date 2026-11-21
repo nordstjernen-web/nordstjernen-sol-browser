@@ -503,6 +503,8 @@ static JSValue ns_ho_new_default(JSContext *ctx, ns_ho_kind kind);
 static ns_hostobj *ns_ho_of(JSValueConst v, ns_ho_kind kind);
 static char *ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob,
                                      gsize *out_len);
+static char *ns_utf8_replace_lone_surrogates(const char *s, gsize len,
+                                             gsize *out_len);
 static char *ns_fetch_normalize_method(const char *method);
 static JSValue ns_event_stop_immediate(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
@@ -1302,91 +1304,319 @@ ns_js_value_is_url_search_params(JSContext *ctx, JSValueConst v)
     return ok;
 }
 
+typedef struct ns_form_entry {
+    char     *name;
+    gsize     name_len;
+    char     *value;
+    gsize     value_len;
+    gboolean  is_file;
+    char     *file_type;
+    char     *file_bytes;
+    gsize     file_len;
+} ns_form_entry;
+
+static void
+ns_form_entry_clear(gpointer data)
+{
+    ns_form_entry *e = data;
+    g_free(e->name);
+    g_free(e->value);
+    g_free(e->file_type);
+    g_free(e->file_bytes);
+}
+
 static char *
-ns_js_form_data_serialize(JSContext *ctx, JSValueConst fd,
-                          gsize *out_len, char **out_content_type)
+ns_form_js_usv(JSContext *ctx, JSValueConst v, gsize *out_len)
+{
+    size_t len = 0;
+    const char *s = JS_ToCStringLen(ctx, &len, v);
+    if (!s) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        *out_len = 0;
+        return g_strdup("");
+    }
+    gsize fixed_len = 0;
+    char *fixed = ns_utf8_replace_lone_surrogates(s, len, &fixed_len);
+    if (!fixed) {
+        fixed = g_malloc(len + 1);
+        memcpy(fixed, s, len);
+        fixed[len] = '\0';
+        fixed_len = len;
+    }
+    JS_FreeCString(ctx, s);
+    *out_len = fixed_len;
+    return fixed;
+}
+
+static GArray *
+ns_form_entries_read(JSContext *ctx, JSValueConst fd)
+{
+    GArray *out = g_array_new(FALSE, TRUE, sizeof(ns_form_entry));
+    g_array_set_clear_func(out, ns_form_entry_clear);
+    JSValue entries = JS_GetPropertyStr(ctx, fd, "_entries");
+    uint32_t n = JS_IsArray(entries) ? ns_js_array_length(ctx, entries) : 0;
+    for (uint32_t i = 0; i < n; i++) {
+        JSValue pair = JS_GetPropertyUint32(ctx, entries, i);
+        if (!JS_IsArray(pair)) { JS_FreeValue(ctx, pair); continue; }
+        JSValue k = JS_GetPropertyUint32(ctx, pair, 0);
+        JSValue v = JS_GetPropertyUint32(ctx, pair, 1);
+        JSValue fname_override = JS_GetPropertyUint32(ctx, pair, 2);
+        ns_form_entry e = { 0 };
+        e.name = ns_form_js_usv(ctx, k, &e.name_len);
+        JSValue bytes_priv = JS_IsObject(v)
+            ? JS_GetPropertyStr(ctx, v, "__ndBlobBytes") : JS_UNDEFINED;
+        e.is_file = !JS_IsUndefined(bytes_priv) && !JS_IsNull(bytes_priv);
+        JS_FreeValue(ctx, bytes_priv);
+        if (e.is_file) {
+            JSValue fname = JS_IsString(fname_override)
+                ? JS_DupValue(ctx, fname_override)
+                : JS_GetPropertyStr(ctx, v, "name");
+            if (JS_IsString(fname))
+                e.value = ns_form_js_usv(ctx, fname, &e.value_len);
+            else
+                e.value = g_strdup("blob"), e.value_len = 4;
+            JS_FreeValue(ctx, fname);
+            JSValue type_v = JS_GetPropertyStr(ctx, v, "type");
+            const char *type = JS_IsString(type_v)
+                ? JS_ToCString(ctx, type_v) : NULL;
+            GString *ct = g_string_new(NULL);
+            for (const char *tp = type; tp && *tp; tp++) {
+                unsigned char c = (unsigned char)*tp;
+                if (c >= 0x20 && c != 0x7f) g_string_append_c(ct, (char)c);
+            }
+            e.file_type = g_string_free(ct, FALSE);
+            if (type) JS_FreeCString(ctx, type);
+            JS_FreeValue(ctx, type_v);
+            e.file_bytes = ns_blob_bytes_as_string(ctx, v, &e.file_len);
+        } else {
+            e.value = ns_form_js_usv(ctx, v, &e.value_len);
+        }
+        g_array_append_val(out, e);
+        JS_FreeValue(ctx, k);
+        JS_FreeValue(ctx, v);
+        JS_FreeValue(ctx, fname_override);
+        JS_FreeValue(ctx, pair);
+    }
+    JS_FreeValue(ctx, entries);
+    return out;
+}
+
+static char *
+ns_form_normalize_newlines(const char *s, gsize len, gsize *out_len)
+{
+    GString *out = g_string_sized_new(len + 8);
+    for (gsize i = 0; i < len; i++) {
+        if (s[i] == '\r') {
+            g_string_append(out, "\r\n");
+            if (i + 1 < len && s[i + 1] == '\n') i++;
+        } else if (s[i] == '\n') {
+            g_string_append(out, "\r\n");
+        } else {
+            g_string_append_c(out, s[i]);
+        }
+    }
+    *out_len = out->len;
+    return g_string_free(out, FALSE);
+}
+
+typedef struct ns_form_charset {
+    GIConv   cd;
+    gboolean utf8;
+} ns_form_charset;
+
+static void
+ns_form_charset_open(ns_form_charset *cs, const char *encoding)
+{
+    cs->cd = (GIConv)-1;
+    cs->utf8 = !encoding || g_ascii_strcasecmp(encoding, "UTF-8") == 0;
+    if (cs->utf8) return;
+    cs->cd = g_iconv_open(encoding, "UTF-8");
+    if (cs->cd == (GIConv)-1) cs->utf8 = TRUE;
+}
+
+static void
+ns_form_charset_close(ns_form_charset *cs)
+{
+    if (cs->cd != (GIConv)-1) g_iconv_close(cs->cd);
+    cs->cd = (GIConv)-1;
+}
+
+static void
+ns_form_charset_encode(ns_form_charset *cs, GString *out, const char *s,
+                       gsize len)
+{
+    if (cs->utf8) {
+        g_string_append_len(out, s, (gssize)len);
+        return;
+    }
+    const char *p = s, *end = s + len;
+    while (p < end) {
+        if (*p == '\0') {
+            g_string_append_c(out, '\0');
+            p++;
+            continue;
+        }
+        gunichar c = g_utf8_get_char_validated(p, end - p);
+        if (c == (gunichar)-1 || c == (gunichar)-2) {
+            p++;
+            continue;
+        }
+        const char *next = g_utf8_next_char(p);
+        gchar *in = (gchar *)p;
+        gsize in_left = (gsize)(next - p);
+        gchar buf[16];
+        gchar *o = buf;
+        gsize o_left = sizeof buf;
+        gsize r = g_iconv(cs->cd, &in, &in_left, &o, &o_left);
+        if (r == (gsize)-1 || in_left > 0) {
+            g_iconv(cs->cd, NULL, NULL, NULL, NULL);
+            g_string_append_printf(out, "&#%u;", (unsigned)c);
+        } else {
+            g_iconv(cs->cd, NULL, NULL, &o, &o_left);
+            g_string_append_len(out, buf, (gssize)(o - buf));
+        }
+        p = next;
+    }
+}
+
+static void
+ns_form_urlencode_bytes(GString *out, const char *s, gsize len)
+{
+    for (gsize i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (g_ascii_isalnum(c) || c == '*' || c == '-' || c == '.' || c == '_')
+            g_string_append_c(out, (char)c);
+        else if (c == ' ')
+            g_string_append_c(out, '+');
+        else
+            g_string_append_printf(out, "%%%02X", c);
+    }
+}
+
+static void
+ns_form_encode_pair_part(ns_form_charset *cs, GString *out, const char *s,
+                         gsize len, gboolean percent)
+{
+    gsize norm_len = 0;
+    g_autofree char *norm = ns_form_normalize_newlines(s, len, &norm_len);
+    if (!percent) {
+        ns_form_charset_encode(cs, out, norm, norm_len);
+        return;
+    }
+    GString *bytes = g_string_new(NULL);
+    ns_form_charset_encode(cs, bytes, norm, norm_len);
+    ns_form_urlencode_bytes(out, bytes->str, bytes->len);
+    g_string_free(bytes, TRUE);
+}
+
+static char *
+ns_form_encode_urlencoded(GArray *entries, const char *encoding, gsize *out_len)
+{
+    ns_form_charset cs;
+    ns_form_charset_open(&cs, encoding);
+    GString *out = g_string_new(NULL);
+    for (guint i = 0; i < entries->len; i++) {
+        const ns_form_entry *e = &g_array_index(entries, ns_form_entry, i);
+        if (i > 0) g_string_append_c(out, '&');
+        ns_form_encode_pair_part(&cs, out, e->name, e->name_len, TRUE);
+        g_string_append_c(out, '=');
+        ns_form_encode_pair_part(&cs, out, e->value, e->value_len, TRUE);
+    }
+    ns_form_charset_close(&cs);
+    *out_len = out->len;
+    return g_string_free(out, FALSE);
+}
+
+static char *
+ns_form_encode_text_plain(GArray *entries, const char *encoding, gsize *out_len)
+{
+    ns_form_charset cs;
+    ns_form_charset_open(&cs, encoding);
+    GString *out = g_string_new(NULL);
+    for (guint i = 0; i < entries->len; i++) {
+        const ns_form_entry *e = &g_array_index(entries, ns_form_entry, i);
+        ns_form_encode_pair_part(&cs, out, e->name, e->name_len, FALSE);
+        g_string_append_c(out, '=');
+        ns_form_encode_pair_part(&cs, out, e->value, e->value_len, FALSE);
+        g_string_append(out, "\r\n");
+    }
+    ns_form_charset_close(&cs);
+    *out_len = out->len;
+    return g_string_free(out, FALSE);
+}
+
+static void
+ns_form_multipart_escape(ns_form_charset *cs, GString *out, const char *s,
+                         gsize len)
+{
+    GString *bytes = g_string_new(NULL);
+    ns_form_charset_encode(cs, bytes, s, len);
+    for (gsize i = 0; i < bytes->len; i++) {
+        char c = bytes->str[i];
+        if      (c == '"')  g_string_append(out, "%22");
+        else if (c == '\r') g_string_append(out, "%0D");
+        else if (c == '\n') g_string_append(out, "%0A");
+        else                g_string_append_c(out, c);
+    }
+    g_string_free(bytes, TRUE);
+}
+
+static char *
+ns_form_encode_multipart(GArray *entries, const char *encoding,
+                         gsize *out_len, char **out_content_type)
 {
     char *boundary = ns_multipart_boundary();
     if (out_content_type)
         *out_content_type = g_strdup_printf(
             "multipart/form-data; boundary=%s", boundary);
-
+    ns_form_charset cs;
+    ns_form_charset_open(&cs, encoding);
     GString *body = g_string_new(NULL);
-    JSValue entries = JS_GetPropertyStr(ctx, fd, "_entries");
-    if (JS_IsArray(entries)) {
-        uint32_t n = ns_js_array_length(ctx, entries);
-        for (uint32_t i = 0; i < n; i++) {
-            JSValue pair = JS_GetPropertyUint32(ctx, entries, i);
-            if (!JS_IsArray(pair)) { JS_FreeValue(ctx, pair); continue; }
-            JSValue k = JS_GetPropertyUint32(ctx, pair, 0);
-            JSValue v = JS_GetPropertyUint32(ctx, pair, 1);
-            JSValue fname_override = JS_GetPropertyUint32(ctx, pair, 2);
-            const char *ks = JS_ToCString(ctx, k);
-
-            JSValue b_priv = JS_IsObject(v)
-                ? JS_GetPropertyStr(ctx, v, "__ndBlobBytes") : JS_UNDEFINED;
-            gboolean is_blob = !JS_IsUndefined(b_priv) && !JS_IsNull(b_priv);
-            JS_FreeValue(ctx, b_priv);
-
-            g_string_append_printf(body, "--%s\r\n", boundary);
-            g_string_append(body, "Content-Disposition: form-data; name=\"");
-            ns_multipart_quote_field(body, ks ? ks : "");
-            g_string_append_c(body, '"');
-
-            if (is_blob) {
-                JSValue fname_v = !JS_IsUndefined(fname_override)
-                    ? JS_DupValue(ctx, fname_override)
-                    : JS_GetPropertyStr(ctx, v, "name");
-                const char *fname = JS_IsString(fname_v)
-                    ? JS_ToCString(ctx, fname_v) : NULL;
-                g_string_append(body, "; filename=\"");
-                ns_multipart_quote_field(body, fname ? fname : "blob");
-                g_string_append(body, "\"\r\n");
-                if (fname) JS_FreeCString(ctx, fname);
-                JS_FreeValue(ctx, fname_v);
-
-                JSValue type_v = JS_GetPropertyStr(ctx, v, "type");
-                const char *type = JS_IsString(type_v)
-                    ? JS_ToCString(ctx, type_v) : NULL;
-                GString *ct = g_string_new(NULL);
-                for (const char *tp = type; tp && *tp; tp++) {
-                    unsigned char c = (unsigned char)*tp;
-                    if (c >= 0x20 && c != 0x7f) g_string_append_c(ct, (char)c);
-                }
-                g_string_append_printf(body, "Content-Type: %s\r\n\r\n",
-                    ct->len ? ct->str : "application/octet-stream");
-                g_string_free(ct, TRUE);
-                if (type) JS_FreeCString(ctx, type);
-                JS_FreeValue(ctx, type_v);
-
-                gsize blob_len = 0;
-                char *blob_bytes = ns_blob_bytes_as_string(ctx, v, &blob_len);
-                if (blob_bytes) {
-                    g_string_append_len(body, blob_bytes, (gssize)blob_len);
-                    g_free(blob_bytes);
-                }
-                g_string_append(body, "\r\n");
-            } else {
-                size_t vlen = 0;
-                const char *vs = JS_ToCStringLen(ctx, &vlen, v);
-                g_string_append(body, "\r\n\r\n");
-                if (vs) g_string_append_len(body, vs, (gssize)vlen);
-                if (vs) JS_FreeCString(ctx, vs);
-                g_string_append(body, "\r\n");
-            }
-
-            if (ks) JS_FreeCString(ctx, ks);
-            JS_FreeValue(ctx, k);
-            JS_FreeValue(ctx, v);
-            JS_FreeValue(ctx, fname_override);
-            JS_FreeValue(ctx, pair);
+    for (guint i = 0; i < entries->len; i++) {
+        const ns_form_entry *e = &g_array_index(entries, ns_form_entry, i);
+        gsize name_len = 0;
+        g_autofree char *name = ns_form_normalize_newlines(e->name,
+                                                           e->name_len,
+                                                           &name_len);
+        g_string_append_printf(body, "--%s\r\n", boundary);
+        g_string_append(body, "Content-Disposition: form-data; name=\"");
+        ns_form_multipart_escape(&cs, body, name, name_len);
+        g_string_append_c(body, '"');
+        if (e->is_file) {
+            g_string_append(body, "; filename=\"");
+            ns_form_multipart_escape(&cs, body, e->value, e->value_len);
+            g_string_append_printf(body, "\"\r\nContent-Type: %s\r\n\r\n",
+                e->file_type && *e->file_type ? e->file_type
+                                              : "application/octet-stream");
+            if (e->file_bytes)
+                g_string_append_len(body, e->file_bytes, (gssize)e->file_len);
+        } else {
+            gsize value_len = 0;
+            g_autofree char *value = ns_form_normalize_newlines(
+                e->value, e->value_len, &value_len);
+            g_string_append(body, "\r\n\r\n");
+            ns_form_charset_encode(&cs, body, value, value_len);
         }
+        g_string_append(body, "\r\n");
     }
-    JS_FreeValue(ctx, entries);
+    ns_form_charset_close(&cs);
     g_string_append_printf(body, "--%s--\r\n", boundary);
     g_free(boundary);
-    if (out_len) *out_len = body->len;
+    *out_len = body->len;
     return g_string_free(body, FALSE);
+}
+
+static char *
+ns_js_form_data_serialize(JSContext *ctx, JSValueConst fd,
+                          gsize *out_len, char **out_content_type)
+{
+    GArray *entries = ns_form_entries_read(ctx, fd);
+    gsize len = 0;
+    char *body = ns_form_encode_multipart(entries, "UTF-8", &len,
+                                          out_content_type);
+    g_array_free(entries, TRUE);
+    if (out_len) *out_len = len;
+    return body;
 }
 
 static char *
@@ -24255,6 +24485,7 @@ static void ns_form_collect_controls(const ns_node *form, const ns_node *scan,
                                      const ns_node *doc, JSContext *ctx,
                                      JSValue arr, uint32_t *idx, int depth,
                                      gboolean include_image);
+static gboolean ns_node_is_image_input(const ns_node *el);
 
 static JSValue
 ns_form_data_delete(JSContext *ctx, JSValueConst this_val,
@@ -24374,8 +24605,131 @@ ns_form_data_append_select(JSContext *ctx, JSValueConst fd,
 }
 
 static void
+ns_form_data_append_value(JSContext *ctx, JSValueConst fd, const char *name,
+                          JSValueConst value)
+{
+    JSValueConst args[2] = { JS_NewString(ctx, name ? name : ""), value };
+    JSValue r = ns_form_data_append(ctx, fd, 2, args);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, (JSValue)args[0]);
+}
+
+static JSValue
+ns_form_empty_file(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue file_ctor = JS_GetPropertyStr(ctx, global, "File");
+    JS_FreeValue(ctx, global);
+    JSValue parts = JS_NewArray(ctx);
+    JSValue opts = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, opts, "type",
+                      JS_NewString(ctx, "application/octet-stream"));
+    JSValueConst args[3] = { parts, JS_NewString(ctx, ""), opts };
+    JSValue file = JS_IsConstructor(ctx, file_ctor)
+        ? JS_CallConstructor(ctx, file_ctor, 3, args) : JS_UNDEFINED;
+    if (JS_IsException(file)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        file = JS_UNDEFINED;
+    }
+    JS_FreeValue(ctx, (JSValue)args[1]);
+    JS_FreeValue(ctx, parts);
+    JS_FreeValue(ctx, opts);
+    JS_FreeValue(ctx, file_ctor);
+    return file;
+}
+
+static void
+ns_form_data_append_files(JSContext *ctx, JSValueConst fd, JSValueConst elv,
+                          const char *name)
+{
+    JSValue files = JS_GetPropertyStr(ctx, elv, "files");
+    uint32_t n = JS_IsObject(files) ? ns_js_array_length(ctx, files) : 0;
+    for (uint32_t i = 0; i < n; i++) {
+        JSValue f = JS_GetPropertyUint32(ctx, files, i);
+        if (JS_IsObject(f)) ns_form_data_append_value(ctx, fd, name, f);
+        JS_FreeValue(ctx, f);
+    }
+    if (n == 0) {
+        JSValue empty = ns_form_empty_file(ctx);
+        if (JS_IsObject(empty)) ns_form_data_append_value(ctx, fd, name, empty);
+        JS_FreeValue(ctx, empty);
+    }
+    JS_FreeValue(ctx, files);
+}
+
+static void
+ns_form_data_append_len(JSContext *ctx, JSValueConst fd,
+                        const char *name, gsize name_len,
+                        const char *value, gsize value_len)
+{
+    JSValueConst args[2] = {
+        JS_NewStringLen(ctx, name ? name : "", name ? name_len : 0),
+        JS_NewStringLen(ctx, value ? value : "", value ? value_len : 0),
+    };
+    JSValue r = ns_form_data_append(ctx, fd, 2, args);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, (JSValue)args[0]);
+    JS_FreeValue(ctx, (JSValue)args[1]);
+}
+
+static const char *
+ns_form_control_value_len(const ns_node *el, gsize *len)
+{
+    *len = 0;
+    const char *v = NULL;
+    if ((ns_node_is_tag(el, NS_TAG_TEXTAREA) ||
+         ns_input_value_is_dirty_mode(el)) &&
+        ns_element_get_attr(el, ns_node_is_tag(el, NS_TAG_TEXTAREA)
+                                    ? "data-nd-vdirty" : "data-nd-value"))
+        v = ns_element_get_attr_len(el, "data-nd-value", len);
+    if (!v && !ns_node_is_tag(el, NS_TAG_TEXTAREA))
+        v = ns_element_get_attr_len(el, "value", len);
+    return v;
+}
+
+static gboolean
+ns_form_field_in_datalist(const ns_node *el)
+{
+    for (const ns_node *p = el->parent; p; p = p->parent)
+        if (ns_node_is_tag(p, NS_TAG_DATALIST)) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_form_field_takes_dirname(const ns_node *el, const char *type)
+{
+    if (ns_node_is_tag(el, NS_TAG_TEXTAREA)) return TRUE;
+    if (!ns_node_is_tag(el, NS_TAG_INPUT)) return FALSE;
+    static const char *const types[] = {
+        "hidden", "text", "search", "tel", "url", "email", "password",
+        "submit", "reset", "button",
+    };
+    if (!type || !*type) return TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(types); i++)
+        if (g_ascii_strcasecmp(type, types[i]) == 0) return TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(kw_input_types); i++)
+        if (g_ascii_strcasecmp(type, kw_input_types[i]) == 0) return FALSE;
+    return TRUE;
+}
+
+static void
+ns_form_data_append_image_coords(JSContext *ctx, JSValueConst fd,
+                                 const char *name)
+{
+    g_autofree char *nx = g_strconcat(name ? name : "", name && *name ? "." : "",
+                                      "x", NULL);
+    g_autofree char *ny = g_strconcat(name ? name : "", name && *name ? "." : "",
+                                      "y", NULL);
+    ns_form_data_append_pair(ctx, fd, nx, "0");
+    ns_form_data_append_pair(ctx, fd, ny, "0");
+}
+
+static void
 ns_form_data_populate_from_form(JSContext *ctx, JSValueConst fd,
-                                const ns_node *form, const ns_node *submitter)
+                                const ns_node *form, const ns_node *submitter,
+                                const char *encoding)
 {
     JSValue controls = JS_NewArray(ctx);
     uint32_t i = 0;
@@ -24386,70 +24740,133 @@ ns_form_data_populate_from_form(JSContext *ctx, JSValueConst fd,
     for (uint32_t k = 0; k < len; k++) {
         JSValue elv = JS_GetPropertyUint32(ctx, controls, k);
         const ns_node *el = ns_unwrap_element(elv);
-        if (!el) { JS_FreeValue(ctx, elv); continue; }
-        if (el->name && g_ascii_strcasecmp(el->name, "object") == 0) {
-            JS_FreeValue(ctx, elv); continue;
+        if (!el || !el->name || ns_node_is_tag(el, NS_TAG_OBJECT) ||
+            ns_node_is_tag(el, NS_TAG_FIELDSET) ||
+            ns_node_is_tag(el, NS_TAG_OUTPUT) ||
+            ns_form_field_in_datalist(el) ||
+            ns_element_effectively_disabled(el)) {
+            JS_FreeValue(ctx, elv);
+            continue;
         }
-        if (ns_element_effectively_disabled(el)) { JS_FreeValue(ctx, elv); continue; }
         const char *name = ns_element_get_attr(el, "name");
-        const char *type = ns_element_get_attr(el, "type");
-        gboolean is_button =
-            g_ascii_strcasecmp(el->name, "button") == 0 ||
-            (type && (g_ascii_strcasecmp(type, "submit") == 0 ||
-                      g_ascii_strcasecmp(type, "button") == 0 ||
-                      g_ascii_strcasecmp(type, "reset") == 0 ||
-                      g_ascii_strcasecmp(type, "image") == 0));
-        if (is_button) {
+        const char *type = ns_node_is_tag(el, NS_TAG_INPUT)
+                         ? ns_element_get_attr(el, "type") : NULL;
+        if (ns_node_is_submit_trigger(el) || ns_node_is_tag(el, NS_TAG_BUTTON) ||
+            (type && (g_ascii_strcasecmp(type, "button") == 0 ||
+                      g_ascii_strcasecmp(type, "reset") == 0))) {
             if (el == submitter) {
-                gboolean is_image = g_ascii_strcasecmp(el->name, "input") == 0 &&
-                    type && g_ascii_strcasecmp(type, "image") == 0;
-                if (is_image) {
-                    if (name && *name) {
-                        char *nx = g_strconcat(name, ".x", NULL);
-                        char *ny = g_strconcat(name, ".y", NULL);
-                        ns_form_data_append_pair(ctx, fd, nx, "0");
-                        ns_form_data_append_pair(ctx, fd, ny, "0");
-                        g_free(nx); g_free(ny);
-                    } else {
-                        ns_form_data_append_pair(ctx, fd, "x", "0");
-                        ns_form_data_append_pair(ctx, fd, "y", "0");
-                    }
-                } else if (name && *name) {
+                if (ns_node_is_image_input(el))
+                    ns_form_data_append_image_coords(ctx, fd, name);
+                else if (name && *name) {
                     const char *v = ns_element_get_attr(el, "value");
                     ns_form_data_append_pair(ctx, fd, name, v ? v : "");
                 }
             }
-            JS_FreeValue(ctx, elv); continue;
-        }
-        if (!name || !*name) { JS_FreeValue(ctx, elv); continue; }
-        if (type && g_ascii_strcasecmp(type, "file") == 0) {
-            JS_FreeValue(ctx, elv); continue;
-        }
-        if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
-                     g_ascii_strcasecmp(type, "radio") == 0)) {
-            if (!ns_input_is_checked(el)) { JS_FreeValue(ctx, elv); continue; }
-        }
-        char *owned_value = NULL;
-        const char *value = NULL;
-        if (g_ascii_strcasecmp(el->name, "select") == 0) {
-            ns_form_data_append_select(ctx, fd, el, name);
             JS_FreeValue(ctx, elv);
             continue;
-        } else if (g_ascii_strcasecmp(el->name, "textarea") == 0) {
-            owned_value = ns_textarea_value_dup(el);
-            value = owned_value ? owned_value : "";
-        } else {
-            value = ns_input_used_value(el);
-            if (!value && type &&
-                (g_ascii_strcasecmp(type, "checkbox") == 0 ||
-                 g_ascii_strcasecmp(type, "radio") == 0))
-                value = "on";
         }
-        ns_form_data_append_pair(ctx, fd, name, value ? value : "");
+        if (!name || !*name) { JS_FreeValue(ctx, elv); continue; }
+        gsize name_len = 0;
+        name = ns_element_get_attr_len(el, "name", &name_len);
+        gsize value_len = 0;
+        const char *value = ns_form_control_value_len(el, &value_len);
+        if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
+                     g_ascii_strcasecmp(type, "radio") == 0)) {
+            if (ns_input_is_checked(el)) {
+                const char *v = ns_element_get_attr_len(el, "value", &value_len);
+                ns_form_data_append_len(ctx, fd, name, name_len,
+                                        v ? v : "on", v ? value_len : 2);
+            }
+        } else if (ns_node_is_tag(el, NS_TAG_SELECT)) {
+            ns_form_data_append_select(ctx, fd, el, name);
+        } else if (type && g_ascii_strcasecmp(type, "file") == 0) {
+            ns_form_data_append_files(ctx, fd, elv, name);
+        } else if (type && g_ascii_strcasecmp(type, "hidden") == 0 &&
+                   g_ascii_strcasecmp(name, "_charset_") == 0) {
+            ns_form_data_append_pair(ctx, fd, name, encoding);
+        } else if (ns_node_is_tag(el, NS_TAG_TEXTAREA) && !value) {
+            g_autofree char *text = ns_textarea_value_dup(el);
+            ns_form_data_append_len(ctx, fd, name, name_len,
+                                    text ? text : "", text ? strlen(text) : 0);
+        } else {
+            ns_form_data_append_len(ctx, fd, name, name_len,
+                                    value ? value : "", value ? value_len : 0);
+        }
+        const char *dirname = ns_element_get_attr(el, "dirname");
+        if (dirname && *dirname && ns_form_field_takes_dirname(el, type))
+            ns_form_data_append_pair(ctx, fd, dirname, ns_css_node_dir(el));
         JS_FreeValue(ctx, elv);
-        g_free(owned_value);
     }
     JS_FreeValue(ctx, controls);
+}
+
+static JSValue
+ns_form_data_new_empty(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "FormData");
+    JS_FreeValue(ctx, global);
+    JSValue fd = JS_IsConstructor(ctx, ctor)
+        ? JS_CallConstructor(ctx, ctor, 0, NULL) : JS_UNDEFINED;
+    JS_FreeValue(ctx, ctor);
+    return fd;
+}
+
+static JSValue
+ns_form_data_clone(JSContext *ctx, JSValueConst fd)
+{
+    JSValue copy = ns_form_data_new_empty(ctx);
+    if (!JS_IsObject(copy)) return copy;
+    JSValue entries = JS_GetPropertyStr(ctx, fd, "_entries");
+    JSValue out = JS_NewArray(ctx);
+    uint32_t n = JS_IsArray(entries) ? ns_js_array_length(ctx, entries) : 0;
+    for (uint32_t i = 0; i < n; i++) {
+        JSValue pair = JS_GetPropertyUint32(ctx, entries, i);
+        JSValue dup = JS_NewArray(ctx);
+        JS_SetPropertyUint32(ctx, dup, 0, JS_GetPropertyUint32(ctx, pair, 0));
+        JS_SetPropertyUint32(ctx, dup, 1, JS_GetPropertyUint32(ctx, pair, 1));
+        JS_SetPropertyUint32(ctx, out, i, dup);
+        JS_FreeValue(ctx, pair);
+    }
+    JS_SetPropertyStr(ctx, copy, "_entries", out);
+    JS_FreeValue(ctx, entries);
+    return copy;
+}
+
+static void
+ns_form_fire_formdata(ns_js *js, JSContext *ctx, const ns_node *form,
+                      JSValueConst fd)
+{
+    if (!js || js->halted) return;
+    JSValue event = ns_make_event(ctx, "formdata", form);
+    JS_SetPropertyStr(ctx, event, "bubbles", JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "formData", JS_DupValue(ctx, fd));
+    ns_event_adopt_interface(ctx, event, "FormDataEvent");
+    ns_js_dispatch_built_event(js, form, "formdata", event, NULL);
+}
+
+static JSValue
+ns_form_construct_entry_list(JSContext *ctx, const ns_node *form,
+                             const ns_node *submitter, const char *encoding)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !form) return JS_NULL;
+    if (!js->forms_constructing_entries)
+        js->forms_constructing_entries = g_hash_table_new(g_direct_hash,
+                                                          g_direct_equal);
+    if (g_hash_table_contains(js->forms_constructing_entries, form))
+        return JS_NULL;
+    JSValue fd = ns_form_data_new_empty(ctx);
+    if (!JS_IsObject(fd)) return fd;
+    g_hash_table_add(js->forms_constructing_entries, (gpointer)form);
+    ns_form_data_populate_from_form(ctx, fd, form, submitter,
+                                    encoding ? encoding : "UTF-8");
+    ns_form_fire_formdata(js, ctx, form, fd);
+    if (js->forms_constructing_entries)
+        g_hash_table_remove(js->forms_constructing_entries, form);
+    JSValue entries = ns_form_data_clone(ctx, fd);
+    JS_FreeValue(ctx, fd);
+    return entries;
 }
 
 static JSValue
@@ -24482,7 +24899,20 @@ ns_window_form_data_ctor(JSContext *ctx, JSValueConst this_val,
                     "FormData: the submitter is not owned by this form");
             }
         }
-        ns_form_data_populate_from_form(ctx, obj, form, submitter);
+        JSValue list = ns_form_construct_entry_list(ctx, form, submitter,
+                                                    "UTF-8");
+        if (JS_IsException(list)) {
+            JS_FreeValue(ctx, obj);
+            return list;
+        }
+        if (!JS_IsObject(list)) {
+            JS_FreeValue(ctx, obj);
+            return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+                "FormData: the form is already constructing its entry list");
+        }
+        JS_SetPropertyStr(ctx, obj, "_entries",
+                          JS_GetPropertyStr(ctx, list, "_entries"));
+        JS_FreeValue(ctx, list);
     }
     return obj;
 }
@@ -35313,6 +35743,27 @@ ns_submit_event_ctor(JSContext *ctx, JSValueConst this_val,
     return ev;
 }
 
+static JSValue
+ns_form_data_event_ctor(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    JSValue fd = argc >= 2 && JS_IsObject(argv[1])
+        ? JS_GetPropertyStr(ctx, argv[1], "formData") : JS_UNDEFINED;
+    if (JS_IsException(fd)) return fd;
+    if (!ns_js_value_is_form_data(ctx, fd)) {
+        JS_FreeValue(ctx, fd);
+        return JS_ThrowTypeError(ctx,
+            "FormDataEvent: formData must be a FormData object");
+    }
+    JSValue ev = ns_event_ctor(ctx, this_val, argc, argv);
+    if (JS_IsException(ev)) {
+        JS_FreeValue(ctx, fd);
+        return ev;
+    }
+    JS_SetPropertyStr(ctx, ev, "formData", fd);
+    return ev;
+}
+
 static int
 ns_event_init_string(JSContext *ctx, JSValueConst ev, int argc,
                      JSValueConst *argv, const char *member)
@@ -45449,6 +45900,19 @@ ns_input_get_files(JSContext *ctx, JSValueConst this_val)
         JS_DupValue(ctx, arr),
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     return arr;
+}
+
+static JSValue
+ns_input_set_files(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!ns_node_is_tag(n, NS_TAG_INPUT) || !JS_IsObject(val))
+        return JS_UNDEFINED;
+    const char *type = ns_element_get_attr(n, "type");
+    if (!type || g_ascii_strcasecmp(type, "file") != 0) return JS_UNDEFINED;
+    JS_DefinePropertyValueStr(ctx, this_val, "__nd_files_cache",
+        JS_DupValue(ctx, val), JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    return JS_UNDEFINED;
 }
 
 static ns_node *
@@ -58024,7 +58488,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("validationMessage", ns_element_get_validation_message, NULL),
     JS_CGETSET_DEF("willValidate",      ns_element_get_will_validate,     NULL),
     JS_CGETSET_DEF("labels",            ns_element_get_labels,            NULL),
-    JS_CGETSET_DEF("files",             ns_input_get_files,               NULL),
+    JS_CGETSET_DEF("files",             ns_input_get_files,               ns_input_set_files),
     JS_CGETSET_DEF("indeterminate",     ns_element_get_indeterminate,     ns_element_set_indeterminate),
     JS_CGETSET_DEF("selectionStart",    ns_element_get_selection_start,   ns_element_set_selection_start),
     JS_CGETSET_DEF("selectionEnd",      ns_element_get_selection_end,     ns_element_set_selection_end),
@@ -65123,6 +65587,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     for (gsize i = 0; i < G_N_ELEMENTS(event_subclasses); i++)
         ns_bind_ctor(ctx, global, event_subclasses[i], ns_event_ctor, 2);
     ns_bind_ctor(ctx, global, "CookieChangeEvent", ns_cookie_change_event_ctor, 2);
+    ns_bind_ctor(ctx, global, "FormDataEvent", ns_form_data_event_ctor, 2);
     ns_bind_ctor(ctx, global, "FocusEvent",       ns_focus_event_ctor,       2);
     ns_bind_ctor(ctx, global, "AnimationEvent",   ns_animation_event_ctor,   2);
     ns_bind_ctor(ctx, global, "TransitionEvent",  ns_transition_event_ctor,  2);
@@ -70149,6 +70614,7 @@ ns_js_free(ns_js *js)
         g_hash_table_destroy(js->frame_csps);
         js->frame_csps = NULL;
     }
+    g_clear_pointer(&js->forms_constructing_entries, g_hash_table_destroy);
     if (js->frame_posts) {
         g_hash_table_destroy(js->frame_posts);
         js->frame_posts = NULL;
@@ -77254,6 +77720,165 @@ ns_js_post_form_frame(ns_js *js, const ns_node *form, const char *url,
 {
     return ns_js_post_frame(js, form ? ns_js_node_frame(form->parent) : NULL,
                             url, body, body_len, content_type);
+}
+
+static char *
+ns_form_pick_encoding(JSContext *ctx, const ns_node *form)
+{
+    const char *picked = NULL;
+    const char *accept = ns_element_get_attr(form, "accept-charset");
+    if (accept) {
+        g_auto(GStrv) labels = g_strsplit_set(accept, " \t\n\f\r", -1);
+        for (guint i = 0; labels[i] && !picked; i++)
+            if (*labels[i]) picked = ns_html_encoding_for_label(labels[i]);
+    } else {
+        const ns_node *doc = ns_node_root(form);
+        if (doc && doc->kind == NS_NODE_DOCUMENT &&
+            !(doc->flags & NS_NODE_FRAGMENT)) {
+            JSValue dv = ns_make_element(ctx, doc);
+            JSValue cs = JS_GetPropertyStr(ctx, dv, "characterSet");
+            const char *label = JS_IsString(cs) ? JS_ToCString(ctx, cs) : NULL;
+            if (label) {
+                picked = ns_html_encoding_for_label(label);
+                JS_FreeCString(ctx, label);
+            }
+            JS_FreeValue(ctx, cs);
+            JS_FreeValue(ctx, dv);
+        }
+    }
+    if (!picked || g_ascii_strcasecmp(picked, "replacement") == 0 ||
+        g_ascii_strncasecmp(picked, "UTF-16", 6) == 0)
+        picked = "UTF-8";
+    return g_strdup(picked);
+}
+
+static const char *
+ns_form_enctype(const ns_node *form, const ns_node *submitter)
+{
+    const char *v = NULL;
+    if (submitter)
+        v = ns_element_get_attr(submitter, "formenctype");
+    if (!v) v = ns_element_get_attr(form, "enctype");
+    if (v && g_ascii_strcasecmp(v, "multipart/form-data") == 0)
+        return "multipart/form-data";
+    if (v && g_ascii_strcasecmp(v, "text/plain") == 0)
+        return "text/plain";
+    return "application/x-www-form-urlencoded";
+}
+
+static char *
+ns_form_submitter_attr(const ns_node *form, const ns_node *submitter,
+                       const char *form_attr, const char *submitter_attr)
+{
+    const char *v = submitter
+        ? ns_element_get_attr(submitter, submitter_attr) : NULL;
+    if (!v) v = ns_element_get_attr(form, form_attr);
+    return v ? g_strdup(v) : NULL;
+}
+
+gboolean
+ns_js_form_prepare_submission(ns_js *js, const ns_node *form,
+                              const ns_node *submitter,
+                              ns_js_form_submission *out)
+{
+    memset(out, 0, sizeof *out);
+    if (!js || !form || js->halted) return FALSE;
+    if (submitter && (submitter == form || !ns_node_is_submit_trigger(submitter)))
+        submitter = NULL;
+    JSContext *realm = ns_js_node_realm_context(js, form);
+    if (!realm) realm = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    ns_realm_scope scope;
+    ns_js_realm_scope_enter(js, realm, &scope);
+    JSContext *ctx = js->ctx;
+    g_autofree char *encoding = ns_form_pick_encoding(ctx, form);
+    JSValue fd = ns_form_construct_entry_list(ctx, form, submitter, encoding);
+    gboolean ok = JS_IsObject(fd);
+    if (ok) {
+        g_autofree char *method = ns_form_submitter_attr(form, submitter,
+                                                         "method", "formmethod");
+        out->is_post = method && g_ascii_strcasecmp(method, "post") == 0;
+        out->is_dialog = method && g_ascii_strcasecmp(method, "dialog") == 0;
+        out->action = ns_form_submitter_attr(form, submitter,
+                                             "action", "formaction");
+        out->target = ns_form_submitter_attr(form, submitter,
+                                             "target", "formtarget");
+        GArray *entries = ns_form_entries_read(ctx, fd);
+        const char *enctype = out->is_post ? ns_form_enctype(form, submitter)
+                                           : "application/x-www-form-urlencoded";
+        if (strcmp(enctype, "multipart/form-data") == 0) {
+            out->body = ns_form_encode_multipart(entries, encoding,
+                                                 &out->body_len,
+                                                 &out->content_type);
+        } else if (strcmp(enctype, "text/plain") == 0) {
+            out->body = ns_form_encode_text_plain(entries, encoding,
+                                                  &out->body_len);
+            out->content_type = g_strdup("text/plain");
+        } else {
+            out->body = ns_form_encode_urlencoded(entries, encoding,
+                                                  &out->body_len);
+            out->content_type = g_strdup("application/x-www-form-urlencoded");
+        }
+        g_array_free(entries, TRUE);
+    }
+    JS_FreeValue(ctx, fd);
+    ns_js_realm_scope_leave(js, &scope);
+    return ok;
+}
+
+void
+ns_js_form_submission_clear(ns_js_form_submission *sub)
+{
+    if (!sub) return;
+    g_free(sub->action);
+    g_free(sub->target);
+    g_free(sub->body);
+    g_free(sub->content_type);
+    memset(sub, 0, sizeof *sub);
+}
+
+char *
+ns_js_form_get_action_url(const char *action, const char *query)
+{
+    if (!action) return NULL;
+    const char *hash = strchr(action, '#');
+    gsize head = hash ? (gsize)(hash - action) : strlen(action);
+    const char *q = memchr(action, '?', head);
+    gsize base_len = q ? (gsize)(q - action) : head;
+    return g_strdup_printf("%.*s?%s%s", (int)base_len, action,
+                           query ? query : "", hash ? hash : "");
+}
+
+static gboolean
+ns_form_target_leaves_frame(const char *target)
+{
+    return target && (g_ascii_strcasecmp(target, "_top") == 0 ||
+                      g_ascii_strcasecmp(target, "_blank") == 0 ||
+                      g_ascii_strcasecmp(target, "_parent") == 0);
+}
+
+gboolean
+ns_js_form_submit_into_frame(ns_js *js, const ns_node *form,
+                             const char *target, const char *url,
+                             char *body, gsize body_len,
+                             const char *content_type)
+{
+    if (!js || !form || !url) return FALSE;
+    ns_node *named = ns_js_named_frame(js, form, target);
+    const char *frame_url = ns_js_node_frame_url(js, form);
+    if (!named && (!frame_url || ns_form_target_leaves_frame(target)))
+        return FALSE;
+    if (body) {
+        if (named)
+            ns_js_post_frame(js, named, url, body, body_len, content_type);
+        else
+            ns_js_post_form_frame(js, form, url, body, body_len, content_type);
+    } else if (named) {
+        ns_js_navigate_frame(js, named, url);
+    } else {
+        ns_js_navigate_form_frame(js, form, url);
+    }
+    js->mutated = TRUE;
+    return TRUE;
 }
 
 gboolean

@@ -4510,10 +4510,34 @@ ns_browser_take_post(ns_browser *browser, size_t *out_len, char **out_ct)
 }
 
 static gboolean
-browser_form_target_leaves_frame(const char *target)
+browser_legacy_form_submission(ns_browser *b, const ns_node *form,
+                               const ns_node *clicked,
+                               ns_js_form_submission *sub)
 {
-    return target && (g_ascii_strcasecmp(target, "_top") == 0 ||
-                      g_ascii_strcasecmp(target, "_blank") == 0);
+    memset(sub, 0, sizeof *sub);
+    gboolean from_text = clicked && ns_node_is_text_input(clicked);
+    const char *method = ns_element_get_attr(form, "method");
+    const char *formmethod = (clicked && !from_text)
+                             ? ns_element_get_attr(clicked, "formmethod") : NULL;
+    if (formmethod && *formmethod) method = formmethod;
+    sub->is_post = method && g_ascii_strcasecmp(method, "post") == 0;
+    const char *action = ns_element_get_attr(form, "action");
+    const char *formaction = (clicked && !from_text)
+                             ? ns_element_get_attr(clicked, "formaction") : NULL;
+    sub->action = g_strdup(formaction && *formaction ? formaction : action);
+    const char *target = ns_element_get_attr(form, "target");
+    const char *formtarget = (clicked && !from_text)
+                             ? ns_element_get_attr(clicked, "formtarget") : NULL;
+    sub->target = g_strdup(formtarget && *formtarget ? formtarget : target);
+    GString *pairs = g_string_new(NULL);
+    gboolean first = TRUE;
+    ns_form_set_submission_charset(b->doc_charset);
+    ns_form_collect_inputs(form, b->doc, b->doc, pairs, &first, clicked);
+    ns_form_set_submission_charset(NULL);
+    sub->body_len = pairs->len;
+    sub->body = g_string_free(pairs, FALSE);
+    sub->content_type = g_strdup("application/x-www-form-urlencoded");
+    return TRUE;
 }
 
 static void
@@ -4523,7 +4547,6 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
 {
     if (!b || !form || !b->doc) return;
     gboolean from_text = clicked && ns_node_is_text_input(clicked);
-
     const char *method = ns_element_get_attr(form, "method");
     const char *formmethod = (clicked && !from_text)
                              ? ns_element_get_attr(clicked, "formmethod") : NULL;
@@ -4533,95 +4556,68 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
             b->dirty = TRUE;
         return;
     }
-    gboolean is_post = method && g_ascii_strcasecmp(method, "post") == 0;
 
-    const char *action = ns_element_get_attr(form, "action");
-    const char *formaction = (clicked && !from_text)
-                             ? ns_element_get_attr(clicked, "formaction") : NULL;
-    if (formaction && *formaction) action = formaction;
-    const char *target = ns_element_get_attr(form, "target");
-    const char *formtarget = (clicked && !from_text)
-                             ? ns_element_get_attr(clicked, "formtarget") : NULL;
-    if (formtarget && *formtarget) target = formtarget;
-    if (b->js && !ns_js_sandbox_allows_form_navigation(b->js, form, target,
-                                                       user_activated))
+    ns_js_form_submission sub;
+    gboolean prepared = b->js
+        ? ns_js_form_prepare_submission(b->js, form, clicked, &sub)
+        : browser_legacy_form_submission(b, form, clicked, &sub);
+    if (!prepared || sub.is_dialog) {
+        ns_js_form_submission_clear(&sub);
         return;
+    }
+    if (b->js && !ns_js_sandbox_allows_form_navigation(b->js, form, sub.target,
+                                                       user_activated)) {
+        ns_js_form_submission_clear(&sub);
+        return;
+    }
     const char *frame_url = b->js ? ns_js_node_frame_url(b->js, form) : NULL;
-    ns_node *named = b->js ? ns_js_named_frame(b->js, form, target) : NULL;
-    gboolean in_frame = named ||
-        (frame_url && !browser_form_target_leaves_frame(target));
     g_autofree char *base = frame_url ? NULL : browser_document_base(b);
     const char *doc_url = frame_url ? frame_url : b->base_url;
-    char *abs_action = (action && *action)
-        ? ns_url_resolve(base ? base : doc_url, action)
+    const char *resolve_base = base ? base : doc_url;
+    if (!resolve_base || g_str_has_prefix(resolve_base, "about:"))
+        resolve_base = b->base_url;
+    char *abs_action = (sub.action && *sub.action)
+        ? ns_url_resolve(resolve_base, sub.action)
         : g_strdup(doc_url);
-    if (!abs_action) return;
-    if (!browser_allows_navigation_url(b, abs_action)) {
+    if (!abs_action || !browser_allows_navigation_url(b, abs_action) ||
+        (b->js && !ns_js_csp_form_action_allowed(b->js, form, abs_action))) {
         g_free(abs_action);
-        return;
-    }
-    if (b->js && !ns_js_csp_form_action_allowed(b->js, form, abs_action)) {
-        g_free(abs_action);
+        ns_js_form_submission_clear(&sub);
         return;
     }
 
-    const char *accept_charset = ns_element_get_attr(form, "accept-charset");
-    ns_form_set_submission_charset(
-        (accept_charset && *accept_charset) ? accept_charset
-                                            : b->doc_charset);
-
-    if (is_post) {
-        GString *body = g_string_new(NULL);
-        gboolean first = TRUE;
-        ns_form_collect_inputs(form, b->doc, b->doc, body, &first, clicked);
-        ns_form_set_submission_charset(NULL);
-        if (in_frame) {
-            gsize body_len = body->len;
-            char *bytes = g_string_free(body, FALSE);
-            const char *type = "application/x-www-form-urlencoded";
-            if (named)
-                ns_js_post_frame(b->js, named, abs_action, bytes, body_len, type);
-            else
-                ns_js_post_form_frame(b->js, form, abs_action, bytes, body_len,
-                                      type);
+    if (sub.is_post) {
+        if (b->js && ns_js_form_submit_into_frame(b->js, form, sub.target,
+                                                  abs_action, sub.body,
+                                                  sub.body_len,
+                                                  sub.content_type)) {
+            sub.body = NULL;
             g_free(abs_action);
+            ns_js_form_submission_clear(&sub);
             b->dirty = TRUE;
             return;
         }
         g_free(b->pending_post_body);
         g_free(b->pending_post_ct);
-        b->pending_post_len = body->len;
-        b->pending_post_body = g_string_free(body, FALSE);
-        b->pending_post_ct = g_strdup("application/x-www-form-urlencoded");
+        b->pending_post_len = sub.body_len;
+        b->pending_post_body = g_steal_pointer(&sub.body);
+        b->pending_post_ct = g_steal_pointer(&sub.content_type);
         g_free(b->pending_nav);
         b->pending_nav = abs_action;
+        ns_js_form_submission_clear(&sub);
         return;
     }
 
-    GString *query = g_string_new(NULL);
-    gboolean first = TRUE;
-    ns_form_collect_inputs(form, b->doc, b->doc, query, &first, clicked);
-    ns_form_set_submission_charset(NULL);
-
-    char *frag = strchr(abs_action, '#');
-    if (frag) *frag = '\0';
-    char *full;
-    if (query->len == 0) {
-        full = g_strdup(abs_action);
-    } else {
-        full = strchr(abs_action, '?')
-            ? g_strdup_printf("%s&%s", abs_action, query->str)
-            : g_strdup_printf("%s?%s", abs_action, query->str);
-    }
-    g_string_free(query, TRUE);
+    char *full = ns_js_form_get_action_url(abs_action, sub.body);
     g_free(abs_action);
-    if (in_frame) {
-        if (named) ns_js_navigate_frame(b->js, named, full);
-        else       ns_js_navigate_form_frame(b->js, form, full);
+    if (b->js && ns_js_form_submit_into_frame(b->js, form, sub.target, full,
+                                              NULL, 0, NULL)) {
         g_free(full);
+        ns_js_form_submission_clear(&sub);
         b->dirty = TRUE;
         return;
     }
+    ns_js_form_submission_clear(&sub);
     g_free(b->pending_nav);
     b->pending_nav = full;
 }
