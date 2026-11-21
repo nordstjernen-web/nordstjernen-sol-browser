@@ -5770,6 +5770,10 @@ static const char *ns_js_node_doc_base(ns_js *js, const ns_node *el);
 static char *ns_js_resolve_against_base(ns_js *js, const ns_node *n,
                                         const char *fallback, const char *url);
 static void ns_js_rescan_subtree_images(ns_js *js, ns_node *root, int depth);
+static void ns_js_img_attr_mutated(ns_js *js, ns_node *el, const char *name,
+                                   const char *old_value);
+static void ns_js_picture_child_changed(ns_js *js, ns_node *parent,
+                                        ns_node *child, ns_node *following);
 
 static ns_node *
 ns_unwrap_element_mut(JSValueConst val)
@@ -6588,10 +6592,6 @@ ns_element_attr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst val, 
             ns_js_set_attr_recorded_paint_only(js, n, names[magic], s);
         else
             ns_js_set_attr_recorded_len(js, n, names[magic], s, (gssize)slen);
-        if (changed && magic == 3 && ns_node_is_tag(n, NS_TAG_IMG)) {
-            n->flags &= ~NS_NODE_IMG_LOAD_FIRED;
-            ns_js_start_image_load(js, n, s);
-        }
         if (magic == 3 && ns_node_is_navigable_frame(n))
             ns_js_schedule_iframe_src_change(js, n);
         if (magic == 3 && ns_node_is_media_element(n))
@@ -32918,6 +32918,8 @@ ns_js_record_child_change(ns_js *js, ns_node *parent,
         ns_css_mark_childlist_replaced(parent, added, &removed,
                                        removed ? 1 : 0);
     ns_slot_note_child_change(js, parent);
+    if (added) ns_js_picture_child_changed(js, parent, added, added->next_sibling);
+    if (removed) ns_js_picture_child_changed(js, parent, removed, next_sibling);
     ns_mut_record_emit(js, "childList", parent, added, removed,
                        previous_sibling, next_sibling, NULL, NULL, NULL);
 }
@@ -32986,6 +32988,13 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
             removed ? (ns_node *const *)removed->pdata : NULL,
             removed ? removed->len : 0);
     ns_slot_note_child_change(js, parent);
+    for (guint i = 0; added && i < added->len; i++) {
+        ns_node *c = g_ptr_array_index(added, i);
+        ns_js_picture_child_changed(js, parent, c, c->next_sibling);
+    }
+    for (guint i = 0; removed && i < removed->len; i++)
+        ns_js_picture_child_changed(js, parent, g_ptr_array_index(removed, i),
+                                    next_sibling);
     ns_mut_record_emit_child_list_arrays(js, parent, added, removed,
                                          previous_sibling, next_sibling);
 }
@@ -33113,6 +33122,7 @@ ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
     if (js && target && name && !namespace_uri &&
         g_ascii_strcasecmp(name, "loading") == 0)
         ns_js_lazy_frame_loading_changed(js, target);
+    if (!namespace_uri) ns_js_img_attr_mutated(js, target, name, old_value);
     ns_mut_record_emit(js, "attributes", target, NULL, NULL,
                        NULL, NULL, name, namespace_uri, old_value);
 }
@@ -41196,9 +41206,6 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
             ns_node_is_tag(n, NS_TAG_DETAILS))
             ns_js_details_toggle_open(_j, n, TRUE);
         g_free(old_copy);
-        if (changed && g_ascii_strcasecmp(name, "src") == 0 &&
-            ns_node_is_tag(n, NS_TAG_IMG))
-            ns_js_start_image_load(js_from_ctx(ctx), n, val);
         if (g_ascii_strcasecmp(name, "src") == 0 &&
             ns_node_is_media_element(n))
             ns_media_run_load_algorithm(ctx, this_val, n);
@@ -52564,13 +52571,128 @@ ns_js_resolve_against_base(ns_js *js, const ns_node *n, const char *fallback,
     return ns_url_resolve(base ? base : fallback, url);
 }
 
+static char *
+ns_js_img_request_source(const ns_node *el)
+{
+    if (ns_element_get_attr(el, "srcset") ||
+        ns_node_is_tag(el->parent, NS_TAG_PICTURE)) {
+        char *chosen = ns_img_chosen_url(el);
+        if (chosen && *chosen) return chosen;
+        g_free(chosen);
+    }
+    const char *src = ns_element_get_attr(el, "src");
+    return src && *src ? g_strdup(src) : NULL;
+}
+
+static gboolean
+ns_js_img_defers_load(const ns_node *el)
+{
+    const char *loading = ns_element_get_attr(el, "loading");
+    return loading && g_ascii_strcasecmp(loading, "lazy") == 0;
+}
+
+static void
+ns_js_img_relevant_mutation(ns_js *js, ns_node *img)
+{
+    if (!js || !img || !js->image_cache || js->halted) return;
+    if (ns_node_in_template_content(img) || ns_js_node_in_dead_document(js, img))
+        return;
+    img->flags &= ~NS_NODE_IMG_LOAD_FIRED;
+    ns_js_start_image_load(js, img, ns_element_get_attr(img, "src"));
+}
+
+static int
+ns_img_crossorigin_state(const char *v)
+{
+    if (!v) return 0;
+    return g_ascii_strcasecmp(v, "use-credentials") == 0 ? 2 : 1;
+}
+
+static const char *
+ns_img_referrer_policy_state(const char *v)
+{
+    static const char *const tokens[] = {
+        "no-referrer", "no-referrer-when-downgrade", "same-origin", "origin",
+        "strict-origin", "origin-when-cross-origin",
+        "strict-origin-when-cross-origin", "unsafe-url",
+    };
+    if (v)
+        for (guint i = 0; i < G_N_ELEMENTS(tokens); i++)
+            if (g_ascii_strcasecmp(v, tokens[i]) == 0) return tokens[i];
+    return "";
+}
+
+static gboolean
+ns_img_attr_is_relevant(const ns_node *el, const char *name,
+                        const char *old_value)
+{
+    if (g_ascii_strcasecmp(name, "src") == 0 ||
+        g_ascii_strcasecmp(name, "srcset") == 0 ||
+        g_ascii_strcasecmp(name, "sizes") == 0 ||
+        g_ascii_strcasecmp(name, "width") == 0)
+        return TRUE;
+    const char *cur = ns_element_get_attr(el, name);
+    if (g_ascii_strcasecmp(name, "crossorigin") == 0)
+        return ns_img_crossorigin_state(cur) != ns_img_crossorigin_state(old_value);
+    if (g_ascii_strcasecmp(name, "referrerpolicy") == 0)
+        return ns_img_referrer_policy_state(cur) !=
+               ns_img_referrer_policy_state(old_value);
+    return FALSE;
+}
+
+static gboolean
+ns_source_attr_is_relevant(const char *name)
+{
+    static const char *const names[] = {
+        "srcset", "sizes", "media", "type", "width", "height",
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(names); i++)
+        if (g_ascii_strcasecmp(name, names[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static void
+ns_js_picture_imgs_after(ns_js *js, ns_node *from)
+{
+    for (ns_node *c = from; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT && ns_node_is_tag(c, NS_TAG_IMG))
+            ns_js_img_relevant_mutation(js, c);
+}
+
+static void
+ns_js_img_attr_mutated(ns_js *js, ns_node *el, const char *name,
+                       const char *old_value)
+{
+    if (!js || !el || !name || el->kind != NS_NODE_ELEMENT) return;
+    if (ns_node_is_tag(el, NS_TAG_IMG)) {
+        if (ns_img_attr_is_relevant(el, name, old_value))
+            ns_js_img_relevant_mutation(js, el);
+    } else if (ns_node_is_tag(el, NS_TAG_SOURCE) &&
+               ns_node_is_tag(el->parent, NS_TAG_PICTURE) &&
+               ns_source_attr_is_relevant(name)) {
+        ns_js_picture_imgs_after(js, el->next_sibling);
+    }
+}
+
+static void
+ns_js_picture_child_changed(ns_js *js, ns_node *parent, ns_node *child,
+                            ns_node *following)
+{
+    if (!js || !parent || !child || child->kind != NS_NODE_ELEMENT) return;
+    if (!ns_node_is_tag(parent, NS_TAG_PICTURE)) return;
+    if (ns_node_is_tag(child, NS_TAG_IMG))
+        ns_js_img_relevant_mutation(js, child);
+    else if (ns_node_is_tag(child, NS_TAG_SOURCE))
+        ns_js_picture_imgs_after(js, following);
+}
+
 static void
 ns_js_rescan_subtree_images(ns_js *js, ns_node *root, int depth)
 {
     if (!js || !root || depth >= 512) return;
     if (root->kind == NS_NODE_ELEMENT && ns_node_is_tag(root, NS_TAG_IMG)) {
-        const char *src = ns_element_get_attr(root, "src");
-        ns_js_image_load *r = (src && *src && js->js_image_loads)
+        g_autofree char *src = ns_js_img_request_source(root);
+        ns_js_image_load *r = (src && js->js_image_loads)
             ? g_hash_table_lookup(js->js_image_loads, root) : NULL;
         if (r && r->requested_url) {
             char *abs = ns_js_resolve_against_base(js, root, NULL, src);
@@ -52579,6 +52701,11 @@ ns_js_rescan_subtree_images(ns_js *js, ns_node *root, int depth)
                 ns_js_start_image_load(js, root, src);
             }
             g_free(abs);
+        } else if (src && !r && !ns_js_img_defers_load(root) &&
+                   !(root->flags & NS_NODE_IMG_LOAD_FIRED) &&
+                   !ns_node_in_template_content(root) &&
+                   !ns_js_node_in_dead_document(js, root)) {
+            ns_js_start_image_load(js, root, src);
         }
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
@@ -52645,7 +52772,7 @@ ns_js_image_ready_idle(gpointer data)
         g_hash_table_remove(js->js_image_loads, r->el);
         return G_SOURCE_REMOVE;
     }
-    const char *cur_src = ns_element_get_attr(r->el, "src");
+    g_autofree char *cur_src = ns_js_img_request_source(r->el);
     const char *cur_base = ns_js_node_doc_base(js, r->el);
     char *abs_url = NULL;
     if (cur_src && *cur_src && cur_base)
@@ -52697,6 +52824,8 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
 {
     if (!js || !js->image_cache || !el) return;
     if (!el->name || !ns_node_is_tag(el, NS_TAG_IMG)) return;
+    g_autofree char *chosen = ns_js_img_request_source(el);
+    if (chosen) src = chosen;
     if (!js->js_image_loads)
         js->js_image_loads = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                                    NULL, ns_js_image_load_free);
@@ -73665,8 +73794,7 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
         ns_js_script_needs_prepare(js, root->parent);
         if (root->kind != NS_NODE_ELEMENT) return;
     }
-    if (js->js_image_loads && g_hash_table_size(js->js_image_loads) > 0)
-        ns_js_rescan_subtree_images(js, root, 0);
+    ns_js_rescan_subtree_images(js, root, 0);
     if (!ns_js_root_connected(js, root)) return;
     ns_js_start_link_loads(js, root);
     if (js->in_pump) return;
@@ -76328,9 +76456,8 @@ ns_js_track_document_images(ns_js *js, ns_node *n, int depth)
     if (ns_node_is_tag(n, NS_TAG_IMG)) {
         const char *src = ns_element_get_attr(n, "src");
         const char *loading = ns_element_get_attr(n, "loading");
-        if (src && *src && !ns_element_get_attr(n, "srcset") &&
+        if (((src && *src) || ns_element_get_attr(n, "srcset")) &&
             !(loading && g_ascii_strcasecmp(loading, "lazy") == 0) &&
-            !ns_node_is_tag(n->parent, NS_TAG_PICTURE) &&
             !(js->js_image_loads && g_hash_table_contains(js->js_image_loads, n)) &&
             !(n->flags & NS_NODE_IMG_LOAD_FIRED))
             ns_js_start_image_load(js, n, src);

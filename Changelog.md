@@ -3,6 +3,15 @@ Changelog:
 
 1.0.51:
 ======
+* `<img>` elements inserted by `innerHTML`, cloned from a `<template>`
+  or created by `cloneNode` now start loading as soon as they join the
+  document, so `complete`, `naturalWidth` and `naturalHeight` are right
+  and the document `load` event waits for them. `srcset` and
+  `<picture>` images load the source the engine selects, and the
+  spec's relevant mutations reload an image: setting `src` (even to the
+  same value), `srcset`, `sizes` or `width`, a change of `crossorigin`
+  or `referrerpolicy` state, and moving it into or out of a `<picture>`
+  or editing that picture's `<source>` elements.
 * CSS module scripts: `import sheet from "./x.css" with { type: "css" }`
   (and the `import()` form) loads a `text/css` resource and exports a
   constructable `CSSStyleSheet`, ready for `adoptedStyleSheets`. Other
