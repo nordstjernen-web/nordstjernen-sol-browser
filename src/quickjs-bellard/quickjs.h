@@ -970,6 +970,7 @@ JSValue JS_NewArrayBufferCopy(JSContext *ctx, const uint8_t *buf, size_t len);
 void JS_DetachArrayBuffer(JSContext *ctx, JSValueConst obj);
 uint8_t *JS_GetArrayBuffer(JSContext *ctx, size_t *psize, JSValueConst obj);
 JS_BOOL JS_IsArrayBuffer(JSValueConst obj);
+JS_BOOL JS_IsSharedArrayBuffer(JSValueConst obj);
 // returns true or false if obj is an ArrayBuffer, -1 otherwise
 int JS_IsImmutableArrayBuffer(JSValueConst obj);
 // returns 0 if obj is an ArrayBuffer, -1 otherwise

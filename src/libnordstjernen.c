@@ -1417,6 +1417,7 @@ static char *g_pending_permissions_policy;
 static char *g_pending_connection_allowlist;
 static gboolean g_pending_untrusted_transport;
 static char *g_pending_referrer_policy;
+static gboolean g_pending_cross_origin_isolated;
 
 static const char *
 browser_find_meta_referrer(const ns_node *node, int depth)
@@ -1449,6 +1450,35 @@ browser_register_referrer_policy(const ns_node *doc, const char *url)
     ns_net_referrer_policy_register(doc, url, combined);
 }
 
+static gboolean
+browser_header_token_is(const char *value, const char *const *tokens)
+{
+    if (!value) return FALSE;
+    g_autofree char *first = g_strndup(value, strcspn(value, ";,"));
+    g_strstrip(first);
+    for (; *tokens; tokens++)
+        if (g_ascii_strcasecmp(first, *tokens) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+browser_cross_origin_isolated(const char *url, const char *raw_headers)
+{
+    if (!url || !(g_str_has_prefix(url, "https://") ||
+                  g_str_has_prefix(url, "http://localhost") ||
+                  g_str_has_prefix(url, "http://127.0.0.1")))
+        return FALSE;
+    static const char *const coop_ok[] = { "same-origin", NULL };
+    static const char *const coep_ok[] = { "require-corp", "credentialless",
+                                           NULL };
+    g_autofree char *coop =
+        ns_net_raw_header_values(raw_headers, "Cross-Origin-Opener-Policy");
+    g_autofree char *coep =
+        ns_net_raw_header_values(raw_headers, "Cross-Origin-Embedder-Policy");
+    return browser_header_token_is(coop, coop_ok) &&
+           browser_header_token_is(coep, coep_ok);
+}
+
 static ns_browser *
 browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
                        double viewport_height, int settle_ms,
@@ -1469,6 +1499,10 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
 
     browser_register_early_csp(doc, url, csp_header);
     browser_register_referrer_policy(doc, url);
+    gboolean cross_origin_isolated = g_pending_cross_origin_isolated;
+    g_pending_cross_origin_isolated = FALSE;
+    if (cross_origin_isolated)
+        ns_net_coep_register(doc, url);
     if (ns_config_get()->speculative_preload)
         ns_engine_speculative_preload(doc, base, FALSE);
 
@@ -1536,6 +1570,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
             ns_js_set_opener(b->js, g_opener_token, g_opener_origin);
         ns_js_add_csp_header(b->js, csp_header);
         ns_js_set_permissions_policy(b->js, g_pending_permissions_policy);
+        ns_js_set_cross_origin_isolated(b->js, cross_origin_isolated);
         g_clear_pointer(&g_pending_permissions_policy, g_free);
         ns_js_set_connection_allowlist(b->js, base,
                                        g_pending_connection_allowlist);
@@ -2013,6 +2048,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     g_free(g_pending_connection_allowlist);
     g_pending_connection_allowlist =
         ns_net_raw_header_values(resp->raw_headers, "Connection-Allowlist");
+    g_pending_cross_origin_isolated =
+        browser_cross_origin_isolated(resp->final_url ? resp->final_url : url,
+                                      resp->raw_headers);
     g_free(g_pending_referrer_policy);
     g_pending_referrer_policy =
         ns_net_raw_header_values(resp->raw_headers, "Referrer-Policy");
@@ -6099,6 +6137,7 @@ ns_browser_close(ns_browser *browser)
     if (!browser) return;
     ns_net_csp_unregister(browser->doc);
     ns_net_referrer_policy_unregister(browser->doc);
+    ns_net_coep_unregister(browser->doc);
     if (browser->media_events_source)
         g_source_remove(browser->media_events_source);
     if (browser->img_sessions) {

@@ -1156,6 +1156,66 @@ ns_net_referrer_policy_of(const char *doc_url)
     return policy;
 }
 
+static GMutex      g_coep_lock;
+static GHashTable *g_coep_by_origin;
+
+void
+ns_net_coep_register(gconstpointer owner, const char *doc_url)
+{
+    g_autofree char *origin = doc_url ? ns_url_origin_from(doc_url) : NULL;
+    if (!origin || !*origin || strcmp(origin, "null") == 0) return;
+    g_mutex_lock(&g_coep_lock);
+    if (!g_coep_by_origin)
+        g_coep_by_origin = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                 g_free, NULL);
+    g_hash_table_replace(g_coep_by_origin, g_steal_pointer(&origin),
+                         (gpointer)owner);
+    g_mutex_unlock(&g_coep_lock);
+}
+
+void
+ns_net_coep_unregister(gconstpointer owner)
+{
+    g_mutex_lock(&g_coep_lock);
+    if (g_coep_by_origin) {
+        GHashTableIter it;
+        gpointer k, v;
+        g_hash_table_iter_init(&it, g_coep_by_origin);
+        while (g_hash_table_iter_next(&it, &k, &v))
+            if (v == owner) g_hash_table_iter_remove(&it);
+    }
+    g_mutex_unlock(&g_coep_lock);
+}
+
+static gboolean
+ns_net_coep_requires_corp(const char *doc_url)
+{
+    g_autofree char *origin = doc_url ? ns_url_origin_from(doc_url) : NULL;
+    if (!origin || !*origin) return FALSE;
+    g_mutex_lock(&g_coep_lock);
+    gboolean on = g_coep_by_origin &&
+                  g_hash_table_contains(g_coep_by_origin, origin);
+    g_mutex_unlock(&g_coep_lock);
+    return on;
+}
+
+static gboolean
+ns_net_corp_blocks(const char *url, const char *top_url, const char *raw_headers)
+{
+    if (!top_url || !*top_url || !url || ns_url_same_origin(top_url, url))
+        return FALSE;
+    g_autofree char *corp =
+        ns_net_raw_header_values(raw_headers, "Cross-Origin-Resource-Policy");
+    char *value = corp ? g_strstrip(corp) : NULL;
+    if (value && g_ascii_strcasecmp(value, "same-origin") == 0)
+        return TRUE;
+    if (value && g_ascii_strcasecmp(value, "same-site") == 0)
+        return !ns_url_is_same_site(top_url, url);
+    if (value && g_ascii_strcasecmp(value, "cross-origin") == 0)
+        return FALSE;
+    return ns_net_coep_requires_corp(top_url);
+}
+
 static char *
 ns_net_referer_for_request(const char *url, const char *top_url,
                            ns_referer_policy configured)
@@ -7121,6 +7181,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         g_free(h);
     }
 
+    gboolean no_cors_request = FALSE;
     if (request_http) {
         const char *fetch_site;
         if (!request_site_url || !*request_site_url) {
@@ -7152,6 +7213,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         } else {
             fetch_mode = "no-cors";
         }
+        no_cors_request = strcmp(fetch_mode, "no-cors") == 0;
         char *mode_h = g_strdup_printf("Sec-Fetch-Mode: %s", fetch_mode);
         headers = curl_slist_append(headers, mode_h);
         g_free(mode_h);
@@ -7479,6 +7541,11 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     g_free(header_ctx.content_encoding);
     ns_write_ctx_clear(&write_ctx);
     ns_cache_entry_free(cached);
+    if (!resp->error && no_cors_request &&
+        ns_net_corp_blocks(url, top_url, resp->raw_headers)) {
+        if (resp->body) g_byte_array_set_size(resp->body, 0);
+        resp->error = g_strdup("blocked by Cross-Origin-Resource-Policy");
+    }
 
     {
         gint64 fetch_end_us = g_get_monotonic_time();
