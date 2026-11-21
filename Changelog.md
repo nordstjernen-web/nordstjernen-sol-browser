@@ -3,6 +3,13 @@ Changelog:
 
 1.0.51:
 ======
+* Networking: an HTTP/1.x response with neither `Content-Length` nor
+  `Transfer-Encoding` ends at connection close, so a TLS server that closes
+  without `close_notify` no longer turns the whole page into a fetch error
+  (OpenSSL's "unexpected eof"). Framed responses still fail when truncated.
+  This unblocked 3,731 `.https` web-platform-tests that never loaded.
+* `scripts/wpt-full.py --paths-from=FILE` reads test paths or URLs from a
+  file, one per line, to rerun a list of tests.
 * npm package: on x86_64 Linux with glibc 2.39 or newer (Ubuntu 24.04,
   Debian 13, Fedora 40 and newer) `nordstjernen-browser` installs the
   release AppImage, checked against `SHA256SUMS` and unpacked so no FUSE

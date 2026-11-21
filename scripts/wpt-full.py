@@ -39,11 +39,12 @@ def enumerate_tests(wpt_root, prefixes):
         manifest = json.load(f)
     items = []
     walk_manifest(manifest["items"].get("testharness", {}), "", items)
+    prefixes = tuple(p.strip("/") for p in prefixes)
     tests = []
     for url, extras in items:
         if url.endswith(".js"):
             continue
-        if prefixes and not any(url.lstrip("/").startswith(p.strip("/")) for p in prefixes):
+        if prefixes and not url.lstrip("/").startswith(prefixes):
             continue
         tests.append((url, extras.get("timeout") == "long"))
     tests.sort()
@@ -270,8 +271,12 @@ def main():
     p.add_argument("--tsv")
     p.add_argument("--list", action="store_true")
     p.add_argument("--summary-only", action="store_true")
+    p.add_argument("--paths-from")
     p.add_argument("paths", nargs="*")
     args = p.parse_args()
+    if args.paths_from:
+        with open(args.paths_from, encoding="utf-8") as f:
+            args.paths += [line.strip() for line in f if line.strip()]
     os.environ.setdefault("NS_ALLOW_ROOT", "1")
 
     if args.summary_only:
