@@ -3,6 +3,13 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Security: only real loopback addresses count as loopback. A hostname
+  that merely starts with `127.`, such as `127.example.com`, was treated
+  as a trustworthy origin over plain http: it could register a service
+  worker, and the address bar showed it without the "Not secure" chip.
+  The engine and the shell now share one check that parses the address,
+  so `localhost`, `*.localhost`, `127.0.0.0/8` and `::1` qualify and
+  nothing else does.
 * Security: a cross-origin frame or window can no longer reach another
   document's global object through an exception. Calls made through a
   cross-origin window (`postMessage`, `location.href`, `location.replace`,

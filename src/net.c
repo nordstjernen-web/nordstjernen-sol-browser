@@ -1463,16 +1463,6 @@ ns_user_agent_has_client_hints(const char *user_agent)
            !strstr(user_agent, "Ladybird/");
 }
 
-static gboolean
-ns_host_is_loopback(const char *host)
-{
-    return g_ascii_strcasecmp(host, "localhost") == 0 ||
-           g_str_has_suffix(host, ".localhost") ||
-           strcmp(host, "127.0.0.1") == 0 ||
-           strcmp(host, "::1") == 0 ||
-           strcmp(host, "[::1]") == 0;
-}
-
 char *
 ns_net_https_first_upgrade(const char *url)
 {

@@ -32804,10 +32804,7 @@ ns_sw_url_trustworthy(const char *url)
         return TRUE;
     if (g_ascii_strncasecmp(url, "http://", 7) != 0) return FALSE;
     g_autofree char *host = ns_url_host_from(url);
-    return host && (g_ascii_strcasecmp(host, "localhost") == 0 ||
-                    g_str_has_suffix(host, ".localhost") ||
-                    g_str_has_prefix(host, "127.") ||
-                    strcmp(host, "[::1]") == 0);
+    return ns_host_is_loopback(host);
 }
 
 static JSValue
@@ -62965,10 +62962,7 @@ ns_url_is_potentially_trustworthy(const char *url)
     if (g_str_has_prefix(url, "https:")) return TRUE;
     if (!g_str_has_prefix(url, "http:")) return FALSE;
     g_autofree char *host = ns_url_host_from(url);
-    return host && (g_ascii_strcasecmp(host, "localhost") == 0 ||
-                    g_str_has_suffix(host, ".localhost") ||
-                    g_str_has_prefix(host, "127.") ||
-                    strcmp(host, "[::1]") == 0 || strcmp(host, "::1") == 0);
+    return ns_host_is_loopback(host);
 }
 
 static JSValue
