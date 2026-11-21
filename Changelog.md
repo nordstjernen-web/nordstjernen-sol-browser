@@ -3,6 +3,11 @@ Changelog:
 
 1.0.51:
 ======
+* Remote-control (MCP) screenshots no longer show faint lines across the
+  page every 256 device pixels. The capture composited the page tiles at
+  CSS-pixel scale, where tile edges fall inside a pixel; it now renders at
+  the display's device scale, where they line up as on screen, and
+  scales the finished image down.
 * WebGL 2: the overloads that take a view plus `srcOffset` (and a length)
   work: `uniform*v` and `uniformMatrix*fv` (which now also honour
   `transpose` in WebGL 2), `bufferData`, `bufferSubData`,
