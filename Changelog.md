@@ -3,6 +3,19 @@ Changelog:
 
 1.0.51:
 ======
+* Canvas layers: `beginLayer()` and `endLayer()` on the 2D context and
+  `OffscreenCanvasRenderingContext2D`. A layer is drawn into its own
+  group with alpha, compositing and shadows reset, and `endLayer()`
+  composites it onto the canvas with the states that were current at
+  `beginLayer()`, so a group of shapes can be faded or shadowed as one.
+  `restore()` and `endLayer()` throw `InvalidStateError` when they do not
+  match the open layer or `save()`, `reset()` closes open layers, and
+  reading pixels from a canvas with an open layer (`getImageData`,
+  `putImageData`, `drawImage`/`createPattern`/`createImageBitmap` with
+  it as the source, `toDataURL`, `toBlob`, `convertToBlob`,
+  `transferToImageBitmap`) throws `InvalidStateError`. `reset()` also
+  unwinds the `save()` stack it used to leave behind. 54 more canvas
+  web-platform-tests pass.
 * `roundRect()` on the 2D context and `Path2D` follows the spec: radii
   given as `DOMPoint`s or `{x, y}` dictionaries draw elliptical corners
   (they were read as plain numbers, so the corners came out square),

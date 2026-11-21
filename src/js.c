@@ -52403,6 +52403,9 @@ ns_element_toDataURL(JSContext *ctx, JSValueConst this_val,
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el || !js_from_ctx(ctx)) return JS_NewString(ctx, "data:,");
     ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
+    if (ns_canvas_state_layer_open(st))
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "The canvas has an open layer; call endLayer() first.");
     cairo_surface_t *surf = ns_js_canvas_surface(js_from_ctx(ctx), el);
     if (!st || !surf) return JS_NewString(ctx, "data:,");
     if (!st->origin_clean)
@@ -52442,6 +52445,9 @@ ns_element_toBlob(JSContext *ctx, JSValueConst this_val,
     const ns_node *el = ns_unwrap_element(this_val);
     ns_canvas_state *st = el && js_from_ctx(ctx)
         ? ns_canvas_state_for(js_from_ctx(ctx), el) : NULL;
+    if (ns_canvas_state_layer_open(st))
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "The canvas has an open layer; call endLayer() first.");
     if (st && !st->origin_clean)
         return ns_throw_dom_exception(ctx, "SecurityError", 18,
             "Tainted canvases may not be exported.");

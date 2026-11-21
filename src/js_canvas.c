@@ -95,6 +95,7 @@ ns_canvas_state_reset(ns_canvas_state *st, int w, int h)
     st->shadow_r = st->shadow_g = st->shadow_b = st->shadow_a = 0;
     st->shadow_blur = st->shadow_ox = st->shadow_oy = 0;
     st->origin_clean = TRUE;
+    st->layer_depth = 0;
     if (JS_IsObject(st->ctx2d)) ns_ctx2d_init_state(st->jsctx, st->ctx2d);
 }
 
@@ -367,6 +368,30 @@ ns_canvas_throw_dom(JSContext *ctx, const char *name, const char *msg)
     return JS_Throw(ctx, exc);
 }
 
+gboolean
+ns_canvas_state_layer_open(const ns_canvas_state *st)
+{
+    return st && st->layer_depth > 0;
+}
+
+static JSValue
+ns_canvas_throw_layer_open(JSContext *ctx)
+{
+    return ns_canvas_throw_dom(ctx, "InvalidStateError",
+        "The canvas has an open layer; call endLayer() first.");
+}
+
+static gboolean
+ns_canvas_source_layer_open(JSContext *ctx, JSValueConst src)
+{
+    if (!JS_IsObject(src)) return FALSE;
+    const ns_node *n = ns_offscreen_node(src);
+    if (!n) n = ns_unwrap_element(src);
+    ns_js *js = js_from_ctx(ctx);
+    if (!n || !js || !ns_node_is_tag(n, NS_TAG_CANVAS)) return FALSE;
+    return ns_canvas_state_layer_open(ns_canvas_state_for(js, n));
+}
+
 JSValue
 ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
@@ -377,6 +402,15 @@ ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
     if (JS_IsException(promise)) return promise;
     if (argc < 1 || !JS_IsObject(argv[0])) {
         ns_js_promise_reject(ctx, resolvers, "createImageBitmap: source required");
+        return promise;
+    }
+    if (ns_canvas_source_layer_open(ctx, argv[0])) {
+        ns_canvas_throw_layer_open(ctx);
+        JSValue error = JS_GetException(ctx);
+        JS_FreeValue(ctx, JS_Call(ctx, resolvers[1], JS_UNDEFINED, 1, &error));
+        JS_FreeValue(ctx, error);
+        JS_FreeValue(ctx, resolvers[0]);
+        JS_FreeValue(ctx, resolvers[1]);
         return promise;
     }
     int sw = 0, sh = 0;
@@ -467,6 +501,8 @@ ns_offscreen_transferToImageBitmap(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     const ns_node *el = ns_offscreen_node(this_val);
     if (!js || !el) return JS_NULL;
+    if (ns_canvas_state_layer_open(ns_canvas_state_for(js, el)))
+        return ns_canvas_throw_layer_open(ctx);
     cairo_surface_t *src = ns_js_canvas_surface(js, el);
     if (!src) return JS_NULL;
     int w = cairo_image_surface_get_width(src);
@@ -1618,12 +1654,10 @@ static const char *ns_ctx_savable_props[] = {
     "_dashes",
 };
 
-JSValue
-ns_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+static void
+ns_ctx_push_state(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st,
+                  gboolean layer)
 {
-    (void)argc; (void)argv;
-    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (!st) return JS_UNDEFINED;
     cairo_save(st->cr);
     JSValue stack = ns_hget(ctx, this_val, "_stateStack");
     if (!JS_IsArray(stack)) {
@@ -1637,22 +1671,39 @@ ns_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         JS_DefinePropertyValueStr(ctx, snap, ns_ctx_savable_props[i], v,
                                   JS_PROP_C_W_E);
     }
+    if (layer)
+        JS_DefinePropertyValueStr(ctx, snap, "_layer", JS_TRUE, JS_PROP_C_W_E);
     uint32_t n = ns_js_array_length(ctx, stack);
     JS_DefinePropertyValueUint32(ctx, stack, n, snap, JS_PROP_C_W_E);
     JS_FreeValue(ctx, stack);
-    return JS_UNDEFINED;
 }
 
-JSValue
-ns_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+static int
+ns_ctx_top_state_kind(JSContext *ctx, JSValueConst this_val)
 {
-    (void)argc; (void)argv;
-    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (!st) return JS_UNDEFINED;
     JSValue stack = ns_hget(ctx, this_val, "_stateStack");
-    if (!JS_IsArray(stack)) { JS_FreeValue(ctx, stack); return JS_UNDEFINED; }
-    uint32_t n = ns_js_array_length(ctx, stack);
-    if (n == 0) { JS_FreeValue(ctx, stack); return JS_UNDEFINED; }
+    uint32_t n = JS_IsArray(stack) ? ns_js_array_length(ctx, stack) : 0;
+    int kind = 0;
+    if (n > 0) {
+        JSValue snap = JS_GetPropertyUint32(ctx, stack, n - 1);
+        JSValue layer = JS_GetPropertyStr(ctx, snap, "_layer");
+        kind = JS_ToBool(ctx, layer) > 0 ? 2 : 1;
+        JS_FreeValue(ctx, layer);
+        JS_FreeValue(ctx, snap);
+    }
+    JS_FreeValue(ctx, stack);
+    return kind;
+}
+
+static void
+ns_ctx_pop_state(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
+{
+    JSValue stack = ns_hget(ctx, this_val, "_stateStack");
+    uint32_t n = JS_IsArray(stack) ? ns_js_array_length(ctx, stack) : 0;
+    if (n == 0) {
+        JS_FreeValue(ctx, stack);
+        return;
+    }
     JSValue snap = JS_GetPropertyUint32(ctx, stack, n - 1);
     for (gsize i = 0; i < G_N_ELEMENTS(ns_ctx_savable_props); i++) {
         JSValue v = JS_GetPropertyStr(ctx, snap, ns_ctx_savable_props[i]);
@@ -1664,8 +1715,120 @@ ns_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     JS_FreeAtom(ctx, len_atom);
     JS_FreeValue(ctx, stack);
     cairo_restore(st->cr);
+}
+
+static void
+ns_ctx_unwind_states(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
+{
+    int kind;
+    while ((kind = ns_ctx_top_state_kind(ctx, this_val)) != 0) {
+        if (kind == 2) {
+            cairo_pattern_destroy(cairo_pop_group(st->cr));
+            st->layer_depth--;
+        }
+        ns_ctx_pop_state(ctx, this_val, st);
+    }
+    st->layer_depth = 0;
+}
+
+JSValue
+ns_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (!st) return JS_UNDEFINED;
+    ns_ctx_push_state(ctx, this_val, st, FALSE);
     return JS_UNDEFINED;
 }
+
+JSValue
+ns_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (!st) return JS_UNDEFINED;
+    int kind = ns_ctx_top_state_kind(ctx, this_val);
+    if (kind == 2)
+        return ns_canvas_throw_dom(ctx, "InvalidStateError",
+            "restore() cannot close a layer; call endLayer() first.");
+    if (kind == 1) ns_ctx_pop_state(ctx, this_val, st);
+    return JS_UNDEFINED;
+}
+
+JSValue
+ns_ctx_beginLayer(JSContext *ctx, JSValueConst this_val, int argc,
+                  JSValueConst *argv)
+{
+    if (argc >= 1 && !JS_IsUndefined(argv[0]) && !JS_IsNull(argv[0]) &&
+        !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx,
+            "beginLayer: options must be a dictionary");
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (!st) return JS_UNDEFINED;
+    ns_ctx_push_state(ctx, this_val, st, TRUE);
+    ns_hset(ctx, this_val, "globalAlpha", JS_NewFloat64(ctx, 1));
+    ns_hset(ctx, this_val, "globalCompositeOperation",
+            JS_NewString(ctx, "source-over"));
+    ns_hset(ctx, this_val, "shadowColor", JS_NewString(ctx, "rgba(0, 0, 0, 0)"));
+    ns_hset(ctx, this_val, "shadowBlur", JS_NewFloat64(ctx, 0));
+    ns_hset(ctx, this_val, "shadowOffsetX", JS_NewFloat64(ctx, 0));
+    ns_hset(ctx, this_val, "shadowOffsetY", JS_NewFloat64(ctx, 0));
+    ns_hset(ctx, this_val, "filter", JS_NewString(ctx, "none"));
+    cairo_push_group(st->cr);
+    st->layer_depth++;
+    return JS_UNDEFINED;
+}
+
+typedef struct ns_draw_layer_ud {
+    JSContext *ctx;
+    JSValueConst this_val;
+    ns_canvas_state *st;
+    cairo_pattern_t *layer;
+    double ga;
+} ns_draw_layer_ud;
+
+static void
+ns_draw_layer(cairo_t *cr, void *vud)
+{
+    ns_draw_layer_ud *u = vud;
+    cairo_save(cr);
+    ns_ctx_apply_draw_operator(u->ctx, u->this_val, u->st, cr);
+    cairo_set_source(cr, u->layer);
+    if (u->ga < 1.0 - 1e-6) cairo_paint_with_alpha(cr, u->ga);
+    else                     cairo_paint(cr);
+    cairo_restore(cr);
+}
+
+JSValue
+ns_ctx_endLayer(JSContext *ctx, JSValueConst this_val, int argc,
+                JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (!st) return JS_UNDEFINED;
+    if (ns_ctx_top_state_kind(ctx, this_val) != 2)
+        return ns_canvas_throw_dom(ctx, "InvalidStateError",
+            "endLayer() has no matching beginLayer().");
+    cairo_pattern_t *layer = cairo_pop_group(st->cr);
+    st->layer_depth--;
+    ns_ctx_pop_state(ctx, this_val, st);
+    ns_ctx_sync_styles(ctx, this_val, st);
+    cairo_matrix_t ctm, identity;
+    cairo_get_matrix(st->cr, &ctm);
+    cairo_matrix_init_identity(&identity);
+    cairo_pattern_set_matrix(layer, &identity);
+    cairo_identity_matrix(st->cr);
+    ns_draw_layer_ud u = {
+        .ctx = ctx, .this_val = this_val, .st = st, .layer = layer,
+        .ga = ns_ctx_global_alpha(ctx, this_val),
+    };
+    ns_ctx_with_shadow(ctx, this_val, st, ns_draw_layer, &u);
+    cairo_set_matrix(st->cr, &ctm);
+    cairo_pattern_destroy(layer);
+    ns_js_request_repaint(js_from_ctx(ctx));
+    return JS_UNDEFINED;
+}
+
 
 JSValue
 ns_ctx_translate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
@@ -2396,6 +2559,8 @@ ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowTypeError(ctx,
             "Failed to execute 'drawImage' on 'CanvasRenderingContext2D': "
             "argument 1 is not a valid image source.");
+    if (ns_canvas_source_layer_open(ctx, argv[0]))
+        return ns_canvas_throw_layer_open(ctx);
     if (argc < 3) return JS_UNDEFINED;
     int sw_total = 0, sh_total = 0;
     gboolean origin_clean = TRUE;
@@ -2457,6 +2622,8 @@ ns_ctx_createPattern(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
     if (argc < 1 || !JS_IsObject(argv[0])) return JS_NULL;
+    if (ns_canvas_source_layer_open(ctx, argv[0]))
+        return ns_canvas_throw_layer_open(ctx);
     int iw = 0, ih = 0;
     gboolean origin_clean = TRUE;
     cairo_surface_t *probe = ns_ctx_drawimage_source(ctx, argv[0], &iw, &ih,
@@ -2555,6 +2722,7 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
     JS_ToInt32(ctx, &sw, argv[2]);
     JS_ToInt32(ctx, &sh, argv[3]);
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (ns_canvas_state_layer_open(st)) return ns_canvas_throw_layer_open(ctx);
     if (st && !st->origin_clean)
         return ns_canvas_throw_dom(ctx, "SecurityError",
             "The canvas has been tainted by cross-origin data.");
@@ -2609,6 +2777,8 @@ JSValue
 ns_ctx_putImageData(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
+    if (ns_canvas_state_layer_open(ns_ctx_state(ctx, this_val)))
+        return ns_canvas_throw_layer_open(ctx);
     if (argc < 3 || !JS_IsObject(argv[0])) return JS_UNDEFINED;
     JSValue wv = JS_GetPropertyStr(ctx, argv[0], "width");
     JSValue hv = JS_GetPropertyStr(ctx, argv[0], "height");
@@ -2884,8 +3054,10 @@ ns_ctx_reset(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
+    ns_ctx_unwind_states(ctx, this_val, st);
     cairo_save(st->cr);
     cairo_identity_matrix(st->cr);
+    cairo_reset_clip(st->cr);
     cairo_set_operator(st->cr, CAIRO_OPERATOR_CLEAR);
     cairo_paint(st->cr);
     cairo_restore(st->cr);
@@ -3689,7 +3861,11 @@ ns_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
     gboolean rejected = FALSE;
     if (el && js_from_ctx(ctx)) {
         ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
-        if (st && !st->origin_clean) {
+        if (ns_canvas_state_layer_open(st)) {
+            ns_canvas_throw_layer_open(ctx);
+            result = JS_GetException(ctx);
+            rejected = TRUE;
+        } else if (st && !st->origin_clean) {
             ns_canvas_throw_dom(ctx, "SecurityError",
                                 "Tainted canvases may not be exported.");
             result = JS_GetException(ctx);

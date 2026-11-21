@@ -38,6 +38,7 @@ typedef struct ns_canvas_state {
     JSRuntime *rt;
     ns_node *owned_node;
     int context_kind;
+    int layer_depth;
 } ns_canvas_state;
 
 typedef struct ns_path2d {
@@ -541,6 +542,11 @@ JSValue
 ns_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue
 ns_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
+JSValue
+ns_ctx_beginLayer(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
+JSValue
+ns_ctx_endLayer(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
+gboolean ns_canvas_state_layer_open(const ns_canvas_state *st);
 JSValue
 ns_ctx_translate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue
