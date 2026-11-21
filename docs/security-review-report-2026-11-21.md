@@ -8,7 +8,7 @@ numbers in §5 are theirs. Two parallel reviewers did the reading: one on
 memory safety, one on web policy, network and the process boundary.
 
 The review itself changed no source file. M1 and C1 were fixed afterwards on
-request, and C2 after that; nothing else is fixed.
+request, and C2 and M2 after that; nothing else is fixed.
 
 ## 1. Summary
 
@@ -19,7 +19,7 @@ request, and C2 after that; nothing else is fixed.
 - **One high-severity memory bug: a Web Audio out-of-bounds read (M1).** Any
   page can trigger it with no interaction. Fixed (`1f012fa8`) and the fix
   was run.
-- **Three medium WebGL findings (M2–M4):** uninitialised GPU storage handed
+- **Three medium WebGL findings (M2–M4; M2 fixed):** uninitialised GPU storage handed
   to the page, and two gaps in draw-call bounds validation.
 - **One medium policy finding (C2):** a hostname that starts with `127.` is
   treated as loopback, so `http://127.example.com/` counts as a secure
@@ -35,7 +35,7 @@ request, and C2 after that; nothing else is fixed.
 |---|---------|----------|----------|----------|
 | C1 | Exception thrown in the target realm leaks that realm to a cross-origin caller | any framed or popup document | critical | run on the headless browser; fixed |
 | M1 | Web Audio `_evn` wraps the bounds check; out-of-bounds read returned to script | any web page | high | run; fixed in `1f012fa8` |
-| M2 | WebGL hands out GL storage that was never initialised | any web page | medium | traced in source; not run |
+| M2 | WebGL hands out GL storage that was never initialised | any web page | medium | run; fixed |
 | M3 | WebGL2 index validation uses a stale shadow of the element buffer | any web page | medium (high on non-robust contexts) | traced in source; not run |
 | M4 | WebGL buffer sizes tracked by GL name; deleted buffer still attached to a vertex array | any web page | low–medium | plausible; needs driver name reuse |
 | C2 | `127.`-prefixed hostnames treated as loopback in three places | any web page on such a host | medium | run; fixed |
@@ -181,7 +181,7 @@ data from the same process, including other frames' realms.
 **Still worth doing.** Keep automation state in a C struct behind a class id
 and brand-check `this`, so the page cannot write it at all.
 
-### M2. WebGL hands the page GL storage that was never initialised (medium)
+### M2. WebGL hands the page GL storage that was never initialised (medium, fixed)
 
 **Where and why.**
 - **Drawing buffer after a resize.** `ns_webgl_sync_size`
@@ -202,10 +202,30 @@ and brand-check `this`, so the page cannot write it at all.
 WebGL contexts or video textures in the same renderer. How much leaks
 depends on the driver; none was exercised.
 
-**Fix.** Clear colour, depth and stencil after every
-`ns_webgl_alloc_storage`; upload zeros in `bufferData(size)` for all
-targets; zero each level after `texStorage*`; clear a renderbuffer in
-`renderbufferStorage` when it is already attached.
+**Evidence.** Run on a Windows driver without robust contexts, after
+filling and freeing textures and buffers with a pattern. Before the fix a
+1 MiB `bufferData(size)` buffer read back with every byte non-zero, as did a
+4096-byte uniform buffer; mip levels 3 and 6 of a `texStorage2D` texture, a
+renderbuffer allocated after being attached, a re-allocated renderbuffer and
+a resized antialiased WebGL 1 canvas all returned stale pixels.
+
+**Fix applied.**
+- `ns_webgl_alloc_storage` clears colour, depth and stencil of the drawing
+  buffer, and of the resolve target of an antialiased one, every time.
+- `bufferData(size)` uploads zeros for every target.
+- `texStorage2D` / `texStorage3D` upload zeros to every level, face and
+  layer, in bands of at most 4 MiB, and only when the call really made the
+  texture immutable. A format that is neither a known sized format nor a
+  known compressed one is refused with `INVALID_ENUM`.
+- `renderbufferStorage` and `renderbufferStorageMultisample` clear the new
+  storage at once through a scratch framebuffer, which replaces the
+  clear-on-attach bookkeeping. Integer colour formats are cleared with the
+  integer clear calls.
+
+After the fix every read in the same test returns zeros, twenty sized
+formats and a compressed one allocate without a GL error, uploads after
+`texStorage2D` still work, and a second `texStorage2D` on the same texture
+still fails without wiping it.
 
 ### M3. WebGL2 index validation uses a stale element-buffer shadow (medium)
 
@@ -397,8 +417,7 @@ J11, S2, S4, S5 and S6 were not re-checked.
 1. **Port C1 and M1** to the other editions (`Security-Fix:` slugs
    `cross-realm-exception-leak` and `webaudio-param-event-count-overread`).
 2. Move AudioParam automation state out of page-writable properties.
-3. **M3**, at least the refusal of WebGL2 on non-robust contexts, then
-   **M2**.
+3. **M3**, at least the refusal of WebGL2 on non-robust contexts.
 4. **J15**, **N4** and **J16**: the three open raw-pointer lifetimes.
 5. **N3 / J7** and the rest of the tab-wide state class (J6, J8, J9, J14).
 6. Make `__`-prefixed bindings engine-private by default (J10, J13).

@@ -72,7 +72,6 @@ typedef struct ns_webgl {
     GHashTable    *bound_buffers;
     GHashTable    *buffer_sizes;
     GHashTable    *elem_data;
-    GHashTable    *uncleared_rbs;
     GHashTable    *shader_src;
     GHashTable    *shader_log;
     int            next_sync;
@@ -266,6 +265,20 @@ wgl_copy_opaque_rgba_row(uint8_t *dst, const uint8_t *src, int w,
 #endif
 }
 
+static void wgl_clear_attachment(GLenum target, GLenum attachment);
+
+static void
+ns_webgl_clear_storage(ns_webgl *g, gboolean depth_stencil)
+{
+    wgl_clear_attachment(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0);
+    if (depth_stencil)
+        wgl_clear_attachment(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT);
+    if (g->samples <= 1) return;
+    wgl_bind_framebuffer(g, GL_FRAMEBUFFER, g->fbo);
+    wgl_clear_attachment(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0);
+    wgl_bind_framebuffer(g, GL_FRAMEBUFFER, g->draw_fbo);
+}
+
 static gboolean
 ns_webgl_alloc_storage(ns_webgl *g, int w, int h)
 {
@@ -315,7 +328,10 @@ ns_webgl_alloc_storage(ns_webgl *g, int w, int h)
     }
 
     wgl_bind_framebuffer(g, GL_FRAMEBUFFER, ns_webgl_draw_target(g));
-    return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        return FALSE;
+    ns_webgl_clear_storage(g, ds_format != 0);
+    return TRUE;
 }
 
 static void
@@ -440,7 +456,6 @@ ns_webgl_make(JSContext *ctx, ns_js *js, const ns_node *canvas, int version,
     }
     glViewport(0, 0, g->w, g->h);
     glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT);
     wgl_enable_shader_point_size();
     return g;
 }
@@ -479,7 +494,6 @@ ns_webgl_free(ns_webgl *g)
     if (g->buffer_sizes) g_hash_table_destroy(g->buffer_sizes);
     if (g->attrib_masks) g_hash_table_destroy(g->attrib_masks);
     if (g->elem_data) g_hash_table_destroy(g->elem_data);
-    if (g->uncleared_rbs) g_hash_table_destroy(g->uncleared_rbs);
     if (g->shader_src) g_hash_table_destroy(g->shader_src);
     if (g->shader_log) g_hash_table_destroy(g->shader_log);
     if (g->pbo_timer) {
@@ -2846,13 +2860,16 @@ wgl_bufferData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return JS_UNDEFINED;
     }
     GLuint bn = wgl_bound_buffer(g, target);
-    gboolean is_elem = target == GL_ELEMENT_ARRAY_BUFFER;
     wgl_elem_shadow_clear(g, bn);
     if (argc >= 2 && JS_IsNumber(argv[1])) {
         int64_t size = 0;
         JS_ToInt64(ctx, &size, argv[1]);
         if (size < 0 || (uint64_t)size > NS_WEBGL_MAX_ALLOC) return JS_UNDEFINED;
-        uint8_t *z = is_elem && size ? g_malloc0((size_t)size) : NULL;
+        uint8_t *z = size ? g_try_malloc0((size_t)size) : NULL;
+        if (size && !z) {
+            g->injected_error = GL_OUT_OF_MEMORY;
+            return JS_UNDEFINED;
+        }
         glBufferData(target, (GLsizeiptr)size, z, usage);
         g_free(z);
         wgl_buffer_stored(g, target, bn, NULL, (size_t)size);
@@ -3804,7 +3821,14 @@ wgl_clear_attachment(GLenum target, GLenum attachment)
         glDrawBuffers(1, &only);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         static const GLfloat zero[4] = { 0, 0, 0, 0 };
-        glClearBufferfv(GL_COLOR, 0, zero);
+        static const GLint izero[4] = { 0, 0, 0, 0 };
+        static const GLuint uzero[4] = { 0, 0, 0, 0 };
+        GLint component = 0;
+        glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, attachment,
+            GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &component);
+        if (component == GL_INT) glClearBufferiv(GL_COLOR, 0, izero);
+        else if (component == GL_UNSIGNED_INT) glClearBufferuiv(GL_COLOR, 0, uzero);
+        else glClearBufferfv(GL_COLOR, 0, zero);
         glColorMask(cmask[0], cmask[1], cmask[2], cmask[3]);
         GLenum restore[8];
         for (int i = 0; i < max_bufs; i++) restore[i] = (GLenum)draw_bufs[i];
@@ -3818,25 +3842,35 @@ wgl_clear_attachment(GLenum target, GLenum attachment)
 }
 
 static void
-wgl_clear_new_renderbuffer(ns_webgl *g, GLenum target, GLenum attachment, GLuint rb)
+wgl_zero_bound_renderbuffer(void)
 {
-    if (!rb || !g->uncleared_rbs ||
-        !g_hash_table_contains(g->uncleared_rbs, GUINT_TO_POINTER(rb)))
-        return;
-    if (glCheckFramebufferStatus(target) != GL_FRAMEBUFFER_COMPLETE) return;
-    g_hash_table_remove(g->uncleared_rbs, GUINT_TO_POINTER(rb));
-    wgl_clear_attachment(target, attachment);
-}
-
-static void
-wgl_mark_renderbuffer_uncleared(ns_webgl *g)
-{
-    GLint rb = 0;
+    GLint rb = 0, w = 0, h = 0, depth = 0, stencil = 0;
     glGetIntegerv(GL_RENDERBUFFER_BINDING, &rb);
     if (!rb) return;
-    if (!g->uncleared_rbs)
-        g->uncleared_rbs = g_hash_table_new(g_direct_hash, g_direct_equal);
-    g_hash_table_add(g->uncleared_rbs, GUINT_TO_POINTER((GLuint)rb));
+    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &w);
+    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &h);
+    if (w <= 0 || h <= 0) return;
+    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_DEPTH_SIZE, &depth);
+    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_STENCIL_SIZE, &stencil);
+    GLenum attachment = depth && stencil ? GL_DEPTH_STENCIL_ATTACHMENT
+                      : depth            ? GL_DEPTH_ATTACHMENT
+                      : stencil          ? GL_STENCIL_ATTACHMENT
+                                         : GL_COLOR_ATTACHMENT0;
+    GLint prev_draw = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw);
+    GLuint scratch = 0;
+    glGenFramebuffers(1, &scratch);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, scratch);
+    glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, attachment, GL_RENDERBUFFER,
+                              (GLuint)rb);
+    if (attachment != GL_COLOR_ATTACHMENT0) {
+        GLenum none = GL_NONE;
+        glDrawBuffers(1, &none);
+    }
+    if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE)
+        wgl_clear_attachment(GL_DRAW_FRAMEBUFFER, attachment);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw);
+    glDeleteFramebuffers(1, &scratch);
 }
 
 static JSValue
@@ -3848,7 +3882,6 @@ wgl_framebufferRenderbuffer(JSContext *ctx, JSValueConst this_val, int argc, JSV
     GLuint rb = (GLuint)wgl_name(ctx, argv[3]);
     glFramebufferRenderbuffer(target, attachment,
                               (GLenum)argi(ctx, argc, argv, 2), rb);
-    wgl_clear_new_renderbuffer(g, target, attachment, rb);
     return JS_UNDEFINED;
 }
 
@@ -3878,7 +3911,7 @@ wgl_renderbufferStorage(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     WGL_GET(0);
     glRenderbufferStorage((GLenum)argi(ctx, argc, argv, 0), (GLenum)argi(ctx, argc, argv, 1),
                           argi(ctx, argc, argv, 2), argi(ctx, argc, argv, 3));
-    wgl_mark_renderbuffer_uncleared(g);
+    wgl_zero_bound_renderbuffer();
     return JS_UNDEFINED;
 }
 
@@ -4321,13 +4354,175 @@ static JSValue wgl_uniformMatrix3x4fv(JSContext *c, JSValueConst t, int a, JSVal
 static JSValue wgl_uniformMatrix4x3fv(JSContext *c, JSValueConst t, int a, JSValueConst *v)
 { return wgl_uniformMatrix_nxm(c, t, a, v, 4, 3); }
 
+static gboolean wgl_compressed_block(GLenum fmt, int *bw, int *bh, int *bytes);
+
+typedef struct {
+    GLenum internal, format, type;
+    int    bytes;
+} wgl_sized_format;
+
+static const wgl_sized_format *
+wgl_sized_format_of(GLenum internal)
+{
+    static const wgl_sized_format table[] = {
+        { GL_R8, GL_RED, GL_UNSIGNED_BYTE, 1 },
+        { GL_R8_SNORM, GL_RED, GL_BYTE, 1 },
+        { GL_R16F, GL_RED, GL_HALF_FLOAT, 2 },
+        { GL_R32F, GL_RED, GL_FLOAT, 4 },
+        { GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, 1 },
+        { GL_R8I, GL_RED_INTEGER, GL_BYTE, 1 },
+        { GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT, 2 },
+        { GL_R16I, GL_RED_INTEGER, GL_SHORT, 2 },
+        { GL_R32UI, GL_RED_INTEGER, GL_UNSIGNED_INT, 4 },
+        { GL_R32I, GL_RED_INTEGER, GL_INT, 4 },
+        { GL_RG8, GL_RG, GL_UNSIGNED_BYTE, 2 },
+        { GL_RG8_SNORM, GL_RG, GL_BYTE, 2 },
+        { GL_RG16F, GL_RG, GL_HALF_FLOAT, 4 },
+        { GL_RG32F, GL_RG, GL_FLOAT, 8 },
+        { GL_RG8UI, GL_RG_INTEGER, GL_UNSIGNED_BYTE, 2 },
+        { GL_RG8I, GL_RG_INTEGER, GL_BYTE, 2 },
+        { GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT, 4 },
+        { GL_RG16I, GL_RG_INTEGER, GL_SHORT, 4 },
+        { GL_RG32UI, GL_RG_INTEGER, GL_UNSIGNED_INT, 8 },
+        { GL_RG32I, GL_RG_INTEGER, GL_INT, 8 },
+        { GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE, 3 },
+        { GL_SRGB8, GL_RGB, GL_UNSIGNED_BYTE, 3 },
+        { GL_RGB565, GL_RGB, GL_UNSIGNED_BYTE, 3 },
+        { GL_RGB8_SNORM, GL_RGB, GL_BYTE, 3 },
+        { GL_R11F_G11F_B10F, GL_RGB, GL_HALF_FLOAT, 6 },
+        { GL_RGB9_E5, GL_RGB, GL_HALF_FLOAT, 6 },
+        { GL_RGB16F, GL_RGB, GL_HALF_FLOAT, 6 },
+        { GL_RGB32F, GL_RGB, GL_FLOAT, 12 },
+        { GL_RGB8UI, GL_RGB_INTEGER, GL_UNSIGNED_BYTE, 3 },
+        { GL_RGB8I, GL_RGB_INTEGER, GL_BYTE, 3 },
+        { GL_RGB16UI, GL_RGB_INTEGER, GL_UNSIGNED_SHORT, 6 },
+        { GL_RGB16I, GL_RGB_INTEGER, GL_SHORT, 6 },
+        { GL_RGB32UI, GL_RGB_INTEGER, GL_UNSIGNED_INT, 12 },
+        { GL_RGB32I, GL_RGB_INTEGER, GL_INT, 12 },
+        { GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 4 },
+        { GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE, 4 },
+        { GL_RGBA8_SNORM, GL_RGBA, GL_BYTE, 4 },
+        { GL_RGB5_A1, GL_RGBA, GL_UNSIGNED_BYTE, 4 },
+        { GL_RGBA4, GL_RGBA, GL_UNSIGNED_BYTE, 4 },
+        { GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, 4 },
+        { GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, 8 },
+        { GL_RGBA32F, GL_RGBA, GL_FLOAT, 16 },
+        { GL_RGBA8UI, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, 4 },
+        { GL_RGBA8I, GL_RGBA_INTEGER, GL_BYTE, 4 },
+        { GL_RGB10_A2UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT_2_10_10_10_REV, 4 },
+        { GL_RGBA16UI, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, 8 },
+        { GL_RGBA16I, GL_RGBA_INTEGER, GL_SHORT, 8 },
+        { GL_RGBA32UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT, 16 },
+        { GL_RGBA32I, GL_RGBA_INTEGER, GL_INT, 16 },
+        { GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, 2 },
+        { GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, 4 },
+        { GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, 4 },
+        { GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, 4 },
+        { GL_DEPTH32F_STENCIL8, GL_DEPTH_STENCIL,
+          GL_FLOAT_32_UNSIGNED_INT_24_8_REV, 8 },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(table); i++)
+        if (table[i].internal == internal) return &table[i];
+    return NULL;
+}
+
+enum { NS_WEBGL_ZERO_BAND = 4 * 1024 * 1024 };
+
+static void
+wgl_zero_tex_level(GLenum target, GLint level, GLenum internal,
+                   const wgl_sized_format *sf, int w, int h, int depth,
+                   gboolean volume, const uint8_t *zero, size_t zero_len)
+{
+    int bw = 1, bh = 1, block_bytes = sf ? sf->bytes : 0;
+    if (!sf && !wgl_compressed_block(internal, &bw, &bh, &block_bytes)) return;
+    size_t blocks_x = ((size_t)w + (size_t)bw - 1) / (size_t)bw;
+    size_t row_bytes = blocks_x * (size_t)block_bytes;
+    if (!row_bytes || row_bytes > zero_len) return;
+    int band = (int)MIN(zero_len / row_bytes, (size_t)h) * bh;
+    int faces = target == GL_TEXTURE_CUBE_MAP ? 6 : 1;
+    for (int z = 0; z < depth * faces; z++) {
+        GLenum image = target == GL_TEXTURE_CUBE_MAP
+            ? (GLenum)(GL_TEXTURE_CUBE_MAP_POSITIVE_X + z) : target;
+        for (int y = 0; y < h; y += band) {
+            int rows = MIN(band, h - y);
+            GLsizei size = (GLsizei)(row_bytes * (((size_t)rows + (size_t)bh - 1) /
+                                                  (size_t)bh));
+            if (sf && volume)
+                glTexSubImage3D(image, level, 0, y, z, w, rows, 1, sf->format,
+                                sf->type, zero);
+            else if (sf)
+                glTexSubImage2D(image, level, 0, y, w, rows, sf->format,
+                                sf->type, zero);
+            else if (volume)
+                glCompressedTexSubImage3D(image, level, 0, y, z, w, rows, 1,
+                                          internal, size, zero);
+            else
+                glCompressedTexSubImage2D(image, level, 0, y, w, rows, internal,
+                                          size, zero);
+        }
+    }
+}
+
+static void
+wgl_zero_tex_storage(ns_webgl *g, GLenum target, int levels, GLenum internal,
+                     const wgl_sized_format *sf, int w, int h, int depth,
+                     gboolean volume, const uint8_t *zero, size_t zero_len)
+{
+    wgl_unpack_state saved;
+    wgl_unpack_tight(g, &saved);
+    GLint unpack_buffer = 0;
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack_buffer);
+    if (unpack_buffer) glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    for (int level = 0; level < levels; level++) {
+        int lw = MAX(1, w >> level), lh = MAX(1, h >> level);
+        int ld = target == GL_TEXTURE_3D ? MAX(1, depth >> level) : depth;
+        wgl_zero_tex_level(target, level, internal, sf, lw, lh, ld, volume,
+                           zero, zero_len);
+    }
+    if (unpack_buffer) glBindBuffer(GL_PIXEL_UNPACK_BUFFER, (GLuint)unpack_buffer);
+    wgl_unpack_restore(g, &saved);
+}
+
+static void
+wgl_tex_storage(ns_webgl *g, GLenum target, int levels, GLenum internal,
+                int w, int h, int depth, gboolean volume)
+{
+    const wgl_sized_format *sf = wgl_sized_format_of(internal);
+    int bw = 1, bh = 1, block_bytes = sf ? sf->bytes : 0;
+    if (!sf && !wgl_compressed_block(internal, &bw, &bh, &block_bytes)) {
+        g->injected_error = GL_INVALID_ENUM;
+        return;
+    }
+    gboolean sized = w > 0 && h > 0 && depth > 0 && levels > 0 && levels <= 31;
+    size_t row_bytes = sized
+        ? (((size_t)w + (size_t)bw - 1) / (size_t)bw) * (size_t)block_bytes : 0;
+    size_t zero_len = MAX(row_bytes, (size_t)NS_WEBGL_ZERO_BAND);
+    uint8_t *zero = sized ? g_try_malloc0(zero_len) : NULL;
+    if (sized && !zero) {
+        g->injected_error = GL_OUT_OF_MEMORY;
+        return;
+    }
+    GLint was_immutable = 1, is_immutable = 0;
+    glGetTexParameteriv(target, GL_TEXTURE_IMMUTABLE_FORMAT, &was_immutable);
+    if (volume) glTexStorage3D(target, levels, internal, w, h, depth);
+    else glTexStorage2D(target, levels, internal, w, h);
+    glGetTexParameteriv(target, GL_TEXTURE_IMMUTABLE_FORMAT, &is_immutable);
+    if (zero && !was_immutable && is_immutable)
+        wgl_zero_tex_storage(g, target, levels, internal, sf, w, h, depth,
+                             volume, zero, zero_len);
+    g_free(zero);
+}
+
 static JSValue
 wgl_texStorage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    glTexStorage2D((GLenum)argi(ctx, argc, argv, 0), argi(ctx, argc, argv, 1),
-                   (GLenum)argi(ctx, argc, argv, 2), argi(ctx, argc, argv, 3),
-                   argi(ctx, argc, argv, 4));
+    GLenum target = (GLenum)argi(ctx, argc, argv, 0);
+    int levels = argi(ctx, argc, argv, 1);
+    GLenum internal = (GLenum)argi(ctx, argc, argv, 2);
+    int w = argi(ctx, argc, argv, 3);
+    int h = argi(ctx, argc, argv, 4);
+    wgl_tex_storage(g, target, levels, internal, w, h, 1, FALSE);
     return JS_UNDEFINED;
 }
 
@@ -4338,7 +4533,7 @@ wgl_renderbufferStorageMultisample(JSContext *ctx, JSValueConst this_val, int ar
     glRenderbufferStorageMultisample((GLenum)argi(ctx, argc, argv, 0), argi(ctx, argc, argv, 1),
                                      (GLenum)argi(ctx, argc, argv, 2), argi(ctx, argc, argv, 3),
                                      argi(ctx, argc, argv, 4));
-    wgl_mark_renderbuffer_uncleared(g);
+    wgl_zero_bound_renderbuffer();
     return JS_UNDEFINED;
 }
 
@@ -4779,9 +4974,13 @@ static JSValue
 wgl_texStorage3D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     WGL_GET(0);
-    glTexStorage3D((GLenum)argi(ctx, argc, argv, 0), argi(ctx, argc, argv, 1),
-                   (GLenum)argi(ctx, argc, argv, 2), argi(ctx, argc, argv, 3),
-                   argi(ctx, argc, argv, 4), argi(ctx, argc, argv, 5));
+    GLenum target = (GLenum)argi(ctx, argc, argv, 0);
+    int levels = argi(ctx, argc, argv, 1);
+    GLenum internal = (GLenum)argi(ctx, argc, argv, 2);
+    int w = argi(ctx, argc, argv, 3);
+    int h = argi(ctx, argc, argv, 4);
+    int depth = argi(ctx, argc, argv, 5);
+    wgl_tex_storage(g, target, levels, internal, w, h, depth, TRUE);
     return JS_UNDEFINED;
 }
 

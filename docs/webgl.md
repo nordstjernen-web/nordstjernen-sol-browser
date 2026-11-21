@@ -241,9 +241,14 @@ mitigations focus on the parts a hostile page can actually reach.
   undersized buffer is skipped (no write past the view); `texImage2D` /
   `texImage3D` / `texSubImage*` from an undersized array are skipped (no read
   past it).
-- **No uninitialized GPU memory disclosure.** `bufferData(size)` and
-  `texImage2D/3D(…, null)` upload zero-filled storage instead of leaving
-  the contents undefined, so a page can't read back stale VRAM.
+- **No uninitialized GPU memory disclosure.** Every allocation a page can
+  read back starts as zeros, so it cannot see stale VRAM: `bufferData(size)`
+  and `texImage2D/3D(…, null)` upload zero-filled storage; `texStorage2D/3D`
+  uploads zeros to every level, face and layer (in bands of at most 4 MiB)
+  and accepts only the sized and compressed formats it knows how to fill;
+  `renderbufferStorage[Multisample]` clears the new storage through a
+  scratch framebuffer; and the canvas drawing buffer has its colour, depth
+  and stencil cleared whenever it is allocated or resized.
 - **Buffer-range checks on raw copies.** `bufferSubData` (JS → buffer) and
   `getBufferSubData` (buffer → JS, via `glMapBufferRange`) validate that
   `srcByteOffset + length` lands inside the bound buffer — offset
@@ -299,15 +304,10 @@ mitigations focus on the parts a hostile page can actually reach.
 What is **not** done: there is no full GL command-stream validator (the
 ANGLE model). Index-buffer bounds are now checked and shaders are
 validated before compilation, and vertex, index and uniform buffer ranges
-are checked at every draw (see above). "Robust resource initialization" is
-not done: storage allocated by `texStorage2D/3D`
-and `renderbufferStorage[Multisample]` is left in the driver's hands, so a
-page that attaches a never-cleared renderbuffer or immutable texture to
-its own framebuffer and reads it back gets whatever the driver hands out
-(zero on the security-conscious drivers, undefined per spec). The browser
-clears its own canvas drawing buffer, but does not yet zero every
-page-allocated attachment. Users who do not want pages to reach the native
-GL stack can disable WebGL globally in Settings.
+are checked at every draw (see above). Resources are initialised eagerly,
+when they are allocated, rather than lazily on first use as ANGLE does.
+Users who do not want pages to reach the native GL stack can disable WebGL
+globally in Settings.
 
 ## Limitations
 

@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Security: WebGL no longer hands a page graphics memory it did not write.
+  `bufferData(size)` left every buffer except an element array
+  uninitialised, `texStorage2D` / `texStorage3D` and
+  `renderbufferStorage` allocated without clearing, and a resized canvas
+  kept whatever the driver gave it; `getBufferSubData` and `readPixels`
+  then returned stale bytes from earlier buffers and textures. All of
+  these now start as zeros. `texStorage2D` / `texStorage3D` accept only
+  the sized and compressed formats WebGL 2 defines.
 * Security: only real loopback addresses count as loopback. A hostname
   that merely starts with `127.`, such as `127.example.com`, was treated
   as a trustworthy origin over plain http: it could register a service
