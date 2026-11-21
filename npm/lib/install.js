@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
-const { Readable } = require('stream');
+const { Readable, Transform } = require('stream');
 const { pipeline } = require('stream/promises');
 const product = require('./product');
 const { preflight, versionAtLeast } = require('./dependencies');
@@ -20,6 +20,7 @@ const EXECUTABLE_DIRECTORIES = ['bin', 'libexec'];
 
 class InstallError extends Error {}
 class AppImageUnusable extends InstallError {}
+class DownloadFailed extends InstallError {}
 
 function log(message) {
   write(`[${product.packageName}] ${message}\n`);
@@ -47,13 +48,16 @@ function executablePath() {
   return usesMacRelease() ? product.macRelease.executable : product.executable;
 }
 
-const LIBRARY_DIRECTORIES = [
-  '/lib64', '/usr/lib64', '/lib', '/usr/lib',
-  '/lib/x86_64-linux-gnu', '/usr/lib/x86_64-linux-gnu', '/usr/local/lib',
-];
+const NATIVE_LIBRARIES = {
+  x64: {
+    ldconfigTag: ',x86-64)',
+    directories: ['/usr/lib64', '/lib64', '/usr/lib/x86_64-linux-gnu', '/lib/x86_64-linux-gnu'],
+  },
+};
 
-function hostLibraryPresent(name, cache) {
-  return cache.includes(`${name} `) || LIBRARY_DIRECTORIES.some((directory) => fs.existsSync(path.join(directory, name)));
+function hostLibraryPresent(name, ldconfigLines, native) {
+  if (ldconfigLines.some((line) => line.startsWith(`${name} `) && line.includes(native.ldconfigTag))) return true;
+  return native.directories.some((directory) => fs.existsSync(path.join(directory, name)));
 }
 
 function linuxReleaseObstacle() {
@@ -64,8 +68,10 @@ function linuxReleaseObstacle() {
   const glibc = process.report.getReport().header.glibcVersionRuntime;
   if (!glibc) return 'the release AppImage needs glibc, and this system uses another C library';
   if (!versionAtLeast(glibc, release.glibc)) return `the release AppImage needs glibc ${release.glibc}, and this system has ${glibc}`;
+  const native = NATIVE_LIBRARIES[release.arch];
   const cache = capture('ldconfig', ['-p']) || capture('/sbin/ldconfig', ['-p']) || '';
-  const absent = release.hostLibraries.filter((name) => !hostLibraryPresent(name, cache));
+  const ldconfigLines = cache.split('\n').map((line) => line.trim());
+  const absent = release.hostLibraries.filter((name) => !hostLibraryPresent(name, ldconfigLines, native));
   if (absent.length) return `the release AppImage needs these system libraries: ${absent.join(', ')}`;
   return null;
 }
@@ -75,8 +81,8 @@ async function installLinuxRelease(staging) {
   const extraction = fs.mkdtempSync(`${staging}.extract-`);
   try {
     const image = path.join(extraction, asset);
-    await download(`${RELEASE_URL}/${asset}`, image);
-    verify(image, await releaseChecksum(asset), asset);
+    const expected = await releaseChecksum(asset);
+    verify(await download(`${RELEASE_URL}/${asset}`, image), expected, asset);
     fs.chmodSync(image, 0o755);
     log('unpacking');
     const unpacked = spawnSync(image, ['--appimage-extract'], { cwd: extraction, stdio: 'ignore' });
@@ -145,41 +151,76 @@ function writableRoot() {
   throw new InstallError(`No writable install directory among: ${installRoots().join(', ')}`);
 }
 
-async function download(url, destination) {
-  log(`downloading ${url}`);
-  const response = await fetch(url);
-  if (!response.ok) throw new InstallError(`GET ${url}: HTTP ${response.status}`);
-  await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(destination));
+function megabytes(bytes) {
+  return (bytes / 1048576).toFixed(1);
 }
 
-function sourceChecksum() {
+async function fetchOrFail(url) {
+  let response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw new DownloadFailed(`GET ${url}: ${error.cause ? error.cause.message : error.message}`);
+  }
+  if (!response.ok) throw new DownloadFailed(`GET ${url}: HTTP ${response.status}`);
+  return response;
+}
+
+async function download(url, destination) {
+  log(`downloading ${url}`);
+  const response = await fetchOrFail(url);
+  const total = Number(response.headers.get('content-length')) || 0;
+  const report = percentReporter('downloading', (done, size) => `${megabytes(done)}/${megabytes(size)} MB`);
+  const hash = crypto.createHash('sha256');
+  let received = 0;
+  const meter = new Transform({
+    transform(chunk, encoding, done) {
+      hash.update(chunk);
+      received += chunk.length;
+      if (total) report(received, total);
+      done(null, chunk);
+    },
+  });
+  try {
+    await pipeline(Readable.fromWeb(response.body), meter, fs.createWriteStream(destination));
+  } catch (error) {
+    throw new DownloadFailed(`GET ${url}: ${error.message}`);
+  }
+  return hash.digest('hex');
+}
+
+function recordedChecksums() {
   try {
     const recorded = JSON.parse(fs.readFileSync(SOURCE_CHECKSUM_FILE, 'utf8'));
-    return recorded.version === product.version ? recorded.sha256 : null;
+    return recorded.version === product.version ? recorded : null;
   } catch {
     return null;
   }
 }
 
-function sha256(file) {
-  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-}
-
-function verify(file, expected, name) {
-  const actual = sha256(file);
+function verify(actual, expected, name) {
   if (actual !== expected) {
     throw new InstallError(`${name} has SHA-256 ${actual}, but ${expected} was expected; refusing to install it`);
   }
 }
 
-async function releaseChecksum(asset) {
-  const response = await fetch(`${RELEASE_URL}/SHA256SUMS`);
-  if (!response.ok) throw new InstallError(`GET ${RELEASE_URL}/SHA256SUMS: HTTP ${response.status}`);
-  for (const line of (await response.text()).split('\n')) {
+function parseChecksums(text) {
+  const sums = {};
+  for (const line of text.split('\n')) {
     const [sum, name] = line.trim().split(/\s+\*?/);
-    if (name === asset) return sum.toLowerCase();
+    if (sum && name) sums[name] = sum.toLowerCase();
   }
-  throw new InstallError(`${asset} is not listed in the ${product.version} SHA256SUMS`);
+  return sums;
+}
+
+async function releaseChecksum(asset) {
+  const recorded = recordedChecksums();
+  if (recorded && recorded.assets && recorded.assets[asset]) return recorded.assets[asset];
+  log(`this package records no checksum for ${asset} (unpublished checkout); using the release's SHA256SUMS`);
+  const response = await fetchOrFail(`${RELEASE_URL}/SHA256SUMS`);
+  const sum = parseChecksums(await response.text())[asset];
+  if (!sum) throw new DownloadFailed(`${asset} is not listed in the ${product.version} SHA256SUMS`);
+  return sum;
 }
 
 function run(command, args) {
@@ -191,8 +232,8 @@ function run(command, args) {
 async function installMacRelease(staging, work) {
   const { asset, app } = product.macRelease;
   const dmg = path.join(work, asset);
-  await download(`${RELEASE_URL}/${asset}`, dmg);
-  verify(dmg, await releaseChecksum(asset), asset);
+  const expected = await releaseChecksum(asset);
+  verify(await download(`${RELEASE_URL}/${asset}`, dmg), expected, asset);
   const mountpoint = fs.mkdtempSync(path.join(work, 'mount-'));
   run('hdiutil', ['attach', '-nobrowse', '-readonly', '-quiet', '-mountpoint', mountpoint, dmg]);
   try {
@@ -216,21 +257,26 @@ function logTail(file, count) {
   }
 }
 
-function progressReporter(label) {
+function percentReporter(label, describe) {
   let lastPercent = -1;
-  return (line) => {
-    const step = line.match(/^\[(\d+)\/(\d+)\]/);
-    if (!step) return;
-    const [done, total] = [Number(step[1]), Number(step[2])];
+  return (done, total) => {
     const percent = Math.floor((done * 100) / total);
     if (percent === lastPercent) return;
     if (process.stderr.isTTY) {
-      write(`\r[${product.packageName}] ${label}: ${done}/${total} (${percent}%)\x1b[K`);
+      write(`\r[${product.packageName}] ${label}: ${describe(done, total)} (${percent}%)\x1b[K`);
       if (done === total) write('\n');
     } else if (percent % 10 === 0) {
       log(`${label}: ${percent}%`);
     }
     lastPercent = percent;
+  };
+}
+
+function progressReporter(label) {
+  const report = percentReporter(label, (done, total) => `${done}/${total}`);
+  return (line) => {
+    const step = line.match(/^\[(\d+)\/(\d+)\]/);
+    if (step) report(Number(step[1]), Number(step[2]));
   };
 }
 
@@ -243,10 +289,11 @@ async function buildFromSource(staging, work) {
     },
   });
 
-  const expected = sourceChecksum();
+  const recorded = recordedChecksums();
+  const expected = recorded ? recorded.sha256 : null;
   const tarball = path.join(work, `${product.packageName}-${product.version}.tar.gz`);
-  await download(SOURCE_URL, tarball);
-  if (expected) verify(tarball, expected, `the ${product.version} source tarball`);
+  const actual = await download(SOURCE_URL, tarball);
+  if (expected) verify(actual, expected, `the ${product.version} source tarball`);
   else log('this package records no source checksum (unpublished checkout); the tarball is trusted over HTTPS only');
 
   const logFile = buildLogPath();
@@ -284,7 +331,7 @@ async function installLinuxReleaseOrBuild(staging, work) {
       await installLinuxRelease(staging);
       return;
     } catch (error) {
-      if (!(error instanceof AppImageUnusable)) throw error;
+      if (!(error instanceof AppImageUnusable || error instanceof DownloadFailed)) throw error;
       log(`${error.message}\nbuilding from source instead`);
       fs.rmSync(staging, { recursive: true, force: true });
       fs.mkdirSync(staging, { recursive: true });
@@ -322,4 +369,4 @@ async function install() {
   return findInstalled();
 }
 
-module.exports = { install, product, SOURCE_URL, SOURCE_CHECKSUM_FILE, InstallError, log };
+module.exports = { install, product, SOURCE_URL, RELEASE_URL, SOURCE_CHECKSUM_FILE, parseChecksums, InstallError, log };

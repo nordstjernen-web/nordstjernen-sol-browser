@@ -16,6 +16,13 @@ Changelog:
   is no longer dropped there. The README names the supported
   distributions correctly, lists Rust in the install commands, and
   explains npm 12's `--allow-scripts`.
+* npm package: `prepack` pins the SHA-256 of the release AppImage and the
+  macOS `.dmg` in the package, as it already did for the source tarball,
+  so installing no longer trusts the release's `SHA256SUMS`. A failed
+  AppImage download falls back to the source build, downloads show their
+  progress and are hashed as they stream, and the host-library check
+  counts only 64-bit libraries. Tested on Ubuntu 24.04, Debian 13 and
+  Fedora 40, 41 and 42.
 
 1.0.50:
 ======
