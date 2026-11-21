@@ -3,6 +3,17 @@ Changelog:
 
 1.0.51:
 ======
+* WebAssembly threads: `new WebAssembly.Memory({shared: true, ...})`
+  makes a shared memory whose `buffer` is a `SharedArrayBuffer` over the
+  wasm linear memory (reserved up to its maximum, capped at 1 GiB, so it
+  never moves). A module that imports a shared memory adopts it, so the
+  page and its workers run instances of the same module on one memory,
+  with the atomic instructions and `memory.atomic.wait32/64`/`notify`
+  working across threads. A shared `WebAssembly.Memory` (from a
+  cross-origin isolated page) and a `WebAssembly.Module` can be posted to
+  workers; the module is shared, not recompiled. Importing a non-shared
+  memory where a shared one is declared, or the reverse, is a
+  `LinkError`.
 * WebAssembly runs on WAMR 2.4.6, the upstream security release: it
   bounds-checks guest pointers in `realloc`, `module_malloc` and the
   libc-builtin `strtol`/`strtoul`, validates the entry signatures used by

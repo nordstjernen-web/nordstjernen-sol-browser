@@ -15,6 +15,24 @@ void ns_wasm_install(JSContext *ctx, JSValueConst global)
     (void)global;
 }
 
+JSValue
+ns_wasm_wire_handle(JSContext *ctx, JSValueConst v, const char **kind)
+{
+    (void)ctx;
+    (void)v;
+    *kind = NULL;
+    return JS_UNDEFINED;
+}
+
+JSValue
+ns_wasm_wire_restore(JSContext *ctx, const char *kind, JSValueConst sab)
+{
+    (void)ctx;
+    (void)kind;
+    (void)sab;
+    return JS_NULL;
+}
+
 #else
 
 #include <glib.h>
@@ -32,6 +50,7 @@ void ns_wasm_install(JSContext *ctx, JSValueConst global)
 #define NS_WASM_MAX_RESULTS 16
 #define NS_WASM_PAGE_SIZE 65536u
 #define NS_WASM_MEMORY_MAX_BYTES (512u * 1024u * 1024u)
+#define NS_WASM_SHARED_MAX_BYTES (1024u * 1024u * 1024u)
 
 static JSClassID ns_wasm_module_class_id;
 static JSClassID ns_wasm_instance_class_id;
@@ -68,6 +87,7 @@ typedef struct {
     wasm_module_t module;
     ns_wasm_linkage linkage;
     gboolean imports_linked;
+    gint refs;
 } ns_wasm_module;
 
 typedef struct {
@@ -95,6 +115,7 @@ typedef struct {
     guint8 *staging;
     size_t staging_size;
     uint32_t max_pages;
+    wasm_memory_inst_t shared;
 } ns_wasm_memory;
 
 typedef struct {
@@ -232,6 +253,60 @@ ns_wasm_runtime_free(mem_alloc_usage_t usage, void *ptr)
         ns_js_cage_shared_free(ptr);
 }
 
+static GMutex ns_wasm_shared_mutex;
+static GHashTable *ns_wasm_shared_by_data;
+
+static void
+ns_wasm_shared_dup_cb(void *opaque)
+{
+    ns_wamr_shared_memory_dup(opaque);
+}
+
+static void
+ns_wasm_shared_release_cb(void *opaque)
+{
+    ns_wamr_shared_memory_release(opaque);
+}
+
+static void
+ns_wasm_shared_register(wasm_memory_inst_t mem)
+{
+    void *data = wasm_memory_get_base_address(mem);
+    if (!data)
+        return;
+    g_mutex_lock(&ns_wasm_shared_mutex);
+    if (!ns_wasm_shared_by_data)
+        ns_wasm_shared_by_data = g_hash_table_new(g_direct_hash,
+                                                  g_direct_equal);
+    gboolean fresh = !g_hash_table_contains(ns_wasm_shared_by_data, data);
+    if (fresh)
+        g_hash_table_insert(ns_wasm_shared_by_data, data, mem);
+    g_mutex_unlock(&ns_wasm_shared_mutex);
+    if (fresh)
+        ns_js_sab_register_foreign(data, ns_wasm_shared_dup_cb,
+                                   ns_wasm_shared_release_cb, mem);
+}
+
+static void
+ns_wasm_shared_destroyed(void *data)
+{
+    g_mutex_lock(&ns_wasm_shared_mutex);
+    if (ns_wasm_shared_by_data)
+        g_hash_table_remove(ns_wasm_shared_by_data, data);
+    g_mutex_unlock(&ns_wasm_shared_mutex);
+    ns_js_sab_unregister_foreign(data);
+}
+
+static wasm_memory_inst_t
+ns_wasm_shared_lookup(void *data)
+{
+    g_mutex_lock(&ns_wasm_shared_mutex);
+    wasm_memory_inst_t mem = ns_wasm_shared_by_data
+        ? g_hash_table_lookup(ns_wasm_shared_by_data, data) : NULL;
+    g_mutex_unlock(&ns_wasm_shared_mutex);
+    return mem;
+}
+
 static gpointer
 ns_wasm_runtime_init_once(gpointer data)
 {
@@ -246,6 +321,7 @@ ns_wasm_runtime_init_once(gpointer data)
     wasm_runtime_set_log_level(g_getenv("ND_WASM_LOG")
                                    ? WASM_LOG_LEVEL_VERBOSE
                                    : WASM_LOG_LEVEL_ERROR);
+    ns_wamr_set_shared_memory_destroy_callback(ns_wasm_shared_destroyed);
     wasm_runtime_set_enlarge_mem_success_callback(ns_wasm_on_memory_grown,
                                                   NULL);
     (void)data;
@@ -1367,6 +1443,13 @@ ns_wasm_memory_finalizer(JSRuntime *rt, JSValue val)
     ns_wasm_memory *m = JS_GetOpaque(val, ns_wasm_memory_class_id);
     if (!m)
         return;
+    if (m->shared) {
+        JS_FreeValueRT(rt, m->buffer);
+        JS_FreeValueRT(rt, m->instance);
+        ns_wamr_shared_memory_release(m->shared);
+        g_free(m);
+        return;
+    }
     ns_wasm_memory_detach_buffer(m);
     JS_FreeValueRT(rt, m->instance);
     ns_js_cage_shared_free(m->staging);
@@ -1390,11 +1473,51 @@ static const JSClassDef ns_wasm_memory_class = {
 };
 
 static JSValue
+ns_wasm_shared_buffer(JSContext *ctx, ns_wasm_memory *m)
+{
+    guint8 *base = wasm_memory_get_base_address(m->shared);
+    size_t size = (size_t)wasm_memory_get_cur_page_count(m->shared) *
+                  wasm_memory_get_bytes_per_page(m->shared);
+    if (!JS_IsUndefined(m->buffer) && m->base == base && m->size == size)
+        return JS_DupValue(ctx, m->buffer);
+    JSValue buffer = JS_NewArrayBuffer(ctx, base, size, 0, NULL, NULL, TRUE);
+    if (JS_IsException(buffer))
+        return buffer;
+    JS_FreeValue(ctx, m->buffer);
+    m->buffer = buffer;
+    m->base = base;
+    m->size = size;
+    return JS_DupValue(ctx, m->buffer);
+}
+
+static JSValue
+ns_wasm_memory_new_shared(JSContext *ctx, wasm_memory_inst_t mem)
+{
+    JSValue obj = JS_NewObjectClass(ctx, ns_wasm_memory_class_id);
+    if (JS_IsException(obj)) {
+        ns_wamr_shared_memory_release(mem);
+        return obj;
+    }
+    ns_wasm_memory *m = g_new0(ns_wasm_memory, 1);
+    m->ctx = ctx;
+    ns_js_pin_realm(ctx);
+    m->instance = JS_UNDEFINED;
+    m->buffer = JS_UNDEFINED;
+    m->shared = mem;
+    m->max_pages = ns_wamr_memory_max_pages(mem);
+    ns_wasm_shared_register(mem);
+    JS_SetOpaque(obj, m);
+    return obj;
+}
+
+static JSValue
 ns_wasm_memory_buffer_get(JSContext *ctx, JSValueConst this_val)
 {
     ns_wasm_memory *m = JS_GetOpaque2(ctx, this_val, ns_wasm_memory_class_id);
     if (!m)
         return JS_EXCEPTION;
+    if (m->shared)
+        return ns_wasm_shared_buffer(ctx, m);
     guint8 *base;
     size_t size;
     if (m->staging) {
@@ -1479,6 +1602,13 @@ ns_wasm_memory_grow(JSContext *ctx, JSValueConst this_val, int argc,
     if (ns_wasm_to_u32_index(ctx, argc > 0 ? argv[0] : JS_UNDEFINED,
                              &delta, "wasm memory.grow delta"))
         return JS_EXCEPTION;
+    if (m->shared) {
+        uint32_t old_pages =
+            (uint32_t)wasm_memory_get_cur_page_count(m->shared);
+        if (delta && !wasm_memory_enlarge(m->shared, delta))
+            return JS_ThrowRangeError(ctx, "wasm memory.grow failed");
+        return JS_NewUint32(ctx, old_pages);
+    }
     if (m->staging) {
         uint32_t old_pages = (uint32_t)(m->staging_size / NS_WASM_PAGE_SIZE);
         if (delta) {
@@ -1536,7 +1666,8 @@ ns_wasm_on_memory_grown(wasm_module_inst_t inst, void *user_data)
     if (!wi || JS_IsUndefined(wi->memory_obj))
         return;
     ns_wasm_memory *m = JS_GetOpaque(wi->memory_obj, ns_wasm_memory_class_id);
-    ns_wasm_memory_detach_buffer(m);
+    if (m && !m->shared)
+        ns_wasm_memory_detach_buffer(m);
 }
 
 static void
@@ -1924,7 +2055,7 @@ static void
 ns_wasm_module_finalizer(JSRuntime *rt, JSValue val)
 {
     ns_wasm_module *m = JS_GetOpaque(val, ns_wasm_module_class_id);
-    if (!m)
+    if (!m || !g_atomic_int_dec_and_test(&m->refs))
         return;
     if (m->module)
         wasm_runtime_unload(m->module);
@@ -2270,11 +2401,34 @@ ns_wasm_bind_imports(JSContext *ctx, wasm_module_t module,
                                         : JS_UNDEFINED;
             JS_FreeValue(ctx, ns);
             switch (imp.kind) {
-            case WASM_IMPORT_EXPORT_KIND_MEMORY:
-                if (JS_GetOpaque(v, ns_wasm_memory_class_id) &&
-                    JS_IsUndefined(linkage->provided_memory))
+            case WASM_IMPORT_EXPORT_KIND_MEMORY: {
+                ns_wasm_memory *pm = JS_GetOpaque(v, ns_wasm_memory_class_id);
+                gboolean want_shared =
+                    wasm_memory_type_get_shared(imp.u.memory_type);
+                if (want_shared != (pm && pm->shared)) {
+                    JS_FreeValue(ctx, v);
+                    ns_wasm_throw_named(ctx, "LinkError",
+                        want_shared ? "imported memory must be a shared "
+                                      "WebAssembly.Memory"
+                                    : "imported memory must not be shared");
+                    return FALSE;
+                }
+                if (pm && pm->shared &&
+                    (wasm_memory_get_cur_page_count(pm->shared) <
+                         wasm_memory_type_get_init_page_count(
+                             imp.u.memory_type) ||
+                     ns_wamr_memory_max_pages(pm->shared) >
+                         wasm_memory_type_get_max_page_count(
+                             imp.u.memory_type))) {
+                    JS_FreeValue(ctx, v);
+                    ns_wasm_throw_named(ctx, "LinkError",
+                        "imported shared memory has incompatible limits");
+                    return FALSE;
+                }
+                if (pm && JS_IsUndefined(linkage->provided_memory))
                     linkage->provided_memory = JS_DupValue(ctx, v);
                 break;
+            }
             case WASM_IMPORT_EXPORT_KIND_TABLE:
                 if (JS_GetOpaque(v, ns_wasm_table_class_id) &&
                     JS_IsUndefined(linkage->provided_table))
@@ -2526,6 +2680,13 @@ ns_wasm_build_exports(JSContext *ctx, JSValueConst instance_obj,
                 ns_js_pin_realm(ctx);
                 m->instance = JS_DupValue(ctx, instance_obj);
                 m->buffer = JS_UNDEFINED;
+                wasm_memory_inst_t own = wasm_runtime_get_memory(wi->inst, 0);
+                if (ns_wamr_memory_is_shared(own)) {
+                    ns_wamr_shared_memory_dup(own);
+                    m->shared = own;
+                    m->max_pages = ns_wamr_memory_max_pages(own);
+                    ns_wasm_shared_register(own);
+                }
                 JS_SetOpaque(mem_obj, m);
                 wi->memory_obj = JS_DupValue(ctx, mem_obj);
             }
@@ -2598,6 +2759,7 @@ ns_wasm_module_from_bytes(JSContext *ctx, const guint8 *bytes, size_t len)
                                    "wasm module too large");
 
     ns_wasm_module *mod = g_new0(ns_wasm_module, 1);
+    mod->refs = 1;
     ns_wasm_linkage_init(&mod->linkage);
     mod->load_bytes = ns_wasm_memdup_bytes(bytes, len);
     mod->len = len;
@@ -2685,6 +2847,8 @@ ns_wasm_adopt_provided_imports(JSContext *ctx, JSValueConst instance_obj,
     if (!JS_IsUndefined(wi->linkage.provided_memory)) {
         ns_wasm_memory *m = JS_GetOpaque(wi->linkage.provided_memory,
                                          ns_wasm_memory_class_id);
+        if (m && m->shared && JS_IsUndefined(wi->memory_obj))
+            wi->memory_obj = JS_DupValue(ctx, wi->linkage.provided_memory);
         wasm_memory_inst_t mem =
             m && m->staging ? wasm_runtime_get_memory(wi->inst, 0) : NULL;
         if (mem) {
@@ -2726,6 +2890,8 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
         JS_GetOpaque2(ctx, module_obj, ns_wasm_module_class_id);
     if (!mod || !mod->module)
         return JS_EXCEPTION;
+    if (!ns_wasm_runtime_ready())
+        return JS_ThrowRangeError(ctx, "wasm runtime init failed");
 
     JSRuntime *rt = JS_GetRuntime(ctx);
     ns_wasm_linkage linkage;
@@ -2761,10 +2927,15 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
     wi->pending_exc = JS_UNDEFINED;
     wi->linkage = linkage;
 
+    ns_wasm_memory *provided =
+        JS_IsUndefined(wi->linkage.provided_memory) ? NULL
+        : JS_GetOpaque(wi->linkage.provided_memory, ns_wasm_memory_class_id);
     g_private_set(&ns_wasm_instantiating, wi);
+    ns_wamr_set_adopted_memory(provided ? provided->shared : NULL);
     wasm_module_inst_t inst =
         wasm_runtime_instantiate(inst_module, NS_WASM_STACK_SIZE, 0, error_buf,
                                  sizeof(error_buf));
+    ns_wamr_set_adopted_memory(NULL);
     g_private_set(&ns_wasm_instantiating, NULL);
     if (!inst) {
         JSValue exc = JS_UNDEFINED;
@@ -2951,8 +3122,22 @@ ns_wasm_memory_ctor(JSContext *ctx, JSValueConst new_target, int argc,
     JSValue sv = JS_GetPropertyStr(ctx, desc, "shared");
     int shared = JS_ToBool(ctx, sv);
     JS_FreeValue(ctx, sv);
-    if (shared)
-        return JS_ThrowTypeError(ctx, "shared wasm memory is not supported");
+    if (shared) {
+        if (!maximum)
+            return JS_ThrowTypeError(ctx, "shared wasm memory requires a "
+                                          "maximum");
+        if (!ns_wasm_runtime_ready())
+            return JS_ThrowRangeError(ctx, "wasm runtime init failed");
+        uint32_t cap = NS_WASM_SHARED_MAX_BYTES / NS_WASM_PAGE_SIZE;
+        if (initial > cap)
+            return JS_ThrowRangeError(ctx, "wasm memory initial is too large");
+        wasm_memory_inst_t mem =
+            ns_wamr_shared_memory_new(initial, MIN(maximum, cap));
+        if (!mem)
+            return JS_ThrowRangeError(ctx, "wasm memory could not be "
+                                           "allocated");
+        return ns_wasm_memory_new_shared(ctx, mem);
+    }
     guint64 bytes = (guint64)initial * NS_WASM_PAGE_SIZE;
     if (bytes > NS_WASM_MEMORY_MAX_BYTES)
         return JS_ThrowRangeError(ctx, "wasm memory initial is too large");
@@ -3333,6 +3518,131 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
     if (JS_IsException(boot))
         JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, boot);
+}
+
+typedef struct {
+    gint refs;
+    ns_wasm_module *mod;
+    void *block;
+} ns_wasm_module_handle;
+
+static GMutex ns_wasm_handles_mutex;
+static GHashTable *ns_wasm_handles;
+
+static void
+ns_wasm_module_unref(ns_wasm_module *m)
+{
+    if (!m || !g_atomic_int_dec_and_test(&m->refs))
+        return;
+    if (m->module)
+        wasm_runtime_unload(m->module);
+    ns_wasm_linkage_clear(NULL, &m->linkage);
+    g_free(m->load_bytes);
+    g_free(m);
+}
+
+static void
+ns_wasm_module_handle_dup(void *opaque)
+{
+    ns_wasm_module_handle *h = opaque;
+    g_atomic_int_inc(&h->refs);
+}
+
+static void
+ns_wasm_module_handle_release(void *opaque)
+{
+    ns_wasm_module_handle *h = opaque;
+    if (!g_atomic_int_dec_and_test(&h->refs))
+        return;
+    g_mutex_lock(&ns_wasm_handles_mutex);
+    g_hash_table_remove(ns_wasm_handles, h->block);
+    g_mutex_unlock(&ns_wasm_handles_mutex);
+    ns_js_sab_unregister_foreign(h->block);
+    ns_js_cage_shared_free(h->block);
+    ns_wasm_module_unref(h->mod);
+    g_free(h);
+}
+
+static JSValue
+ns_wasm_module_handle_new(JSContext *ctx, ns_wasm_module *mod)
+{
+    ns_wasm_module_handle *h = g_new0(ns_wasm_module_handle, 1);
+    h->block = ns_js_cage_shared_malloc(16);
+    if (!h->block) {
+        g_free(h);
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    memset(h->block, 0, 16);
+    g_atomic_int_inc(&mod->refs);
+    h->mod = mod;
+    g_mutex_lock(&ns_wasm_handles_mutex);
+    if (!ns_wasm_handles)
+        ns_wasm_handles = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_hash_table_insert(ns_wasm_handles, h->block, h);
+    g_mutex_unlock(&ns_wasm_handles_mutex);
+    ns_js_sab_register_foreign(h->block, ns_wasm_module_handle_dup,
+                               ns_wasm_module_handle_release, h);
+    g_atomic_int_inc(&h->refs);
+    JSValue sab = JS_NewArrayBuffer(ctx, h->block, 16, 0, NULL, NULL, TRUE);
+    ns_wasm_module_handle_release(h);
+    return sab;
+}
+
+static ns_wasm_module *
+ns_wasm_module_from_block(void *block)
+{
+    g_mutex_lock(&ns_wasm_handles_mutex);
+    ns_wasm_module_handle *h = ns_wasm_handles
+        ? g_hash_table_lookup(ns_wasm_handles, block) : NULL;
+    ns_wasm_module *mod = h ? h->mod : NULL;
+    if (mod)
+        g_atomic_int_inc(&mod->refs);
+    g_mutex_unlock(&ns_wasm_handles_mutex);
+    return mod;
+}
+
+JSValue
+ns_wasm_wire_handle(JSContext *ctx, JSValueConst v, const char **kind)
+{
+    *kind = NULL;
+    ns_wasm_memory *m = JS_GetOpaque(v, ns_wasm_memory_class_id);
+    if (m && m->shared) {
+        *kind = "WMEM";
+        return ns_wasm_shared_buffer(ctx, m);
+    }
+    ns_wasm_module *mod = JS_GetOpaque(v, ns_wasm_module_class_id);
+    if (mod) {
+        *kind = "WMOD";
+        return ns_wasm_module_handle_new(ctx, mod);
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue
+ns_wasm_wire_restore(JSContext *ctx, const char *kind, JSValueConst sab)
+{
+    size_t len = 0;
+    uint8_t *data = JS_IsSharedArrayBuffer(sab)
+        ? JS_GetArrayBuffer(ctx, &len, sab) : NULL;
+    if (!data)
+        return JS_NULL;
+    if (strcmp(kind, "WMEM") == 0) {
+        wasm_memory_inst_t mem = ns_wasm_shared_lookup(data);
+        if (!mem)
+            return JS_NULL;
+        ns_wamr_shared_memory_dup(mem);
+        return ns_wasm_memory_new_shared(ctx, mem);
+    }
+    ns_wasm_module *mod = ns_wasm_module_from_block(data);
+    if (!mod)
+        return JS_NULL;
+    JSValue obj = JS_NewObjectClass(ctx, ns_wasm_module_class_id);
+    if (JS_IsException(obj)) {
+        ns_wasm_module_unref(mod);
+        return obj;
+    }
+    JS_SetOpaque(obj, mod);
+    return obj;
 }
 
 #endif

@@ -40,6 +40,16 @@
  return_func:
      if (!ret && module && enlarge_memory_error_cb) {
          WASMExecEnv *exec_env = NULL;
+@@ -1979,7 +1997,8 @@
+ #if WASM_MEM_ALLOC_WITH_USER_DATA != 0
+                                   allocator_user_data,
+ #endif
+-                                  *memory_data_size))) {
++                                  is_shared_memory ? map_size
++                                                   : *memory_data_size))) {
+             return BHT_ERROR;
+         }
+ #else
 --- a/core/iwasm/common/wasm_runtime_common.c
 +++ b/core/iwasm/common/wasm_runtime_common.c
 @@ -4418,6 +4418,99 @@
@@ -1140,7 +1150,38 @@
                                         error_buf, error_buf_size)) {
 --- a/core/iwasm/interpreter/wasm_runtime.c
 +++ b/core/iwasm/interpreter/wasm_runtime.c
-@@ -1634,6 +1634,8 @@
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include "wasm_runtime.h"
++#include "../../../ns_wamr_internal.h"
+ #include "wasm.h"
+ #include "wasm_loader.h"
+ #include "wasm_interp.h"
+@@ -255,6 +256,8 @@
+                         don't free the memory */
+                     if (ref_count > 0)
+                         continue;
++                    if (ns_wamr_shared_memory_destroy_standalone(memories[i]))
++                        continue;
+                 }
+ #endif
+                 if (memories[i]->heap_handle) {
+@@ -298,6 +301,13 @@
+         shared_memory_inc_reference(memory);
+         return memory;
+     }
++    if (is_shared_memory && memory_idx == 0) {
++        WASMMemoryInstance *adopted = ns_wamr_take_adopted_memory();
++        if (adopted) {
++            shared_memory_inc_reference(adopted);
++            return adopted;
++        }
++    }
+ #else
+     (void)parent;
+     (void)memory_idx;
+@@ -1634,6 +1644,8 @@
      return func;
  }
  
@@ -1149,7 +1190,7 @@
  static bool
  execute_post_instantiate_functions(WASMModuleInstance *module_inst,
                                     bool is_sub_inst, WASMExecEnv *exec_env_main)
-@@ -1658,7 +1660,7 @@
+@@ -1658,7 +1670,7 @@
       * the environment at most once, and that none of their other exports
       * are accessed before that call.
       */
@@ -1158,7 +1199,7 @@
          initialize_func =
              lookup_post_instantiate_func(module_inst, "_initialize");
      }
-@@ -1666,7 +1668,7 @@
+@@ -1666,7 +1678,7 @@
  
      /* Execute possible "__post_instantiate" function if wasm app is
         compiled by emsdk's early version */
@@ -1167,7 +1208,7 @@
          post_inst_func =
              lookup_post_instantiate_func(module_inst, "__post_instantiate");
      }
-@@ -1674,7 +1676,7 @@
+@@ -1674,7 +1686,7 @@
  #if WASM_ENABLE_BULK_MEMORY != 0
      /* Only execute the memory init function for main instance since
         the data segments will be dropped once initialized */
@@ -1267,3 +1308,18 @@
  
  #define strncasecmp _strnicmp
  #define strcasecmp _stricmp
+@@ -139,10 +143,14 @@
+     os_memory_order_seq_cst,
+ } os_memory_order;
+ 
++#if defined(__GNUC__)
++#define os_atomic_thread_fence(mem_order) __atomic_thread_fence(__ATOMIC_SEQ_CST)
++#else
+ void
+ bh_atomic_thread_fence(int mem_order);
+ 
+ #define os_atomic_thread_fence bh_atomic_thread_fence
++#endif
+ 
+ typedef enum windows_handle_type {
+     windows_handle_type_socket,

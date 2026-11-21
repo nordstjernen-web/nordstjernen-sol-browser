@@ -10,5 +10,8 @@
 
 void ns_wasm_install(JSContext *ctx, JSValueConst global);
 bool ns_wasm_compile_allowed(JSContext *ctx);
+JSValue ns_wasm_wire_handle(JSContext *ctx, JSValueConst v, const char **kind);
+JSValue ns_wasm_wire_restore(JSContext *ctx, const char *kind,
+                             JSValueConst sab);
 
 #endif
