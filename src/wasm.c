@@ -24,6 +24,7 @@ void ns_wasm_install(JSContext *ctx, JSValueConst global)
 #include <wasm_export.h>
 
 #include "ns_wamr.h"
+#include "ns_wamr_eh.h"
 
 #define NS_WASM_STACK_SIZE (1u << 20)
 #define NS_WASM_RECLAIM_INTERVAL 64
@@ -82,6 +83,7 @@ typedef struct {
     gboolean has_pending;
     guint call_depth;
     guint calls_since_reclaim;
+    struct ns_wasm_eh *eh;
 } ns_wasm_instance;
 
 typedef struct {
@@ -472,11 +474,695 @@ ns_wasm_val_to_js(JSContext *ctx, const wasm_val_t *val)
     }
 }
 
+#define NS_WASM_KIND_TAG 4
+
+static JSClassID ns_wasm_tag_class_id;
+static JSClassID ns_wasm_exception_class_id;
+static const char ns_wasm_js_exception_identity;
+
+typedef struct {
+    void *identity;
+    JSValue owner;
+    wasm_valkind_t kinds[NS_WASM_MAX_PARAMS];
+    guint n_kinds;
+} ns_wasm_tag;
+
+typedef struct {
+    JSValue tag;
+    JSValue *args;
+    guint n_args;
+} ns_wasm_exception;
+
+struct ns_wasm_eh {
+    JSValue *tags;
+    guint n_tags;
+    GArray *pins;
+};
+
+static void
+ns_wasm_tag_finalizer(JSRuntime *rt, JSValue val)
+{
+    ns_wasm_tag *t = JS_GetOpaque(val, ns_wasm_tag_class_id);
+    if (!t)
+        return;
+    JS_FreeValueRT(rt, t->owner);
+    g_free(t);
+}
+
+static void
+ns_wasm_tag_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
+{
+    ns_wasm_tag *t = JS_GetOpaque(val, ns_wasm_tag_class_id);
+    if (t)
+        JS_MarkValue(rt, t->owner, mark_func);
+}
+
+static const JSClassDef ns_wasm_tag_class = {
+    "Tag",
+    .finalizer = ns_wasm_tag_finalizer,
+    .gc_mark = ns_wasm_tag_gc_mark,
+};
+
+static void
+ns_wasm_exception_finalizer(JSRuntime *rt, JSValue val)
+{
+    ns_wasm_exception *e = JS_GetOpaque(val, ns_wasm_exception_class_id);
+    if (!e)
+        return;
+    JS_FreeValueRT(rt, e->tag);
+    for (guint i = 0; i < e->n_args; i++)
+        JS_FreeValueRT(rt, e->args[i]);
+    g_free(e->args);
+    g_free(e);
+}
+
+static void
+ns_wasm_exception_gc_mark(JSRuntime *rt, JSValueConst val,
+                          JS_MarkFunc *mark_func)
+{
+    ns_wasm_exception *e = JS_GetOpaque(val, ns_wasm_exception_class_id);
+    if (!e)
+        return;
+    JS_MarkValue(rt, e->tag, mark_func);
+    for (guint i = 0; i < e->n_args; i++)
+        JS_MarkValue(rt, e->args[i], mark_func);
+}
+
+static const JSClassDef ns_wasm_exception_class = {
+    "Exception",
+    .finalizer = ns_wasm_exception_finalizer,
+    .gc_mark = ns_wasm_exception_gc_mark,
+};
+
+static int
+ns_wasm_eh_length(JSContext *ctx, JSValueConst obj, int64_t *out)
+{
+    JSValue v = JS_GetPropertyStr(ctx, obj, "length");
+    if (JS_IsException(v))
+        return -1;
+    int r = JS_ToInt64(ctx, out, v);
+    JS_FreeValue(ctx, v);
+    return r;
+}
+
+static guint
+ns_wasm_kind_cells(wasm_valkind_t kind)
+{
+    switch (kind) {
+    case WASM_I64:
+    case WASM_F64:
+        return 2;
+    case WASM_V128:
+        return 4;
+    default:
+        return 1;
+    }
+}
+
+static JSValue
+ns_wasm_tag_new(JSContext *ctx, JSValueConst owner, wasm_module_t module,
+                wasm_module_inst_t inst, uint32_t tag_index)
+{
+    JSValue obj = JS_NewObjectClass(ctx, ns_wasm_tag_class_id);
+    if (JS_IsException(obj))
+        return obj;
+    ns_wasm_tag *t = g_new0(ns_wasm_tag, 1);
+    t->owner = JS_DupValue(ctx, owner);
+    t->identity = ns_wamr_tag_identity(inst, tag_index);
+    t->n_kinds = MIN(ns_wamr_tag_param_count(module, tag_index),
+                     G_N_ELEMENTS(t->kinds));
+    for (guint i = 0; i < t->n_kinds; i++)
+        t->kinds[i] = ns_wamr_tag_param_kind(module, tag_index, i);
+    JS_SetOpaque(obj, t);
+    return obj;
+}
+
+static gboolean
+ns_wasm_tag_kind_from_name(const char *name, wasm_valkind_t *out)
+{
+    static const struct {
+        const char *name;
+        wasm_valkind_t kind;
+    } kinds[] = {
+        { "i32", WASM_I32 },       { "i64", WASM_I64 },
+        { "f32", WASM_F32 },       { "f64", WASM_F64 },
+        { "externref", WASM_EXTERNREF },
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(kinds); i++) {
+        if (!strcmp(name, kinds[i].name)) {
+            *out = kinds[i].kind;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static JSValue
+ns_wasm_tag_ctor(JSContext *ctx, JSValueConst new_target, int argc,
+                 JSValueConst *argv)
+{
+    (void)new_target;
+    if (argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "WebAssembly.Tag requires a descriptor");
+    JSValue params = JS_GetPropertyStr(ctx, argv[0], "parameters");
+    if (JS_IsException(params))
+        return params;
+    int64_t len = 0;
+    if (!JS_IsObject(params) || ns_wasm_eh_length(ctx, params, &len) < 0 ||
+        len < 0 || len > NS_WASM_MAX_PARAMS) {
+        JS_FreeValue(ctx, params);
+        if (JS_HasException(ctx))
+            return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx,
+                                 "WebAssembly.Tag parameters must be a list");
+    }
+    ns_wasm_tag *t = g_new0(ns_wasm_tag, 1);
+    t->owner = JS_UNDEFINED;
+    t->identity = t;
+    guint cells = 0;
+    for (int64_t i = 0; i < len; i++) {
+        JSValue v = JS_GetPropertyUint32(ctx, params, (uint32_t)i);
+        const char *name = JS_IsException(v) ? NULL : JS_ToCString(ctx, v);
+        JS_FreeValue(ctx, v);
+        gboolean ok = name && ns_wasm_tag_kind_from_name(name, &t->kinds[i]);
+        if (name)
+            JS_FreeCString(ctx, name);
+        if (!ok) {
+            JS_FreeValue(ctx, params);
+            g_free(t);
+            if (JS_HasException(ctx))
+                return JS_EXCEPTION;
+            return JS_ThrowTypeError(ctx, "invalid WebAssembly.Tag parameter");
+        }
+        cells += ns_wasm_kind_cells(t->kinds[i]);
+    }
+    JS_FreeValue(ctx, params);
+    t->n_kinds = (guint)len;
+    if (cells > NS_WAMR_EXN_MAX_CELLS) {
+        g_free(t);
+        return JS_ThrowRangeError(ctx, "WebAssembly.Tag has too many parameters");
+    }
+    JSValue obj = JS_NewObjectClass(ctx, ns_wasm_tag_class_id);
+    if (JS_IsException(obj)) {
+        g_free(t);
+        return obj;
+    }
+    JS_SetOpaque(obj, t);
+    return obj;
+}
+
+static JSValue
+ns_wasm_exception_arg_from_js(JSContext *ctx, wasm_valkind_t kind,
+                              JSValueConst v)
+{
+    switch (kind) {
+    case WASM_I32: {
+        int32_t i = 0;
+        if (JS_ToInt32(ctx, &i, v))
+            return JS_EXCEPTION;
+        return JS_NewInt32(ctx, i);
+    }
+    case WASM_I64: {
+        int64_t i = 0;
+        if (JS_ToBigInt64(ctx, &i, v))
+            return JS_EXCEPTION;
+        return JS_NewBigInt64(ctx, i);
+    }
+    case WASM_F32: {
+        double d = 0;
+        if (JS_ToFloat64(ctx, &d, v))
+            return JS_EXCEPTION;
+        return JS_NewFloat64(ctx, (float)d);
+    }
+    case WASM_F64: {
+        double d = 0;
+        if (JS_ToFloat64(ctx, &d, v))
+            return JS_EXCEPTION;
+        return JS_NewFloat64(ctx, d);
+    }
+    case WASM_EXTERNREF:
+        return JS_DupValue(ctx, v);
+    default:
+        return JS_ThrowTypeError(ctx, "unsupported WebAssembly.Exception "
+                                      "argument type");
+    }
+}
+
+static JSValue
+ns_wasm_exception_new(JSContext *ctx, JSValueConst tag_obj, JSValue *args,
+                      guint n_args)
+{
+    JSValue obj = JS_NewObjectClass(ctx, ns_wasm_exception_class_id);
+    if (JS_IsException(obj)) {
+        for (guint i = 0; i < n_args; i++)
+            JS_FreeValue(ctx, args[i]);
+        g_free(args);
+        return obj;
+    }
+    ns_wasm_exception *e = g_new0(ns_wasm_exception, 1);
+    e->tag = JS_DupValue(ctx, tag_obj);
+    e->args = args;
+    e->n_args = n_args;
+    JS_SetOpaque(obj, e);
+    return obj;
+}
+
+static JSValue
+ns_wasm_exception_ctor(JSContext *ctx, JSValueConst new_target, int argc,
+                       JSValueConst *argv)
+{
+    (void)new_target;
+    ns_wasm_tag *t =
+        argc > 0 ? JS_GetOpaque(argv[0], ns_wasm_tag_class_id) : NULL;
+    if (!t)
+        return JS_ThrowTypeError(ctx, "WebAssembly.Exception requires a Tag");
+    JSValueConst payload = argc > 1 ? argv[1] : JS_UNDEFINED;
+    int64_t len = 0;
+    if (!JS_IsObject(payload) || ns_wasm_eh_length(ctx, payload, &len) < 0 ||
+        len != (int64_t)t->n_kinds) {
+        if (JS_HasException(ctx))
+            return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "WebAssembly.Exception payload does not "
+                                      "match the tag");
+    }
+    JSValue *args = g_new0(JSValue, t->n_kinds ? t->n_kinds : 1);
+    for (guint i = 0; i < t->n_kinds; i++) {
+        JSValue v = JS_GetPropertyUint32(ctx, payload, i);
+        args[i] = JS_IsException(v)
+                      ? v
+                      : ns_wasm_exception_arg_from_js(ctx, t->kinds[i], v);
+        JS_FreeValue(ctx, v);
+        if (JS_IsException(args[i])) {
+            for (guint j = 0; j < i; j++)
+                JS_FreeValue(ctx, args[j]);
+            g_free(args);
+            return JS_EXCEPTION;
+        }
+    }
+    JSValue obj = ns_wasm_exception_new(ctx, argv[0], args, t->n_kinds);
+    if (JS_IsException(obj) || argc < 3 || !JS_IsObject(argv[2]))
+        return obj;
+    JSValue trace = JS_GetPropertyStr(ctx, argv[2], "traceStack");
+    gboolean want_stack = JS_ToBool(ctx, trace) > 0;
+    JS_FreeValue(ctx, trace);
+    if (want_stack) {
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue error_ctor = JS_GetPropertyStr(ctx, global, "Error");
+        JS_FreeValue(ctx, global);
+        JSValue err = JS_IsFunction(ctx, error_ctor)
+                          ? JS_CallConstructor(ctx, error_ctor, 0, NULL)
+                          : JS_NewError(ctx);
+        JS_FreeValue(ctx, error_ctor);
+        JSValue stack = JS_IsException(err)
+                            ? JS_UNDEFINED
+                            : JS_GetPropertyStr(ctx, err, "stack");
+        JS_FreeValue(ctx, err);
+        if (JS_IsException(stack))
+            stack = JS_UNDEFINED;
+        JS_DefinePropertyValueStr(ctx, obj, "stack", stack,
+                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    }
+    return obj;
+}
+
+static ns_wasm_exception *
+ns_wasm_exception_this(JSContext *ctx, JSValueConst this_val, int argc,
+                       JSValueConst *argv, ns_wasm_tag **out_tag)
+{
+    ns_wasm_exception *e = JS_GetOpaque(this_val, ns_wasm_exception_class_id);
+    if (!e) {
+        JS_ThrowTypeError(ctx, "not a WebAssembly.Exception");
+        return NULL;
+    }
+    *out_tag = argc > 0 ? JS_GetOpaque(argv[0], ns_wasm_tag_class_id) : NULL;
+    if (!*out_tag) {
+        JS_ThrowTypeError(ctx, "argument is not a WebAssembly.Tag");
+        return NULL;
+    }
+    return e;
+}
+
+static gboolean
+ns_wasm_exception_has_tag(const ns_wasm_exception *e, const ns_wasm_tag *t)
+{
+    ns_wasm_tag *own = JS_GetOpaque(e->tag, ns_wasm_tag_class_id);
+    return own && own->identity == t->identity;
+}
+
+static JSValue
+ns_wasm_exception_is(JSContext *ctx, JSValueConst this_val, int argc,
+                     JSValueConst *argv)
+{
+    ns_wasm_tag *t = NULL;
+    ns_wasm_exception *e = ns_wasm_exception_this(ctx, this_val, argc, argv, &t);
+    if (!e)
+        return JS_EXCEPTION;
+    return JS_NewBool(ctx, ns_wasm_exception_has_tag(e, t));
+}
+
+static JSValue
+ns_wasm_exception_get_arg(JSContext *ctx, JSValueConst this_val, int argc,
+                          JSValueConst *argv)
+{
+    ns_wasm_tag *t = NULL;
+    ns_wasm_exception *e = ns_wasm_exception_this(ctx, this_val, argc, argv, &t);
+    if (!e)
+        return JS_EXCEPTION;
+    if (!ns_wasm_exception_has_tag(e, t))
+        return JS_ThrowTypeError(ctx, "WebAssembly.Exception has another tag");
+    uint32_t index = 0;
+    if (ns_wasm_to_u32_index(ctx, argc > 1 ? argv[1] : JS_UNDEFINED, &index,
+                             "index"))
+        return JS_EXCEPTION;
+    if (index >= e->n_args)
+        return JS_ThrowRangeError(ctx, "WebAssembly.Exception argument index "
+                                       "out of range");
+    return JS_DupValue(ctx, e->args[index]);
+}
+
+static const JSCFunctionListEntry ns_wasm_exception_proto_funcs[] = {
+    JS_CFUNC_DEF("is", 1, ns_wasm_exception_is),
+    JS_CFUNC_DEF("getArg", 2, ns_wasm_exception_get_arg),
+};
+
+static struct ns_wasm_eh *
+ns_wasm_eh_state(ns_wasm_instance *wi)
+{
+    if (!wi->eh) {
+        wi->eh = g_new0(struct ns_wasm_eh, 1);
+        wi->eh->pins = g_array_new(FALSE, FALSE, sizeof(JSValue));
+    }
+    return wi->eh;
+}
+
+static void
+ns_wasm_eh_release_pins(JSRuntime *rt, struct ns_wasm_eh *eh)
+{
+    for (guint i = 0; i < eh->pins->len; i++)
+        JS_FreeValueRT(rt, g_array_index(eh->pins, JSValue, i));
+    g_array_set_size(eh->pins, 0);
+}
+
+static void
+ns_wasm_eh_free(JSRuntime *rt, ns_wasm_instance *wi)
+{
+    struct ns_wasm_eh *eh = wi->eh;
+    if (!eh)
+        return;
+    ns_wasm_eh_release_pins(rt, eh);
+    g_array_free(eh->pins, TRUE);
+    for (guint i = 0; i < eh->n_tags; i++)
+        JS_FreeValueRT(rt, eh->tags[i]);
+    g_free(eh->tags);
+    g_free(eh);
+    wi->eh = NULL;
+}
+
+static void
+ns_wasm_eh_mark(JSRuntime *rt, ns_wasm_instance *wi, JS_MarkFunc *mark_func)
+{
+    struct ns_wasm_eh *eh = wi->eh;
+    if (!eh)
+        return;
+    for (guint i = 0; i < eh->pins->len; i++)
+        JS_MarkValue(rt, g_array_index(eh->pins, JSValue, i), mark_func);
+    for (guint i = 0; i < eh->n_tags; i++)
+        JS_MarkValue(rt, eh->tags[i], mark_func);
+}
+
+static void
+ns_wasm_eh_reset(JSContext *ctx, ns_wasm_instance *wi)
+{
+    ns_wamr_exn_clear(wi->inst);
+    if (wi->eh)
+        ns_wasm_eh_release_pins(JS_GetRuntime(ctx), wi->eh);
+}
+
+static gboolean
+ns_wasm_eh_tags_match(const ns_wasm_tag *t, wasm_module_t module,
+                      uint32_t tag_index)
+{
+    if (t->n_kinds != ns_wamr_tag_param_count(module, tag_index))
+        return FALSE;
+    for (guint i = 0; i < t->n_kinds; i++)
+        if (t->kinds[i] != ns_wamr_tag_param_kind(module, tag_index, i))
+            return FALSE;
+    return TRUE;
+}
+
+static gboolean
+ns_wasm_eh_setup(JSContext *ctx, JSValueConst instance_obj,
+                 ns_wasm_instance *wi, ns_wasm_module *mod,
+                 JSValueConst import_object)
+{
+    uint32_t n_tags = ns_wamr_tag_count(mod->module);
+    uint32_t n_imports = ns_wamr_import_tag_count(mod->module);
+    if (n_tags == 0)
+        return TRUE;
+
+    struct ns_wasm_eh *eh = ns_wasm_eh_state(wi);
+    eh->tags = g_new(JSValue, n_tags);
+    for (uint32_t i = 0; i < n_tags; i++)
+        eh->tags[i] = JS_UNDEFINED;
+    eh->n_tags = n_tags;
+
+    for (uint32_t i = 0; i < n_imports; i++) {
+        const char *module_name = NULL, *name = NULL;
+        ns_wamr_import_tag_name(mod->module, i, &module_name, &name);
+        JSValue ns = JS_IsObject(import_object)
+                         ? JS_GetPropertyStr(ctx, import_object, module_name)
+                         : JS_UNDEFINED;
+        JSValue v = JS_IsObject(ns) ? JS_GetPropertyStr(ctx, ns, name)
+                                    : JS_UNDEFINED;
+        JS_FreeValue(ctx, ns);
+        ns_wasm_tag *t = JS_GetOpaque(v, ns_wasm_tag_class_id);
+        if (!t || !ns_wasm_eh_tags_match(t, mod->module, i) ||
+            !ns_wamr_tag_link_import(wi->inst, i, t->identity)) {
+            JS_FreeValue(ctx, v);
+            if (JS_HasException(ctx))
+                return FALSE;
+            char *msg = g_strdup_printf(
+                "tag import %s.%s is missing or has the wrong type",
+                module_name, name);
+            ns_wasm_throw_named(ctx, "LinkError", msg);
+            g_free(msg);
+            return FALSE;
+        }
+        eh->tags[i] = v;
+    }
+    for (uint32_t i = n_imports; i < n_tags; i++) {
+        eh->tags[i] = ns_wasm_tag_new(ctx, instance_obj, mod->module, wi->inst,
+                                      i);
+        if (JS_IsException(eh->tags[i])) {
+            eh->tags[i] = JS_UNDEFINED;
+            return FALSE;
+        }
+    }
+
+    int32_t n_exports = wasm_runtime_get_export_count(mod->module);
+    for (int32_t i = 0; i < n_exports; i++) {
+        uint32_t tag_index = 0;
+        if (!ns_wamr_export_tag_index(mod->module, i, &tag_index) ||
+            tag_index >= n_tags)
+            continue;
+        wasm_export_t exp;
+        wasm_runtime_get_export_type(mod->module, i, &exp);
+        if (JS_SetPropertyStr(ctx, wi->exports, exp.name,
+                              JS_DupValue(ctx, eh->tags[tag_index])) < 0)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static JSValue
+ns_wasm_eh_tag_for_identity(ns_wasm_instance *wi, void *identity)
+{
+    struct ns_wasm_eh *eh = wi->eh;
+    if (!eh)
+        return JS_UNDEFINED;
+    for (guint i = 0; i < eh->n_tags; i++) {
+        ns_wasm_tag *t = JS_GetOpaque(eh->tags[i], ns_wasm_tag_class_id);
+        if (t && t->identity == identity)
+            return eh->tags[i];
+    }
+    for (guint i = 0; i < eh->pins->len; i++) {
+        JSValue v = g_array_index(eh->pins, JSValue, i);
+        ns_wasm_tag *t = JS_GetOpaque(v, ns_wasm_tag_class_id);
+        if (t && t->identity == identity)
+            return v;
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_wasm_eh_cell_to_js(JSContext *ctx, wasm_valkind_t kind,
+                      const uint32_t *cell)
+{
+    switch (kind) {
+    case WASM_I32:
+        return JS_NewInt32(ctx, (int32_t)cell[0]);
+    case WASM_I64: {
+        int64_t v;
+        memcpy(&v, cell, sizeof(v));
+        return JS_NewBigInt64(ctx, v);
+    }
+    case WASM_F32: {
+        float v;
+        memcpy(&v, cell, sizeof(v));
+        return JS_NewFloat64(ctx, v);
+    }
+    case WASM_F64: {
+        double v;
+        memcpy(&v, cell, sizeof(v));
+        return JS_NewFloat64(ctx, v);
+    }
+    case WASM_EXTERNREF: {
+        void *obj = NULL;
+        if (cell[0] == NS_WAMR_NULL_REF ||
+            !wasm_externref_ref2obj(cell[0], &obj))
+            return JS_NULL;
+        return ns_wasm_ref_to_js(ctx, obj);
+    }
+    default:
+        return JS_UNDEFINED;
+    }
+}
+
+static gboolean
+ns_wasm_eh_take(JSContext *ctx, ns_wasm_instance *wi, JSValue *out)
+{
+    void *identity = NULL;
+    const uint32_t *cells = NULL;
+    uint32_t cell_num = 0;
+    if (!wi->inst ||
+        !ns_wamr_exn_pending(wi->inst, &identity, &cells, &cell_num))
+        return FALSE;
+
+    if (identity == &ns_wasm_js_exception_identity) {
+        guint pin = cells[0];
+        *out = wi->eh && pin < wi->eh->pins->len
+                   ? JS_DupValue(ctx, g_array_index(wi->eh->pins, JSValue, pin))
+                   : JS_UNDEFINED;
+        ns_wamr_exn_clear(wi->inst);
+        return TRUE;
+    }
+
+    JSValue tag_obj = ns_wasm_eh_tag_for_identity(wi, identity);
+    ns_wasm_tag *t = JS_GetOpaque(tag_obj, ns_wasm_tag_class_id);
+    if (!t)
+        return FALSE;
+    JSValue *args = g_new0(JSValue, t->n_kinds ? t->n_kinds : 1);
+    guint pos = 0;
+    for (guint i = 0; i < t->n_kinds; i++) {
+        guint need = ns_wasm_kind_cells(t->kinds[i]);
+        args[i] = pos + need <= cell_num
+                      ? ns_wasm_eh_cell_to_js(ctx, t->kinds[i], cells + pos)
+                      : JS_UNDEFINED;
+        pos += need;
+    }
+    ns_wamr_exn_clear(wi->inst);
+    *out = ns_wasm_exception_new(ctx, tag_obj, args, t->n_kinds);
+    return TRUE;
+}
+
+static gboolean
+ns_wasm_eh_js_to_cells(JSContext *ctx, ns_wasm_instance *wi,
+                       const ns_wasm_tag *t, const ns_wasm_exception *e,
+                       uint32_t *cells, uint32_t *out_cell_num)
+{
+    guint pos = 0;
+    if (e->n_args != t->n_kinds)
+        return FALSE;
+    for (guint i = 0; i < t->n_kinds; i++) {
+        guint need = ns_wasm_kind_cells(t->kinds[i]);
+        if (pos + need > NS_WAMR_EXN_MAX_CELLS)
+            return FALSE;
+        if (t->kinds[i] == WASM_EXTERNREF) {
+            uint32_t idx = 0;
+            if (!ns_wasm_ref_register(wi->inst, ns_wasm_ref_box(ctx, e->args[i]),
+                                      &idx))
+                return FALSE;
+            cells[pos] = idx;
+        } else {
+            wasm_val_t val;
+            if (ns_wasm_js_to_val(ctx, wi, e->args[i], t->kinds[i], &val))
+                return FALSE;
+            memcpy(cells + pos, &val.of, need * sizeof(uint32_t));
+        }
+        pos += need;
+    }
+    *out_cell_num = pos;
+    return TRUE;
+}
+
+static gboolean
+ns_wasm_eh_raise(JSContext *ctx, ns_wasm_instance *wi,
+                 wasm_module_inst_t inst, JSValue exc)
+{
+    if (!wi || !inst || inst != wi->inst) {
+        JS_FreeValue(ctx, exc);
+        return FALSE;
+    }
+    struct ns_wasm_eh *eh = ns_wasm_eh_state(wi);
+    ns_wasm_exception *e = JS_GetOpaque(exc, ns_wasm_exception_class_id);
+    ns_wasm_tag *t = e ? JS_GetOpaque(e->tag, ns_wasm_tag_class_id) : NULL;
+    if (t) {
+        uint32_t cells[NS_WAMR_EXN_MAX_CELLS];
+        uint32_t cell_num = 0;
+        if (ns_wasm_eh_js_to_cells(ctx, wi, t, e, cells, &cell_num)) {
+            JSValue tag_obj = JS_DupValue(ctx, e->tag);
+            g_array_append_val(eh->pins, tag_obj);
+            JS_FreeValue(ctx, exc);
+            return ns_wamr_exn_raise(inst, t->identity, cells, cell_num);
+        }
+        if (JS_HasException(ctx))
+            JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    uint32_t cells[2] = { eh->pins->len, 0 };
+    g_array_append_val(eh->pins, exc);
+    return ns_wamr_exn_raise(inst, (void *)&ns_wasm_js_exception_identity,
+                             cells, 2);
+}
+
+static void
+ns_wasm_eh_install(JSContext *ctx, JSValueConst ns)
+{
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    ns_new_class_id(&ns_wasm_tag_class_id);
+    if (!JS_IsRegisteredClass(rt, ns_wasm_tag_class_id))
+        JS_NewClass(rt, ns_wasm_tag_class_id, &ns_wasm_tag_class);
+    ns_new_class_id(&ns_wasm_exception_class_id);
+    if (!JS_IsRegisteredClass(rt, ns_wasm_exception_class_id))
+        JS_NewClass(rt, ns_wasm_exception_class_id, &ns_wasm_exception_class);
+
+    const int iface = JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE;
+    JSValue tag_proto = JS_NewObject(ctx);
+    JS_SetClassProto(ctx, ns_wasm_tag_class_id, JS_DupValue(ctx, tag_proto));
+    JSValue tag_ctor = JS_NewCFunction2(ctx, ns_wasm_tag_ctor, "Tag", 1,
+                                        JS_CFUNC_constructor, 0);
+    JS_SetPropertyStr(ctx, tag_ctor, "prototype", tag_proto);
+    JS_DefinePropertyValueStr(ctx, ns, "Tag", tag_ctor, iface);
+
+    JSValue exn_proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, exn_proto, ns_wasm_exception_proto_funcs,
+                               G_N_ELEMENTS(ns_wasm_exception_proto_funcs));
+    JS_SetClassProto(ctx, ns_wasm_exception_class_id,
+                     JS_DupValue(ctx, exn_proto));
+    JSValue exn_ctor = JS_NewCFunction2(ctx, ns_wasm_exception_ctor,
+                                        "Exception", 2, JS_CFUNC_constructor,
+                                        0);
+    JS_SetPropertyStr(ctx, exn_ctor, "prototype", exn_proto);
+    JS_DefinePropertyValueStr(ctx, ns, "Exception", exn_ctor, iface);
+}
+
 static JSValue
 ns_wasm_call_result(JSContext *ctx, ns_wasm_instance *wi, gboolean ok,
                     guint n_results, const wasm_val_t *results)
 {
     if (!ok) {
+        JSValue thrown;
+        if (ns_wasm_eh_take(ctx, wi, &thrown))
+            return JS_IsException(thrown) ? thrown : JS_Throw(ctx, thrown);
         if (wi->has_pending) {
             JSValue exc = wi->pending_exc;
             wi->pending_exc = JS_UNDEFINED;
@@ -543,6 +1229,7 @@ ns_wasm_call_function(JSContext *ctx, ns_wasm_instance *wi,
 
     if (wi->call_depth == 0) {
         wasm_runtime_clear_exception(wi->inst);
+        ns_wasm_eh_reset(ctx, wi);
         if (wi->has_pending) {
             JS_FreeValue(ctx, wi->pending_exc);
             wi->pending_exc = JS_UNDEFINED;
@@ -1288,6 +1975,7 @@ ns_wasm_instance_finalizer(JSRuntime *rt, JSValue val)
     JS_FreeValueRT(rt, wi->exports);
     JS_FreeValueRT(rt, wi->memory_obj);
     JS_FreeValueRT(rt, wi->pending_exc);
+    ns_wasm_eh_free(rt, wi);
     g_free(wi);
 }
 
@@ -1302,6 +1990,7 @@ ns_wasm_instance_gc_mark(JSRuntime *rt, JSValueConst val,
     JS_MarkValue(rt, wi->exports, mark_func);
     JS_MarkValue(rt, wi->memory_obj, mark_func);
     JS_MarkValue(rt, wi->pending_exc, mark_func);
+    ns_wasm_eh_mark(rt, wi, mark_func);
     ns_wasm_linkage_gc_mark(rt, &wi->linkage, mark_func);
     if (wi->funcs) {
         GHashTableIter it;
@@ -1392,11 +2081,16 @@ ns_wasm_native_dispatch(wasm_exec_env_t exec_env, uint64_t *args)
         JS_FreeValue(ctx, argv[i]);
 
     if (JS_IsException(ret)) {
+        JSValue exc = JS_GetException(ctx);
+        if (ns_wasm_eh_raise(ctx, wi, inst, JS_DupValue(ctx, exc))) {
+            JS_FreeValue(ctx, exc);
+            return;
+        }
         if (wi && !wi->has_pending) {
-            wi->pending_exc = JS_GetException(ctx);
+            wi->pending_exc = exc;
             wi->has_pending = TRUE;
         } else {
-            JS_FreeValue(ctx, JS_GetException(ctx));
+            JS_FreeValue(ctx, exc);
         }
         if (inst)
             wasm_runtime_set_exception(inst, "uncaught JavaScript exception");
@@ -2120,6 +2814,10 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
         JS_FreeValue(ctx, obj);
         return JS_EXCEPTION;
     }
+    if (!ns_wasm_eh_setup(ctx, obj, wi, mod, import_object)) {
+        JS_FreeValue(ctx, obj);
+        return JS_EXCEPTION;
+    }
     if (JS_DefinePropertyValueStr(ctx, obj, "exports",
                                   JS_DupValue(ctx, wi->exports),
                                   JS_PROP_ENUMERABLE) < 0) {
@@ -2438,6 +3136,8 @@ ns_wasm_kind_name(uint8_t kind)
         return "memory";
     case WASM_IMPORT_EXPORT_KIND_GLOBAL:
         return "global";
+    case NS_WASM_KIND_TAG:
+        return "tag";
     default:
         return "";
     }
@@ -2622,6 +3322,7 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
     }
     JS_FreeValue(ctx, tag_sym);
     JS_FreeValue(ctx, sym_ctor);
+    ns_wasm_eh_install(ctx, ns);
     JS_DefinePropertyValueStr(ctx, global, "WebAssembly", ns, iface);
     ns_wasm_guard_buffer_transfer(ctx, global);
 

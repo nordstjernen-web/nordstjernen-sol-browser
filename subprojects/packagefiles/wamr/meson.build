@@ -1,4 +1,4 @@
-# WAMR (wasm-micro-runtime) overlay: the fast interpreter with reference-types and bulk-memory, exposed as `libwamr`.
+# WAMR (wasm-micro-runtime) overlay: the fast interpreter with reference-types, bulk-memory and legacy exception handling, exposed as `libwamr`.
 
 project('wamr', 'c', license: 'Apache-2.0 WITH LLVM-exception', meson_version: '>=1.1')
 
@@ -12,6 +12,8 @@ wamr_c_args = cc.get_supported_arguments(['-w']) + [
   '-DWASM_ENABLE_FAST_INTERP=1',
   '-DWASM_ENABLE_BULK_MEMORY=1',
   '-DWASM_ENABLE_REF_TYPES=1',
+  '-DWASM_ENABLE_EXCE_HANDLING=1',
+  '-DWASM_ENABLE_TAGS=1',
   '-DWASM_ENABLE_MODULE_INST_CONTEXT=1',
   '-DWASM_MEM_ALLOC_WITH_USAGE=1',
   '-DWASM_DISABLE_HW_BOUND_CHECK=1',
@@ -22,6 +24,7 @@ wamr_invoke_native_suffix = get_option('simd') ? '_simd.s' : '.s'
 
 wamr_srcs = files(
   'ns_wamr.c',
+  'ns_wamr_eh.c',
   'core/iwasm/common/wasm_blocking_op.c',
   'core/iwasm/common/wasm_exec_env.c',
   'core/iwasm/common/wasm_loader_common.c',

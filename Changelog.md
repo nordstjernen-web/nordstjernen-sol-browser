@@ -7,6 +7,18 @@ Changelog:
   bounds-checks guest pointers in `realloc`, `module_malloc` and the
   libc-builtin `strtol`/`strtoul`, validates the entry signatures used by
   thread start, and fixes a loader crash on a bad constant expression.
+* WebAssembly exception handling: modules built with Emscripten's
+  `-fwasm-exceptions` (the original try/catch/throw/rethrow/delegate
+  proposal with a tag section) now load and run in WAMR's fast
+  interpreter, so SIMD keeps working. The loader records each `try` as
+  a handler range with its `catch` clauses and the frame slots that
+  receive the payload, and a throw unwinds frame by frame to the
+  innermost match. `WebAssembly.Tag` and `WebAssembly.Exception`
+  (`is()`, `getArg()`, `traceStack`) are available, tags can be
+  imported and exported, an exception that leaves wasm reaches JS as a
+  `WebAssembly.Exception`, and one thrown from JS (or any JS error
+  passing through an import) can be caught by wasm and rethrown
+  unchanged. Traps stay uncatchable.
 * Cross-origin isolation: a top-level document served over HTTPS (or
   from localhost) with `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`) is
