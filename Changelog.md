@@ -3,6 +3,15 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Security: a cross-origin frame or window can no longer reach another
+  document's global object through an exception. Calls made through a
+  cross-origin window (`postMessage`, `location.href`, `location.replace`,
+  `close`, `focus`, `blur`) ran natives of the target document, and an
+  error they threw was created in the target's realm: its
+  `constructor.constructor` was that document's `Function`, which gave
+  the caller full access to it. Such errors are now re-created in the
+  caller's realm, and `postMessage` argument errors are thrown there in
+  the first place.
 * Security: Web Audio no longer reads past an AudioParam's automation
   array. The event count is a script-writable property, and a count of
   2^30 wrapped the bounds check to zero, so `cancelAndHoldAtTime` and the
