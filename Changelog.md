@@ -3,6 +3,15 @@ Changelog:
 
 1.0.51:
 ======
+* `<iframe loading="lazy">` frames load. A lazy frame that started off
+  screen was hidden by the user-agent style sheet until it loaded, so it
+  had no box, never came into view and stayed blank for good, even when
+  it was at the top of the page (many video and map embeds use
+  `loading="lazy"`). Deferred frames now keep their normal box, load
+  once the page is scrolled within 1500 px of them (the window's scroll
+  position counts, not only the root box's), load at once when
+  `loading` is removed or set to `eager`, and a `src` set from script
+  on a lazy frame that has not loaded yet is deferred the same way.
 * `import()` in code compiled from a string resolves relative specifiers
   as the HTML spec says instead of failing with "module specifier must be
   absolute" or "no function filename for import()": `eval` and

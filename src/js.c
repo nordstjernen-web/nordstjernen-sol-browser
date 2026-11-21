@@ -199,6 +199,7 @@ ns_set_active_js(ns_js *js)
 
 #define NS_TRANSIENT_ACTIVATION_US (5 * G_USEC_PER_SEC)
 #define NS_WPT_DRAG_THRESHOLD_PX 3.0
+#define NS_LAZY_FRAME_ATTR "data-nd-frame-lazy"
 #define NS_MOUSE_POINTER_ID 1
 
 static void
@@ -369,6 +370,8 @@ static void ns_text_selection_set_state(JSContext *ctx,
                                         uint32_t start, uint32_t end,
                                         const char *direction);
 static void ns_js_process_pending_iframes(ns_js *js);
+static void ns_js_schedule_iframe_src_change(ns_js *js, ns_node *iframe);
+static void ns_js_lazy_frame_loading_changed(ns_js *js, ns_node *iframe);
 static GBytes *ns_js_blob_url_lookup(ns_js *js, const char *url, char **out_type);
 static void ns_slot_note_child_change(ns_js *js, ns_node *parent);
 static void ns_slot_note_attr_change(ns_js *js, ns_node *target,
@@ -6585,7 +6588,7 @@ ns_element_attr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst val, 
             ns_js_start_image_load(js, n, s);
         }
         if (magic == 3 && ns_node_is_navigable_frame(n))
-            ns_js_schedule_iframe_load_full(js, n, TRUE);
+            ns_js_schedule_iframe_src_change(js, n);
         if (magic == 3 && ns_node_is_media_element(n))
             ns_media_run_load_algorithm(ctx, this_val, n);
         if (changed && ns_node_is_tag(n, NS_TAG_OBJECT) &&
@@ -33110,6 +33113,9 @@ ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
     }
     ns_slot_note_attr_change(js, target, name);
     ns_css_mark_attr_dirty(target, name, old_value);
+    if (js && target && name && !namespace_uri &&
+        g_ascii_strcasecmp(name, "loading") == 0)
+        ns_js_lazy_frame_loading_changed(js, target);
     ns_mut_record_emit(js, "attributes", target, NULL, NULL,
                        NULL, NULL, name, namespace_uri, old_value);
 }
@@ -41202,7 +41208,7 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         if (ns_node_is_navigable_frame(n) &&
             (g_ascii_strcasecmp(name, "src") == 0 ||
              g_ascii_strcasecmp(name, "srcdoc") == 0))
-            ns_js_schedule_iframe_load_full(js_from_ctx(ctx), n, TRUE);
+            ns_js_schedule_iframe_src_change(js_from_ctx(ctx), n);
         else if (changed && ns_node_is_tag(n, NS_TAG_OBJECT) &&
                  g_ascii_strcasecmp(name, "data") == 0)
             ns_js_schedule_iframe_load(js_from_ctx(ctx), n);
@@ -73740,6 +73746,14 @@ ns_js_iframe_source_loaded(ns_js *js, ns_node *iframe)
     return same;
 }
 
+static double
+ns_js_lazy_frame_limit(ns_js *js)
+{
+    double scroll_y = MAX(js->layout_root->scroll_y,
+                          ns_window_scroll_prop(ns_js_main_realm(js), "scrollY"));
+    return scroll_y + ns_css_viewport_h() + 1500.0;
+}
+
 static void
 ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe, gboolean force)
 {
@@ -73751,9 +73765,13 @@ ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe, gboolean force)
     if (!force && lazy && js->iframe_load_depth == 0) {
         const ns_box *box = js->layout_root
             ? ns_box_find_by_dom(js->layout_root, iframe) : NULL;
-        double limit = js->layout_root
-            ? js->layout_root->scroll_y + ns_css_viewport_h() + 1500.0 : 0;
+        double limit = js->layout_root ? ns_js_lazy_frame_limit(js) : 0;
         if (!box || box->y > limit) {
+            if (!ns_element_get_attr(iframe, NS_LAZY_FRAME_ATTR)) {
+                ns_element_set_attr(iframe, NS_LAZY_FRAME_ATTR, "");
+                ns_css_mark_attr_dirty(iframe, NS_LAZY_FRAME_ATTR, NULL);
+                js->mutated = TRUE;
+            }
             if (!js->deferred_iframe_loads)
                 js->deferred_iframe_loads = g_ptr_array_new();
             for (guint i = 0; i < js->deferred_iframe_loads->len; i++)
@@ -73784,6 +73802,29 @@ ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe)
 }
 
 static void
+ns_js_lazy_frame_loading_changed(ns_js *js, ns_node *iframe)
+{
+    if (!js->deferred_iframe_loads) return;
+    gboolean deferred = FALSE;
+    for (guint i = 0; i < js->deferred_iframe_loads->len && !deferred; i++)
+        deferred = g_ptr_array_index(js->deferred_iframe_loads, i) == iframe;
+    if (!deferred) return;
+    const char *loading = ns_element_get_attr(iframe, "loading");
+    if (loading && g_ascii_strcasecmp(loading, "lazy") == 0) return;
+    ns_js_schedule_iframe_load(js, iframe);
+}
+
+static void
+ns_js_schedule_iframe_src_change(ns_js *js, ns_node *iframe)
+{
+    const char *loading = iframe ? ns_element_get_attr(iframe, "loading") : NULL;
+    gboolean first_lazy_load =
+        loading && g_ascii_strcasecmp(loading, "lazy") == 0 &&
+        !ns_element_get_attr(iframe, "data-nd-frame-url");
+    ns_js_schedule_iframe_load_full(js, iframe, !first_lazy_load);
+}
+
+static void
 ns_js_promote_deferred_iframes(ns_js *js)
 {
     if (!js || !js->layout_root || !js->deferred_iframe_loads) return;
@@ -73791,7 +73832,7 @@ ns_js_promote_deferred_iframes(ns_js *js)
     while (i < js->deferred_iframe_loads->len) {
         ns_node *iframe = g_ptr_array_index(js->deferred_iframe_loads, i);
         const ns_box *box = ns_box_find_by_dom(js->layout_root, iframe);
-        double limit = js->layout_root->scroll_y + ns_css_viewport_h() + 1500.0;
+        double limit = ns_js_lazy_frame_limit(js);
         if (!box || box->y > limit) {
             i++;
             continue;
