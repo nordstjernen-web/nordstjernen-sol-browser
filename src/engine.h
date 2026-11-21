@@ -122,9 +122,6 @@ GByteArray *ns_engine_png_bytes(const ns_box *root, double x, double y,
                                 double width, double height, double scale,
                                 int *out_width, int *out_height);
 int ns_engine_write_pdf(const ns_box *root, const char *path);
-int ns_engine_write_pdf_paged(const ns_box *root, const char *path,
-                              const struct ns_print_setup *setup);
-
 typedef struct ns_engine_pdf {
     double content_scale;
     const char *title;
@@ -139,6 +136,9 @@ typedef struct ns_engine_pdf {
 GByteArray *ns_engine_pdf_bytes(const ns_box *root,
                                 const struct ns_print_setup *setup,
                                 const ns_engine_pdf *job, int *out_pages);
+int ns_engine_write_pdf_job(const ns_box *root, const char *path,
+                            const struct ns_print_setup *setup,
+                            const ns_engine_pdf *job);
 
 GPtrArray *ns_engine_print_recordings(const ns_box *root,
                                       const struct ns_print_setup *setup);

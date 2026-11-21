@@ -55,6 +55,7 @@ ns_args_need_console(int argc, wchar_t **argv)
         if (wcscmp(argv[i], L"--headless") == 0 ||
             wcscmp(argv[i], L"--print-config") == 0 ||
             ns_has_prefix(argv[i], L"--dump=") ||
+            ns_has_prefix(argv[i], L"--export=") ||
             ns_has_prefix(argv[i], L"--url=") ||
             ns_has_prefix(argv[i], L"--viewport=") ||
             ns_has_prefix(argv[i], L"--eval=") ||

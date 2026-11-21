@@ -5,6 +5,7 @@
 
 #include "engine.h"
 
+#include <glib/gstdio.h>
 #include <cairo-pdf.h>
 #include <cairo.h>
 #include <math.h>
@@ -2559,32 +2560,24 @@ ns_engine_write_pdf(const ns_box *root, const char *path)
 #define NS_PRINT_PT_PER_PX (72.0 / 96.0)
 
 int
-ns_engine_write_pdf_paged(const ns_box *root, const char *path,
-                          const ns_print_setup *setup)
+ns_engine_write_pdf_job(const ns_box *root, const char *path,
+                        const ns_print_setup *setup, const ns_engine_pdf *job)
 {
-    if (!root || !path || !setup) return 2;
-    double page_h = setup->height - setup->margin_top - setup->margin_bottom;
-    GArray *offsets = ns_print_page_offsets(root, page_h);
-    cairo_surface_t *surf = cairo_pdf_surface_create(
-        path, setup->width * NS_PRINT_PT_PER_PX,
-        setup->height * NS_PRINT_PT_PER_PX);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
-        g_array_free(offsets, TRUE);
-        fprintf(stderr, "engine: failed to create PDF surface\n");
+    if (!root || !path || !setup || !job) return 2;
+    int pages = 0;
+    GByteArray *pdf = ns_engine_pdf_bytes(root, setup, job, &pages);
+    if (!pdf) {
+        fprintf(stderr, "engine: failed to render the PDF\n");
         return 2;
     }
-    pdf_set_metadata(surf);
-    cairo_t *cr = cairo_create(surf);
-    for (guint i = 0; i < offsets->len; i++) {
-        double top = g_array_index(offsets, double, i);
-        ns_print_draw_page(cr, root, setup, NS_PRINT_PT_PER_PX, top,
-                           ns_print_page_bottom(offsets, i, page_h));
-        cairo_show_page(cr);
+    FILE *f = g_fopen(path, "wb");
+    gboolean ok = f && fwrite(pdf->data, 1, pdf->len, f) == pdf->len;
+    if (f && fclose(f) != 0) ok = FALSE;
+    g_byte_array_free(pdf, TRUE);
+    if (!ok) {
+        fprintf(stderr, "engine: cannot write %s\n", path);
+        return 2;
     }
-    cairo_destroy(cr);
-    cairo_surface_destroy(surf);
-    g_array_free(offsets, TRUE);
     return 0;
 }
 
@@ -2675,14 +2668,136 @@ pdf_link_is_external(const char *uri)
 }
 
 static void
+pdf_append_escaped(GString *out, const char *s)
+{
+    for (; *s; s++) {
+        if (*s == '\'' || *s == '\\') g_string_append_c(out, '\\');
+        if ((unsigned char)*s >= 0x20) g_string_append_c(out, *s);
+    }
+}
+
+#define NS_PDF_MAX_DESTS (1u << 16)
+
+typedef struct pdf_dest {
+    char *name;
+    double x, y;
+    guint page;
+} pdf_dest;
+
+static guint
+pdf_page_of(const GArray *offsets, double y)
+{
+    guint page = 0;
+    while (page + 1 < offsets->len &&
+           g_array_index(offsets, double, page + 1) <= y + 0.5)
+        page++;
+    return page;
+}
+
+static void
+pdf_collect_dests(const ns_box *b, const GArray *offsets, GArray *out,
+                  GHashTable *names)
+{
+    if (!b || out->len >= NS_PDF_MAX_DESTS) return;
+    const ns_node *n = b->dom;
+    if (n && n->kind == NS_NODE_ELEMENT && b->kind != NS_BOX_INLINE) {
+        const char *id = ns_element_get_attr(n, "id");
+        if (id && *id && !g_hash_table_contains(names, id)) {
+            double y = b->y + b->margin.top;
+            pdf_dest d = { g_strdup(id), b->x, y, pdf_page_of(offsets, y) };
+            g_array_append_val(out, d);
+            g_hash_table_insert(names, d.name, GUINT_TO_POINTER(out->len));
+        }
+    }
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        pdf_collect_dests(c, offsets, out, names);
+    if (b->inline_atomics)
+        for (guint i = 0; i < b->inline_atomics->len; i++)
+            pdf_collect_dests(g_array_index(b->inline_atomics, ns_inline_atomic,
+                                            i).box, offsets, out, names);
+}
+
+static void
+pdf_dests_free(GArray *dests)
+{
+    for (guint i = 0; i < dests->len; i++)
+        g_free(g_array_index(dests, pdf_dest, i).name);
+    g_array_free(dests, TRUE);
+}
+
+static void
+pdf_tag_dests(cairo_t *cr, const GArray *dests, const ns_print_setup *setup,
+              double scale, guint page, double page_top)
+{
+    for (guint i = 0; i < dests->len; i++) {
+        const pdf_dest *d = &g_array_index(dests, pdf_dest, i);
+        if (d->page != page) continue;
+        GString *attr = g_string_new("name='");
+        pdf_append_escaped(attr, d->name);
+        g_string_append(attr, "' x=");
+        pdf_append_number(attr, (setup->margin_left + d->x * scale) *
+                                NS_PRINT_PT_PER_PX);
+        g_string_append(attr, " y=");
+        pdf_append_number(attr, (setup->margin_top + (d->y - page_top) * scale) *
+                                NS_PRINT_PT_PER_PX);
+        cairo_tag_begin(cr, CAIRO_TAG_DEST, attr->str);
+        cairo_tag_end(cr, CAIRO_TAG_DEST);
+        g_string_free(attr, TRUE);
+    }
+}
+
+static const pdf_dest *
+pdf_dest_named(const GArray *dests, GHashTable *names, const char *name)
+{
+    guint slot = GPOINTER_TO_UINT(g_hash_table_lookup(names, name));
+    return slot ? &g_array_index(dests, pdf_dest, slot - 1) : NULL;
+}
+
+static char *
+pdf_link_target(const char *href, const char *doc_url, const GArray *dests,
+                GHashTable *names, const char *page_ranges, gboolean *is_dest)
+{
+    *is_dest = FALSE;
+    char *abs = doc_url ? ns_url_resolve(doc_url, href) : NULL;
+    const char *uri = abs ? abs : href;
+    const char *hash = strchr(uri, '#');
+    if (hash && hash[1]) {
+        gsize doc_len = doc_url ? strcspn(doc_url, "#") : 0;
+        gboolean same_doc = href[0] == '#' ||
+            (doc_len && (gsize)(hash - uri) == doc_len &&
+             strncmp(uri, doc_url, doc_len) == 0);
+        if (same_doc) {
+            char *name = g_uri_unescape_string(hash + 1, NULL);
+            if (!name) name = g_strdup(hash + 1);
+            const pdf_dest *d = pdf_dest_named(dests, names, name);
+            if (!d) d = pdf_dest_named(dests, names, hash + 1);
+            g_free(name);
+            g_free(abs);
+            if (!d || !pdf_page_selected(page_ranges, d->page + 1)) return NULL;
+            *is_dest = TRUE;
+            return g_strdup(d->name);
+        }
+    }
+    if (!pdf_link_is_external(uri)) {
+        g_free(abs);
+        return NULL;
+    }
+    return abs ? abs : g_strdup(href);
+}
+
+static void
 pdf_tag_links(cairo_t *cr, const GArray *links, const ns_print_setup *setup,
-              double scale, double page_top, double page_bottom)
+              double scale, double page_top, double page_bottom,
+              const ns_engine_pdf *job, const GArray *dests, GHashTable *names)
 {
     for (guint i = 0; i < links->len; i++) {
         const ns_print_link *l = &g_array_index(links, ns_print_link, i);
         double mid = l->y + l->h / 2.0;
-        if (mid < page_top || mid >= page_bottom || !pdf_link_is_external(l->uri))
-            continue;
+        if (mid < page_top || mid >= page_bottom) continue;
+        gboolean is_dest = FALSE;
+        char *target = pdf_link_target(l->uri, job->url, dests, names,
+                                       job->page_ranges, &is_dest);
+        if (!target) continue;
         GString *attr = g_string_new("rect=[");
         pdf_append_number(attr, setup->margin_left + l->x * scale);
         g_string_append_c(attr, ' ');
@@ -2691,15 +2806,13 @@ pdf_tag_links(cairo_t *cr, const GArray *links, const ns_print_setup *setup,
         pdf_append_number(attr, l->w * scale);
         g_string_append_c(attr, ' ');
         pdf_append_number(attr, l->h * scale);
-        g_string_append(attr, "] uri='");
-        for (const char *p = l->uri; *p; p++) {
-            if (*p == '\'' || *p == '\\') g_string_append_c(attr, '\\');
-            if ((unsigned char)*p >= 0x20) g_string_append_c(attr, *p);
-        }
+        g_string_append(attr, is_dest ? "] dest='" : "] uri='");
+        pdf_append_escaped(attr, target);
         g_string_append_c(attr, '\'');
         cairo_tag_begin(cr, CAIRO_TAG_LINK, attr->str);
         cairo_tag_end(cr, CAIRO_TAG_LINK);
         g_string_free(attr, TRUE);
+        g_free(target);
     }
 }
 
@@ -2814,6 +2927,9 @@ ns_engine_pdf_bytes(const ns_box *root, const ns_print_setup *setup,
     GArray *offsets = ns_print_page_offsets(root, page_h);
     GArray *links = ns_print_links(root);
     GArray *headings = ns_print_headings(root);
+    GArray *dests = g_array_new(FALSE, FALSE, sizeof(pdf_dest));
+    GHashTable *dest_names = g_hash_table_new(g_str_hash, g_str_equal);
+    pdf_collect_dests(root, offsets, dests, dest_names);
     GArray *sheet_of_page = g_array_new(FALSE, TRUE, sizeof(int));
     g_array_set_size(sheet_of_page, offsets->len);
     guint total = offsets->len;
@@ -2827,9 +2943,11 @@ ns_engine_pdf_bytes(const ns_box *root, const ns_print_setup *setup,
         ns_print_draw_page_scaled(cr, root, setup, NS_PRINT_PT_PER_PX, scale,
                                   top, bottom);
         pdf_draw_margin_texts(cr, setup, job, i + 1, total, date);
+        pdf_tag_dests(cr, dests, setup, scale, i, top);
         cairo_save(cr);
         cairo_scale(cr, NS_PRINT_PT_PER_PX, NS_PRINT_PT_PER_PX);
-        pdf_tag_links(cr, links, setup, scale, top, bottom);
+        pdf_tag_links(cr, links, setup, scale, top, bottom, job, dests,
+                      dest_names);
         cairo_restore(cr);
         cairo_show_page(cr);
         g_array_index(sheet_of_page, int, i) = ++sheets;
@@ -2844,6 +2962,8 @@ ns_engine_pdf_bytes(const ns_box *root, const ns_print_setup *setup,
     g_array_free(sheet_of_page, TRUE);
     ns_print_links_free(links);
     ns_print_headings_free(headings);
+    g_hash_table_destroy(dest_names);
+    pdf_dests_free(dests);
     if (status != CAIRO_STATUS_SUCCESS || sheets == 0) {
         g_byte_array_free(pdf, TRUE);
         return NULL;

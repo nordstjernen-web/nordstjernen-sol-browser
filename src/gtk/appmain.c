@@ -223,6 +223,7 @@ ns_win32_args_need_console(int argc, char **argv)
             g_strcmp0(argv[i], "--wpt")          == 0 ||
             g_strcmp0(argv[i], "--wpt-batch")    == 0 ||
             g_str_has_prefix(argv[i], "--dump=") ||
+            g_str_has_prefix(argv[i], "--export=") ||
             g_str_has_prefix(argv[i], "--url=")  ||
             g_str_has_prefix(argv[i], "--viewport=") ||
             g_str_has_prefix(argv[i], "--eval=") ||
@@ -371,6 +372,7 @@ ns_proc_mode_wanted(int argc, char **argv)
             g_strcmp0(a, "--wpt") == 0 ||
             g_strcmp0(a, "--wpt-batch") == 0 ||
             g_str_has_prefix(a, "--dump=") ||
+            g_str_has_prefix(a, "--export=") ||
             g_str_has_prefix(a, "--eval=") ||
             g_str_has_prefix(a, "--inspect=") ||
             g_str_has_prefix(a, "--inspect-at=") ||
@@ -502,6 +504,8 @@ ns_print_version_or_help(int argc, char **argv)
                   "                         what a headless run writes (default text)\n"
                   "                         pdf: one page as tall as the document\n"
                   "                         print: paged PDF, A4 unless @page says otherwise\n"
+                  "  --export=pdf:FILE      save the page as a paged PDF with links\n"
+                  "                         (A4 unless @page says otherwise)\n"
                   "  --viewport=W[xH]       headless viewport size (default 1000 wide;\n"
                   "                         print: the sheet's content width)\n"
                   "  --version              print the version and exit\n"
