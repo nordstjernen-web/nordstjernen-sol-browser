@@ -341,6 +341,14 @@ void                ns_js_drag_session_set_data(ns_js_drag_session *session,
                                                 const char *data);
 void                ns_js_drag_session_add_file(ns_js_drag_session *session,
                                                 const char *path);
+void                ns_js_drag_pointer_down(ns_js *js, const ns_node *target,
+                                            double x, double y,
+                                            double threshold);
+gboolean            ns_js_drag_pointer_move(ns_js *js, const ns_node *target,
+                                            double x, double y);
+gboolean            ns_js_drag_pointer_up(ns_js *js, const ns_node *target,
+                                          double x, double y);
+gboolean            ns_js_drag_active(const ns_js *js);
 gboolean            ns_js_dispatch_drag_event(ns_js *js, ns_js_drag_session *session,
                                               const ns_node *target,
                                               const char *type,

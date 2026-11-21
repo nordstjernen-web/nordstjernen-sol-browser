@@ -3,6 +3,21 @@ Changelog:
 
 1.0.51:
 ======
+* HTML drag and drop works inside a page. Pressing on a `draggable="true"`
+  element, a link or an image and moving the mouse starts a drag:
+  `dragstart` (cancelable, with the link or image address preset as
+  `text/uri-list` and `text/plain`), then `drag` at the source and
+  `dragenter`/`dragleave`/`dragover` at the element under the pointer,
+  and on release `drop` where the last `dragover` accepted the drop,
+  followed by `dragend` with the negotiated `dropEffect`. Mouse and
+  pointer events are held back while the drag runs. `DataTransfer` keeps
+  the spec's data store modes (writable only during `dragstart`,
+  readable during `drop`, otherwise only its types are visible) and
+  ignores invalid `dropEffect`/`effectAllowed` values. Text fields,
+  `<select>` and editable content never start a drag, and in the window
+  the mouse has to move 8 pixels first, so an unsteady click on a link
+  still follows it. Sortable lists, kanban boards and other drag-and-drop
+  page UIs now work, and 117 more `html/editing` web-platform-tests pass.
 * Fragment navigation follows the HTML spec in the engine itself, so it
   behaves the same in the window, headless and the WPT runner. Setting
   `location.hash`, assigning a `#fragment` URL or following a

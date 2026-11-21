@@ -210,6 +210,13 @@ struct ns_js {
     gboolean      pointer_input;
     gboolean      autofocus_processed;
     const ns_node *focus_nav_start;
+    const ns_node *drag_candidate;
+    double         drag_start_x, drag_start_y, drag_threshold;
+    struct ns_js_drag_session *drag_session;
+    const ns_node *drag_source;
+    const ns_node *drag_immediate;
+    const ns_node *drag_current;
+    const char    *drag_operation;
     const ns_node *active_modal;
     GPtrArray     *close_watchers;
     GPtrArray     *modal_dialogs;

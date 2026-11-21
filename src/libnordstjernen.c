@@ -172,6 +172,7 @@ struct ns_browser {
 #define NS_LAYOUT_RAPID_US (250 * 1000)
 #define NS_LAYOUT_DAMP_US (700 * 1000)
 #define NS_LAYOUT_BACKGROUND_MIN_US (16 * 1000)
+#define NS_BROWSER_DRAG_THRESHOLD_PX 8.0
 #define NS_LAYOUT_BACKGROUND_MAX_US (120 * 1000)
 #define NS_LAYOUT_TRANSFORM_CATCHUP_US (1000 * 1000)
 #define NS_CARET_BLINK_US (530 * 1000)
@@ -3712,6 +3713,7 @@ char *
 ns_browser_select(ns_browser *browser, int kind, int x, int y)
 {
     if (!browser || !browser->layout) return NULL;
+    if (kind == 1 && ns_js_drag_active(browser->js)) return NULL;
     if (browser->range_drag && kind == 1) {
         browser_range_set_from_x(browser, browser->range_drag, x);
         if (browser->dirty) {
@@ -3827,6 +3829,20 @@ ns_browser_hover_full(ns_browser *browser, int x, int y, int mods,
     if (browser->js) node = ns_js_pointer_event_target(browser->js, node);
 
     browser_prune_cached_nodes(browser);
+    if (browser->js && (browser->buttons_down & browser_button_bit(0)) &&
+        ns_js_drag_pointer_move(browser->js, node, x, y)) {
+        if (ns_selection_has_range(&browser->selection)) {
+            ns_selection_clear(&browser->selection);
+            browser_sync_js_selection(browser);
+            browser->dirty = TRUE;
+        }
+        browser->selection_dragged = FALSE;
+        if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+        if (!browser->dirty) return 0;
+        browser_relayout(browser);
+        browser->dirty = FALSE;
+        return 1;
+    }
     if (browser->range_drag) {
         browser_range_set_from_x(browser, browser->range_drag, x);
         if (browser->dirty) {
@@ -4754,6 +4770,9 @@ ns_browser_press_full(ns_browser *browser, int x, int y, int mods, int button,
         browser_mouse_dispatch(browser, target, "mousedown", x, y, 0,
                                clicks, mods, NULL, &mousedown_prevented);
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+        if (!mousedown_prevented && clicks < 2)
+            ns_js_drag_pointer_down(browser->js, target, x, y,
+                                    NS_BROWSER_DRAG_THRESHOLD_PX);
     }
 
     gboolean in_datalist = FALSE;
@@ -5013,6 +5032,19 @@ ns_browser_release_full(ns_browser *browser, int x, int y, int button,
     browser->press_node = NULL;
     browser->press_active = FALSE;
     browser->buttons_down &= ~browser_button_bit(0);
+    if (browser->js && ns_js_drag_pointer_up(browser->js, up, x, y)) {
+        browser->selection_dragged = FALSE;
+        ns_css_set_active_node(NULL);
+        if (!browser->buttons_down)
+            ns_js_release_pointer_capture(browser->js);
+        if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+        if (browser->dirty) {
+            browser_relayout(browser);
+            browser->dirty = FALSE;
+            if (out_changed) *out_changed = 1;
+        }
+        return NULL;
+    }
 
     gboolean selected = browser->selection_dragged &&
                         ns_selection_has_range(&browser->selection);
