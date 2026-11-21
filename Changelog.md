@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Security: Web Audio no longer reads past an AudioParam's automation
+  array. The event count is a script-writable property, and a count of
+  2^30 wrapped the bounds check to zero, so `cancelAndHoldAtTime` and the
+  render path walked memory beyond the array and returned a value from it
+  to the page. The count is now clamped to the 4096-event limit and
+  compared without multiplying.
 * IndexedDB: a single database may now grow to the origin's storage limit
   (1 GiB) instead of stopping at 256 MiB. SuperTuxKart's Medium texture
   quality failed to start after Low had been played: both data bundles

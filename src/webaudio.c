@@ -120,8 +120,9 @@ enum {
 static uint32_t
 ns_wa_param_sync(JSContext *ctx, JSValueConst p)
 {
-    uint32_t n = (uint32_t)MAX(0.0, ns_wa_num(ctx, p, "_evn", 0.0));
-    if (!n) return 0;
+    double count = ns_wa_num(ctx, p, "_evn", 0.0);
+    if (!(count >= 1.0)) return 0;
+    uint32_t n = count >= NS_WA_MAX_EVENTS ? NS_WA_MAX_EVENTS : (uint32_t)count;
     double shown = ns_wa_num(ctx, p, "_shown", NAN);
     double value = ns_wa_num(ctx, p, "value", NAN);
     if (!isnan(shown) && value != shown) {
@@ -216,7 +217,7 @@ ns_wa_param_at(JSContext *ctx, JSValueConst node, const char *name,
         JSValue arr = JS_GetPropertyStr(ctx, p, "_ev");
         uint32_t cap = 0;
         double *ev = ns_wa_float64(ctx, arr, &cap);
-        if (ev && n * 4 <= cap) {
+        if (ev && n <= cap / 4) {
             v = ns_wa_param_eval(ev, &n, base, t, TRUE);
             if (!isfinite(v)) v = dflt;
             JS_SetPropertyStr(ctx, p, "_evn", JS_NewInt32(ctx, (int32_t)n));
@@ -284,7 +285,7 @@ ns_wa_param_insert(JSContext *ctx, JSValueConst p, int type, double value,
             JS_FreeValue(ctx, arr);
             return;
         }
-        if (old && n * 4 <= ocap) memcpy(gev, old, (size_t)n * 4 * sizeof(double));
+        if (old && n <= ocap / 4) memcpy(gev, old, (size_t)n * 4 * sizeof(double));
         else n = 0;
         JS_FreeValue(ctx, arr);
         JS_SetPropertyStr(ctx, p, "_ev", JS_DupValue(ctx, grown));
@@ -320,7 +321,7 @@ ns_wa_param_cancel(JSContext *ctx, JSValueConst p, double time, gboolean hold)
     uint32_t cap = 0;
     double *ev = ns_wa_float64(ctx, arr, &cap);
     double held = NAN;
-    if (ev && n * 4 <= cap) {
+    if (ev && n <= cap / 4) {
         if (hold) {
             uint32_t m = n;
             held = ns_wa_param_eval(ev, &m, base, time, FALSE);
