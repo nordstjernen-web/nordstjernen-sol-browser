@@ -3,6 +3,15 @@ Changelog:
 
 1.0.51:
 ======
+* The AppImage runs natively on Wayland. linuxdeploy's GTK hook forced
+  `GDK_BACKEND=x11`, so the browser always went through XWayland and did
+  not start at all on a Wayland session without it; `pack-appimage.sh`
+  now drops that line. The hook also records the host's own values of
+  the variables it points into the bundle (`GTK_PATH`, `GTK_THEME`,
+  `XDG_DATA_DIRS`, `GSETTINGS_SCHEMA_DIR`, …), and opening a finished
+  download restores them, and clears `APPDIR`/`APPIMAGE`, for the app it
+  launches, so that app no longer loads the bundle's GTK modules, schemas
+  and forced Adwaita theme.
 * npm package: on x86_64 Linux with glibc 2.39 or newer (Ubuntu 24.04,
   Debian 13, Fedora 40 and newer) `nordstjernen-browser` installs the
   release AppImage, checked against `SHA256SUMS` and unpacked so no FUSE

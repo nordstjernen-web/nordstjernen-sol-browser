@@ -1144,12 +1144,42 @@ downloads_dir(void)
     return fallback;
 }
 
+static GAppLaunchContext *
+host_launch_context(void)
+{
+    GdkDisplay *display = gdk_display_get_default();
+    GAppLaunchContext *ctx = display
+        ? G_APP_LAUNCH_CONTEXT(gdk_display_get_app_launch_context(display))
+        : g_app_launch_context_new();
+    const char *names = g_getenv("NS_HOST_ENV");
+    if (!names)
+        return ctx;
+    char **list = g_strsplit(names, " ", -1);
+    for (char **name = list; *name; name++) {
+        if (!**name)
+            continue;
+        char *saved_name = g_strconcat("NS_HOST_ENV_", *name, NULL);
+        const char *saved = g_getenv(saved_name);
+        if (saved)
+            g_app_launch_context_setenv(ctx, *name, saved);
+        else
+            g_app_launch_context_unsetenv(ctx, *name);
+        g_app_launch_context_unsetenv(ctx, saved_name);
+        g_free(saved_name);
+    }
+    g_strfreev(list);
+    g_app_launch_context_unsetenv(ctx, "NS_HOST_ENV");
+    return ctx;
+}
+
 static void
 download_open_path(const char *path)
 {
     char *uri = g_filename_to_uri(path, NULL, NULL);
     if (uri) {
-        g_app_info_launch_default_for_uri(uri, NULL, NULL);
+        GAppLaunchContext *ctx = host_launch_context();
+        g_app_info_launch_default_for_uri(uri, ctx, NULL);
+        g_object_unref(ctx);
         g_free(uri);
     }
 }
