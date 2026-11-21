@@ -23,14 +23,11 @@ if gtk4_dep.version().version_compare('<4.22')
 endif
 
 nordstjernen_gtk_deps = nordstjernen_platform_deps + [gtk4_dep, cairo, libcrypto,
-                                                    libm, libpsl]
+                                                    libm, libpsl, libfontconfig,
+                                                    ns_win_system_libs]
 if host_machine.system() == 'windows'
   nordstjernen_gtk_sources += files('webauthn_win.c')
-endif
-if have_fontconfig
-  nordstjernen_gtk_deps += [libfontconfig]
-endif
-if host_machine.system() != 'windows'
+else
   nordstjernen_gtk_deps += [cc.find_library('rt', required: false)]
 endif
 
@@ -38,7 +35,6 @@ nordstjernen_gtk_link = [libns_platform]
 if gtk4_dep.version().version_compare('<4.22')
   nordstjernen_gtk_deps += nordstjernen_deps
   nordstjernen_gtk_link = [libnordstjernen_static]
-  nordstjernen_gtk_sources += files('../security_root.c')
 endif
 
 nordstjernen_gtk_platform_sources = []
@@ -67,7 +63,7 @@ executable(
   link_with: nordstjernen_gtk_link,
   dependencies: nordstjernen_gtk_deps,
   include_directories: include_directories('..', '.'),
-  win_subsystem: nordstjernen_win_subsystem,
+  win_subsystem: 'windows',
   link_args: nordstjernen_exe_link_args + nordstjernen_gtk_platform_link_args,
   install: true,
 )

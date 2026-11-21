@@ -506,11 +506,8 @@ endif
 # macOS/Windows packages bundle a minimal LGPL FFmpeg built by
 # scripts/build-ffmpeg-lgpl.sh. Below 6.0 the required build fails on
 # Linux/Windows and WebM disables on macOS.
-libav_required = get_option('libav')
-if libav_required.auto() and (host_machine.system() == 'windows' or
-                              host_machine.system() == 'linux')
-  libav_required = true
-endif
+libav_required = get_option('libav').enable_auto_if(
+  host_machine.system() in ['windows', 'linux'])
 libavformat = dependency('libavformat', version: '>=60', required: libav_required)
 libavcodec = dependency('libavcodec', version: '>=60', required: libav_required)
 libavutil = dependency('libavutil', version: '>=58', required: libav_required)
@@ -544,10 +541,8 @@ elif is_android
   media_os_backend = 'android'
   media_os_deps += [cc.find_library('mediandk')]
 else
-  gst_required = get_option('gstreamer')
-  if host_machine.system() == 'linux' and gst_required.auto()
-    gst_required = true
-  endif
+  gst_required = get_option('gstreamer').enable_auto_if(
+    host_machine.system() == 'linux')
   gst_core = dependency('gstreamer-1.0', version: '>=1.20',
                         required: gst_required)
   gst_app = dependency('gstreamer-app-1.0', version: '>=1.20',
@@ -651,37 +646,9 @@ else
   libwamr = declare_dependency()
 endif
 
-install_data(
-  'data/icons/hicolor/scalable/apps/nordstjernen.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen.gif',
-  'data/icons/hicolor/scalable/apps/nordstjernen-back-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-bookmarks-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-close-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-downloads-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-forward-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-globe-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-home-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-lock-open-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-lock-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-menu-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-new-tab-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-page-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-private-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-reload-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-star-filled-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-star-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-stop-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-warning-symbolic.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-console.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-settings.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-about.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-stage-connect.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-stage-fetch.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-stage-parse.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-stage-script.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-stage-render.svg',
-  'data/icons/hicolor/scalable/apps/nordstjernen-stage-done.svg',
-  install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps',
+install_subdir(
+  'data/icons/hicolor',
+  install_dir: get_option('datadir') / 'icons',
 )
 
 install_data(
@@ -696,48 +663,9 @@ install_data(
   install_dir: get_option('datadir') / 'nordstjernen',
 )
 
-install_data(
-  'data/i18n/am.lang',
-  'data/i18n/ar.lang',
-  'data/i18n/bn.lang',
-  'data/i18n/de.lang',
-  'data/i18n/el.lang',
-  'data/i18n/en.lang',
-  'data/i18n/es.lang',
-  'data/i18n/fa.lang',
-  'data/i18n/fr.lang',
-  'data/i18n/gu.lang',
-  'data/i18n/ha.lang',
-  'data/i18n/hi.lang',
-  'data/i18n/hu.lang',
-  'data/i18n/id.lang',
-  'data/i18n/it.lang',
-  'data/i18n/ja.lang',
-  'data/i18n/jv.lang',
-  'data/i18n/kn.lang',
-  'data/i18n/ko.lang',
-  'data/i18n/ml.lang',
-  'data/i18n/mr.lang',
-  'data/i18n/my.lang',
-  'data/i18n/nl.lang',
-  'data/i18n/pa.lang',
-  'data/i18n/pl.lang',
-  'data/i18n/pt.lang',
-  'data/i18n/ro.lang',
-  'data/i18n/ru.lang',
-  'data/i18n/su.lang',
-  'data/i18n/sw.lang',
-  'data/i18n/ta.lang',
-  'data/i18n/te.lang',
-  'data/i18n/th.lang',
-  'data/i18n/tl.lang',
-  'data/i18n/tr.lang',
-  'data/i18n/uk.lang',
-  'data/i18n/ur.lang',
-  'data/i18n/vi.lang',
-  'data/i18n/yo.lang',
-  'data/i18n/zh.lang',
-  install_dir: get_option('datadir') / 'nordstjernen' / 'i18n',
+install_subdir(
+  'data/i18n',
+  install_dir: get_option('datadir') / 'nordstjernen',
 )
 
 install_data(
@@ -751,14 +679,19 @@ install_data(
   install_dir: get_option('datadir') / 'metainfo',
 )
 
-summary({'WebAssembly (WAMR)': have_wasm,
-         'WebAssembly SIMD (SIMDe)': have_wasm_simd}, section: 'Features')
-summary({'WebGL (glslang shader validator)': have_glslang}, section: 'Features')
-summary({'AVIF images (libavif)': have_avif}, section: 'Features')
-summary({'PDF viewer (PDF.js)': have_pdfjs}, section: 'Features')
-summary({'H.264/AAC OS decoders': media_os_backend}, section: 'Features')
-summary({'JPEG XL images (libjxl)': have_jxl}, section: 'Features')
-summary({'GTK 4 shell': have_gtk}, section: 'Shells')
+summary({
+  'WebAssembly (WAMR)': have_wasm,
+  'WebAssembly SIMD (SIMDe)': have_wasm_simd,
+  'WebGL (glslang shader validator)': have_glslang,
+  'WebGPU (wgpu-native)': have_webgpu,
+  'WebM video (FFmpeg libav*)': have_libav,
+  'H.264/AAC OS decoders': media_os_backend,
+  'AVIF images (libavif)': have_avif,
+  'JPEG XL images (libjxl)': have_jxl,
+  'PDF viewer (PDF.js)': have_pdfjs,
+  'Spell-checking (Enchant)': have_enchant,
+}, section: 'Features', bool_yn: true)
+summary({'GTK 4 shell': have_gtk}, section: 'Shells', bool_yn: true)
 
 ns_parsers_rust_args = ['--edition=2024', '-C', 'panic=abort']
 ns_url_rs = static_library('ns_url', 'src/url_rs/lib.rs',

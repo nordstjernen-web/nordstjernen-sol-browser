@@ -8,7 +8,6 @@ wtl_micro_version = wtl_version[2].to_int()
 wtl_api_version = '@0@.0'.format(wtl_major_version)
 
 wtl_host_system = host_machine.system()
-wtl_argument_syntax = cc.get_argument_syntax()
 
 wtl_conf = configuration_data()
 wtl_conf.set('NS_PANGO_BINARY_AGE', wtl_minor_version * 100 + wtl_micro_version)
@@ -30,40 +29,16 @@ if wtl_host_system == 'windows'
   wtl_cflags += '-D_WIN32_WINNT=0x0A00'
 endif
 
-wtl_test_cflags = []
-if wtl_argument_syntax == 'msvc'
-  wtl_test_cflags += ['-FImsvc_recommended_pragmas.h', '-utf-8']
-elif wtl_argument_syntax == 'gcc'
-  wtl_test_cflags += [
-    '-w',
-    '-fno-strict-aliasing',
-    '-fstack-protector-strong',
-    '-fstack-clash-protection',
-    '-fcf-protection',
-  ]
-  if wtl_host_system == 'windows'
-    wtl_test_cflags += '-mms-bitfields'
-  endif
+wtl_test_cflags = [
+  '-w',
+  '-fno-strict-aliasing',
+]
+if wtl_host_system == 'windows'
+  wtl_test_cflags += '-mms-bitfields'
+elif wtl_host_system == 'linux'
+  wtl_test_cflags += ['-fno-semantic-interposition', '-fno-plt']
 endif
 wtl_cflags += cc.get_supported_arguments(wtl_test_cflags)
-
-if wtl_argument_syntax == 'msvc'
-  wtl_cflags += cc.get_supported_arguments(['/Gy', '/Gw'])
-else
-  wtl_cflags += cc.get_supported_arguments([
-    '-ffunction-sections',
-    '-fdata-sections',
-  ])
-  if wtl_host_system == 'linux'
-    wtl_cflags += cc.get_supported_arguments([
-      '-fno-semantic-interposition',
-      '-fno-plt',
-    ])
-  endif
-  if cc.has_header_symbol('features.h', '__GLIBC__')
-    wtl_cflags += ['-U_FORTIFY_SOURCE', '-D_FORTIFY_SOURCE=3']
-  endif
-endif
 
 if ns_is_release
   wtl_cflags += ['-DG_DISABLE_CAST_CHECKS', '-DNDEBUG']
@@ -80,7 +55,7 @@ wtl_override_options = [
 
 wtl_glib_req = '>= 2.80'
 wtl_deps = [
-  cc.find_library('m', required: false),
+  libm,
   dependency('glib-2.0', version: wtl_glib_req),
   dependency('gobject-2.0', version: wtl_glib_req),
   dependency('gio-2.0', version: wtl_glib_req),

@@ -9,6 +9,10 @@ Changelog:
   are cached in one database and the Medium chunks hit the per-database
   cap. `navigator.storage.estimate()` now reports the origin's real
   IndexedDB usage and that limit as its quota, instead of 0 and 2 GiB.
+* Build: the engine library reuses the platform library's objects instead
+  of compiling its eleven shared sources a second time; the icon and
+  translation directories install whole, so a new language or icon needs
+  no meson.build change; the meson summary lists every optional feature.
 * Remote-control (MCP) screenshots no longer show faint lines across the
   page every 256 device pixels. The capture composited the page tiles at
   CSS-pixel scale, where tile edges fall inside a pixel; it now renders at

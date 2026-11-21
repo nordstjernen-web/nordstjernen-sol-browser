@@ -1,7 +1,6 @@
 # Fabrice Bellard's QuickJS, forked in-tree as the browser's JavaScript engine. Exposes libquickjs and the qjs-bellard host tool.
 
-bqjs_fs = import('fs')
-bqjs_version = bqjs_fs.read('VERSION').strip()
+bqjs_version = fs.read('VERSION').strip()
 
 bqjs_c_args = cc.get_supported_arguments('-w', '-fwrapv') + [
   '-D_GNU_SOURCE',
@@ -13,7 +12,7 @@ if host_machine.system() == 'windows'
 endif
 
 bqjs_sys_deps = [
-  cc.find_library('m', required: false),
+  libm,
   dependency('threads'),
   dependency('dl', required: false),
 ]
