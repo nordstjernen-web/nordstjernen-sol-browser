@@ -100,6 +100,7 @@ typedef struct ns_header_ctx {
     GString *raw;
     long     status;
     gboolean http1;
+    gboolean body_framed;
     gboolean set_cookie_seen;
     CURL    *cookie_curl;
     const char *cookie_partition;
@@ -3056,8 +3057,12 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
         const char *sp = memchr(buffer, ' ', bytes);
         hc->status = sp ? (long)g_ascii_strtoll(sp + 1, NULL, 10) : 0;
         hc->http1 = bytes >= 7 && g_ascii_strncasecmp(buffer, "HTTP/1.", 7) == 0;
+        hc->body_framed = FALSE;
         return bytes;
     }
+    if ((bytes >= 15 && g_ascii_strncasecmp(buffer, "Content-Length:", 15) == 0) ||
+        (bytes >= 18 && g_ascii_strncasecmp(buffer, "Transfer-Encoding:", 18) == 0))
+        hc->body_framed = TRUE;
     if (hc->status >= 100 && hc->status < 200) {
         ns_header_early_hint(hc, buffer, bytes);
         return bytes;
@@ -6235,6 +6240,10 @@ ns_hop_transport(const ns_hop_req *req, ns_write_ctx *wctx,
             redirect_status == 308)
             rc = CURLE_OK;
     }
+
+    if (rc == CURLE_RECV_ERROR && hctx->http1 && !hctx->body_framed &&
+        hctx->status >= 200 && g_strstr_len(errbuf, -1, "unexpected eof"))
+        rc = CURLE_OK;
 
     if ((rc == CURLE_PEER_FAILED_VERIFICATION ||
          rc == CURLE_SSL_CACERT_BADFILE) &&
