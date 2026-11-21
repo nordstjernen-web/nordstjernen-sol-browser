@@ -3,6 +3,27 @@ Changelog:
 
 1.0.51:
 ======
+* CSS module scripts: `import sheet from "./x.css" with { type: "css" }`
+  (and the `import()` form) loads a `text/css` resource and exports a
+  constructable `CSSStyleSheet`, ready for `adoptedStyleSheets`. Other
+  MIME types are refused, and workers reject CSS modules without
+  fetching them, as the spec requires. External `<script type="module">`
+  files must now be served with a JavaScript MIME type; anything else
+  fires `error` instead of being run.
+* Workers fire `unhandledrejection` and `rejectionhandled`. A dedicated
+  or shared worker only logged unhandled promise rejections; it now
+  tracks them like a window does, dispatches the events on the worker
+  global (`onunhandledrejection` included, cancelable, with `promise`
+  and `reason`), and exposes the `PromiseRejectionEvent` constructor.
+* Module scripts follow the fetch rules of the HTML spec. A module or
+  `import()` whose response has an HTTP error status (404, 500, …) now
+  fails instead of being run, so `import()` rejects and an error page
+  served as JavaScript or JSON is never executed. A `<script
+  type="module">` whose module graph cannot be fetched (a missing or
+  refused dependency, a wrong MIME type, a CORS failure) fires `error`
+  at the element instead of nothing, and an empty module file is a
+  valid, empty module. `import.meta.resolve()` resolves a specifier
+  against the module's URL and the import map.
 * `<iframe loading="lazy">` frames load. A lazy frame that started off
   screen was hidden by the user-agent style sheet until it loaded, so it
   had no box, never came into view and stayed blank for good, even when
