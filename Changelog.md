@@ -12,6 +12,14 @@ Changelog:
   download restores them, and clears `APPDIR`/`APPIMAGE`, for the app it
   launches, so that app no longer loads the bundle's GTK modules, schemas
   and forced Adwaita theme.
+* Fixed a renderer crash when the JavaScript heap ran out of memory while
+  IndexedDB was building query results (the `interleaved-cursors`
+  web-platform-tests). Setting a property on a primitive with no
+  prototype, such as the exception value an out-of-memory allocation
+  returns, read through a null prototype that the caged heap does not
+  decode as `NULL`. The engine now checks the prototype's tag, and the
+  IndexedDB backend propagates allocation failures instead of dropping
+  them.
 * `grid-template-areas` rows are split into cells as the grid spec
   tokenizes them, so a minified row such as `". .main. ."` is five
   cells, not four with a `.main.` name. lichess.org's page grid is

@@ -310,12 +310,35 @@ static JSValue
 ns_idb_read_value(JSContext *ctx, const void *blob, int len)
 {
     if (!blob || len <= 0) return JS_UNDEFINED;
-    JSValue v = JS_ReadObject(ctx, blob, (size_t)len, JS_READ_OBJ_REFERENCE);
-    if (JS_IsException(v)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        return JS_UNDEFINED;
+    return JS_ReadObject(ctx, blob, (size_t)len, JS_READ_OBJ_REFERENCE);
+}
+
+static JSValue
+ns_idb_row(JSContext *ctx, const char *key, const char *primary_key, JSValue value)
+{
+    if (JS_IsException(value)) return value;
+    JSValue rec = JS_NewObject(ctx);
+    if (JS_IsException(rec) ||
+        JS_SetPropertyStr(ctx, rec, "key", JS_NewString(ctx, key ? key : "")) < 0 ||
+        (primary_key &&
+         JS_SetPropertyStr(ctx, rec, "primaryKey", JS_NewString(ctx, primary_key)) < 0) ||
+        JS_SetPropertyStr(ctx, rec, "value", JS_DupValue(ctx, value)) < 0) {
+        JS_FreeValue(ctx, rec);
+        rec = JS_EXCEPTION;
     }
-    return v;
+    JS_FreeValue(ctx, value);
+    return rec;
+}
+
+static int
+ns_idb_append_row(JSContext *ctx, JSValue *arr, uint32_t index, JSValue rec)
+{
+    if (JS_IsException(rec) || JS_SetPropertyUint32(ctx, *arr, index, rec) < 0) {
+        JS_FreeValue(ctx, *arr);
+        *arr = JS_EXCEPTION;
+        return -1;
+    }
+    return 0;
 }
 
 static gboolean
@@ -945,19 +968,17 @@ ns_idb_backend_records(JSContext *ctx, JSValueConst this_val,
     }
     JSValue arr = JS_NewArray(ctx);
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(h->db,
+    if (!JS_IsException(arr) && sqlite3_prepare_v2(h->db,
         "SELECT key,value FROM records WHERE store=?",
         -1, &st, NULL) == SQLITE_OK) {
         sqlite3_bind_text(st, 1, store, -1, SQLITE_TRANSIENT);
         uint32_t i = 0;
         while (sqlite3_step(st) == SQLITE_ROW) {
             const char *key = (const char *)sqlite3_column_text(st, 0);
-            JSValue rec = JS_NewObject(ctx);
-            JS_SetPropertyStr(ctx, rec, "key", JS_NewString(ctx, key ? key : ""));
-            JS_SetPropertyStr(ctx, rec, "value",
-                ns_idb_read_value(ctx, sqlite3_column_blob(st, 1),
-                                  sqlite3_column_bytes(st, 1)));
-            JS_SetPropertyUint32(ctx, arr, i++, rec);
+            JSValue value = ns_idb_read_value(ctx, sqlite3_column_blob(st, 1),
+                                              sqlite3_column_bytes(st, 1));
+            JSValue rec = ns_idb_row(ctx, key, NULL, value);
+            if (ns_idb_append_row(ctx, &arr, i++, rec) < 0) break;
         }
     }
     if (st) sqlite3_finalize(st);
@@ -987,7 +1008,7 @@ ns_idb_backend_index_records(JSContext *ctx, JSValueConst this_val,
     }
     JSValue arr = JS_NewArray(ctx);
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(h->db,
+    if (!JS_IsException(arr) && sqlite3_prepare_v2(h->db,
         "SELECT ir.index_key,ir.primary_key,r.value "
         "FROM index_records ir JOIN records r "
         "ON r.store=ir.store AND r.key=ir.primary_key "
@@ -999,15 +1020,10 @@ ns_idb_backend_index_records(JSContext *ctx, JSValueConst this_val,
         while (sqlite3_step(st) == SQLITE_ROW) {
             const char *ik = (const char *)sqlite3_column_text(st, 0);
             const char *pk = (const char *)sqlite3_column_text(st, 1);
-            JSValue rec = JS_NewObject(ctx);
-            JS_SetPropertyStr(ctx, rec, "key",
-                JS_NewString(ctx, ik ? ik : ""));
-            JS_SetPropertyStr(ctx, rec, "primaryKey",
-                JS_NewString(ctx, pk ? pk : ""));
-            JS_SetPropertyStr(ctx, rec, "value",
-                ns_idb_read_value(ctx, sqlite3_column_blob(st, 2),
-                                  sqlite3_column_bytes(st, 2)));
-            JS_SetPropertyUint32(ctx, arr, i++, rec);
+            JSValue value = ns_idb_read_value(ctx, sqlite3_column_blob(st, 2),
+                                              sqlite3_column_bytes(st, 2));
+            JSValue rec = ns_idb_row(ctx, ik, pk, value);
+            if (ns_idb_append_row(ctx, &arr, i++, rec) < 0) break;
         }
     }
     if (st) sqlite3_finalize(st);
