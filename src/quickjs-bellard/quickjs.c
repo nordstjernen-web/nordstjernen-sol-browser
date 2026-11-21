@@ -62009,6 +62009,11 @@ BOOL JS_IsArrayBuffer(JSValueConst obj)
     return JS_GetClassID(obj) == JS_CLASS_ARRAY_BUFFER;
 }
 
+BOOL JS_IsSharedArrayBuffer(JSValueConst obj)
+{
+    return JS_GetClassID(obj) == JS_CLASS_SHARED_ARRAY_BUFFER;
+}
+
 static JSValue js_array_buffer_constructor0(JSContext *ctx, JSValueConst new_target,
                                             int argc, JSValueConst *argv,
                                             JSClassID class_id)
@@ -66210,7 +66215,11 @@ static int js_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
     return pthread_cond_timedwait_relative_np(cond, mutex, &ts);
 #else
     struct timespec ts;
+#if defined(_WIN32)
+    clock_gettime(CLOCK_REALTIME, &ts);
+#else
     clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
     ts.tv_sec += timeout_ms / 1000;
     ts.tv_nsec += (timeout_ms % 1000) * 1000000;
     if (ts.tv_nsec >= 1000000000) {
@@ -66278,7 +66287,7 @@ static JSValue js_atomics_wait(JSContext *ctx,
 
     waiter = &waiter_s;
     waiter->ptr = ptr;
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
     pthread_cond_init(&waiter->cond, NULL);
 #else
     {

@@ -3,6 +3,23 @@ Changelog:
 
 1.0.51:
 ======
+* Cross-origin isolation: a top-level document served over HTTPS (or
+  from localhost) with `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`) is
+  cross-origin isolated. `crossOriginIsolated` is then true and
+  `SharedArrayBuffer` is exposed, in the page and in the dedicated
+  workers it starts; everywhere else it stays hidden. Such a document can
+  no longer pull in cross-origin `no-cors` subresources that do not opt
+  in with `Cross-Origin-Resource-Policy`, and that header is now honoured
+  on every page: `same-origin` and `same-site` resources are refused to
+  other origins and sites.
+* `SharedArrayBuffer` is shared, not copied, by `postMessage` between a
+  page and its workers, with reference-counted backing memory in the JS
+  heap cage. `Atomics.wait` blocks in workers, and `Atomics.notify` wakes
+  waiters in other threads.
+* Windows: `Atomics.wait` with a timeout returned `"timed-out"` at once,
+  because the wait computed its deadline on a clock the condition
+  variable does not use.
 * Form submission follows the HTML entry-list and encoding rules.
   `new FormData(form)` and every submission build the entry list the
   spec way: file inputs contribute their `File`s (an empty file when

@@ -153,6 +153,8 @@ struct ns_js {
     JSValue       fullscreen_request_resolve;
     JSValue       fullscreen_request_reject;
     JSValue       history_state;
+    JSValue       sab_ctor;
+    gboolean      cross_origin_isolated;
     int           history_length;
     GPtrArray    *history_entries;
     int           history_pos;

@@ -156,6 +156,7 @@ void   ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer use
 void   ns_js_set_early_inject_src(ns_js *js, const char *src);
 void   ns_js_add_csp_header(ns_js *js, const char *header_value);
 void   ns_js_set_permissions_policy(ns_js *js, const char *header_value);
+void   ns_js_set_cross_origin_isolated(ns_js *js, gboolean isolated);
 void   ns_js_set_connection_allowlist(ns_js *js, const char *document_url,
                                       const char *header_value);
 void   ns_js_set_document_sandbox(ns_js *js, ns_node *doc, const char *csp_header,

@@ -20,6 +20,13 @@ void      *ns_js_cage_shared_realloc(void *ptr, size_t size);
 void       ns_js_cage_shared_free(void *ptr);
 size_t     ns_js_cage_shared_usable_size(const void *ptr);
 
+void       ns_js_sab_dup(void *data);
+void       ns_js_sab_free(void *data);
+void       ns_js_sab_register_foreign(void *data, void (*dup)(void *opaque),
+                                      void (*release)(void *opaque),
+                                      void *opaque);
+void       ns_js_sab_unregister_foreign(void *data);
+
 G_END_DECLS
 
 #endif

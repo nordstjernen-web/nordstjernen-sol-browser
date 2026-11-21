@@ -145,6 +145,7 @@ struct ns_worker_host {
     gboolean      is_service_worker;
     gboolean      is_shared;
     gboolean      opaque_origin;
+    gboolean      cross_origin_isolated;
     gint          sw_active;
     gint          terminated;
     char         *scope;
@@ -2168,6 +2169,25 @@ ns_js_feature_allowed(ns_js *js, JSContext *realm, const char *feature)
     if (!js || js->worker_host || !feature) return TRUE;
     return ns_js_frame_feature_allowed(js, ns_js_frame_of_realm(js, realm),
                                        feature);
+}
+
+void
+ns_js_set_cross_origin_isolated(ns_js *js, gboolean isolated)
+{
+    if (!js || !js->ctx) return;
+    js->cross_origin_isolated = isolated;
+    JSContext *ctx = js->ctx;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JS_DefinePropertyValueStr(ctx, global, "crossOriginIsolated",
+                              JS_NewBool(ctx, isolated),
+                              JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE);
+    if (isolated && JS_IsObject(js->sab_ctor))
+        JS_DefinePropertyValueStr(ctx, global, "SharedArrayBuffer",
+                                  JS_DupValue(ctx, js->sab_ctor),
+                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_FreeValue(ctx, global);
+    if (js->worker_host && isolated)
+        JS_SetCanBlock(js->rt, TRUE);
 }
 
 void
@@ -27776,6 +27796,7 @@ typedef struct ns_worker_message {
     guint64        *xfer_ids;
     guint           n_xfer;
     GPtrArray      *followups;
+    GPtrArray      *shared_buffers;
 } ns_worker_message;
 
 typedef struct ns_worker_log_delivery {
@@ -27884,6 +27905,11 @@ ns_worker_message_free(ns_worker_message *msg)
         for (guint i = 0; i < msg->followups->len; i++)
             ns_worker_message_free(g_ptr_array_index(msg->followups, i));
         g_ptr_array_free(msg->followups, TRUE);
+    }
+    if (msg->shared_buffers) {
+        for (guint i = 0; i < msg->shared_buffers->len; i++)
+            ns_js_sab_free(g_ptr_array_index(msg->shared_buffers, i));
+        g_ptr_array_free(msg->shared_buffers, TRUE);
     }
     g_free(msg->xfer_ids);
     g_free(msg->bytes);
@@ -28280,6 +28306,14 @@ ns_wire_encode_object(ns_wire_enc *e, JSValueConst v)
         return ns_sc_fail(ctx);
     }
 
+    if (JS_IsSharedArrayBuffer(v)) {
+        ns_js *js = js_from_ctx(ctx);
+        if (!js || !js->cross_origin_isolated) return ns_sc_fail(ctx);
+        JSValue node = ns_wire_node(ctx, "SAB");
+        ns_wire_push(ctx, node, JS_DupValue(ctx, v));
+        return node;
+    }
+
     if (JS_IsArrayBuffer(v)) {
         if (ns_sc_buffer_detached(ctx, v)) return ns_sc_fail(ctx);
         size_t size = 0;
@@ -28547,6 +28581,8 @@ ns_wire_decode_node(ns_wire_dec *d, JSValueConst node, const char *kind)
         JS_ToUint32(ctx, &i, a1);
         out = JS_IsArray(d->ports) ? JS_GetPropertyUint32(ctx, d->ports, i)
                                    : JS_NULL;
+    } else if (strcmp(kind, "SAB") == 0) {
+        out = JS_IsSharedArrayBuffer(a1) ? JS_DupValue(ctx, a1) : JS_NULL;
     } else if (strcmp(kind, "AB") == 0) {
         if (JS_IsUndefined(a2)) {
             out = JS_DupValue(ctx, a1);
@@ -29693,8 +29729,20 @@ ns_worker_message_new(JSContext *ctx, ns_worker_host *host, JSValueConst value,
         return NULL;
     }
     size_t len = 0;
-    uint8_t *bytes = JS_WriteObject(ctx, &len, wire, JS_WRITE_OBJ_REFERENCE);
+    uint8_t **sab_tab = NULL;
+    size_t sab_count = 0;
+    uint8_t *bytes = JS_WriteObject2(ctx, &len, wire,
+                                     JS_WRITE_OBJ_REFERENCE | JS_WRITE_OBJ_SAB,
+                                     &sab_tab, &sab_count);
     JS_FreeValue(ctx, wire);
+    if (bytes && sab_count) {
+        msg->shared_buffers = g_ptr_array_sized_new((guint)sab_count);
+        for (size_t i = 0; i < sab_count; i++) {
+            ns_js_sab_dup(sab_tab[i]);
+            g_ptr_array_add(msg->shared_buffers, sab_tab[i]);
+        }
+    }
+    js_free(ctx, sab_tab);
     if (!bytes) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         ns_sc_fail(ctx);
@@ -29721,7 +29769,8 @@ ns_worker_message_value(JSContext *ctx, const ns_worker_message *msg,
     if (!msg || msg->is_undefined) return JS_UNDEFINED;
     if (!msg->bytes || msg->len == 0) return JS_NULL;
     JSValue wire = JS_ReadObject(ctx, msg->bytes, msg->len,
-                                 JS_READ_OBJ_REFERENCE);
+                                 JS_READ_OBJ_REFERENCE |
+                                 (msg->shared_buffers ? JS_READ_OBJ_SAB : 0));
     if (JS_IsException(wire)) return wire;
     JSValue value = ns_wire_decode_value(ctx, wire, ports);
     JS_FreeValue(ctx, wire);
@@ -31799,6 +31848,7 @@ ns_worker_js_new(ns_worker_host *host)
     js->time_origin_us = (g_get_monotonic_time() / 100) * 100;
     js->time_origin_real_ms = floor((double)g_get_real_time() / 100.0) / 10.0;
     js->history_state = JS_NULL;
+    js->sab_ctor = JS_UNDEFINED;
     js->iframe_doc = JS_UNDEFINED;
     js->pristine_promise = JS_UNDEFINED;
     js->main_context = host->context;
@@ -31927,6 +31977,8 @@ ns_worker_js_new(ns_worker_host *host)
     ns_wasm_install(ctx, global);
     JS_SetPropertyStr(ctx, global, "crossOriginIsolated", JS_FALSE);
     ns_hide_shared_array_buffer(ctx, global);
+    if (host->cross_origin_isolated)
+        ns_js_set_cross_origin_isolated(js, TRUE);
     ns_bind_ctor(ctx, global, "XMLHttpRequestEventTarget", ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "XMLHttpRequestUpload", ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "XMLHttpRequest", ns_window_xhr_ctor, 0);
@@ -32355,6 +32407,8 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     host->inline_script_len = inline_script_len;
     host->is_module = is_module;
     host->opaque_origin = owner_opaque;
+    host->cross_origin_isolated =
+        js->cross_origin_isolated && !opaque && !owner_opaque;
     host->origin = opaque || owner_opaque ? g_strdup("null")
                                           : ns_url_origin_from(host->base_url);
     if (!host->origin) host->origin = g_strdup("");
@@ -63133,6 +63187,12 @@ ns_install_event_handler_accessors(JSContext *ctx, JSValueConst proto)
 static void
 ns_hide_shared_array_buffer(JSContext *ctx, JSValueConst global)
 {
+    ns_js *owner = js_from_ctx(ctx);
+    if (owner && ctx == owner->ctx && !JS_IsObject(owner->sab_ctor)) {
+        JSValue ctor = JS_GetPropertyStr(ctx, global, "SharedArrayBuffer");
+        if (JS_IsObject(ctor)) owner->sab_ctor = ctor;
+        else JS_FreeValue(ctx, ctor);
+    }
     JSAtom atom = JS_NewAtom(ctx, "SharedArrayBuffer");
     if (JS_DeleteProperty(ctx, global, atom, 0) < 0)
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -66311,6 +66371,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->soft_nav_cb = NULL;
     js->soft_nav_user_data = NULL;
     js->history_state = JS_NULL;
+    js->sab_ctor = JS_UNDEFINED;
     js->navigation = JS_UNDEFINED;
     js->iframe_doc = JS_UNDEFINED;
     js->pending_fullscreen_resolve = JS_UNDEFINED;
@@ -70280,6 +70341,7 @@ ns_js_free(ns_js *js)
         js->workers = NULL;
     }
     if (js->ctx) JS_FreeValue(js->ctx, js->history_state);
+    if (js->ctx) JS_FreeValue(js->ctx, js->sab_ctor);
     if (js->ctx) JS_FreeValue(js->ctx, js->navigation);
     if (js->history_entries) {
         for (guint i = 0; i < js->history_entries->len; i++)
