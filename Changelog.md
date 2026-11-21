@@ -3,6 +3,15 @@ Changelog:
 
 1.0.51:
 ======
+* `import()` in code compiled from a string resolves relative specifiers
+  as the HTML spec says instead of failing with "module specifier must be
+  absolute" or "no function filename for import()": `eval` and
+  `Function` code uses the URL of the script that created it,
+  `setTimeout`/`setInterval` strings use the URL of the script that
+  scheduled them, and event-handler attributes and other code with no
+  script URL use the document's base URL (a worker's URL in workers).
+  Errors in timer strings started by a cross-origin script are still
+  reported in full, as the spec requires.
 * HTML drag and drop works inside a page. Pressing on a `draggable="true"`
   element, a link or an image and moving the mouse starts a drag:
   `dragstart` (cancelable, with the link or image address preset as

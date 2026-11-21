@@ -9275,6 +9275,8 @@ static BOOL js_filename_is_engine_code(JSRuntime *rt, JSAtom filename)
     name = (const char *)str->u.str8;
     if (name[0] != '<')
         return FALSE;
+    if (str->len > 7 && !memcmp(name, "<timer:", 7))
+        return FALSE;
     for (i = 0; i < countof(page_origins); i++)
         if (str->len == strlen(page_origins[i]) &&
             !memcmp(name, page_origins[i], str->len))
@@ -32643,6 +32645,17 @@ static int js_link_module(JSContext *ctx, JSModuleDef *m)
 
 /* return JS_ATOM_NULL if the name cannot be found. Only works with
    not striped bytecode functions. */
+static BOOL js_atom_is_eval_input(JSRuntime *rt, JSAtom atom)
+{
+    JSString *str;
+
+    if (atom == JS_ATOM_NULL || __JS_AtomIsTaggedInt(atom))
+        return TRUE;
+    str = js_atom_struct(rt, atom);
+    return !str || (!str->is_wide_char && str->len == 7 &&
+                    !memcmp(str->u.str8, "<input>", 7));
+}
+
 JSAtom JS_GetScriptOrModuleName(JSContext *ctx, int n_stack_levels)
 {
     JSStackFrame *sf;
@@ -32666,15 +32679,18 @@ JSAtom JS_GetScriptOrModuleName(JSContext *ctx, int n_stack_levels)
         if (!js_class_has_bytecode(p->class_id))
             return JS_ATOM_NULL;
         b = js_cload(struct JSFunctionBytecode *, p->u.func.function_bytecode);
-        if (!b->is_direct_or_indirect_eval) {
+        if (!b->is_direct_or_indirect_eval ||
+            (b->has_debug && !js_atom_is_eval_input(ctx->rt, b->debug.filename))) {
             if (!b->has_debug)
                 return JS_ATOM_NULL;
             return JS_DupAtom(ctx, b->debug.filename);
-        } else {
+        }
+        do {
             sf = sf->prev_frame;
             if (!sf)
                 return JS_ATOM_NULL;
-        }
+        } while (JS_VALUE_GET_TAG(sf->cur_func) == JS_TAG_OBJECT &&
+                 !js_class_has_bytecode(JS_VALUE_GET_OBJ(sf->cur_func)->class_id));
     }
 }
 
@@ -39267,12 +39283,39 @@ static BOOL js_compile_strings_refused(JSContext *ctx)
     return TRUE;
 }
 
+static JSAtom js_eval_caller_filename(JSContext *ctx)
+{
+    JSStackFrame *sf;
+    JSObject *p;
+    JSFunctionBytecode *b;
+    JSString *str;
+
+    for (sf = ctx->rt->current_stack_frame; sf; sf = sf->prev_frame) {
+        if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
+            continue;
+        p = JS_VALUE_GET_OBJ(sf->cur_func);
+        if (!js_class_has_bytecode(p->class_id))
+            continue;
+        b = js_cload(struct JSFunctionBytecode *, p->u.func.function_bytecode);
+        if (!b->has_debug || b->debug.filename == JS_ATOM_NULL ||
+            __JS_AtomIsTaggedInt(b->debug.filename))
+            return JS_ATOM_NULL;
+        str = js_atom_struct(ctx->rt, b->debug.filename);
+        if (!str || str->len == 0 ||
+            (!str->is_wide_char && str->u.str8[0] == '<'))
+            return JS_ATOM_NULL;
+        return JS_DupAtom(ctx, b->debug.filename);
+    }
+    return JS_ATOM_NULL;
+}
+
 static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
                              JSValueConst val, int flags, int scope_idx)
 {
     JSValue ret;
-    const char *str;
+    const char *str, *filename = NULL;
     size_t len;
+    JSAtom caller;
 
     if (!JS_IsString(val))
         return JS_DupValue(ctx, val);
@@ -39281,7 +39324,15 @@ static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
     str = JS_ToCStringLen(ctx, &len, val);
     if (!str)
         return JS_EXCEPTION;
-    ret = JS_EvalInternal(ctx, this_obj, str, len, "<input>", flags, scope_idx);
+    caller = js_eval_caller_filename(ctx);
+    if (caller != JS_ATOM_NULL) {
+        filename = JS_AtomToCString(ctx, caller);
+        JS_FreeAtom(ctx, caller);
+    }
+    ret = JS_EvalInternal(ctx, this_obj, str, len,
+                          filename ? filename : "<input>", flags, scope_idx);
+    if (filename)
+        JS_FreeCString(ctx, filename);
     JS_FreeCString(ctx, str);
     return ret;
 }

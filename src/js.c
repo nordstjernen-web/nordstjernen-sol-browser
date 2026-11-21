@@ -1048,6 +1048,7 @@ typedef struct ns_timer {
     JSContext *ctx;
     JSValue  cb;
     char    *code;
+    char    *code_filename;
     int      id;
     guint    glib_source;
     gboolean is_interval;
@@ -1466,6 +1467,7 @@ ns_timer_free(gpointer data)
     JSContext *ctx = t->ctx ? t->ctx : t->js->ctx;
     JS_FreeValue(ctx, t->cb);
     g_free(t->code);
+    g_free(t->code_filename);
     for (int i = 0; i < t->extra_args_count; i++)
         JS_FreeValue(ctx, t->extra_args[i]);
     g_free(t->extra_args);
@@ -2544,6 +2546,7 @@ ns_timer_fire(gpointer data)
     JSValue cb = JS_IsUndefined(t->cb) ? JS_UNDEFINED
                                        : JS_DupValue(callback_ctx, t->cb);
     char *code = t->code ? g_strdup(t->code) : NULL;
+    g_autofree char *code_filename = g_strdup(t->code_filename);
     int n_extra = t->extra_args_count;
     JSValue *extra = NULL;
     if (n_extra > 0) {
@@ -2556,7 +2559,8 @@ ns_timer_fire(gpointer data)
     js->callback_depth++;
     if (code) {
         ret = ns_js_can_compile_strings(callback_ctx)
-            ? JS_Eval(callback_ctx, code, strlen(code), "<timer>",
+            ? JS_Eval(callback_ctx, code, strlen(code),
+                      code_filename ? code_filename : "<timer>",
                       JS_EVAL_TYPE_GLOBAL)
             : JS_UNDEFINED;
     } else if (t->is_idle) {
@@ -2667,6 +2671,15 @@ ns_js_setTimeout(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     t->frame = ns_js_context_frame(js, ctx);
     t->cb = is_function ? JS_DupValue(ctx, argv[0]) : JS_UNDEFINED;
     t->code = code;
+    if (code) {
+        JSAtom caller = JS_GetScriptOrModuleName(ctx, 1);
+        const char *name = caller != JS_ATOM_NULL
+            ? JS_AtomToCString(ctx, caller) : NULL;
+        if (name && *name && name[0] != '<')
+            t->code_filename = g_strdup_printf("<timer:%s>", name);
+        if (name) JS_FreeCString(ctx, name);
+        JS_FreeAtom(ctx, caller);
+    }
     t->is_interval = is_interval;
     t->nesting_level = nesting;
     t->interval_ms = ms;
@@ -71202,6 +71215,17 @@ ns_js_import_map_resolve(ns_js *js, const ns_node *frame, const char *name)
 }
 
 static char *
+ns_js_module_fallback_base(ns_js *js, JSContext *ctx)
+{
+    if (!js) return NULL;
+    if (js->worker_host)
+        return g_strdup(js->worker_host->base_url);
+    ns_node *frame = ns_js_frame_of_realm(js, ctx);
+    if (frame) return g_strdup(ns_js_realm_url_or_current(js, ctx));
+    return ns_js_doc_base_url(js);
+}
+
+static char *
 ns_js_module_normalize(JSContext *ctx, const char *base_name,
                        const char *name, void *opaque)
 {
@@ -71216,6 +71240,13 @@ ns_js_module_normalize(JSContext *ctx, const char *base_name,
     }
     gboolean relative = name[0] == '/' || g_str_has_prefix(name, "./") ||
                         g_str_has_prefix(name, "../");
+    g_autofree char *fallback_base = NULL;
+    if (relative && base_name && g_str_has_prefix(base_name, "<timer:") &&
+        g_str_has_suffix(base_name, ">"))
+        base_name = fallback_base = g_strndup(base_name + 7,
+                                              strlen(base_name) - 8);
+    else if (relative && (!base_name || !*base_name || base_name[0] == '<'))
+        base_name = fallback_base = ns_js_module_fallback_base(js, ctx);
     char *abs_url = ns_url_resolve(relative && base_name && *base_name
                                        ? base_name : NULL, name);
     if (!abs_url && !relative) {
