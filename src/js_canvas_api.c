@@ -276,6 +276,7 @@ static const ns_attr_def ns_ctx2d_attrs[] = {
 static const ns_api_method ns_ctx2d_methods[] = {
     { "arc", ns_ctx_arc, 5 },
     { "arcTo", ns_ctx_arcTo, 5 },
+    { "beginLayer", ns_ctx_beginLayer, 0 },
     { "beginPath", ns_ctx_beginPath, 0 },
     { "bezierCurveTo", ns_ctx_bezierCurveTo, 6 },
     { "clearRect", ns_ctx_clearRect, 4 },
@@ -289,6 +290,7 @@ static const ns_api_method ns_ctx2d_methods[] = {
     { "drawFocusIfNeeded", ns_ctx_draw_focus_if_needed, 1 },
     { "drawImage", ns_ctx_drawImage, 3 },
     { "ellipse", ns_ctx_ellipse, 7 },
+    { "endLayer", ns_ctx_endLayer, 0 },
     { "fill", ns_ctx_fill, 0 },
     { "fillRect", ns_ctx_fillRect, 4 },
     { "fillText", ns_ctx_fillText, 3 },

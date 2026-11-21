@@ -3,6 +3,66 @@ Changelog:
 
 1.0.51:
 ======
+* Fragment navigation follows the HTML spec in the engine itself, so it
+  behaves the same in the window, headless and the WPT runner. Setting
+  `location.hash`, assigning a `#fragment` URL or following a
+  same-document link scrolls to the target synchronously (by id, then
+  `<a name>`, then the percent-decoded fragment, with `#top` and an empty
+  fragment scrolling to the top), updates `:target`, and focuses the
+  target or, when it is not focusable, the viewport. `hashchange` is
+  fired as a task instead of synchronously from inside the setter, so
+  `oldURL`/`newURL` are right when the hash changes twice in a row and a
+  handler that changes the hash again gets its own event. Each fragment
+  navigation adds a session-history entry (`location.replace()` replaces
+  it), `history.back()`/`forward()` between them fire `hashchange` and
+  restore the entry's scroll position before it unless
+  `history.scrollRestoration` is `manual`, and `document.URL` and
+  `documentURI` follow fragment navigations, `pushState` and
+  `replaceState`. The `location.hash` setter percent-encodes the value,
+  replaces lone surrogates, and does nothing when the fragment would not
+  change. 38 more `html/browsers` tests pass.
+* The `Origin` interface from the HTML standard: `new Origin()` makes a
+  fresh opaque origin, `Origin.from()` extracts one from a URL string, a
+  `URL`, another `Origin`, the global object (window or worker), a
+  same-origin window, a trusted `MessageEvent` or an `<a>`/`<area>`
+  link, and `opaque`, `isSameOrigin()` and `isSameSite()` compare them
+  (same site by scheme and registrable domain from the public suffix
+  list; opaque origins only match themselves). 285 more
+  `html/browsers/origin` subtests pass.
+* Canvas layers: `beginLayer()` and `endLayer()` on the 2D context and
+  `OffscreenCanvasRenderingContext2D`. A layer is drawn into its own
+  group with alpha, compositing and shadows reset, and `endLayer()`
+  composites it onto the canvas with the states that were current at
+  `beginLayer()`, so a group of shapes can be faded or shadowed as one.
+  `restore()` and `endLayer()` throw `InvalidStateError` when they do not
+  match the open layer or `save()`, `reset()` closes open layers, and
+  reading pixels from a canvas with an open layer (`getImageData`,
+  `putImageData`, `drawImage`/`createPattern`/`createImageBitmap` with
+  it as the source, `toDataURL`, `toBlob`, `convertToBlob`,
+  `transferToImageBitmap`) throws `InvalidStateError`. `reset()` also
+  unwinds the `save()` stack it used to leave behind. 54 more canvas
+  web-platform-tests pass.
+* `roundRect()` on the 2D context and `Path2D` follows the spec: radii
+  given as `DOMPoint`s or `{x, y}` dictionaries draw elliptical corners
+  (they were read as plain numbers, so the corners came out square),
+  any iterable is accepted as the radii list, an empty list, more than
+  four radii or a negative radius throw a `RangeError`, a non-finite
+  argument makes the call a no-op instead of drawing, radii too large
+  for the rectangle are scaled down together, a negative width or height
+  keeps each radius on its own corner and reverses the winding, and the
+  call ends with a new subpath at (x, y). 90 more canvas
+  web-platform-tests pass.
+* Canvas 2D shadows are drawn for shapes outside the canvas whose shadow
+  is offset onto it, for `drawImage()`, and for the transparent parts of
+  gradients and patterns. The shadow used to be rendered into a
+  canvas-sized buffer, so a shape drawn above the canvas with
+  `shadowOffsetY` lost its shadow, and images cast none at all. The
+  shadow is now a Gaussian blur (three box passes, σ = `shadowBlur`/2,
+  no 64 px cap) of the shape's alpha over the region that lands on the
+  canvas, composited with the current operator and clip; strokes keep
+  their caps, joins and dashes in the shadow. `drawImage()` no longer
+  discards the path being built. 90 more canvas web-platform-tests
+  pass.
 * The AppImage runs natively on Wayland. linuxdeploy's GTK hook forced
   `GDK_BACKEND=x11`, so the browser always went through XWayland and did
   not start at all on a Wayland session without it; `pack-appimage.sh`

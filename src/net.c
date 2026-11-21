@@ -1210,6 +1210,17 @@ ns_url_site_from(const char *url)
     return g_strdup_printf("%s://%s", p->protocol, site_host);
 }
 
+char *
+ns_host_registrable_domain(const char *host)
+{
+    if (!host || !*host || host[0] == '[' || g_hostname_is_ip_address(host))
+        return NULL;
+    g_autofree char *lower = g_ascii_strdown(host, -1);
+    const psl_ctx_t *psl = psl_builtin();
+    const char *reg = psl ? psl_registrable_domain(psl, lower) : NULL;
+    return reg && *reg ? g_strdup(reg) : NULL;
+}
+
 gboolean
 ns_url_is_same_site(const char *a, const char *b)
 {
