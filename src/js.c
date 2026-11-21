@@ -25169,6 +25169,19 @@ ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_window_registrable_domain(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1 || !JS_IsString(argv[0])) return JS_NULL;
+    const char *host = JS_ToCString(ctx, argv[0]);
+    if (!host) return JS_EXCEPTION;
+    g_autofree char *site = ns_host_registrable_domain(host);
+    JS_FreeCString(ctx, host);
+    return site ? JS_NewString(ctx, site) : JS_NULL;
+}
+
+static JSValue
 ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
@@ -31366,6 +31379,7 @@ ns_worker_js_new(ns_worker_host *host)
     ns_fetch_install_interface(ctx, global, "Request");
     ns_fetch_install_static_response(ctx);
     JS_SetPropertyStr(ctx, global, "__ndWorkerHeadersOnly", JS_TRUE);
+    ns_bind_fn(ctx, global, "__ndRegistrableDomain", ns_window_registrable_domain, 1);
     ns_bind_ctor(ctx, global, "AbortController",
                  ns_window_abort_controller_ctor, 0);
     ns_install_abort_signal_interface(ctx, global);
@@ -64344,6 +64358,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "__nsWptKey",            ns_wpt_key,                       4);
     ns_bind_fn(ctx, global, "__nsWptActivate",       ns_wpt_activate,                  0);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
+    ns_bind_fn(ctx, global, "__ndRegistrableDomain", ns_window_registrable_domain,     1);
     ns_bind_fn(ctx, global, "__ndMseAppend",         ns_window_mse_append,             3);
     ns_js_webauthn_install(ctx, global);
     ns_bind_fn(ctx, global, "__ndMseEos",            ns_window_mse_eos,                1);

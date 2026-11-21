@@ -266,6 +266,7 @@ char *ns_url_host_from(const char *url);
 char *ns_url_origin_from(const char *url);
 gboolean ns_url_same_origin(const char *a, const char *b);
 gboolean ns_url_is_same_site(const char *a, const char *b);
+char    *ns_host_registrable_domain(const char *host);
 char *ns_net_raw_header_values(const char *raw, const char *name);
 gboolean ns_url_is_http_or_https(const char *url);
 gboolean ns_net_url_is_chrome_page(const char *url);

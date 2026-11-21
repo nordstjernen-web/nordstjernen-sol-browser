@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51:
 ======
+* The `Origin` interface from the HTML standard: `new Origin()` makes a
+  fresh opaque origin, `Origin.from()` extracts one from a URL string, a
+  `URL`, another `Origin`, the global object (window or worker), a
+  same-origin window, a trusted `MessageEvent` or an `<a>`/`<area>`
+  link, and `opaque`, `isSameOrigin()` and `isSameSite()` compare them
+  (same site by scheme and registrable domain from the public suffix
+  list; opaque origins only match themselves). 285 more
+  `html/browsers/origin` subtests pass.
 * Canvas layers: `beginLayer()` and `endLayer()` on the 2D context and
   `OffscreenCanvasRenderingContext2D`. A layer is drawn into its own
   group with alpha, compositing and shadows reset, and `endLayer()`

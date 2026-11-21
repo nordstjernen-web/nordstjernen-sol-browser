@@ -7302,6 +7302,184 @@
         }
     })();
 
+    (function installOrigin() {
+        var registrableDomain = global.__ndRegistrableDomain;
+        if (typeof registrableDomain === 'function') {
+            try { delete global.__ndRegistrableDomain; } catch (e) {}
+        }
+        if (typeof global.Origin === 'function' || typeof global.URL !== 'function') return;
+        var HTML_NS = 'http://www.w3.org/1999/xhtml';
+        var SVG_NS = 'http://www.w3.org/2000/svg';
+        var XLINK_NS = 'http://www.w3.org/1999/xlink';
+        var records = new WeakMap();
+        var recordOf = idlBrand(records);
+        var opaqueBySource = new WeakMap();
+        var selfOpaque = null;
+
+        function opaque() {
+            return { opaque: true, token: {} };
+        }
+
+        function opaqueFor(key) {
+            if (key === null || (typeof key !== 'object' && typeof key !== 'function'))
+                return opaque();
+            var record = opaqueBySource.get(key);
+            if (!record) {
+                record = opaque();
+                opaqueBySource.set(key, record);
+            }
+            return record;
+        }
+
+        function noOrigin() {
+            return new TypeError('Origin.from: the value has no origin');
+        }
+
+        function parse(input, base) {
+            try {
+                return base === undefined ? new global.URL(input) : new global.URL(input, base);
+            } catch (e) {
+                throw new TypeError('Origin.from: "' + input + '" is not a valid URL');
+            }
+        }
+
+        function fromSerialized(serialized, key) {
+            if (typeof serialized !== 'string' || serialized === '' || serialized === 'null')
+                return opaqueFor(key);
+            var url = parse(serialized);
+            return {
+                opaque: false,
+                scheme: url.protocol.slice(0, -1),
+                host: url.hostname,
+                port: url.port
+            };
+        }
+
+        function fromURL(url) {
+            return fromSerialized(url.origin, undefined);
+        }
+
+        function isWindowProxy(value) {
+            try {
+                return value.window === value && value.self === value;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function fromWindow(win) {
+            var serialized;
+            try {
+                void win.document.nodeType;
+                serialized = win.origin;
+            } catch (e) {
+                throw noOrigin();
+            }
+            if (typeof serialized !== 'string') throw noOrigin();
+            return fromSerialized(serialized, win);
+        }
+
+        function fromSelf() {
+            var serialized = global.origin;
+            if (typeof serialized === 'string' && serialized !== '' && serialized !== 'null')
+                return fromSerialized(serialized, undefined);
+            if (!selfOpaque) selfOpaque = opaque();
+            return selfOpaque;
+        }
+
+        function fromMessageEvent(event) {
+            if (!event.isTrusted) throw noOrigin();
+            return fromSerialized(event.origin, event.source || undefined);
+        }
+
+        function fromHyperlink(el) {
+            var ns = el.namespaceURI;
+            var name = el.localName;
+            if (ns === HTML_NS && (name === 'a' || name === 'area')) {
+                var href = el.getAttribute('href');
+                if (href === null) throw noOrigin();
+                return fromURL(parse(href, el.baseURI));
+            }
+            if (ns === SVG_NS && name === 'a') {
+                var raw = el.getAttribute('href');
+                if (raw === null) raw = el.getAttributeNS(XLINK_NS, 'href');
+                if (raw === null) throw noOrigin();
+                return fromURL(parse(raw, el.baseURI));
+            }
+            throw noOrigin();
+        }
+
+        function extract(value) {
+            if (typeof value === 'string') return fromURL(parse(value));
+            if (value === null || (typeof value !== 'object' && typeof value !== 'function'))
+                throw noOrigin();
+            var existing = records.get(value);
+            if (existing) return existing;
+            if (value instanceof global.URL) return fromURL(value);
+            if (value === global) return fromSelf();
+            if (typeof global.MessageEvent === 'function' && value instanceof global.MessageEvent)
+                return fromMessageEvent(value);
+            if (typeof global.Location === 'function' && value instanceof global.Location)
+                throw noOrigin();
+            if (isWindowProxy(value)) return fromWindow(value);
+            if (typeof global.Element === 'function' && value instanceof global.Element)
+                return fromHyperlink(value);
+            throw noOrigin();
+        }
+
+        function argument(value, method) {
+            var record = records.get(value);
+            if (record === undefined)
+                throw new TypeError("Failed to execute '" + method +
+                                    "' on 'Origin': parameter 1 is not of type 'Origin'.");
+            return record;
+        }
+
+        function sameHostSite(a, b) {
+            if (a.host === b.host) return true;
+            if (typeof registrableDomain !== 'function') return false;
+            var siteA = registrableDomain(a.host);
+            return siteA !== null && siteA === registrableDomain(b.host);
+        }
+
+        class Origin {
+            constructor() {
+                records.set(this, opaque());
+            }
+            static from(value) {
+                var origin = Object.create(Origin.prototype);
+                records.set(origin, extract(value));
+                return origin;
+            }
+            get opaque() {
+                return recordOf(this).opaque;
+            }
+            isSameOrigin(other) {
+                var a = recordOf(this);
+                var b = argument(other, 'isSameOrigin');
+                if (a.opaque || b.opaque) return a.opaque && b.opaque && a.token === b.token;
+                return a.scheme === b.scheme && a.host === b.host && a.port === b.port;
+            }
+            isSameSite(other) {
+                var a = recordOf(this);
+                var b = argument(other, 'isSameSite');
+                if (a.opaque || b.opaque) return a.opaque && b.opaque && a.token === b.token;
+                return a.scheme === b.scheme && sameHostSite(a, b);
+            }
+        }
+        ['opaque', 'isSameOrigin', 'isSameSite'].forEach(function (key) {
+            var d = Object.getOwnPropertyDescriptor(Origin.prototype, key);
+            d.enumerable = true;
+            Object.defineProperty(Origin.prototype, key, d);
+        });
+        var fromDescriptor = Object.getOwnPropertyDescriptor(Origin, 'from');
+        fromDescriptor.enumerable = true;
+        Object.defineProperty(Origin, 'from', fromDescriptor);
+        Object.defineProperty(Origin.prototype, Symbol.toStringTag,
+                              { value: 'Origin', configurable: true });
+        defineCtor('Origin', Origin);
+    })();
+
     if (ndWorkerScope) return;
 
     if (typeof QuotaExceededError !== 'function') {
