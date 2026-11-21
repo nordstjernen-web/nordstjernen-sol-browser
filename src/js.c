@@ -28306,6 +28306,21 @@ ns_wire_encode_object(ns_wire_enc *e, JSValueConst v)
         return ns_sc_fail(ctx);
     }
 
+    const char *wasm_kind = NULL;
+    JSValue wasm_handle = ns_wasm_wire_handle(ctx, v, &wasm_kind);
+    if (wasm_kind) {
+        if (JS_IsException(wasm_handle)) return wasm_handle;
+        ns_js *owner = js_from_ctx(ctx);
+        if (strcmp(wasm_kind, "WMEM") == 0 &&
+            (!owner || !owner->cross_origin_isolated)) {
+            JS_FreeValue(ctx, wasm_handle);
+            return ns_sc_fail(ctx);
+        }
+        JSValue node = ns_wire_node(ctx, wasm_kind);
+        ns_wire_push(ctx, node, wasm_handle);
+        return node;
+    }
+
     if (JS_IsSharedArrayBuffer(v)) {
         ns_js *js = js_from_ctx(ctx);
         if (!js || !js->cross_origin_isolated) return ns_sc_fail(ctx);
@@ -28581,6 +28596,8 @@ ns_wire_decode_node(ns_wire_dec *d, JSValueConst node, const char *kind)
         JS_ToUint32(ctx, &i, a1);
         out = JS_IsArray(d->ports) ? JS_GetPropertyUint32(ctx, d->ports, i)
                                    : JS_NULL;
+    } else if (strcmp(kind, "WMEM") == 0 || strcmp(kind, "WMOD") == 0) {
+        out = ns_wasm_wire_restore(ctx, kind, a1);
     } else if (strcmp(kind, "SAB") == 0) {
         out = JS_IsSharedArrayBuffer(a1) ? JS_DupValue(ctx, a1) : JS_NULL;
     } else if (strcmp(kind, "AB") == 0) {
@@ -29734,7 +29751,6 @@ ns_worker_message_new(JSContext *ctx, ns_worker_host *host, JSValueConst value,
     uint8_t *bytes = JS_WriteObject2(ctx, &len, wire,
                                      JS_WRITE_OBJ_REFERENCE | JS_WRITE_OBJ_SAB,
                                      &sab_tab, &sab_count);
-    JS_FreeValue(ctx, wire);
     if (bytes && sab_count) {
         msg->shared_buffers = g_ptr_array_sized_new((guint)sab_count);
         for (size_t i = 0; i < sab_count; i++) {
@@ -29743,6 +29759,7 @@ ns_worker_message_new(JSContext *ctx, ns_worker_host *host, JSValueConst value,
         }
     }
     js_free(ctx, sab_tab);
+    JS_FreeValue(ctx, wire);
     if (!bytes) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         ns_sc_fail(ctx);

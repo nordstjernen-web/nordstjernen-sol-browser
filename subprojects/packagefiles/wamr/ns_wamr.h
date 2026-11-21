@@ -26,6 +26,15 @@ void ns_wamr_externref_reclaim(wasm_module_inst_t inst);
 
 void ns_wamr_set_host_calls_ctors(bool enabled);
 
+void ns_wamr_set_shared_memory_destroy_callback(void (*cb)(void *memory_data));
+wasm_memory_inst_t ns_wamr_shared_memory_new(uint32_t init_pages,
+                                             uint32_t max_pages);
+void ns_wamr_shared_memory_dup(wasm_memory_inst_t memory);
+void ns_wamr_shared_memory_release(wasm_memory_inst_t memory);
+bool ns_wamr_memory_is_shared(wasm_memory_inst_t memory);
+uint32_t ns_wamr_memory_max_pages(wasm_memory_inst_t memory);
+void ns_wamr_set_adopted_memory(wasm_memory_inst_t memory);
+
 void wasm_runtime_set_enlarge_mem_success_callback(
     void (*callback)(wasm_module_inst_t module_inst, void *user_data),
     void *user_data);
