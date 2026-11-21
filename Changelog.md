@@ -3,6 +3,18 @@ Changelog:
 
 1.0.51:
 ======
+* `grid-template-areas` rows are split into cells as the grid spec
+  tokenizes them, so a minified row such as `". .main. ."` is five
+  cells, not four with a `.main.` name. lichess.org's page grid is
+  written that way, and its lobby was squeezed into a narrow column
+  drawn over the side panel, with the game boards missing. Areas that
+  are not rectangles, or that use characters outside names and `.`, now
+  make the declaration invalid, and `element.style` gives the rows in
+  their canonical form.
+* A `url()` in a custom property keeps the author's quoting when it is
+  made absolute. Scripts read such values back as text: lichess.org cuts
+  `url(` and `)` off its piece variables, and the quotes we added landed
+  in the image address, so no chess piece loaded.
 * npm package: on x86_64 Linux with glibc 2.39 or newer (Ubuntu 24.04,
   Debian 13, Fedora 40 and newer) `nordstjernen-browser` installs the
   release AppImage, checked against `SHA256SUMS` and unpacked so no FUSE
