@@ -1499,6 +1499,11 @@ ns_js_attach_idle(ns_js *js, GSourceFunc func, gpointer data)
 
 static void ns_storage_drain_deferred_events(ns_js *js);
 static void ns_js_report_pending_rejections(ns_js *js);
+static JSValue ns_event_ctor(JSContext *ctx, JSValueConst this_val, int argc,
+                             JSValueConst *argv);
+static void ns_js_promise_rejection_tracker(JSContext *ctx, JSValueConst promise,
+                                            JSValueConst reason,
+                                            ns_js_bool is_handled, void *opaque);
 static void ns_js_drop_pending_rejections(ns_js *js);
 
 typedef struct {
@@ -30347,16 +30352,6 @@ ns_worker_console_assert(JSContext *ctx, JSValueConst this_val,
 }
 
 static void
-ns_worker_promise_rejection_tracker(JSContext *ctx, JSValueConst promise,
-                                    JSValueConst reason, ns_js_bool is_handled,
-                                    void *opaque)
-{
-    (void)promise; (void)opaque;
-    if (is_handled) return;
-    ns_worker_console_emit(ctx, "[unhandled rejection]", 1, &reason);
-}
-
-static void
 ns_worker_install_console(JSContext *ctx, JSValueConst global)
 {
     JSValue console = JS_NewObject(ctx);
@@ -31407,7 +31402,7 @@ ns_worker_js_new(ns_worker_host *host)
     if (mb > 512) mb = 512;
     JS_SetInterruptHandler(js->rt, ns_js_interrupt_cb, js);
     JS_SetMemoryLimit(js->rt, (size_t)mb * 1024 * 1024);
-    JS_SetHostPromiseRejectionTracker(js->rt, ns_worker_promise_rejection_tracker, NULL);
+    JS_SetHostPromiseRejectionTracker(js->rt, ns_js_promise_rejection_tracker, NULL);
     JS_SetMaxStackSize(js->rt, ns_worker_stack_limit(host));
 
     js->ctx = JS_NewContext(js->rt);
@@ -31475,8 +31470,10 @@ ns_worker_js_new(ns_worker_host *host)
     }
     ns_bind_ctor_proto_fn(ctx, global, "MessageEvent", "initMessageEvent",
                           ns_message_event_init, 1);
+    ns_bind_ctor(ctx, global, "PromiseRejectionEvent", ns_event_ctor, 2);
     ns_event_link_proto(ctx, global, "MessageEvent", "Event");
     ns_event_link_proto(ctx, global, "ErrorEvent", "Event");
+    ns_event_link_proto(ctx, global, "PromiseRejectionEvent", "Event");
     ns_event_link_proto(ctx, global, "ExtendableEvent", "Event");
     ns_event_link_proto(ctx, global, "FetchEvent", "ExtendableEvent");
     ns_event_link_proto(ctx, global, "ExtendableMessageEvent",
@@ -60772,12 +60769,25 @@ ns_js_dispatch_rejection_event(ns_js *js, JSContext *ctx, const char *type,
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue event = ns_target_make_event(ctx, global, type);
     ns_event_adopt_interface(ctx, event, "PromiseRejectionEvent");
-    JS_SetPropertyStr(ctx, event, "promise", JS_DupValue(ctx, promise));
-    JS_SetPropertyStr(ctx, event, "reason", JS_DupValue(ctx, reason));
-    JS_SetPropertyStr(ctx, event, "cancelable",
-                      cancelable ? JS_TRUE : JS_FALSE);
-    ns_node *target_doc = ns_window_document_for(ctx, global);
-    ns_js_dispatch_window_only_event(js, target_doc, type, event, prevented);
+    ns_event_data *data = ns_event_data_of(event);
+    JSValueConst state = data ? data->state : event;
+    JS_DefinePropertyValueStr(ctx, state, "promise", JS_DupValue(ctx, promise),
+                              JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, state, "reason", JS_DupValue(ctx, reason),
+                              JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, state, "cancelable",
+                              cancelable ? JS_TRUE : JS_FALSE, JS_PROP_C_W_E);
+    if (js->worker_host) {
+        ns_worker_dispatch(ctx, global, type, event);
+        JSValue dp = JS_GetPropertyStr(ctx, event, "defaultPrevented");
+        if (prevented) *prevented = JS_ToBool(ctx, dp) > 0;
+        JS_FreeValue(ctx, dp);
+        JS_FreeValue(ctx, event);
+    } else {
+        ns_node *target_doc = ns_window_document_for(ctx, global);
+        ns_js_dispatch_window_only_event(js, target_doc, type, event,
+                                         prevented);
+    }
     JS_FreeValue(ctx, global);
 }
 

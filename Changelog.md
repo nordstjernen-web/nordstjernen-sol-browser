@@ -3,6 +3,11 @@ Changelog:
 
 1.0.51:
 ======
+* Workers fire `unhandledrejection` and `rejectionhandled`. A dedicated
+  or shared worker only logged unhandled promise rejections; it now
+  tracks them like a window does, dispatches the events on the worker
+  global (`onunhandledrejection` included, cancelable, with `promise`
+  and `reason`), and exposes the `PromiseRejectionEvent` constructor.
 * Module scripts follow the fetch rules of the HTML spec. A module or
   `import()` whose response has an HTTP error status (404, 500, …) now
   fails instead of being run, so `import()` rejects and an error page
