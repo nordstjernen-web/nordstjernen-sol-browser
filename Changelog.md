@@ -3,6 +3,16 @@ Changelog:
 
 1.0.51:
 ======
+* `roundRect()` on the 2D context and `Path2D` follows the spec: radii
+  given as `DOMPoint`s or `{x, y}` dictionaries draw elliptical corners
+  (they were read as plain numbers, so the corners came out square),
+  any iterable is accepted as the radii list, an empty list, more than
+  four radii or a negative radius throw a `RangeError`, a non-finite
+  argument makes the call a no-op instead of drawing, radii too large
+  for the rectangle are scaled down together, a negative width or height
+  keeps each radius on its own corner and reverses the winding, and the
+  call ends with a new subpath at (x, y). 90 more canvas
+  web-platform-tests pass.
 * Canvas 2D shadows are drawn for shapes outside the canvas whose shadow
   is offset onto it, for `drawImage()`, and for the transparent parts of
   gradients and patterns. The shadow used to be rendered into a

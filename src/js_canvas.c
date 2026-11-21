@@ -2706,68 +2706,175 @@ ns_ctx_strokeText(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-static void
-ns_round_rect_subpath(cairo_t *cr, double x, double y, double w, double h,
-                      double rtl, double rtr, double rbr, double rbl)
+typedef struct ns_corner_radius {
+    double x, y;
+} ns_corner_radius;
+
+static int
+ns_dom_point_init_member(JSContext *ctx, JSValueConst obj, const char *name,
+                         double fallback, double *out)
 {
-    double aw = fabs(w), ah = fabs(h);
-    double max_r = (aw < ah ? aw : ah) / 2.0;
-    if (rtl > max_r) rtl = max_r;
-    if (rtr > max_r) rtr = max_r;
-    if (rbr > max_r) rbr = max_r;
-    if (rbl > max_r) rbl = max_r;
-    double x2 = x + w, y2 = y + h;
-    if (w < 0) { double t = x; x = x2; x2 = t; }
-    if (h < 0) { double t = y; y = y2; y2 = t; }
-    cairo_new_sub_path(cr);
-    cairo_arc(cr, x  + rtl, y  + rtl, rtl, G_PI,        1.5 * G_PI);
-    cairo_arc(cr, x2 - rtr, y  + rtr, rtr, 1.5 * G_PI,  0);
-    cairo_arc(cr, x2 - rbr, y2 - rbr, rbr, 0,           0.5 * G_PI);
-    cairo_arc(cr, x  + rbl, y2 - rbl, rbl, 0.5 * G_PI,  G_PI);
-    cairo_close_path(cr);
+    *out = fallback;
+    if (!JS_IsObject(obj)) return 0;
+    JSValue v = JS_GetPropertyStr(ctx, obj, name);
+    if (JS_IsException(v)) return -1;
+    int rc = JS_IsUndefined(v) ? 0 : JS_ToFloat64(ctx, out, v);
+    JS_FreeValue(ctx, v);
+    return rc;
+}
+
+static int
+ns_corner_radius_from_value(JSContext *ctx, JSValueConst v,
+                            ns_corner_radius *out)
+{
+    if (JS_IsObject(v) || JS_IsNull(v) || JS_IsUndefined(v)) {
+        double w, z;
+        if (ns_dom_point_init_member(ctx, v, "w", 1, &w) ||
+            ns_dom_point_init_member(ctx, v, "x", 0, &out->x) ||
+            ns_dom_point_init_member(ctx, v, "y", 0, &out->y) ||
+            ns_dom_point_init_member(ctx, v, "z", 0, &z))
+            return -1;
+        return 0;
+    }
+    double d = 0;
+    if (JS_ToFloat64(ctx, &d, v)) return -1;
+    out->x = out->y = d;
+    return 0;
 }
 
 static gboolean
-ns_extract_radii(JSContext *ctx, JSValueConst v,
-                 double *rtl, double *rtr, double *rbr, double *rbl)
+ns_value_is_iterable(JSContext *ctx, JSValueConst v)
 {
-    *rtl = *rtr = *rbr = *rbl = 0;
-    if (JS_IsArray(v)) {
-        uint32_t n = ns_js_array_length(ctx, v);
-        double r[4] = { 0, 0, 0, 0 };
-        for (uint32_t i = 0; i < n && i < 4; i++) {
-            JSValue e = JS_GetPropertyUint32(ctx, v, i);
-            JS_ToFloat64(ctx, &r[i], e);
-            JS_FreeValue(ctx, e);
+    if (!JS_IsObject(v)) return FALSE;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue symbol = JS_GetPropertyStr(ctx, global, "Symbol");
+    JSValue iterator = JS_GetPropertyStr(ctx, symbol, "iterator");
+    JSAtom atom = JS_ValueToAtom(ctx, iterator);
+    JSValue method = atom != JS_ATOM_NULL ? JS_GetProperty(ctx, v, atom)
+                                          : JS_UNDEFINED;
+    if (atom != JS_ATOM_NULL) JS_FreeAtom(ctx, atom);
+    gboolean iterable = !JS_IsUndefined(method) && !JS_IsNull(method) &&
+                        !JS_IsException(method);
+    if (JS_IsException(method)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, method);
+    JS_FreeValue(ctx, iterator);
+    JS_FreeValue(ctx, symbol);
+    JS_FreeValue(ctx, global);
+    return iterable;
+}
+
+static int
+ns_round_rect_read_radii(JSContext *ctx, int argc, JSValueConst *argv,
+                         ns_corner_radius radii[4], int *count)
+{
+    *count = 1;
+    radii[0].x = radii[0].y = 0;
+    if (argc < 5 || JS_IsUndefined(argv[4])) return 0;
+    if (!ns_value_is_iterable(ctx, argv[4]))
+        return ns_corner_radius_from_value(ctx, argv[4], &radii[0]);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue array_ctor = JS_GetPropertyStr(ctx, global, "Array");
+    JSValue from = JS_GetPropertyStr(ctx, array_ctor, "from");
+    JSValue list = JS_Call(ctx, from, array_ctor, 1, &argv[4]);
+    JS_FreeValue(ctx, from);
+    JS_FreeValue(ctx, array_ctor);
+    JS_FreeValue(ctx, global);
+    if (JS_IsException(list)) return -1;
+    uint32_t n = ns_js_array_length(ctx, list);
+    for (uint32_t i = 0; i < n; i++) {
+        ns_corner_radius r = { 0, 0 };
+        JSValue e = JS_GetPropertyUint32(ctx, list, i);
+        int rc = JS_IsException(e) ? -1 : ns_corner_radius_from_value(ctx, e, &r);
+        JS_FreeValue(ctx, e);
+        if (rc) {
+            JS_FreeValue(ctx, list);
+            return -1;
         }
-        if (n == 1) { *rtl = *rtr = *rbr = *rbl = r[0]; }
-        else if (n == 2) { *rtl = *rbr = r[0]; *rtr = *rbl = r[1]; }
-        else if (n == 3) { *rtl = r[0]; *rtr = *rbl = r[1]; *rbr = r[2]; }
-        else { *rtl = r[0]; *rtr = r[1]; *rbr = r[2]; *rbl = r[3]; }
-    } else {
-        double r = 0;
-        JS_ToFloat64(ctx, &r, v);
-        *rtl = *rtr = *rbr = *rbl = r;
+        if (i < 4) radii[i] = r;
     }
-    return !(*rtl < 0 || *rtr < 0 || *rbr < 0 || *rbl < 0);
+    JS_FreeValue(ctx, list);
+    *count = n > 4 ? 5 : (int)n;
+    return 0;
+}
+
+static void
+ns_round_rect_corner(cairo_t *cr, double kx, double ky, double ex, double ey)
+{
+    const double kappa = 0.5522847498307936;
+    double sx, sy;
+    cairo_get_current_point(cr, &sx, &sy);
+    cairo_curve_to(cr, sx + kappa * (kx - sx), sy + kappa * (ky - sy),
+                   ex + kappa * (kx - ex), ey + kappa * (ky - ey), ex, ey);
+}
+
+static JSValue
+ns_round_rect_apply(JSContext *ctx, cairo_t *cr, int argc, JSValueConst *argv)
+{
+    if (argc < 4)
+        return JS_ThrowTypeError(ctx, "roundRect: 4 arguments required");
+    double x, y, w, h;
+    if (JS_ToFloat64(ctx, &x, argv[0]) || JS_ToFloat64(ctx, &y, argv[1]) ||
+        JS_ToFloat64(ctx, &w, argv[2]) || JS_ToFloat64(ctx, &h, argv[3]))
+        return JS_EXCEPTION;
+    ns_corner_radius radii[4];
+    int count = 0;
+    if (ns_round_rect_read_radii(ctx, argc, argv, radii, &count))
+        return JS_EXCEPTION;
+    if (!isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h))
+        return JS_UNDEFINED;
+    if (count < 1 || count > 4)
+        return JS_ThrowRangeError(ctx,
+            "roundRect: radii must contain one to four values");
+    for (int i = 0; i < count; i++) {
+        if (!isfinite(radii[i].x) || !isfinite(radii[i].y))
+            return JS_UNDEFINED;
+        if (radii[i].x < 0 || radii[i].y < 0)
+            return JS_ThrowRangeError(ctx,
+                "roundRect: radii must not be negative");
+    }
+    ns_corner_radius ul, ur, lr, ll;
+    switch (count) {
+    case 4: ul = radii[0]; ur = radii[1]; lr = radii[2]; ll = radii[3]; break;
+    case 3: ul = radii[0]; ur = ll = radii[1]; lr = radii[2]; break;
+    case 2: ul = lr = radii[0]; ur = ll = radii[1]; break;
+    default: ul = ur = lr = ll = radii[0]; break;
+    }
+    double aw = fabs(w), ah = fabs(h);
+    double scale = 1.0;
+    if (ul.x + ur.x > aw) scale = MIN(scale, aw / (ul.x + ur.x));
+    if (ll.x + lr.x > aw) scale = MIN(scale, aw / (ll.x + lr.x));
+    if (ul.y + ll.y > ah) scale = MIN(scale, ah / (ul.y + ll.y));
+    if (ur.y + lr.y > ah) scale = MIN(scale, ah / (ur.y + lr.y));
+    if (scale < 1.0) {
+        ns_corner_radius *all[4] = { &ul, &ur, &lr, &ll };
+        for (int i = 0; i < 4; i++) {
+            all[i]->x *= scale;
+            all[i]->y *= scale;
+        }
+    }
+    double sx = w < 0 ? -1.0 : 1.0, sy = h < 0 ? -1.0 : 1.0;
+    cairo_new_sub_path(cr);
+    cairo_move_to(cr, x + sx * ul.x, y);
+    cairo_line_to(cr, x + w - sx * ur.x, y);
+    ns_round_rect_corner(cr, x + w, y, x + w, y + sy * ur.y);
+    cairo_line_to(cr, x + w, y + h - sy * lr.y);
+    ns_round_rect_corner(cr, x + w, y + h, x + w - sx * lr.x, y + h);
+    cairo_line_to(cr, x + sx * ll.x, y + h);
+    ns_round_rect_corner(cr, x, y + h, x, y + h - sy * ll.y);
+    cairo_line_to(cr, x, y + sy * ul.y);
+    ns_round_rect_corner(cr, x, y, x + sx * ul.x, y);
+    cairo_close_path(cr);
+    cairo_move_to(cr, x, y);
+    return JS_UNDEFINED;
 }
 
 JSValue
 ns_ctx_roundRect(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
-    if (argc < 4) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    double x = ns_arg_d(ctx, argv[0]);
-    double y = ns_arg_d(ctx, argv[1]);
-    double w = ns_arg_d(ctx, argv[2]);
-    double h = ns_arg_d(ctx, argv[3]);
-    double rtl = 0, rtr = 0, rbr = 0, rbl = 0;
-    if (argc >= 5 && !ns_extract_radii(ctx, argv[4], &rtl, &rtr, &rbr, &rbl))
-        return JS_ThrowRangeError(ctx, "roundRect radius must be non-negative");
-    ns_round_rect_subpath(st->cr, x, y, w, h, rtl, rtr, rbr, rbl);
-    return JS_UNDEFINED;
+    return ns_round_rect_apply(ctx, st->cr, argc, argv);
 }
 
 JSValue
@@ -3057,16 +3164,7 @@ ns_path2d_roundRect(JSContext *ctx, JSValueConst this_val,
     cairo_t *cr = NULL;
     JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
-    if (argc < 4) return JS_UNDEFINED;
-    double x = ns_arg_d(ctx, argv[0]);
-    double y = ns_arg_d(ctx, argv[1]);
-    double w = ns_arg_d(ctx, argv[2]);
-    double h = ns_arg_d(ctx, argv[3]);
-    double rtl = 0, rtr = 0, rbr = 0, rbl = 0;
-    if (argc >= 5 && !ns_extract_radii(ctx, argv[4], &rtl, &rtr, &rbr, &rbl))
-        return JS_ThrowRangeError(ctx, "roundRect radius must be non-negative");
-    ns_round_rect_subpath(cr, x, y, w, h, rtl, rtr, rbr, rbl);
-    return JS_UNDEFINED;
+    return ns_round_rect_apply(ctx, cr, argc, argv);
 }
 
 JSValue
