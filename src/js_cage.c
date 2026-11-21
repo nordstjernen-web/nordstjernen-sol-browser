@@ -15,7 +15,10 @@ ns_js_cage_log_once(void)
     g_once_init_leave(&logged, 1);
 }
 
-#define NS_SAB_HEADER_SIZE 16
+typedef union {
+    gint   refs;
+    guint8 pad[16];
+} ns_sab_header;
 
 typedef struct {
     void (*dup)(void *opaque);
@@ -65,11 +68,11 @@ static void *
 ns_sab_alloc(void *opaque, size_t size)
 {
     (void)opaque;
-    if (size > G_MAXSIZE - NS_SAB_HEADER_SIZE) return NULL;
-    guint8 *block = JS_CageMalloc(size + NS_SAB_HEADER_SIZE);
+    if (size > G_MAXSIZE - sizeof(ns_sab_header)) return NULL;
+    ns_sab_header *block = JS_CageMalloc(size + sizeof(ns_sab_header));
     if (!block) return NULL;
-    g_atomic_int_set((gint *)block, 1);
-    return block + NS_SAB_HEADER_SIZE;
+    g_atomic_int_set(&block->refs, 1);
+    return block + 1;
 }
 
 void
@@ -81,7 +84,7 @@ ns_js_sab_dup(void *ptr)
         f.dup(f.opaque);
         return;
     }
-    g_atomic_int_inc((gint *)((guint8 *)ptr - NS_SAB_HEADER_SIZE));
+    g_atomic_int_inc(&((ns_sab_header *)ptr - 1)->refs);
 }
 
 void
@@ -93,8 +96,8 @@ ns_js_sab_free(void *ptr)
         f.release(f.opaque);
         return;
     }
-    guint8 *block = (guint8 *)ptr - NS_SAB_HEADER_SIZE;
-    if (g_atomic_int_dec_and_test((gint *)block))
+    ns_sab_header *block = (ns_sab_header *)ptr - 1;
+    if (g_atomic_int_dec_and_test(&block->refs))
         JS_CageFree(block);
 }
 
