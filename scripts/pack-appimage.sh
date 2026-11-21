@@ -137,6 +137,33 @@ DEPLOY_GTK_VERSION=4 \
     --icon-file "$PNG_ICON" \
     --plugin gtk
 
+GTK_HOOK="$APPDIR/apprun-hooks/linuxdeploy-plugin-gtk.sh"
+if [ ! -f "$GTK_HOOK" ]; then
+    echo "$(basename "$0"): linuxdeploy-plugin-gtk wrote no $GTK_HOOK" >&2
+    exit 1
+fi
+sed -i '/^export GDK_BACKEND=/d' "$GTK_HOOK"
+if grep -q '^export GDK_BACKEND=' "$GTK_HOOK"; then
+    echo "$(basename "$0"): could not drop GDK_BACKEND from $GTK_HOOK" >&2
+    exit 1
+fi
+HOOK_VARS=$(sed -n 's/^export \([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' "$GTK_HOOK" \
+            | grep -vx APPDIR | sort -u | tr '\n' ' ')
+{
+    head -n 1 "$GTK_HOOK"
+    cat <<EOF
+for ns_host_var in $HOOK_VARS; do
+    if [ -n "\${!ns_host_var+set}" ]; then
+        export "NS_HOST_ENV_\$ns_host_var=\${!ns_host_var}"
+    fi
+done
+unset ns_host_var
+export NS_HOST_ENV="${HOOK_VARS}APPDIR APPIMAGE ARGV0 OWD"
+EOF
+    tail -n +2 "$GTK_HOOK"
+} > "$GTK_HOOK.new"
+mv "$GTK_HOOK.new" "$GTK_HOOK"
+
 "$ROOT/scripts/check-no-profile-data.sh" "$APPDIR"
 FINAL="$ROOT/dist/${NAME}-${VERSION}-${ARCH}.AppImage"
 ARCH="${ARCH}" "$APPIMAGETOOL" --appimage-extract-and-run \

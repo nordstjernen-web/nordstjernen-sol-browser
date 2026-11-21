@@ -3,6 +3,15 @@ Changelog:
 
 1.0.51:
 ======
+* The AppImage runs natively on Wayland. linuxdeploy's GTK hook forced
+  `GDK_BACKEND=x11`, so the browser always went through XWayland and did
+  not start at all on a Wayland session without it; `pack-appimage.sh`
+  now drops that line. The hook also records the host's own values of
+  the variables it points into the bundle (`GTK_PATH`, `GTK_THEME`,
+  `XDG_DATA_DIRS`, `GSETTINGS_SCHEMA_DIR`, …), and opening a finished
+  download restores them, and clears `APPDIR`/`APPIMAGE`, for the app it
+  launches, so that app no longer loads the bundle's GTK modules, schemas
+  and forced Adwaita theme.
 * `grid-template-areas` rows are split into cells as the grid spec
   tokenizes them, so a minified row such as `". .main. ."` is five
   cells, not four with a `.main.` name. lichess.org's page grid is
