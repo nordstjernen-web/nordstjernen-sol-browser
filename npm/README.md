@@ -13,11 +13,20 @@ nordstjernen https://nordstjernen.org
 On Linux, macOS and the BSDs, run the install with `sudo`, because npm's global
 directory belongs to root; on Windows, run it without `sudo`.
 
+npm 12 and newer do not run install scripts unless allowed, so the browser is
+then installed the first time you run `nordstjernen`. To install it straight
+away, allow this package's script:
+
+```sh
+sudo npm install -g --allow-scripts=nordstjernen-browser nordstjernen-browser
+```
+
 ## What installing does
 
 | System | What happens |
 | --- | --- |
-| Linux, BSD, Intel macOS | Nordstjernen is built from the release source on your machine with meson and ninja, against your system's GTK 4, FFmpeg and other libraries. The source tarball is checked against the SHA-256 recorded in this package. The build takes several minutes and shows its progress in the terminal. |
+| Linux on x86_64 with glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and newer) | The release AppImage is downloaded from GitHub, checked against the release's `SHA256SUMS` and unpacked, so no FUSE is needed. It uses the system's glibc, libstdc++, X11, Wayland, fontconfig, FreeType, HarfBuzz and FriBiDi, which every desktop has, and bundles GTK 4, FFmpeg and the rest. If those libraries are missing or the AppImage does not start, the browser is built from source instead. |
+| Other Linux, BSD, Intel macOS | Nordstjernen is built from the release source on your machine with meson and ninja, against your system's GTK 4, FFmpeg and other libraries. The source tarball is checked against the SHA-256 recorded in this package. The build takes several minutes and shows its progress in the terminal. |
 | macOS on Apple silicon | The Developer ID signed and notarised release build is downloaded from GitHub and checked against the release's `SHA256SUMS`. |
 | Windows | Nordstjernen is built from the release source with [MSYS2](https://www.msys2.org)'s UCRT64 clang, meson and ninja, against MSYS2's GTK 4 and FFmpeg. The signed build is in the [Microsoft Store](https://apps.microsoft.com/detail/9NW8T7W5Z4PL). |
 
@@ -28,10 +37,13 @@ macOS, `%LOCALAPPDATA%` on Windows) instead.
 
 ## Building from source
 
-The build needs Ubuntu 24.04, Debian 13, Fedora 40, openSUSE Tumbleweed or a
-newer distribution: older releases ship a GTK, FFmpeg, HarfBuzz or meson that
-is too old. Before downloading anything, the installer checks the build tools
-and every required library, and names whatever is missing or too old.
+The build needs Ubuntu 25.04, Debian 13, Fedora 42, openSUSE Tumbleweed or a
+newer distribution: older releases ship a libcurl, GTK, FFmpeg, HarfBuzz or
+meson that is too old. It also needs rustc 1.100 or newer; where the
+distribution's is older, install a current one with
+[rustup](https://rustup.rs). Before downloading anything, the installer checks
+the build tools and every required library, and names whatever is missing or
+too old.
 
 If the build fails, the installer prints the end of the build output and the
 path of the full log, `build-<version>.log` in `~/.cache/nordstjernen-browser`
@@ -42,7 +54,7 @@ Install the build dependencies before you install the package.
 Debian/Ubuntu:
 
 ```sh
-sudo apt install build-essential pkg-config meson ninja-build \
+sudo apt install build-essential pkg-config meson ninja-build rustc \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl3-dev glslang-dev \
     libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
@@ -51,7 +63,7 @@ sudo apt install build-essential pkg-config meson ninja-build \
 Fedora/RHEL (`ffmpeg-devel` comes from RPM Fusion):
 
 ```sh
-sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
+sudo dnf install gcc rust pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
     openssl-devel uchardet-devel libpsl-devel sqlite-devel \
     libseccomp-devel libwebp-devel SDL3-devel glslang-devel ffmpeg-devel
 ```
@@ -59,7 +71,7 @@ sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl
 openSUSE (`ffmpeg-devel` comes from Packman):
 
 ```sh
-sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
+sudo zypper install gcc rust pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
     libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel \
     libseccomp-devel libwebp-devel SDL3-devel glslang-devel ffmpeg-devel
 ```
@@ -67,7 +79,7 @@ sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-de
 macOS on Intel ([Homebrew](https://brew.sh)):
 
 ```sh
-brew install meson ninja pkg-config gtk4 libepoxy curl openssl@3 \
+brew install meson ninja pkg-config rust gtk4 libepoxy curl openssl@3 \
     uchardet libpsl sqlite webp sdl3 glslang ffmpeg
 ```
 
@@ -75,7 +87,7 @@ Windows: install [MSYS2](https://www.msys2.org) in `C:\msys64` (or set
 `MSYS2_ROOT`), then in its UCRT64 terminal:
 
 ```sh
-pacman -S --needed tar mingw-w64-ucrt-x86_64-{clang,pkgconf,meson,ninja,gtk4,libepoxy,curl,uchardet,libpsl,sqlite3,libwebp,sdl3,glslang,ffmpeg}
+pacman -S --needed tar mingw-w64-ucrt-x86_64-{clang,rust,pkgconf,meson,ninja,gtk4,libepoxy,curl,uchardet,libpsl,sqlite3,libwebp,sdl3,glslang,ffmpeg}
 ```
 
 The browser runs against the MSYS2 libraries it was built with, so keep MSYS2
@@ -87,7 +99,8 @@ FFmpeg 6.0 or newer is required on Linux and Windows.
 
 ## Environment variables
 
-- `NORDSTJERNEN_BUILD_FROM_SOURCE=1` builds from source on Apple silicon too.
+- `NORDSTJERNEN_BUILD_FROM_SOURCE=1` builds from source on Apple silicon and
+  on Linux systems that could run the AppImage.
 - `NORDSTJERNEN_SKIP_INSTALL=1` skips the install step; the browser is then
   installed the first time you run `nordstjernen`. Package managers that do
   not run install scripts (pnpm, `npm --ignore-scripts`) get the same

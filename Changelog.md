@@ -1,6 +1,22 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.51:
+======
+* npm package: on x86_64 Linux with glibc 2.39 or newer (Ubuntu 24.04,
+  Debian 13, Fedora 40 and newer) `nordstjernen-browser` installs the
+  release AppImage, checked against `SHA256SUMS` and unpacked so no FUSE
+  is needed, instead of compiling for minutes. It falls back to the
+  source build when a host library is missing or the AppImage does not
+  start.
+* npm package: the source-build preflight checks for rustc 1.100 and
+  libcurl 8.11, as meson does, so Ubuntu 24.04 is told what is missing
+  before the download instead of failing in `meson setup`; glslang counts
+  as installed when its header is (Arch ships no `glslang.pc`), so WebGL
+  is no longer dropped there. The README names the supported
+  distributions correctly, lists Rust in the install commands, and
+  explains npm 12's `--allow-scripts`.
+
 1.0.50:
 ======
 * `android/scripts/build-deps.sh` hands meson the rustc found first on the

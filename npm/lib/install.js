@@ -1,4 +1,4 @@
-// install.js: builds the browser release from source with meson, or copies a notarised macOS release where the product has one, and installs it inside the package.
+// install.js: unpacks the release AppImage or notarised macOS build where the system can run it, otherwise builds the release from source with meson, and installs it inside the package.
 'use strict';
 
 const fs = require('fs');
@@ -9,8 +9,8 @@ const { spawnSync } = require('child_process');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 const product = require('./product');
-const { preflight } = require('./dependencies');
-const { write, locateMsys2, buildEnvironment, runtimeEnvironment, buildPath, runLogged } = require('./system');
+const { preflight, versionAtLeast } = require('./dependencies');
+const { write, locateMsys2, capture, buildEnvironment, runtimeEnvironment, buildPath, runLogged } = require('./system');
 
 const RELEASE_URL = `https://github.com/${product.repo}/releases/download/${product.version}`;
 const SOURCE_URL = `https://github.com/${product.repo}/archive/refs/tags/${product.version}.tar.gz`;
@@ -19,6 +19,7 @@ const RUNTIME_FILE = 'npm-runtime.json';
 const EXECUTABLE_DIRECTORIES = ['bin', 'libexec'];
 
 class InstallError extends Error {}
+class AppImageUnusable extends InstallError {}
 
 function log(message) {
   write(`[${product.packageName}] ${message}\n`);
@@ -44,6 +45,55 @@ function usesMacRelease() {
 
 function executablePath() {
   return usesMacRelease() ? product.macRelease.executable : product.executable;
+}
+
+const LIBRARY_DIRECTORIES = [
+  '/lib64', '/usr/lib64', '/lib', '/usr/lib',
+  '/lib/x86_64-linux-gnu', '/usr/lib/x86_64-linux-gnu', '/usr/local/lib',
+];
+
+function hostLibraryPresent(name, cache) {
+  return cache.includes(`${name} `) || LIBRARY_DIRECTORIES.some((directory) => fs.existsSync(path.join(directory, name)));
+}
+
+function linuxReleaseObstacle() {
+  const release = product.linuxRelease;
+  if (!release || process.platform !== 'linux') return 'unsupported';
+  if (process.env[`${product.envPrefix}_BUILD_FROM_SOURCE`] === '1') return `${product.envPrefix}_BUILD_FROM_SOURCE=1`;
+  if (process.arch !== release.arch) return `the release AppImage is built for ${release.arch}, not ${process.arch}`;
+  const glibc = process.report.getReport().header.glibcVersionRuntime;
+  if (!glibc) return 'the release AppImage needs glibc, and this system uses another C library';
+  if (!versionAtLeast(glibc, release.glibc)) return `the release AppImage needs glibc ${release.glibc}, and this system has ${glibc}`;
+  const cache = capture('ldconfig', ['-p']) || capture('/sbin/ldconfig', ['-p']) || '';
+  const absent = release.hostLibraries.filter((name) => !hostLibraryPresent(name, cache));
+  if (absent.length) return `the release AppImage needs these system libraries: ${absent.join(', ')}`;
+  return null;
+}
+
+async function installLinuxRelease(staging) {
+  const { asset, executable } = product.linuxRelease;
+  const extraction = fs.mkdtempSync(`${staging}.extract-`);
+  try {
+    const image = path.join(extraction, asset);
+    await download(`${RELEASE_URL}/${asset}`, image);
+    verify(image, await releaseChecksum(asset), asset);
+    fs.chmodSync(image, 0o755);
+    log('unpacking');
+    const unpacked = spawnSync(image, ['--appimage-extract'], { cwd: extraction, stdio: 'ignore' });
+    if (unpacked.error || unpacked.status !== 0) {
+      throw new InstallError(`${asset} --appimage-extract failed${unpacked.error ? `: ${unpacked.error.message}` : ''}`);
+    }
+    fs.rmSync(staging, { recursive: true, force: true });
+    fs.renameSync(path.join(extraction, 'squashfs-root'), staging);
+  } finally {
+    fs.rmSync(extraction, { recursive: true, force: true });
+  }
+  const probe = spawnSync(path.join(staging, executable), ['--version'], { encoding: 'utf8', timeout: 60000 });
+  if (probe.error || probe.status !== 0) {
+    const detail = (probe.stderr || '').trim().split('\n').slice(-3).join('\n');
+    throw new AppImageUnusable(`the release AppImage does not start here${detail ? `:\n${detail}` : ''}`);
+  }
+  fs.writeFileSync(path.join(staging, RUNTIME_FILE), `${JSON.stringify({ path: null, executable })}\n`);
 }
 
 function readRuntime(root) {
@@ -73,10 +123,11 @@ function markExecutable(root) {
 
 function findInstalled() {
   for (const root of installRoots()) {
-    const exe = path.join(root, executablePath());
+    const runtime = readRuntime(root);
+    const exe = path.join(root, runtime.executable || executablePath());
     if (!fs.existsSync(exe)) continue;
     markExecutable(root);
-    return { exe, env: runtimeEnvironment(readRuntime(root).path) };
+    return { exe, env: runtimeEnvironment(runtime.path) };
   }
   return null;
 }
@@ -226,6 +277,24 @@ async function buildFromSource(staging, work) {
   fs.writeFileSync(path.join(staging, RUNTIME_FILE), `${JSON.stringify({ path: msys2 ? msys2.bin : null })}\n`);
 }
 
+async function installLinuxReleaseOrBuild(staging, work) {
+  const obstacle = linuxReleaseObstacle();
+  if (obstacle === null) {
+    try {
+      await installLinuxRelease(staging);
+      return;
+    } catch (error) {
+      if (!(error instanceof AppImageUnusable)) throw error;
+      log(`${error.message}\nbuilding from source instead`);
+      fs.rmSync(staging, { recursive: true, force: true });
+      fs.mkdirSync(staging, { recursive: true });
+    }
+  } else if (obstacle !== 'unsupported') {
+    log(`building from source: ${obstacle}`);
+  }
+  await buildFromSource(staging, work);
+}
+
 async function install() {
   const existing = findInstalled();
   if (existing) return existing;
@@ -237,9 +306,10 @@ async function install() {
   fs.mkdirSync(staging, { recursive: true });
   try {
     if (usesMacRelease()) await installMacRelease(staging, work);
-    else await buildFromSource(staging, work);
-    if (!fs.existsSync(path.join(staging, executablePath()))) {
-      throw new InstallError(`the install did not produce ${executablePath()}`);
+    else await installLinuxReleaseOrBuild(staging, work);
+    const produced = readRuntime(staging).executable || executablePath();
+    if (!fs.existsSync(path.join(staging, produced))) {
+      throw new InstallError(`the install did not produce ${produced}`);
     }
     markExecutable(staging);
     fs.rmSync(root, { recursive: true, force: true });
