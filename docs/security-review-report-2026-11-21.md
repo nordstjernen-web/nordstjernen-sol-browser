@@ -1,10 +1,10 @@
 # Security review report, 2026-11-21
 
 Source review of Nordstjernen at commit `983d178b`, looking for security
-vulnerabilities in the first-party source. It follows
-`docs/security-review-report-2026-11-18.md` (commit `c465ce29`) and
-`docs/security-review-js-2026-11-18.md`, and was aimed first at the areas
-those reviews did not reach. Two parallel reviewers did the reading: one on
+vulnerabilities in the first-party source. It follows the reviews of
+2026-11-13 and 2026-11-18, whose reports are no longer in the tree, and was
+aimed first at the areas they did not reach. The F, S, G, N and J item
+numbers in §5 are theirs. Two parallel reviewers did the reading: one on
 memory safety, one on web policy, network and the process boundary.
 
 The review itself changed no source file. M1 and C1 were fixed afterwards on
