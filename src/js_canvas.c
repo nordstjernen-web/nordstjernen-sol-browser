@@ -1157,62 +1157,83 @@ ns_ctx_has_shadow(const ns_canvas_state *st)
 }
 
 static void
-ns_box_blur_argb(uint8_t *data, int w, int h, int stride, int radius)
+ns_gauss_box_sizes(double sigma, int sizes[3])
 {
-    if (radius <= 0 || w <= 0 || h <= 0) return;
-    if (radius > 64) radius = 64;
-    int span = radius * 2 + 1;
-    uint8_t *tmp = g_try_malloc((size_t)w * (size_t)h * 4u);
-    if (!tmp) return;
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            int sa = 0, sr = 0, sg = 0, sb = 0, n = 0;
-            for (int k = -radius; k <= radius; k++) {
-                int xx = x + k;
-                if (xx < 0 || xx >= w) continue;
-                const uint8_t *p = data + y * stride + xx * 4;
-                sb += p[0]; sg += p[1]; sr += p[2]; sa += p[3];
-                n++;
-            }
-            uint8_t *q = tmp + (y * w + x) * 4;
-            q[0] = (uint8_t)(sb / (n ? n : 1));
-            q[1] = (uint8_t)(sg / (n ? n : 1));
-            q[2] = (uint8_t)(sr / (n ? n : 1));
-            q[3] = (uint8_t)(sa / (n ? n : 1));
-        }
-    }
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            int sa = 0, sr = 0, sg = 0, sb = 0, n = 0;
-            for (int k = -radius; k <= radius; k++) {
-                int yy = y + k;
-                if (yy < 0 || yy >= h) continue;
-                const uint8_t *p = tmp + (yy * w + x) * 4;
-                sb += p[0]; sg += p[1]; sr += p[2]; sa += p[3];
-                n++;
-            }
-            uint8_t *q = data + y * stride + x * 4;
-            q[0] = (uint8_t)(sb / (n ? n : 1));
-            q[1] = (uint8_t)(sg / (n ? n : 1));
-            q[2] = (uint8_t)(sr / (n ? n : 1));
-            q[3] = (uint8_t)(sa / (n ? n : 1));
-        }
-    }
-    g_free(tmp);
-    (void)span;
+    double ideal = sqrt(4.0 * sigma * sigma + 1.0);
+    int lower = (int)floor(ideal);
+    if (lower % 2 == 0) lower--;
+    if (lower < 1) lower = 1;
+    int upper = lower + 2;
+    double m_ideal = (12.0 * sigma * sigma - 3.0 * lower * lower -
+                      12.0 * lower - 9.0) / (-4.0 * lower - 4.0);
+    int m = (int)lround(m_ideal);
+    for (int i = 0; i < 3; i++) sizes[i] = i < m ? lower : upper;
 }
+
+static void
+ns_box_blur_line(const uint8_t *src, uint8_t *dst, int n, int step, int radius)
+{
+    int size = radius * 2 + 1;
+    int sum = 0;
+    for (int i = 0; i < radius && i < n; i++) sum += src[i * step];
+    for (int i = 0; i < n; i++) {
+        int in = i + radius;
+        int out = i - radius - 1;
+        if (in < n) sum += src[in * step];
+        if (out >= 0) sum -= src[out * step];
+        dst[i * step] = (uint8_t)((sum + size / 2) / size);
+    }
+}
+
+static void
+ns_gaussian_blur_a8(uint8_t *data, int w, int h, int stride, double sigma)
+{
+    if (sigma <= 0 || w <= 0 || h <= 0) return;
+    int sizes[3];
+    ns_gauss_box_sizes(sigma, sizes);
+    int line_max = w > h ? w : h;
+    uint8_t *line = g_try_malloc((size_t)line_max * 2u);
+    if (!line) return;
+    uint8_t *tmp = line + line_max;
+    for (int y = 0; y < h; y++) {
+        uint8_t *row = data + (size_t)y * stride;
+        for (int pass = 0; pass < 3; pass++) {
+            int radius = (sizes[pass] - 1) / 2;
+            memcpy(line, row, (size_t)w);
+            ns_box_blur_line(line, row, w, 1, radius);
+        }
+    }
+    for (int x = 0; x < w; x++) {
+        for (int pass = 0; pass < 3; pass++) {
+            int radius = (sizes[pass] - 1) / 2;
+            for (int y = 0; y < h; y++) tmp[y] = data[(size_t)y * stride + x];
+            ns_box_blur_line(tmp, line, h, 1, radius);
+            for (int y = 0; y < h; y++) data[(size_t)y * stride + x] = line[y];
+        }
+    }
+    g_free(line);
+}
+
+#define NS_SHADOW_MAX_SIGMA 256.0
 
 static void
 ns_ctx_with_shadow(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st,
                    ns_ctx_drawfn draw, void *ud)
 {
-    if (!ns_ctx_has_shadow(st)) {
+    if (!ns_ctx_has_shadow(st) || st->w <= 0 || st->h <= 0) {
         draw(st->cr, ud);
         return;
     }
-    int w = st->w, h = st->h;
-    if (w <= 0 || h <= 0) { draw(st->cr, ud); return; }
-    cairo_surface_t *off = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    double sigma = MIN(st->shadow_blur / 2.0, NS_SHADOW_MAX_SIGMA);
+    int pad = (int)ceil(sigma * 3.0) + 2;
+    double ox = CLAMP(st->shadow_ox, -1e7, 1e7);
+    double oy = CLAMP(st->shadow_oy, -1e7, 1e7);
+    double ox_floor = floor(ox), oy_floor = floor(oy);
+    int x0 = -(int)ox_floor - pad;
+    int y0 = -(int)oy_floor - pad;
+    int sw = st->w + 2 * pad + 1;
+    int sh = st->h + 2 * pad + 1;
+    cairo_surface_t *off = cairo_image_surface_create(CAIRO_FORMAT_A8, sw, sh);
     if (cairo_surface_status(off) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(off);
         draw(st->cr, ud);
@@ -1221,58 +1242,83 @@ ns_ctx_with_shadow(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st,
     cairo_t *ocr = cairo_create(off);
     cairo_matrix_t m;
     cairo_get_matrix(st->cr, &m);
-    cairo_set_matrix(ocr, &m);
+    cairo_translate(ocr, -x0 + (ox - ox_floor), -y0 + (oy - oy_floor));
+    cairo_transform(ocr, &m);
     draw(ocr, ud);
     cairo_destroy(ocr);
     cairo_surface_flush(off);
     uint8_t *data = cairo_image_surface_get_data(off);
-    int stride = cairo_image_surface_get_stride(off);
-    int sw = cairo_image_surface_get_width(off);
-    int sh = cairo_image_surface_get_height(off);
-    if (data) {
-        for (int y = 0; y < sh; y++) {
-            uint8_t *row = data + y * stride;
-            for (int x = 0; x < sw; x++) {
-                uint8_t a = row[x * 4 + 3];
-                uint8_t na = (uint8_t)(a * st->shadow_a);
-                row[x * 4 + 0] = (uint8_t)(st->shadow_b * na);
-                row[x * 4 + 1] = (uint8_t)(st->shadow_g * na);
-                row[x * 4 + 2] = (uint8_t)(st->shadow_r * na);
-                row[x * 4 + 3] = na;
-            }
-        }
-        double half_blur = st->shadow_blur * 0.5 + 0.5;
-        int radius = half_blur < 64 ? (int)half_blur : 64;
-        if (radius > 0)
-            ns_box_blur_argb(data, sw, sh, stride, radius);
-        cairo_surface_mark_dirty(off);
-    }
+    if (data && sigma > 0)
+        ns_gaussian_blur_a8(data, sw, sh, cairo_image_surface_get_stride(off),
+                            sigma);
+    cairo_surface_mark_dirty(off);
     cairo_save(st->cr);
     cairo_identity_matrix(st->cr);
-    cairo_set_source_surface(st->cr, off, st->shadow_ox, st->shadow_oy);
-    cairo_paint(st->cr);
+    ns_ctx_apply_composite(ctx, this_val, st->cr);
+    cairo_set_source_rgba(st->cr, st->shadow_r, st->shadow_g, st->shadow_b,
+                          st->shadow_a);
+    cairo_mask_surface(st->cr, off, x0 + ox_floor, y0 + oy_floor);
     cairo_restore(st->cr);
     cairo_surface_destroy(off);
     draw(st->cr, ud);
-    (void)ctx; (void)this_val;
+}
+
+static void
+ns_ctx_set_fill_source_on(JSContext *ctx, JSValueConst this_val,
+                          ns_canvas_state *st, cairo_t *cr)
+{
+    double ga = ns_ctx_global_alpha(ctx, this_val);
+    if (st->fill_pattern) cairo_set_source(cr, st->fill_pattern);
+    else cairo_set_source_rgba(cr, st->fill_r, st->fill_g, st->fill_b,
+                               st->fill_a * ga);
+}
+
+static void
+ns_ctx_set_stroke_source_on(JSContext *ctx, JSValueConst this_val,
+                            ns_canvas_state *st, cairo_t *cr)
+{
+    double ga = ns_ctx_global_alpha(ctx, this_val);
+    if (st->stroke_pattern) cairo_set_source(cr, st->stroke_pattern);
+    else cairo_set_source_rgba(cr, st->stroke_r, st->stroke_g, st->stroke_b,
+                               st->stroke_a * ga);
 }
 
 static void
 ns_ctx_set_fill_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
 {
-    double ga = ns_ctx_global_alpha(ctx, this_val);
-    if (st->fill_pattern) cairo_set_source(st->cr, st->fill_pattern);
-    else cairo_set_source_rgba(st->cr, st->fill_r, st->fill_g, st->fill_b,
-                               st->fill_a * ga);
+    ns_ctx_set_fill_source_on(ctx, this_val, st, st->cr);
 }
 
 static void
 ns_ctx_set_stroke_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
 {
-    double ga = ns_ctx_global_alpha(ctx, this_val);
-    if (st->stroke_pattern) cairo_set_source(st->cr, st->stroke_pattern);
-    else cairo_set_source_rgba(st->cr, st->stroke_r, st->stroke_g, st->stroke_b,
-                               st->stroke_a * ga);
+    ns_ctx_set_stroke_source_on(ctx, this_val, st, st->cr);
+}
+
+static void
+ns_ctx_apply_draw_operator(JSContext *ctx, JSValueConst this_val,
+                           const ns_canvas_state *st, cairo_t *cr)
+{
+    if (cr == st->cr) ns_ctx_apply_composite(ctx, this_val, cr);
+    else cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+}
+
+static void
+ns_ctx_copy_line_style(cairo_t *from, cairo_t *to)
+{
+    cairo_set_line_cap(to, cairo_get_line_cap(from));
+    cairo_set_line_join(to, cairo_get_line_join(from));
+    cairo_set_miter_limit(to, cairo_get_miter_limit(from));
+    int dash_count = cairo_get_dash_count(from);
+    if (dash_count <= 0) {
+        cairo_set_dash(to, NULL, 0, 0);
+        return;
+    }
+    double *dashes = g_new(double, dash_count);
+    double offset = 0;
+    cairo_get_dash(from, dashes, &offset);
+    cairo_set_dash(to, dashes, dash_count, offset);
+    g_free(dashes);
 }
 
 static void
@@ -1292,13 +1338,8 @@ static void
 ns_draw_fillrect(cairo_t *cr, void *vud)
 {
     ns_draw_rect_ud *u = vud;
-    if (cr == u->st->cr) ns_ctx_set_fill_source(u->ctx, u->this_val, u->st);
-    else {
-        double ga = ns_ctx_global_alpha(u->ctx, u->this_val);
-        cairo_set_source_rgba(cr, u->st->fill_r, u->st->fill_g,
-                              u->st->fill_b, u->st->fill_a * ga);
-    }
-    ns_ctx_apply_composite(u->ctx, u->this_val, cr);
+    ns_ctx_set_fill_source_on(u->ctx, u->this_val, u->st, cr);
+    ns_ctx_apply_draw_operator(u->ctx, u->this_val, u->st, cr);
     ns_paint_rect_keeping_path(cr, u->x, u->y, u->w, u->h, FALSE);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 }
@@ -1307,13 +1348,9 @@ static void
 ns_draw_strokerect(cairo_t *cr, void *vud)
 {
     ns_draw_rect_ud *u = vud;
-    if (cr == u->st->cr) ns_ctx_set_stroke_source(u->ctx, u->this_val, u->st);
-    else {
-        double ga = ns_ctx_global_alpha(u->ctx, u->this_val);
-        cairo_set_source_rgba(cr, u->st->stroke_r, u->st->stroke_g,
-                              u->st->stroke_b, u->st->stroke_a * ga);
-    }
-    ns_ctx_apply_composite(u->ctx, u->this_val, cr);
+    ns_ctx_set_stroke_source_on(u->ctx, u->this_val, u->st, cr);
+    ns_ctx_apply_draw_operator(u->ctx, u->this_val, u->st, cr);
+    if (cr != u->st->cr) ns_ctx_copy_line_style(u->st->cr, cr);
     cairo_set_line_width(cr, u->lw);
     ns_paint_rect_keeping_path(cr, u->x, u->y, u->w, u->h, TRUE);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
@@ -1502,14 +1539,10 @@ ns_draw_fillpath(cairo_t *cr, void *vud)
     if (cr != u->st->cr) {
         cairo_new_path(cr);
         if (u->snapshot) cairo_append_path(cr, u->snapshot);
-        cairo_set_source_rgba(cr, u->st->fill_r, u->st->fill_g,
-                              u->st->fill_b, u->st->fill_a *
-                              ns_ctx_global_alpha(u->ctx, u->this_val));
-    } else {
-        ns_ctx_set_fill_source(u->ctx, u->this_val, u->st);
     }
+    ns_ctx_set_fill_source_on(u->ctx, u->this_val, u->st, cr);
     cairo_set_fill_rule(cr, u->fill_rule);
-    ns_ctx_apply_composite(u->ctx, u->this_val, cr);
+    ns_ctx_apply_draw_operator(u->ctx, u->this_val, u->st, cr);
     cairo_fill_preserve(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 }
@@ -1521,13 +1554,10 @@ ns_draw_strokepath(cairo_t *cr, void *vud)
     if (cr != u->st->cr) {
         cairo_new_path(cr);
         if (u->snapshot) cairo_append_path(cr, u->snapshot);
-        cairo_set_source_rgba(cr, u->st->stroke_r, u->st->stroke_g,
-                              u->st->stroke_b, u->st->stroke_a *
-                              ns_ctx_global_alpha(u->ctx, u->this_val));
-    } else {
-        ns_ctx_set_stroke_source(u->ctx, u->this_val, u->st);
+        ns_ctx_copy_line_style(u->st->cr, cr);
     }
-    ns_ctx_apply_composite(u->ctx, u->this_val, cr);
+    ns_ctx_set_stroke_source_on(u->ctx, u->this_val, u->st, cr);
+    ns_ctx_apply_draw_operator(u->ctx, u->this_val, u->st, cr);
     cairo_set_line_width(cr, u->lw);
     cairo_stroke_preserve(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
@@ -2324,6 +2354,40 @@ ns_js_drawimage_source_surface(JSContext *ctx, JSValueConst src,
     return NULL;
 }
 
+typedef struct ns_draw_image_ud {
+    JSContext *ctx;
+    JSValueConst this_val;
+    ns_canvas_state *st;
+    cairo_surface_t *src;
+    double sx, sy, sw, sh, dx, dy, dw, dh, ga;
+    gboolean smooth;
+} ns_draw_image_ud;
+
+static void
+ns_draw_image(cairo_t *cr, void *vud)
+{
+    ns_draw_image_ud *u = vud;
+    cairo_path_t *current = cairo_copy_path(cr);
+    cairo_save(cr);
+    ns_ctx_apply_draw_operator(u->ctx, u->this_val, u->st, cr);
+    cairo_new_path(cr);
+    cairo_translate(cr, u->dx, u->dy);
+    cairo_scale(cr, u->dw / u->sw, u->dh / u->sh);
+    cairo_translate(cr, -u->sx, -u->sy);
+    cairo_rectangle(cr, u->sx, u->sy, u->sw, u->sh);
+    cairo_clip(cr);
+    cairo_set_source_surface(cr, u->src, 0, 0);
+    cairo_pattern_set_filter(cairo_get_source(cr),
+                             u->smooth ? CAIRO_FILTER_BILINEAR
+                                       : CAIRO_FILTER_NEAREST);
+    if (u->ga < 1.0 - 1e-6) cairo_paint_with_alpha(cr, u->ga);
+    else                     cairo_paint(cr);
+    cairo_restore(cr);
+    cairo_new_path(cr);
+    cairo_append_path(cr, current);
+    cairo_path_destroy(current);
+}
+
 JSValue
 ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
@@ -2368,27 +2432,20 @@ ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
         cairo_surface_destroy(src);
         return JS_UNDEFINED;
     }
-    double ga = ns_ctx_global_alpha(ctx, this_val);
-    gboolean smooth = ns_ctx_image_smoothing(ctx, this_val);
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) {
         cairo_surface_destroy(src);
         return JS_UNDEFINED;
     }
-    cairo_save(st->cr);
-    ns_ctx_apply_composite(ctx, this_val, st->cr);
-    cairo_translate(st->cr, dx, dy);
-    cairo_scale(st->cr, dw / sw, dh / sh);
-    cairo_translate(st->cr, -sx, -sy);
-    cairo_rectangle(st->cr, sx, sy, sw, sh);
-    cairo_clip(st->cr);
-    cairo_set_source_surface(st->cr, src, 0, 0);
-    cairo_pattern_set_filter(cairo_get_source(st->cr),
-                             smooth ? CAIRO_FILTER_BILINEAR
-                                    : CAIRO_FILTER_NEAREST);
-    if (ga < 1.0 - 1e-6) cairo_paint_with_alpha(st->cr, ga);
-    else                  cairo_paint(st->cr);
-    cairo_restore(st->cr);
+    ns_ctx_sync_styles(ctx, this_val, st);
+    ns_draw_image_ud u = {
+        .ctx = ctx, .this_val = this_val, .st = st, .src = src,
+        .sx = sx, .sy = sy, .sw = sw, .sh = sh,
+        .dx = dx, .dy = dy, .dw = dw, .dh = dh,
+        .ga = ns_ctx_global_alpha(ctx, this_val),
+        .smooth = ns_ctx_image_smoothing(ctx, this_val),
+    };
+    ns_ctx_with_shadow(ctx, this_val, st, ns_draw_image, &u);
     cairo_surface_destroy(src);
     if (!origin_clean) st->origin_clean = FALSE;
     ns_js_request_repaint(js_from_ctx(ctx));

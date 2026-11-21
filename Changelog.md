@@ -3,6 +3,17 @@ Changelog:
 
 1.0.51:
 ======
+* Canvas 2D shadows are drawn for shapes outside the canvas whose shadow
+  is offset onto it, for `drawImage()`, and for the transparent parts of
+  gradients and patterns. The shadow used to be rendered into a
+  canvas-sized buffer, so a shape drawn above the canvas with
+  `shadowOffsetY` lost its shadow, and images cast none at all. The
+  shadow is now a Gaussian blur (three box passes, σ = `shadowBlur`/2,
+  no 64 px cap) of the shape's alpha over the region that lands on the
+  canvas, composited with the current operator and clip; strokes keep
+  their caps, joins and dashes in the shadow. `drawImage()` no longer
+  discards the path being built. 90 more canvas web-platform-tests
+  pass.
 * The AppImage runs natively on Wayland. linuxdeploy's GTK hook forced
   `GDK_BACKEND=x11`, so the browser always went through XWayland and did
   not start at all on a Wayland session without it; `pack-appimage.sh`
