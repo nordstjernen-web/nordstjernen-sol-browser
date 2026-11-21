@@ -24,11 +24,14 @@ To get a file rather than a printer, from any mode and with no printer
 configured:
 
 ```sh
-nordstjernen --dump=print:out.pdf https://example.org/
+nordstjernen --export=pdf:out.pdf https://example.org/
 ```
 
-That renders the same pagination to a multi-page PDF. It is the quickest
-way to check what a page will do on paper.
+That renders the same pagination to a multi-page PDF, the same document
+`ns_browser_render_pdf` returns: links stay clickable, `#fragment` links
+jump to the element with that `id`, and the page title is the PDF title.
+A missing folder is created. `--dump=print:FILE` writes the same PDF and,
+like every `--dump=` capture, an `-initial` file taken before the settle.
 
 ## The CSS a printer reads
 
@@ -98,7 +101,9 @@ byte[] pdf = page.pdf(PdfOptions.a4()
 The page sees `beforeprint` before it is laid out for the sheet and
 `afterprint` once the screen layout is back. In the document, text is real
 text with embedded font subsets, links to `http(s):`, `mailto:` and `tel:`
-targets stay clickable, and `h1` to `h6` become the outline. With a fixed
+targets stay clickable (relative hrefs resolved against the page URL), a link
+to a `#fragment` of the page jumps to a named destination at the element
+with that `id`, and `h1` to `h6` become the outline. With a fixed
 creation date the same page prints to the same bytes.
 
 `--dump=pdf:FILE`, `/export` with a `.pdf` path and `ns_browser_render_image`

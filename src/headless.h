@@ -23,6 +23,7 @@ typedef enum ns_headless_dump {
 typedef struct ns_headless_opts {
     const char       *url;
     ns_headless_dump  dump;
+    gboolean          export_pdf;
     const char       *out_path;
     int               viewport_width;
     int               viewport_height;

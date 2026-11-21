@@ -167,6 +167,7 @@ ns_watchdog_is_oneshot(const char *arg)
     return g_strcmp0(arg, "--headless")     == 0 ||
            g_strcmp0(arg, "--print-config") == 0 ||
            g_str_has_prefix(arg, "--dump=")       ||
+           g_str_has_prefix(arg, "--export=")     ||
            g_str_has_prefix(arg, "--eval=")       ||
            g_str_has_prefix(arg, "--inspect=")    ||
            g_str_has_prefix(arg, "--inspect-at=");

@@ -262,11 +262,35 @@ fetch_videos_into_layout(ns_box **root_slot, const char *base_url)
 
 static ns_print_setup g_headless_print_setup;
 
-static int
-write_capture(const ns_box *root, const char *path, ns_headless_dump kind)
+static char *
+headless_document_title(ns_node *doc)
 {
-    if (kind == NS_DUMP_PRINT)
-        return ns_engine_write_pdf_paged(root, path, &g_headless_print_setup);
+    ns_node *title = doc ? ns_node_find_first_element(doc, "title") : NULL;
+    char *raw = title ? ns_node_collect_text(title) : NULL;
+    if (!raw) return NULL;
+    char **words = g_strsplit_set(g_strstrip(raw), " \t\n\r\f", -1);
+    GString *out = g_string_new(NULL);
+    for (char **w = words; *w; w++) {
+        if (!**w) continue;
+        if (out->len) g_string_append_c(out, ' ');
+        g_string_append(out, *w);
+    }
+    g_strfreev(words);
+    g_free(raw);
+    return g_string_free(out, FALSE);
+}
+
+static int
+write_capture(const ns_box *root, const char *path, ns_headless_dump kind,
+              ns_node *doc, const char *url)
+{
+    if (kind == NS_DUMP_PRINT) {
+        char *title = headless_document_title(doc);
+        ns_engine_pdf job = { .content_scale = 1.0, .title = title, .url = url };
+        int rc = ns_engine_write_pdf_job(root, path, &g_headless_print_setup, &job);
+        g_free(title);
+        return rc;
+    }
     if (kind == NS_DUMP_PDF) return ns_engine_write_pdf(root, path);
     return ns_engine_write_png(root, path);
 }
@@ -2565,7 +2589,10 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         char *initial_path = ns_engine_suffix_before_ext(opts->out_path, "-initial");
         phase_t0 = g_get_monotonic_time();
         gint64 encode_before_us = (gint64)(ns_engine_encode_ms() * 1000.0);
-        rc = write_capture(layout, initial_path, opts->dump);
+        if (!opts->export_pdf) {
+            rc = write_capture(layout, initial_path, opts->dump, doc, base);
+            fprintf(stderr, "[headless] initial render -> %s\n", initial_path);
+        }
         gint64 encode_us =
             (gint64)(ns_engine_encode_ms() * 1000.0) - encode_before_us;
         gint64 painted = g_get_monotonic_time() - encode_us;
@@ -2576,7 +2603,6 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         g_timing.first_render_cpu_us = headless_thread_cpu_us() -
                                        g_timing.start_cpu_us - encode_us;
         g_timing.nodes = headless_count_elements(doc);
-        fprintf(stderr, "[headless] initial render -> %s\n", initial_path);
         g_free(initial_path);
 
         if (js) ns_js_fire_media_load_events(js, layout);
@@ -2589,7 +2615,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_anim_tick(anim, (gint64)time_ms * 1000);
         headless_tick_smil(&flush_ctx, smil_origin_us + (gint64)time_ms * 1000);
         ns_paint_set_anim(anim);
-        int rc2 = write_capture(layout, opts->out_path, opts->dump);
+        int rc2 = write_capture(layout, opts->out_path, opts->dump, doc, base);
         fprintf(stderr, "[headless] after %dms -> %s\n", time_ms, opts->out_path);
         if (rc == 0) rc = rc2;
         break;
