@@ -79,6 +79,16 @@ This repo is driven by Codex in long uninterrupted sessions.
 - **Don't ask "do you want me to proceed?", "should I continue?",
   "ready to commit?"** — just do it. The user interrupts if they
   disagree.
+- **Don't ask the user to choose between approaches either.** When a
+  task has several workable paths (which library, which interpreter, how
+  much scope, which order), pick the one you would recommend, state it in
+  one line with the reason, and carry on; switch if the user objects. Do
+  not use a multiple-choice question to hand a decision back. Stop only
+  for something irreversible outside the repository or a genuine external
+  blocker (credentials, paid accounts, hardware you cannot reach).
+- **Long tasks are fine.** "Make site X work" may take many PRs across
+  several sessions: keep landing them one after another without asking
+  whether to continue or how far to go.
 - **Don't summarize after every step.** One-line status is enough.
 - **Don't pause for path/file/branch confirmation when context is
   unambiguous.** Grep, pick, proceed.
