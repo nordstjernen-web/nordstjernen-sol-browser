@@ -1,7 +1,7 @@
 [wrap-file]
-directory = wasm-micro-runtime-WAMR-2.4.5
-source_url = https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-2.4.5.tar.gz
-source_filename = wasm-micro-runtime-WAMR-2.4.5.tar.gz
-source_hash = 1ab09d51099f276ca4a1d6629f6b589aab2bd0caa01445e05031a4bed22c199b
+directory = wasm-micro-runtime-WAMR-2.4.6
+source_url = https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-2.4.6.tar.gz
+source_filename = wasm-micro-runtime-WAMR-2.4.6.tar.gz
+source_hash = 6a8de3f74671a72698b4bd61a96c1ce8966db077b2adad7b720757cfd9caff62
 patch_directory = wamr
 diff_files = wamr-nordstjernen.patch

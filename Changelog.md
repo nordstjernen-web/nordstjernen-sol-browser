@@ -3,6 +3,10 @@ Changelog:
 
 1.0.51:
 ======
+* WebAssembly runs on WAMR 2.4.6, the upstream security release: it
+  bounds-checks guest pointers in `realloc`, `module_malloc` and the
+  libc-builtin `strtol`/`strtoul`, validates the entry signatures used by
+  thread start, and fixes a loader crash on a bad constant expression.
 * WebAssembly exception handling: modules built with Emscripten's
   `-fwasm-exceptions` (the original try/catch/throw/rethrow/delegate
   proposal with a tag section) now load and run in WAMR's fast

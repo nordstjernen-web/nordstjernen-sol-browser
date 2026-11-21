@@ -42,7 +42,7 @@
          WASMExecEnv *exec_env = NULL;
 --- a/core/iwasm/common/wasm_runtime_common.c
 +++ b/core/iwasm/common/wasm_runtime_common.c
-@@ -4331,6 +4331,99 @@
+@@ -4418,6 +4418,99 @@
  #endif
  }
  
@@ -142,7 +142,7 @@
  int32
  wasm_runtime_get_export_count(WASMModuleCommon *const module)
  {
-@@ -4624,6 +4717,7 @@
+@@ -4711,6 +4804,7 @@
  #endif
  #if WASM_ENABLE_REF_TYPES != 0
          case VALUE_TYPE_EXTERNREF:
@@ -150,7 +150,7 @@
  #endif
          case VALUE_TYPE_VOID:
          default:
-@@ -4865,7 +4959,7 @@
+@@ -4952,7 +5046,7 @@
                  if (!wasm_externref_ref2obj(externref_idx, &externref_obj))
                      goto fail;
  
@@ -440,7 +440,7 @@
  #if WASM_ENABLE_SHARED_MEMORY != 0
 --- a/core/iwasm/interpreter/wasm_loader.c
 +++ b/core/iwasm/interpreter/wasm_loader.c
-@@ -3199,6 +3199,13 @@
+@@ -3200,6 +3200,13 @@
  
          goto fail;
      }
@@ -454,7 +454,7 @@
  
  #if WASM_ENABLE_MULTI_MODULE != 0
      if (!wasm_runtime_is_built_in_module(sub_module_name)) {
-@@ -5296,6 +5303,13 @@
+@@ -5297,6 +5304,13 @@
  
                  goto fail;
              }
@@ -468,7 +468,7 @@
  
              if (!(tag = module->tags[tag_index] = loader_malloc(
                        sizeof(WASMTag), error_buf, error_buf_size))) {
-@@ -6509,7 +6523,25 @@
+@@ -6510,7 +6524,25 @@
          }
      }
  
@@ -495,7 +495,7 @@
  #if WASM_ENABLE_SHRUNK_MEMORY != 0
          if (aux_data_end_global && aux_heap_base_global
              && aux_stack_top_global) {
-@@ -7176,6 +7208,12 @@
+@@ -7177,6 +7209,12 @@
                      wasm_runtime_free(module->functions[i]->code_compiled);
                  if (module->functions[i]->consts)
                      wasm_runtime_free(module->functions[i]->consts);
@@ -508,7 +508,7 @@
  #endif
  #if WASM_ENABLE_FAST_JIT != 0
                  if (module->functions[i]->fast_jit_jitted_code) {
-@@ -8280,6 +8318,10 @@
+@@ -8281,6 +8319,10 @@
       * to copy the stack operands to the loop block's arguments in
       * wasm_loader_emit_br_info for opcode br. */
      uint16 start_dynamic_offset;
@@ -519,7 +519,7 @@
  #endif
  
      /* Indicate the operand stack is in polymorphic state.
-@@ -11083,44 +11125,6 @@
+@@ -11084,44 +11126,6 @@
      return NULL;
  }
  
@@ -564,7 +564,7 @@
  static bool
  check_block_stack(WASMLoaderContext *loader_ctx, BranchBlock *block,
                    char *error_buf, uint32 error_buf_size)
-@@ -11382,6 +11386,137 @@
+@@ -11383,6 +11387,137 @@
  
      return ret;
  }
@@ -702,7 +702,7 @@
  #endif
  
  #if WASM_ENABLE_GC == 0
-@@ -11642,6 +11777,11 @@
+@@ -11643,6 +11778,11 @@
       * the end opcode and then raising the exception.
       */
      bool pending_exception = false;
@@ -714,7 +714,7 @@
  
      LOG_OP("\nProcessing func | [%d] params | [%d] locals | [%d] return\n",
             func->param_cell_num, func->local_cell_num, func->ret_cell_num);
-@@ -11703,6 +11843,10 @@
+@@ -11704,6 +11844,10 @@
          p = func->code;
          func->code_compiled = loader_ctx->p_code_compiled;
          func->code_compiled_size = loader_ctx->code_compiled_size;
@@ -725,7 +725,7 @@
  
          if (loader_ctx->i64_const_num > 0) {
              int64 *i64_consts_old = loader_ctx->i64_consts;
-@@ -12084,7 +12228,23 @@
+@@ -12085,7 +12229,23 @@
                  }
  #if WASM_ENABLE_EXCE_HANDLING != 0
                  else if (opcode == WASM_OP_TRY) {
@@ -749,7 +749,7 @@
                  }
  #endif
                  else if (opcode == WASM_OP_IF) {
-@@ -12153,246 +12313,166 @@
+@@ -12154,246 +12314,166 @@
  #if WASM_ENABLE_EXCE_HANDLING != 0
              case WASM_OP_THROW:
              {
@@ -1111,7 +1111,7 @@
                  break;
              }
  #endif /* end of WASM_ENABLE_EXCE_HANDLING != 0 */
-@@ -12465,6 +12545,7 @@
+@@ -12466,6 +12546,7 @@
              }
  
              case WASM_OP_END:
@@ -1119,7 +1119,7 @@
              {
                  BranchBlock *cur_block = loader_ctx->frame_csp - 1;
  
-@@ -12494,6 +12575,18 @@
+@@ -12495,6 +12576,18 @@
  
  #if WASM_ENABLE_FAST_INTERP != 0
                  skip_label();
