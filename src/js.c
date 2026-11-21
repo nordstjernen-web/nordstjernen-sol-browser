@@ -71331,7 +71331,8 @@ ns_js_json_module_init(JSContext *ctx, JSModuleDef *m)
 typedef enum {
     NS_MODULE_JAVASCRIPT,
     NS_MODULE_JSON,
-    NS_MODULE_TEXT
+    NS_MODULE_TEXT,
+    NS_MODULE_CSS
 } ns_module_kind;
 
 static ns_module_kind
@@ -71339,7 +71340,19 @@ ns_js_module_kind_of(JSContext *ctx, JSValueConst attributes)
 {
     if (ns_js_attrs_type_is(ctx, attributes, "json")) return NS_MODULE_JSON;
     if (ns_js_attrs_type_is(ctx, attributes, "text")) return NS_MODULE_TEXT;
+    if (ns_js_attrs_type_is(ctx, attributes, "css")) return NS_MODULE_CSS;
     return NS_MODULE_JAVASCRIPT;
+}
+
+static const char *
+ns_module_kind_label(ns_module_kind kind)
+{
+    switch (kind) {
+    case NS_MODULE_JSON: return "JSON";
+    case NS_MODULE_TEXT: return "text";
+    case NS_MODULE_CSS:  return "CSS";
+    default:             return "JavaScript";
+    }
 }
 
 static JSValue
@@ -71355,6 +71368,32 @@ ns_js_text_module_value(JSContext *ctx, const char *body, gsize body_len)
                  : JS_NewStringLen(ctx, body, body_len);
 }
 
+static JSValue
+ns_js_css_module_value(JSContext *ctx, const char *body, gsize body_len)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "CSSStyleSheet");
+    JS_FreeValue(ctx, global);
+    if (!JS_IsConstructor(ctx, ctor)) {
+        JS_FreeValue(ctx, ctor);
+        return JS_ThrowTypeError(ctx, "CSS modules need CSSStyleSheet");
+    }
+    JSValue sheet = JS_CallConstructor(ctx, ctor, 0, NULL);
+    JS_FreeValue(ctx, ctor);
+    if (JS_IsException(sheet)) return sheet;
+    JSValue text = ns_js_text_module_value(ctx, body, body_len);
+    JSValue replace = JS_GetPropertyStr(ctx, sheet, "replaceSync");
+    JSValue r = JS_Call(ctx, replace, sheet, 1, (JSValueConst *)&text);
+    JS_FreeValue(ctx, replace);
+    JS_FreeValue(ctx, text);
+    if (JS_IsException(r)) {
+        JS_FreeValue(ctx, sheet);
+        return r;
+    }
+    JS_FreeValue(ctx, r);
+    return sheet;
+}
+
 static JSModuleDef *
 ns_js_make_data_module(JSContext *ctx, const char *module_name,
                        const char *body, gsize body_len, ns_module_kind kind)
@@ -71362,6 +71401,8 @@ ns_js_make_data_module(JSContext *ctx, const char *module_name,
     JSValue value;
     if (kind == NS_MODULE_TEXT) {
         value = ns_js_text_module_value(ctx, body, body_len);
+    } else if (kind == NS_MODULE_CSS) {
+        value = ns_js_css_module_value(ctx, body, body_len);
     } else {
         char *json_text = g_strndup(body, body_len);
         value = JS_ParseJSON(ctx, json_text, body_len, module_name);
@@ -71828,6 +71869,8 @@ module_mime_acceptable(const char *content_type, ns_module_kind kind)
         ok = strcmp(essence, "application/json") == 0 ||
              strcmp(essence, "text/json") == 0 ||
              g_str_has_suffix(essence, "+json");
+    } else if (kind == NS_MODULE_CSS) {
+        ok = strcmp(essence, "text/css") == 0;
     } else {
         ok = javascript_mime_essence_match(essence, strlen(essence));
     }
@@ -71879,6 +71922,12 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
     ns_js *js = opaque;
     ns_module_kind kind = ns_js_module_kind_of(ctx, attributes);
     if (!module_name) return NULL;
+    if (kind == NS_MODULE_CSS && js && js->worker_host) {
+        JS_ThrowTypeError(ctx, "CSS modules are not available in workers: %s",
+                          module_name);
+        js->module_fetch_failures++;
+        return NULL;
+    }
     if (js && (js->module_load_count > NS_MODULE_LOAD_MAX_COUNT ||
                js->module_load_bytes > NS_MODULE_LOAD_MAX_BYTES)) {
         if (!js->module_load_capped) {
@@ -72018,7 +72067,7 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
     }
     if (!module_mime_acceptable(resp->content_type, kind)) {
         JS_ThrowTypeError(ctx, "%s module %s has disallowed MIME type %s",
-                          kind == NS_MODULE_JSON ? "JSON" : "JavaScript",
+                          ns_module_kind_label(kind),
                           module_name,
                           resp->content_type ? resp->content_type : "(none)");
         ns_response_free(resp);
@@ -72653,7 +72702,18 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         }
         if (resp && resp->status == 200 && resp->body &&
             resp->body->len <= NS_MAX_SCRIPT_BYTES) {
-            if (!ns_security_sri_check(integrity,
+            if (is_module &&
+                !module_mime_acceptable(resp->content_type,
+                                        NS_MODULE_JAVASCRIPT)) {
+                if (js->log_cb) {
+                    char *line = g_strdup_printf(
+                        "module script %s has disallowed MIME type %s",
+                        abs_url, resp->content_type ? resp->content_type
+                                                    : "(none)");
+                    js->log_cb(line, js->log_user_data);
+                    g_free(line);
+                }
+            } else if (!ns_security_sri_check(integrity,
                                        resp->body->data, resp->body->len)) {
                 if (js->log_cb) {
                     char *line = g_strdup_printf(

@@ -3,6 +3,13 @@ Changelog:
 
 1.0.51:
 ======
+* CSS module scripts: `import sheet from "./x.css" with { type: "css" }`
+  (and the `import()` form) loads a `text/css` resource and exports a
+  constructable `CSSStyleSheet`, ready for `adoptedStyleSheets`. Other
+  MIME types are refused, and workers reject CSS modules without
+  fetching them, as the spec requires. External `<script type="module">`
+  files must now be served with a JavaScript MIME type; anything else
+  fires `error` instead of being run.
 * Workers fire `unhandledrejection` and `rejectionhandled`. A dedicated
   or shared worker only logged unhandled promise rejections; it now
   tracks them like a window does, dispatches the events on the worker
