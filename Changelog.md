@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51:
 ======
+* WebGL 2: the overloads that take a view plus `srcOffset` (and a length)
+  work: `uniform*v` and `uniformMatrix*fv` (which now also honour
+  `transpose` in WebGL 2), `bufferData`, `bufferSubData`,
+  `getBufferSubData`, `texImage2D/3D`, `texSubImage2D/3D`, `readPixels`
+  and the compressed texture uploads. They used the whole view, so every
+  Emscripten build, which passes the entire wasm heap with an offset,
+  failed its uniform uploads and drew nothing. A range outside the view
+  is `INVALID_VALUE`. SuperTuxKart's WebAssembly port now renders.
 * Web Audio: `PannerNode` has `positionX/Y/Z` and `orientationX/Y/Z`
   AudioParams, the distance and cone attributes and the legacy
   `setPosition`/`setOrientation`, and `AudioContext.listener` is an
