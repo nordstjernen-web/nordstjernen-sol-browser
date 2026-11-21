@@ -15,6 +15,11 @@ Changelog:
   starts its fixed-function shaders with
   `#extension GL_EXT_shader_non_constant_global_initializers : enable`, so
   every one of them failed to compile in Qwasm (Quake).
+* `document.open()` on a frame's document aborts the frame's pending
+  navigation, as HTML specifies: the written document stays, and closing
+  it fires the frame's `load` event. A frame whose `src` was still
+  loading had its written document replaced when the fetch finished. A
+  later `src` change navigates as usual. Acid3 95 → 96.
 * Live `Range`s follow DOM mutations again: removing a node moves a
   boundary point inside it to the removal point, and inserting before a
   boundary shifts it. The polyfill wrapped `appendChild`, `insertBefore`,

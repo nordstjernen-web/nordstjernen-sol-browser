@@ -68882,6 +68882,26 @@ ns_document_writeln(JSContext *ctx, JSValueConst this_val,
     return ns_document_write_common(ctx, argc, argv, TRUE);
 }
 
+static gboolean
+ns_js_frame_in_list(GPtrArray *list, const ns_node *frame)
+{
+    for (guint i = 0; list && i < list->len; i++)
+        if (g_ptr_array_index(list, i) == frame) return TRUE;
+    return FALSE;
+}
+
+static void
+ns_realmdoc_abort_frame_navigation(ns_js *js, ns_node *host)
+{
+    gboolean pending = ns_element_get_attr(host, "data-nd-frame-nav-pending") ||
+                       ns_js_frame_in_list(js->pending_iframe_loads, host) ||
+                       ns_js_frame_in_list(js->deferred_iframe_loads, host);
+    if (!pending) return;
+    if (js->deferred_iframe_loads)
+        g_ptr_array_remove(js->deferred_iframe_loads, host);
+    ns_element_set_attr(host, "data-nd-frame-nav-aborted", "1");
+}
+
 static JSValue
 ns_realmdoc_open(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
@@ -68903,8 +68923,10 @@ ns_realmdoc_open(JSContext *ctx, JSValueConst this_val,
         ns_node *host = doc->parent;
         if (host && host->kind == NS_NODE_ELEMENT &&
             (ns_node_is_tag(host, NS_TAG_IFRAME) ||
-             ns_node_is_tag(host, NS_TAG_FRAME)))
+             ns_node_is_tag(host, NS_TAG_FRAME))) {
             ns_element_set_attr(host, "data-nd-doc-written", "1");
+            ns_realmdoc_abort_frame_navigation(js, host);
+        }
         js->mutated = TRUE;
     }
     return JS_DupValue(ctx, this_val);
@@ -74777,6 +74799,7 @@ ns_js_lazy_frame_loading_changed(ns_js *js, ns_node *iframe)
 static void
 ns_js_schedule_iframe_src_change(ns_js *js, ns_node *iframe)
 {
+    if (iframe) ns_element_remove_attr(iframe, "data-nd-frame-nav-aborted");
     const char *loading = iframe ? ns_element_get_attr(iframe, "loading") : NULL;
     gboolean first_lazy_load =
         loading && g_ascii_strcasecmp(loading, "lazy") == 0 &&
@@ -76456,11 +76479,15 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
     if (!ns_js_node_in_page(js, iframe)) return;
 
     gboolean adopt_written = FALSE;
+    gboolean nav_aborted =
+        ns_element_get_attr(iframe, "data-nd-frame-nav-aborted") != NULL;
+    if (nav_aborted)
+        ns_element_remove_attr(iframe, "data-nd-frame-nav-aborted");
     if (ns_element_get_attr(iframe, "data-nd-doc-written")) {
         const char *sa = ns_frame_src_attr(iframe);
         const char *sv = sa ? ns_element_get_attr(iframe, sa) : NULL;
         const char *sd = ns_element_get_attr(iframe, "srcdoc");
-        if ((!sv || !*sv) && (!sd || !*sd)) {
+        if (nav_aborted || ((!sv || !*sv) && (!sd || !*sd))) {
             ns_node *written = ns_iframe_document_node(iframe);
             ns_realmdoc_flush_written(js, written);
             if (!ns_js_tree_has_unstarted_script(written)) {
