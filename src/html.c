@@ -694,6 +694,12 @@ ns_encoding_label_to_name(const char *label)
     return NULL;
 }
 
+const char *
+ns_html_encoding_for_label(const char *label)
+{
+    return ns_encoding_label_to_name(label);
+}
+
 char *
 ns_html_declared_charset(const char *body, gsize len, const char *content_type)
 {

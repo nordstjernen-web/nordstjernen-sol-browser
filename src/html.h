@@ -55,6 +55,7 @@ void ns_html_escape_append(GString *out, const char *s, gboolean escape_quotes);
 
 char *ns_html_escape_text(const char *s);
 
+const char *ns_html_encoding_for_label(const char *label);
 char *ns_html_declared_charset(const char *body, gsize len,
                                const char *content_type);
 

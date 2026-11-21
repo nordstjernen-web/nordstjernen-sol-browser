@@ -315,6 +315,8 @@ typedef struct headless_nav_capture {
     char *pending_post_body;
     gsize pending_post_len;
     char *pending_post_ct;
+    ns_js *js;
+    const char *page_url;
 } headless_nav_capture;
 
 static void
@@ -383,25 +385,25 @@ headless_reveal_fragment(ns_node *doc, const char *frag)
     g_array_free(items, TRUE);
 }
 
-static void
-headless_js_form_submit(const ns_node *form, const ns_node *submitter,
-                        gpointer user_data)
+static gboolean
+headless_form_submission(headless_nav_capture *cap, const ns_node *form,
+                         const ns_node *submitter, ns_js_form_submission *sub)
 {
-    headless_nav_capture *cap = user_data;
-    if (!cap || !form) return;
+    if (cap->js) return ns_js_form_prepare_submission(cap->js, form, submitter,
+                                                      sub);
+    memset(sub, 0, sizeof *sub);
     gboolean from_button = submitter && submitter != form &&
                            ns_form_is_submit_trigger(submitter);
     const char *method = ns_element_get_attr(form, "method");
     const char *formmethod = from_button
         ? ns_element_get_attr(submitter, "formmethod") : NULL;
     if (formmethod && *formmethod) method = formmethod;
-    if (method && g_ascii_strcasecmp(method, "dialog") == 0) return;
-    gboolean is_post = method && g_ascii_strcasecmp(method, "post") == 0;
+    sub->is_post = method && g_ascii_strcasecmp(method, "post") == 0;
+    sub->is_dialog = method && g_ascii_strcasecmp(method, "dialog") == 0;
     const char *action = ns_element_get_attr(form, "action");
     const char *formaction = from_button
         ? ns_element_get_attr(submitter, "formaction") : NULL;
-    if (formaction && *formaction) action = formaction;
-    if (!action) action = "";
+    sub->action = g_strdup(formaction && *formaction ? formaction : action);
     GString *q = g_string_new(NULL);
     gboolean first = TRUE;
     const ns_node *doc = ns_node_root(form);
@@ -413,23 +415,74 @@ headless_js_form_submit(const ns_node *form, const ns_node *submitter,
     ns_form_collect_inputs(form, root, root, q, &first,
                            submitter != form ? submitter : NULL);
     ns_form_set_submission_charset(NULL);
-    headless_nav_capture_clear_post(cap);
-    g_free(cap->pending_url);
-    if (is_post) {
-        cap->pending_url = g_strdup(action);
-        cap->pending_post_len = q->len;
-        cap->pending_post_body = g_string_free(q, FALSE);
-        cap->pending_post_ct = g_strdup("application/x-www-form-urlencoded");
+    sub->body_len = q->len;
+    sub->body = g_string_free(q, FALSE);
+    sub->content_type = g_strdup("application/x-www-form-urlencoded");
+    return TRUE;
+}
+
+static void
+headless_js_form_submit(const ns_node *form, const ns_node *submitter,
+                        gpointer user_data)
+{
+    headless_nav_capture *cap = user_data;
+    if (!cap || !form) return;
+    ns_js_form_submission sub;
+    if (!headless_form_submission(cap, form, submitter, &sub) || sub.is_dialog) {
+        ns_js_form_submission_clear(&sub);
         return;
     }
-    char *url;
-    if (q->len > 0) {
-        const char *sep = strchr(action, '?') ? "&" : "?";
-        url = g_strdup_printf("%s%s%s", action, sep, q->str);
-    } else {
-        url = g_strdup(action);
+    const char *frame_url = cap->js ? ns_js_node_frame_url(cap->js, form) : NULL;
+    const char *doc_url = frame_url ? frame_url : cap->page_url;
+    const ns_node *doc = ns_node_root(form);
+    g_autofree char *base = cap->js && doc && doc->kind == NS_NODE_DOCUMENT
+        ? ns_js_base_url_for_document(cap->js, doc, doc_url) : NULL;
+    const char *resolve_base = base ? base : doc_url;
+    if (!resolve_base || g_str_has_prefix(resolve_base, "about:"))
+        resolve_base = cap->page_url;
+    char *action = (sub.action && *sub.action)
+        ? (resolve_base ? ns_url_resolve(resolve_base, sub.action)
+                        : g_strdup(sub.action))
+        : g_strdup(doc_url ? doc_url : "");
+    if (!action) {
+        ns_js_form_submission_clear(&sub);
+        return;
     }
-    g_string_free(q, TRUE);
+    if (cap->js && !ns_js_csp_form_action_allowed(cap->js, form, action)) {
+        g_free(action);
+        ns_js_form_submission_clear(&sub);
+        return;
+    }
+    if (sub.is_post) {
+        if (cap->js && ns_js_form_submit_into_frame(cap->js, form, sub.target,
+                                                    action, sub.body,
+                                                    sub.body_len,
+                                                    sub.content_type)) {
+            sub.body = NULL;
+            g_free(action);
+            ns_js_form_submission_clear(&sub);
+            return;
+        }
+        headless_nav_capture_clear_post(cap);
+        g_free(cap->pending_url);
+        cap->pending_url = action;
+        cap->pending_post_len = sub.body_len;
+        cap->pending_post_body = g_steal_pointer(&sub.body);
+        cap->pending_post_ct = g_steal_pointer(&sub.content_type);
+        ns_js_form_submission_clear(&sub);
+        return;
+    }
+    char *url = ns_js_form_get_action_url(action, sub.body);
+    g_free(action);
+    if (cap->js && ns_js_form_submit_into_frame(cap->js, form, sub.target, url,
+                                                NULL, 0, NULL)) {
+        g_free(url);
+        ns_js_form_submission_clear(&sub);
+        return;
+    }
+    ns_js_form_submission_clear(&sub);
+    headless_nav_capture_clear_post(cap);
+    g_free(cap->pending_url);
     cap->pending_url = url;
 }
 
@@ -2365,6 +2418,8 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
                           headless_js_mutated, NULL,
                           headless_js_navigate, &nav_cap,
                           &navigation_timing);
+    nav_cap.js = js;
+    nav_cap.page_url = page_url;
     if (js) ns_js_set_form_submit_cb(js, headless_js_form_submit, &nav_cap);
     ns_image_cache *image_cache = ns_image_cache_new();
     ns_video_cache *video_cache = ns_video_cache_new();

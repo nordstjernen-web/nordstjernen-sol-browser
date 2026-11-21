@@ -358,6 +358,7 @@ struct ns_js {
     double        selection_x, selection_y, selection_w, selection_h;
     int           module_load_count;
     int           module_fetch_failures;
+    GHashTable   *forms_constructing_entries;
     gsize         module_load_bytes;
     gboolean      module_load_capped;
     GPtrArray    *import_map;

@@ -3,6 +3,30 @@ Changelog:
 
 1.0.51:
 ======
+* Form submission follows the HTML entry-list and encoding rules.
+  `new FormData(form)` and every submission build the entry list the
+  spec way: file inputs contribute their `File`s (an empty file when
+  none is chosen), a hidden `_charset_` field carries the encoding,
+  `dirname` adds the text direction, controls inside a `<datalist>` are
+  skipped, and the `formdata` event fires so listeners can change the
+  entries (re-entrant construction is refused). `enctype` and
+  `formenctype` are honoured: `multipart/form-data` and `text/plain` are
+  sent as such instead of always url-encoding, names and values get
+  CRLF newline normalisation, and a non-UTF-8 `accept-charset` or page
+  encoding turns unmappable characters into `&#N;` references. A GET
+  submission replaces the action URL's query and keeps its fragment,
+  `input.files` can be assigned, and `new FormDataEvent()` requires and
+  exposes `formData`. Forms that target a named iframe, or live inside
+  one, now navigate that frame in the headless and WPT drivers too.
+* `<img>` elements inserted by `innerHTML`, cloned from a `<template>`
+  or created by `cloneNode` now start loading as soon as they join the
+  document, so `complete`, `naturalWidth` and `naturalHeight` are right
+  and the document `load` event waits for them. `srcset` and
+  `<picture>` images load the source the engine selects, and the
+  spec's relevant mutations reload an image: setting `src` (even to the
+  same value), `srcset`, `sizes` or `width`, a change of `crossorigin`
+  or `referrerpolicy` state, and moving it into or out of a `<picture>`
+  or editing that picture's `<source>` elements.
 * PDF export: `--export=pdf:FILE` saves the page as a paged PDF, laid
   out with print media at the `@page` size and margins, without opening
   a window or needing `--headless` (ported from Northstar). It writes
