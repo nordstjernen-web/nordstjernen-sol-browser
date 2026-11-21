@@ -1,0 +1,13 @@
+block @(0,0) 1000x40
+  block @(0,0) 1000x40 <html>
+    block @(0,0) 1000x40 <body>
+      block @(0,0) 300x20 <div>
+        block @(0,0) 20x20
+          inline @(0,0) 20x0 text="X"
+        block @(30,0) 40x20 <div>
+        block @(70,0) 30x20
+          inline @(77,0) 30x0 text="Y"
+      block @(0,20) 300x20 <div>
+        block @(0,20) 50x20
+          inline @(0,20) 50x0 text="G"
+        block @(50,20) 60x20 <div>
