@@ -15,6 +15,13 @@ Changelog:
   starts its fixed-function shaders with
   `#extension GL_EXT_shader_non_constant_global_initializers : enable`, so
   every one of them failed to compile in Qwasm (Quake).
+* Live `Range`s follow DOM mutations again: removing a node moves a
+  boundary point inside it to the removal point, and inserting before a
+  boundary shifts it. The polyfill wrapped `appendChild`, `insertBefore`,
+  `removeChild` and `replaceChild` before the realm setup re-laid the
+  DOM methods onto their final prototypes, which replaced the wrappers;
+  the wrapping now runs after that setup and keeps each method's
+  attributes. Acid3 94 → 95.
 * `DOMException` carries the legacy code constants (`INDEX_SIZE_ERR` = 1
   through `DATA_CLONE_ERR` = 25) on the interface and its prototype, as
   Web IDL defines, in place of non-standard `…Error_CODE` names. Acid3
