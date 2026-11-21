@@ -5801,6 +5801,30 @@ parse_tracks(const char *text)
     return v;
 }
 
+static GPtrArray *
+grid_area_row_cells(const char *row)
+{
+    GPtrArray *cells = g_ptr_array_new_with_free_func(g_free);
+    const unsigned char *p = (const unsigned char *)row;
+    while (*p) {
+        if (is_ws((char)*p)) { p++; continue; }
+        if (*p == '.') {
+            while (*p == '.') p++;
+            g_ptr_array_add(cells, g_strdup("."));
+            continue;
+        }
+        const unsigned char *s = p;
+        while (*p && (g_ascii_isalnum(*p) || *p == '_' || *p == '-' || *p >= 0x80))
+            p++;
+        if (p == s) {
+            g_ptr_array_free(cells, TRUE);
+            return NULL;
+        }
+        g_ptr_array_add(cells, g_strndup((const char *)s, (gsize)(p - s)));
+    }
+    return cells;
+}
+
 static ns_css_value *
 parse_areas(const char *text)
 {
@@ -5827,17 +5851,16 @@ parse_areas(const char *text)
                     g_free(grid[r][k]);
             return NULL;
         }
-        char **toks = g_strsplit_set(row, " \t\r\n", -1);
-        int c = 0;
-        for (int i = 0; toks[i]; i++) {
-            if (!*toks[i]) continue;
-            if (c >= NS_CSS_TRACKS_MAX) break;
-            grid[rows][c++] = g_strdup(toks[i]);
-        }
-        g_strfreev(toks);
+        GPtrArray *cells = grid_area_row_cells(row);
         g_free(row);
-        if (cols < 0) cols = c;
-        else if (c != cols) {
+        int c = 0;
+        for (guint i = 0; cells && i < cells->len; i++) {
+            if (c >= NS_CSS_TRACKS_MAX) break;
+            grid[rows][c++] = g_strdup(g_ptr_array_index(cells, i));
+        }
+        if (cells) g_ptr_array_free(cells, TRUE);
+        if (cols < 0 && cells) cols = c;
+        else if (!cells || c != cols) {
             for (int r = 0; r <= rows; r++)
                 for (int k = 0; k < NS_CSS_TRACKS_MAX; k++)
                     g_free(grid[r][k]);
@@ -5874,6 +5897,15 @@ parse_areas(const char *text)
                 }
                 if (!ok) break;
                 r1++;
+            }
+            for (int k = 0; k < v->u.areas.n_rects; k++) {
+                if (strcmp(v->u.areas.rects[k].name, name) == 0) {
+                    for (int rr = 0; rr < rows; rr++)
+                        for (int kk = 0; kk < NS_CSS_TRACKS_MAX; kk++)
+                            g_free(grid[rr][kk]);
+                    ns_css_value_free(v);
+                    return NULL;
+                }
             }
             if (v->u.areas.n_rects < NS_CSS_AREAS_MAX) {
                 ns_css_area_rect *rect = &v->u.areas.rects[v->u.areas.n_rects++];
@@ -11362,9 +11394,19 @@ def_specified_canonical(const prop_def *def, const char *value)
     return out;
 }
 
+static char *value_serialize_one(const ns_css_value *v);
+
 char *
 ns_css_specified_canonical(const char *prop, const char *value)
 {
+    if (prop && value && strcmp(prop, "grid-template-areas") == 0) {
+        ns_css_value *v = parse_areas(value);
+        if (v) {
+            char *r = value_serialize_one(v);
+            ns_css_value_free(v);
+            return r;
+        }
+    }
     const prop_def *def = prop && value && !strstr(value, "var(") ? prop_def_of(prop_id(prop))
                                                                   : NULL;
     if (def) {
@@ -12526,17 +12568,14 @@ grid_area_string_canonical(const char *tok)
 {
     const char *p = tok;
     char *body = read_css_string(&p, tok + strlen(tok));
-    char **cells = g_strsplit_set(body, " \t\r\n\f", -1);
+    GPtrArray *cells = grid_area_row_cells(body);
     GString *out = g_string_new("\"");
-    gboolean first = TRUE;
-    for (int i = 0; cells[i]; i++) {
-        if (!*cells[i]) continue;
-        if (!first) g_string_append_c(out, ' ');
-        g_string_append(out, cells[i]);
-        first = FALSE;
+    for (guint i = 0; cells && i < cells->len; i++) {
+        if (i) g_string_append_c(out, ' ');
+        g_string_append(out, g_ptr_array_index(cells, i));
     }
     g_string_append_c(out, '"');
-    g_strfreev(cells);
+    if (cells) g_ptr_array_free(cells, TRUE);
     g_free(body);
     return g_string_free(out, FALSE);
 }
@@ -24826,8 +24865,9 @@ css_raw_text_resolve_urls(const char *text, const char *base_url)
         while (s < close && g_ascii_isspace(*s)) s++;
         const char *e = close;
         while (e > s && g_ascii_isspace(e[-1])) e--;
+        char q = 0;
         if (e > s && (*s == '"' || *s == '\'')) {
-            char q = *s;
+            q = *s;
             s++;
             if (e > s && e[-1] == q) e--;
         }
@@ -24835,9 +24875,13 @@ css_raw_text_resolve_urls(const char *text, const char *base_url)
         char *abs = css_url_should_resolve(rel)
             ? ns_url_resolve(base_url, rel) : NULL;
         if (abs && strcmp(abs, rel) != 0) {
-            g_string_append(out, "url(\"");
+            if (!q && strpbrk(abs, "\"'()\\ \t\r\n\f")) q = '"';
+            if (q == '\'' && strchr(abs, '\'')) q = '"';
+            g_string_append(out, "url(");
+            if (q) g_string_append_c(out, q);
             g_string_append(out, abs);
-            g_string_append(out, "\")");
+            if (q) g_string_append_c(out, q);
+            g_string_append_c(out, ')');
             changed = TRUE;
         } else {
             g_string_append_len(out, hit, (gssize)(close + 1 - hit));

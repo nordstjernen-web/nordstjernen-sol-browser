@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Flex and Grid Pseudo-Element Items</title>
+<style>
+body { margin: 0; padding: 0; }
+/* A ::before or ::after with content in a flex or grid container is an
+   item of its own: ::before comes first and ::after last, each with its
+   own margins (applied once). font-size: 0 keeps the dump font-free. */
+.flex { display: flex; width: 300px; height: 20px; }
+.flex::before { content: "X"; display: block; font-size: 0;
+                width: 20px; margin-right: 10px; }
+.flex::after { content: "Y"; display: block; font-size: 0;
+               width: 30px; margin-left: 7px; }
+.flex > div { width: 40px; }
+.grid { display: grid; grid-template-columns: 50px 60px; width: 300px; }
+.grid::before { content: "G"; font-size: 0; height: 20px; }
+.grid > div { height: 20px; }
+</style>
+</head>
+<body>
+<div class="flex"><div></div></div>
+<div class="grid"><div></div></div>
+</body>
+</html>
