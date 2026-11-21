@@ -1159,6 +1159,35 @@ ns_net_referrer_policy_of(const char *doc_url)
 static GMutex      g_coep_lock;
 static GHashTable *g_coep_by_origin;
 
+static gboolean
+ns_net_header_token_is(const char *value, const char *const *tokens)
+{
+    if (!value) return FALSE;
+    g_autofree char *first = g_strndup(value, strcspn(value, ";,"));
+    g_strstrip(first);
+    for (; *tokens; tokens++)
+        if (g_ascii_strcasecmp(first, *tokens) == 0) return TRUE;
+    return FALSE;
+}
+
+gboolean
+ns_net_document_cross_origin_isolated(const char *url, const char *raw_headers)
+{
+    if (!url || !(g_str_has_prefix(url, "https://") ||
+                  g_str_has_prefix(url, "http://localhost") ||
+                  g_str_has_prefix(url, "http://127.0.0.1")))
+        return FALSE;
+    static const char *const coop_ok[] = { "same-origin", NULL };
+    static const char *const coep_ok[] = { "require-corp", "credentialless",
+                                           NULL };
+    g_autofree char *coop =
+        ns_net_raw_header_values(raw_headers, "Cross-Origin-Opener-Policy");
+    g_autofree char *coep =
+        ns_net_raw_header_values(raw_headers, "Cross-Origin-Embedder-Policy");
+    return ns_net_header_token_is(coop, coop_ok) &&
+           ns_net_header_token_is(coep, coep_ok);
+}
+
 void
 ns_net_coep_register(gconstpointer owner, const char *doc_url)
 {

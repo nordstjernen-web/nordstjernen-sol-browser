@@ -2421,6 +2421,14 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     nav_cap.js = js;
     nav_cap.page_url = page_url;
     if (js) ns_js_set_form_submit_cb(js, headless_js_form_submit, &nav_cap);
+    const char *isolation_url = resp->final_url ? resp->final_url : opts->url;
+    gboolean cross_origin_isolated =
+        js && ns_net_document_cross_origin_isolated(isolation_url,
+                                                    resp->raw_headers);
+    if (cross_origin_isolated) {
+        ns_net_coep_register(js, isolation_url);
+        ns_js_set_cross_origin_isolated(js, TRUE);
+    }
     ns_image_cache *image_cache = ns_image_cache_new();
     ns_video_cache *video_cache = ns_video_cache_new();
     ns_box *layout = NULL;
@@ -2495,6 +2503,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         if (styles)        g_hash_table_destroy(styles);
         g_clear_pointer(&flush_ctx.retired_styles, g_hash_table_destroy);
         if (css_cache)     g_hash_table_destroy(css_cache);
+        if (js) ns_net_coep_unregister(js);
         if (js)            ns_js_free(js);
         if (doc)           ns_node_free(doc);
         headless_stop_images(&flush_ctx);
@@ -2656,6 +2665,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     if (styles)        g_hash_table_destroy(styles);
     g_clear_pointer(&flush_ctx.retired_styles, g_hash_table_destroy);
     if (css_cache)     g_hash_table_destroy(css_cache);
+    if (js) ns_net_coep_unregister(js);
     if (js)            ns_js_free(js);
     if (doc)           ns_node_free(doc);
     headless_stop_images(&flush_ctx);
