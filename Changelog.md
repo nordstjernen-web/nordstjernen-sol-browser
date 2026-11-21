@@ -3,6 +3,24 @@ Changelog:
 
 1.0.51:
 ======
+* Fragment navigation follows the HTML spec in the engine itself, so it
+  behaves the same in the window, headless and the WPT runner. Setting
+  `location.hash`, assigning a `#fragment` URL or following a
+  same-document link scrolls to the target synchronously (by id, then
+  `<a name>`, then the percent-decoded fragment, with `#top` and an empty
+  fragment scrolling to the top), updates `:target`, and focuses the
+  target or, when it is not focusable, the viewport. `hashchange` is
+  fired as a task instead of synchronously from inside the setter, so
+  `oldURL`/`newURL` are right when the hash changes twice in a row and a
+  handler that changes the hash again gets its own event. Each fragment
+  navigation adds a session-history entry (`location.replace()` replaces
+  it), `history.back()`/`forward()` between them fire `hashchange` and
+  restore the entry's scroll position before it unless
+  `history.scrollRestoration` is `manual`, and `document.URL` and
+  `documentURI` follow fragment navigations, `pushState` and
+  `replaceState`. The `location.hash` setter percent-encodes the value,
+  replaces lone surrogates, and does nothing when the fragment would not
+  change. 38 more `html/browsers` tests pass.
 * The `Origin` interface from the HTML standard: `new Origin()` makes a
   fresh opaque origin, `Origin.from()` extracts one from a URL string, a
   `URL`, another `Origin`, the global object (window or worker), a

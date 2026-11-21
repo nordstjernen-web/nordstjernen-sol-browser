@@ -90,6 +90,15 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 static void ns_js_refresh_top_layer(ns_js *js);
 static void ns_js_dispatch_hashchange(ns_js *js, const char *old_url,
                                       const char *new_url);
+static void ns_js_update_fragment_target(ns_js *js, const char *url,
+                                         gboolean scroll);
+static void ns_js_sync_document_url(ns_js *js, const char *url);
+static void ns_history_commit_fragment(ns_js *js, const char *url,
+                                       gboolean replace);
+static gboolean ns_url_fragments_equal(const char *a, const char *b);
+static char *ns_nav_key_new(ns_js *js);
+static void ns_js_queue_hashchange(ns_js *js, const char *old_url,
+                                   const char *new_url);
 static void ns_js_drop_remote_helper(ns_js *js);
 static void ns_js_drop_webdriver_helper(ns_js *js);
 
@@ -18005,7 +18014,11 @@ typedef struct {
     JSValue  state;
     char    *key;
     char    *id;
+    double   scroll_x, scroll_y;
+    gboolean has_scroll;
 } ns_history_entry;
+
+static void ns_history_save_scroll(ns_js *js);
 
 static gboolean ns_js_dispatch_built_event(ns_js *js, const ns_node *target,
                                            const char *type, JSValue event,
@@ -18100,6 +18113,7 @@ ns_history_set_state_impl(JSContext *ctx, int argc, JSValueConst *argv,
     if (new_url) {
         g_free(js->current_url);
         js->current_url = new_url;
+        ns_js_sync_document_url(js, js->current_url);
     }
 
     if (!replace) js->history_length++;
@@ -18112,6 +18126,7 @@ ns_history_set_state_impl(JSContext *ctx, int argc, JSValueConst *argv,
         JS_FreeValue(ctx, e->state);
         e->state = JS_DupValue(ctx, js->history_state);
     } else {
+        ns_history_save_scroll(js);
         while ((int)js->history_entries->len > js->history_pos + 1) {
             guint last = js->history_entries->len - 1;
             ns_history_entry_pop_free(js,
@@ -18172,6 +18187,56 @@ ns_history_popstate_job(JSContext *ctx, int argc, JSValueConst *argv)
     return JS_UNDEFINED;
 }
 
+static void
+ns_history_save_scroll(ns_js *js)
+{
+    if (!js || !js->ctx || !js->history_entries ||
+        js->history_pos < 0 || (guint)js->history_pos >= js->history_entries->len)
+        return;
+    JSContext *ctx = ns_js_main_realm(js);
+    ns_history_entry *e = g_ptr_array_index(js->history_entries, js->history_pos);
+    e->scroll_x = ns_window_scroll_prop(ctx, "scrollX");
+    e->scroll_y = ns_window_scroll_prop(ctx, "scrollY");
+    e->has_scroll = TRUE;
+}
+
+static gboolean
+ns_history_restores_scroll(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue history = JS_GetPropertyStr(ctx, global, "history");
+    JSValue mode = JS_IsObject(history)
+        ? JS_GetPropertyStr(ctx, history, "scrollRestoration") : JS_UNDEFINED;
+    const char *m = JS_IsString(mode) ? JS_ToCString(ctx, mode) : NULL;
+    gboolean manual = m && strcmp(m, "manual") == 0;
+    if (m) JS_FreeCString(ctx, m);
+    JS_FreeValue(ctx, mode);
+    JS_FreeValue(ctx, history);
+    JS_FreeValue(ctx, global);
+    return !manual;
+}
+
+static JSValue
+ns_history_scroll_restore_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || js->halted || argc < 2 || !ns_history_restores_scroll(ctx))
+        return JS_UNDEFINED;
+    double x = 0, y = 0;
+    JS_ToFloat64(ctx, &x, argv[0]);
+    JS_ToFloat64(ctx, &y, argv[1]);
+    ns_js_scroll_viewport(ctx, x, y);
+    return JS_UNDEFINED;
+}
+
+static void
+ns_history_queue_scroll_restore(ns_js *js, double x, double y)
+{
+    JSContext *ctx = ns_js_main_realm(js);
+    JSValue args[2] = { JS_NewFloat64(ctx, x), JS_NewFloat64(ctx, y) };
+    ns_js_queue_message_task(ctx, ns_history_scroll_restore_job, 2, args);
+}
+
 static JSValue
 ns_history_navigate(JSContext *ctx, int delta)
 {
@@ -18183,14 +18248,17 @@ ns_history_navigate(JSContext *ctx, int delta)
     if (target < 0 || target > n - 1 || target == js->history_pos)
         return JS_UNDEFINED;
 
+    ns_history_save_scroll(js);
     js->history_pos = (int)target;
     ns_history_entry *e = g_ptr_array_index(js->history_entries, (guint)target);
+    g_autofree char *old_url = g_strdup(js->current_url ? js->current_url : "");
     if (e->url) {
         g_free(js->current_url);
         js->current_url = g_strdup(e->url);
     }
     JS_FreeValue(ctx, js->history_state);
     js->history_state = JS_DupValue(ctx, e->state);
+    ns_js_sync_document_url(js, js->current_url);
 
     if (js->soft_nav_cb)
         js->soft_nav_cb(js->current_url, TRUE, js->soft_nav_user_data);
@@ -18198,7 +18266,49 @@ ns_history_navigate(JSContext *ctx, int delta)
     JSValueConst arg = js->history_state;
     JS_EnqueueJob(ctx, ns_history_popstate_job, 1, &arg);
     ns_nav_fire_currententrychange(js, "traverse");
+    if (e->has_scroll) ns_history_queue_scroll_restore(js, e->scroll_x, e->scroll_y);
+    if (js->current_url && !ns_url_fragments_equal(old_url, js->current_url)) {
+        ns_js_update_fragment_target(js, js->current_url, FALSE);
+        ns_js_queue_hashchange(js, old_url, js->current_url);
+    }
     return JS_UNDEFINED;
+}
+
+static void
+ns_history_commit_fragment(ns_js *js, const char *url, gboolean replace)
+{
+    if (!js || !js->ctx || !url) return;
+    ns_history_ensure_stack(js);
+    JS_FreeValue(js->ctx, js->history_state);
+    js->history_state = JS_NULL;
+    if (replace) {
+        ns_history_entry *e =
+            g_ptr_array_index(js->history_entries, js->history_pos);
+        g_free(e->url);
+        e->url = g_strdup(url);
+        JS_FreeValue(js->ctx, e->state);
+        e->state = JS_NULL;
+        g_free(e->id);
+        e->id = ns_nav_key_new(js);
+    } else {
+        ns_history_save_scroll(js);
+        while ((int)js->history_entries->len > js->history_pos + 1) {
+            guint last = js->history_entries->len - 1;
+            ns_history_entry_pop_free(js,
+                g_ptr_array_index(js->history_entries, last));
+            g_ptr_array_remove_index(js->history_entries, last);
+        }
+        ns_history_entry *ne = g_new0(ns_history_entry, 1);
+        ne->url = g_strdup(url);
+        ne->state = JS_NULL;
+        ne->key = ns_nav_key_new(js);
+        ne->id = ns_nav_key_new(js);
+        g_ptr_array_add(js->history_entries, ne);
+        js->history_pos = js->history_entries->len - 1;
+        js->history_length++;
+    }
+    ns_js_sync_document_url(js, url);
+    ns_nav_fire_currententrychange(js, replace ? "replace" : "push");
 }
 
 static JSValue
@@ -18610,6 +18720,7 @@ ns_nav_navigate(JSContext *ctx, JSValueConst this_val,
             e->state = JS_DupValue(ctx, js->history_state);
             g_free(e->id); e->id = ns_nav_key_new(js);
         } else {
+            ns_history_save_scroll(js);
             while ((int)js->history_entries->len > js->history_pos + 1) {
                 guint last = js->history_entries->len - 1;
                 ns_history_entry_pop_free(js,
@@ -51424,7 +51535,7 @@ ns_js_activate_label(ns_js *js, const ns_node *label, const ns_node *target)
 }
 
 static gboolean
-ns_js_anchor_fragment_navigate(ns_js *js, const char *abs_url)
+ns_js_fragment_navigate(ns_js *js, const char *abs_url, gboolean replace)
 {
     if (!abs_url || !js->current_url || !*js->current_url) return FALSE;
     const char *h = strchr(abs_url, '#');
@@ -51436,6 +51547,7 @@ ns_js_anchor_fragment_navigate(ns_js *js, const char *abs_url)
     if (cur_len != base_len || strncmp(cur, abs_url, base_len) != 0)
         return FALSE;
     if (strcmp(cur, abs_url) == 0) {
+        ns_js_update_fragment_target(js, abs_url, TRUE);
         if (js->fragment_nav_cb)
             js->fragment_nav_cb(abs_url, js->fragment_nav_user_data);
         return TRUE;
@@ -51443,15 +51555,21 @@ ns_js_anchor_fragment_navigate(ns_js *js, const char *abs_url)
     char *old_url = g_strdup(cur);
     g_free(js->current_url);
     js->current_url = g_strdup(abs_url);
+    ns_history_commit_fragment(js, js->current_url, replace);
     if (js->soft_nav_cb)
-        js->soft_nav_cb(js->current_url, FALSE, js->soft_nav_user_data);
+        js->soft_nav_cb(js->current_url, replace, js->soft_nav_user_data);
+    ns_js_update_fragment_target(js, js->current_url, TRUE);
     if (js->fragment_nav_cb)
         js->fragment_nav_cb(js->current_url, js->fragment_nav_user_data);
-    char *new_url = g_strdup(js->current_url);
-    ns_js_dispatch_hashchange(js, old_url, new_url);
-    g_free(new_url);
+    ns_js_queue_hashchange(js, old_url, js->current_url);
     g_free(old_url);
     return TRUE;
+}
+
+static gboolean
+ns_js_anchor_fragment_navigate(ns_js *js, const char *abs_url)
+{
+    return ns_js_fragment_navigate(js, abs_url, FALSE);
 }
 
 static const char *
@@ -68125,7 +68243,7 @@ ns_location_nav_in_iframe(ns_js *js)
 }
 
 static void
-ns_location_navigate_to(ns_js *js, const char *s)
+ns_location_navigate_with(ns_js *js, const char *s, gboolean replace)
 {
     if (!ns_location_target_allowed(s)) {
         ns_location_log_blocked(js, s);
@@ -68134,8 +68252,14 @@ ns_location_navigate_to(ns_js *js, const char *s)
     if (ns_location_nav_in_iframe(js)) return;
     if (!ns_js_realm_may_navigate_top(js, js->ctx)) return;
     g_autofree char *abs_url = ns_url_resolve(ns_js_top_url(js), s);
-    if (!abs_url || !ns_js_anchor_fragment_navigate(js, abs_url))
+    if (!abs_url || !ns_js_fragment_navigate(js, abs_url, replace))
         js->nav_cb(s, FALSE, js->nav_user_data);
+}
+
+static void
+ns_location_navigate_to(ns_js *js, const char *s)
+{
+    ns_location_navigate_with(js, s, FALSE);
 }
 
 static JSValue
@@ -68170,6 +68294,19 @@ ns_location_assign(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
 }
 
 static JSValue
+ns_location_replace(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->nav_cb || argc < 1) return JS_UNDEFINED;
+    const char *s = JS_ToCString(ctx, argv[0]);
+    if (!s) return JS_UNDEFINED;
+    ns_location_navigate_with(js, s, TRUE);
+    JS_FreeCString(ctx, s);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_location_reload(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)ctx; (void)this_val; (void)argc; (void)argv;
@@ -68179,35 +68316,49 @@ ns_location_reload(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_url_fragments_equal(const char *a, const char *b)
+{
+    const char *fa = strchr(a, '#');
+    const char *fb = strchr(b, '#');
+    if (!fa || !fb) return !fa && !fb;
+    return strcmp(fa, fb) == 0;
+}
+
 static JSValue
 ns_location_set_hash(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
     (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_UNDEFINED;
-    const char *s = JS_ToCString(ctx, val);
-    if (!s) return JS_UNDEFINED;
-    const char *frag = s[0] == '#' ? s + 1 : s;
-    char *old_url = g_strdup(ns_js_top_url(js));
-    char *base = g_strdup(old_url);
+    size_t len = 0;
+    const char *s = JS_ToCStringLen(ctx, &len, val);
+    if (!s) return JS_EXCEPTION;
+    g_autofree char *old_url = g_strdup(ns_js_top_url(js));
+    g_autofree char *base = g_strdup(old_url);
     char *cut = strchr(base, '#');
     if (cut) *cut = '\0';
-    char *new_url = *frag ? g_strconcat(base, "#", frag, NULL) : g_strdup(base);
-    g_free(base);
+    gboolean empty = len == 0 || (len == 1 && s[0] == '#');
+    gsize usv_len = 0;
+    g_autofree char *usv = ns_utf8_replace_lone_surrogates(s, len, &usv_len);
+    g_autofree char *new_url = empty
+        ? g_strconcat(base, "#", NULL)
+        : ns_url_set_component_len(base, "hash", usv ? usv : s,
+                                   usv ? usv_len : len);
     JS_FreeCString(ctx, s);
-    if (strcmp(old_url, new_url) == 0) {
-        g_free(old_url);
-        g_free(new_url);
+    const char *old_hash = strchr(old_url, '#');
+    gboolean was_empty = !old_hash || !old_hash[1];
+    if (!new_url || ns_url_fragments_equal(old_url, new_url) ||
+        (empty && was_empty))
         return JS_UNDEFINED;
-    }
     ns_js_set_top_url(js, new_url);
+    ns_history_commit_fragment(js, new_url, FALSE);
     if (js->soft_nav_cb)
         js->soft_nav_cb(new_url, FALSE, js->soft_nav_user_data);
+    ns_js_update_fragment_target(js, new_url, TRUE);
     if (js->fragment_nav_cb)
         js->fragment_nav_cb(new_url, js->fragment_nav_user_data);
-    ns_js_dispatch_hashchange(js, old_url, new_url);
-    g_free(old_url);
-    g_free(new_url);
+    ns_js_queue_hashchange(js, old_url, new_url);
     return JS_UNDEFINED;
 }
 
@@ -68302,7 +68453,7 @@ static const JSCFunctionListEntry ns_location_funcs[] = {
     JS_CGETSET_DEF("origin",   ns_location_get_origin, NULL),
     JS_CFUNC_DEF("assign",   1, ns_location_assign),
     JS_CFUNC_DEF("reload",   0, ns_location_reload),
-    JS_CFUNC_DEF("replace",  1, ns_location_assign),
+    JS_CFUNC_DEF("replace",  1, ns_location_replace),
     JS_CFUNC_DEF("toString", 0, ns_location_toString),
 };
 
@@ -76555,6 +76706,130 @@ ns_js_realm_storage_partition(const ns_js *js, struct JSContext *realm)
     if (!js || !realm) return NULL;
     JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
     return realm == main_ctx ? js->partition_key : NULL;
+}
+
+static char *
+ns_fragment_percent_decode(const char *fragment)
+{
+    GString *bytes = g_string_new(NULL);
+    for (const char *p = fragment; *p; p++) {
+        if (p[0] == '%' && g_ascii_isxdigit(p[1]) && g_ascii_isxdigit(p[2])) {
+            char c = (char)(g_ascii_xdigit_value(p[1]) * 16 +
+                            g_ascii_xdigit_value(p[2]));
+            if (c == '\0') {
+                g_string_free(bytes, TRUE);
+                return NULL;
+            }
+            g_string_append_c(bytes, c);
+            p += 2;
+        } else {
+            g_string_append_c(bytes, *p);
+        }
+    }
+    char *valid = g_utf8_make_valid(bytes->str, (gssize)bytes->len);
+    g_string_free(bytes, TRUE);
+    return valid;
+}
+
+static ns_node *
+ns_js_indicated_part(const ns_node *doc, const char *fragment,
+                     gboolean *top, char **matched)
+{
+    *top = FALSE;
+    *matched = NULL;
+    if (!*fragment) {
+        *top = TRUE;
+        return NULL;
+    }
+    ns_node *target = ns_node_find_fragment_target(doc, fragment);
+    if (target) {
+        *matched = g_strdup(fragment);
+        return target;
+    }
+    g_autofree char *decoded = ns_fragment_percent_decode(fragment);
+    if (!decoded) return NULL;
+    target = ns_node_find_fragment_target(doc, decoded);
+    if (target) {
+        *matched = g_strdup(decoded);
+        return target;
+    }
+    *top = g_ascii_strcasecmp(decoded, "top") == 0;
+    return NULL;
+}
+
+static void
+ns_js_sync_document_url(ns_js *js, const char *url)
+{
+    if (!js || !js->ctx || !url || !*url) return;
+    JSContext *ctx = ns_js_main_realm(js);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue doc = JS_GetPropertyStr(ctx, global, "document");
+    if (JS_IsObject(doc)) {
+        JS_DefinePropertyValueStr(ctx, doc, "URL", JS_NewString(ctx, url),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, doc, "documentURI",
+                                  JS_NewString(ctx, url), JS_PROP_C_W_E);
+    } else if (JS_IsException(doc)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    JS_FreeValue(ctx, doc);
+    JS_FreeValue(ctx, global);
+}
+
+static void
+ns_js_update_fragment_target(ns_js *js, const char *url, gboolean scroll)
+{
+    const char *hash = url ? strchr(url, '#') : NULL;
+    if (!js || !js->current_doc || js->halted) return;
+    gboolean top = FALSE;
+    g_autofree char *matched = NULL;
+    ns_node *target = hash
+        ? ns_js_indicated_part(js->current_doc, hash + 1, &top, &matched)
+        : NULL;
+    ns_css_set_target_fragment(matched);
+    js->mutated = TRUE;
+    if (!scroll || !hash) return;
+    JSContext *ctx = ns_js_main_realm(js);
+    if (top) {
+        ns_js_scroll_viewport(ctx, 0, 0);
+        return;
+    }
+    if (!target) return;
+    ns_realm_scope scope;
+    ns_js_realm_scope_enter(js, ctx, &scope);
+    JSValue el = ns_make_element(ctx, target);
+    JSValue r = ns_element_scrollIntoView(ctx, el, 0, NULL);
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, el);
+    ns_js_set_focus(js, ns_node_is_focusable(target) ? target : NULL);
+    ns_js_realm_scope_leave(js, &scope);
+}
+
+static JSValue
+ns_js_hashchange_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || argc < 2) return JS_UNDEFINED;
+    const char *old_url = JS_ToCString(ctx, argv[0]);
+    const char *new_url = JS_ToCString(ctx, argv[1]);
+    if (old_url && new_url) ns_js_dispatch_hashchange(js, old_url, new_url);
+    if (old_url) JS_FreeCString(ctx, old_url);
+    if (new_url) JS_FreeCString(ctx, new_url);
+    return JS_UNDEFINED;
+}
+
+static void
+ns_js_queue_hashchange(ns_js *js, const char *old_url, const char *new_url)
+{
+    if (!js || !js->ctx) return;
+    JSContext *ctx = ns_js_main_realm(js);
+    JSValue args[2] = {
+        JS_NewString(ctx, old_url ? old_url : ""),
+        JS_NewString(ctx, new_url ? new_url : ""),
+    };
+    ns_js_queue_message_task(ctx, ns_js_hashchange_job, 2, args);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, args[1]);
 }
 
 static void
