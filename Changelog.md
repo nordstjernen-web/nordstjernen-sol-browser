@@ -15,6 +15,10 @@ Changelog:
   starts its fixed-function shaders with
   `#extension GL_EXT_shader_non_constant_global_initializers : enable`, so
   every one of them failed to compile in Qwasm (Quake).
+* Regular expressions may have up to 65535 capture groups instead of 255.
+  rspack's CSS chunk loader tests chunk ids with an alternation of more
+  than 255 groups, so Discord's web client failed with "SyntaxError: too
+  many captures" and showed a blank page; its invite pages now render.
 * `document.open()` on a frame's document aborts the frame's pending
   navigation, as HTML specifies: the written document stays, and closing
   it fires the frame's `load` event. A frame whose `src` was still
