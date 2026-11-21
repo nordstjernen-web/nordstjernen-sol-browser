@@ -15,6 +15,12 @@ Changelog:
   starts its fixed-function shaders with
   `#extension GL_EXT_shader_non_constant_global_initializers : enable`, so
   every one of them failed to compile in Qwasm (Quake).
+* Settings: "Clear browsing data…" works again. It asked through
+  `window.confirm()`, which a page cannot show and which returns false,
+  so the click did nothing. The button now confirms in place: the first
+  click turns it into "Click again to clear", the second clears cookies,
+  cache and site storage, and the browser then asks before erasing
+  history. A failed request is reported instead of claiming success.
 * Build: the engine library reuses the platform library's objects instead
   of compiling its eleven shared sources a second time; the icon and
   translation directories install whole, so a new language or icon needs
