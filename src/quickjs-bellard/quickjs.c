@@ -8572,6 +8572,14 @@ static JSValueConst JS_GetPrototypePrimitive(JSContext *ctx, JSValueConst val)
     return val;
 }
 
+static JSObject *JS_GetPrototypePrimitiveObj(JSContext *ctx, JSValueConst val)
+{
+    JSValueConst proto = JS_GetPrototypePrimitive(ctx, val);
+    if (JS_VALUE_GET_TAG(proto) != JS_TAG_OBJECT)
+        return NULL;
+    return JS_VALUE_GET_OBJ(proto);
+}
+
 /* Return an Object, JS_NULL or JS_EXCEPTION in case of exotic object. */
 JSValue JS_GetPrototype(JSContext *ctx, JSValueConst obj)
 {
@@ -8868,7 +8876,7 @@ JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
             break;
         }
         /* cannot raise an exception */
-        p = JS_VALUE_GET_OBJ(JS_GetPrototypePrimitive(ctx, obj));
+        p = JS_GetPrototypePrimitiveObj(ctx, obj);
         if (!p)
             return JS_UNDEFINED;
     } else {
@@ -10474,7 +10482,7 @@ int JS_SetPropertyInternal(JSContext *ctx, JSValueConst obj,
             default:
                 /* even on a primitive type we can have setters on the prototype */
                 p = NULL;
-                p1 = JS_VALUE_GET_OBJ(JS_GetPrototypePrimitive(ctx, obj));
+                p1 = JS_GetPrototypePrimitiveObj(ctx, obj);
                 goto prototype_lookup;
             }
         }
