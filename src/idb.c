@@ -159,8 +159,31 @@ ns_idb_exec(sqlite3 *db, const char *sql)
     return ns_db_exec(db, sql, "idb");
 }
 
-#define NS_IDB_MAX_PAGES 65536
 #define NS_IDB_MAX_ORIGIN_PAGES (256 * 1024)
+#define NS_IDB_PAGE_BYTES 4096
+
+static gint64
+ns_idb_max_origin_pages(void)
+{
+    static gint64 cached = -1;
+    if (cached < 0) {
+        cached = NS_IDB_MAX_ORIGIN_PAGES;
+        const char *env = g_getenv("NS_IDB_MAX_ORIGIN_PAGES");
+        if (env && *env) {
+            gint64 v = g_ascii_strtoll(env, NULL, 10);
+            if (v > 0) cached = v;
+        }
+    }
+    return cached;
+}
+
+static gboolean
+ns_idb_limit_pages(sqlite3 *db)
+{
+    g_autofree char *sql = g_strdup_printf("PRAGMA max_page_count=%" G_GINT64_FORMAT,
+                                           ns_idb_max_origin_pages());
+    return ns_idb_exec(db, sql);
+}
 
 static gboolean
 ns_idb_schema(sqlite3 *db)
@@ -169,7 +192,7 @@ ns_idb_schema(sqlite3 *db)
            ns_idb_exec(db, "PRAGMA journal_mode=WAL") &&
            ns_idb_exec(db, "PRAGMA synchronous=NORMAL") &&
            ns_idb_exec(db, "PRAGMA cache_size=-512") &&
-           ns_idb_exec(db, "PRAGMA max_page_count=" G_STRINGIFY(NS_IDB_MAX_PAGES)) &&
+           ns_idb_limit_pages(db) &&
            ns_idb_exec(db, "CREATE TABLE IF NOT EXISTS meta("
                            "key TEXT PRIMARY KEY,value TEXT NOT NULL)") &&
            ns_idb_exec(db, "CREATE TABLE IF NOT EXISTS stores("
@@ -733,21 +756,6 @@ ns_idb_db_pages(sqlite3 *db)
     return pages;
 }
 
-static gint64
-ns_idb_max_origin_pages(void)
-{
-    static gint64 cached = -1;
-    if (cached < 0) {
-        cached = NS_IDB_MAX_ORIGIN_PAGES;
-        const char *env = g_getenv("NS_IDB_MAX_ORIGIN_PAGES");
-        if (env && *env) {
-            gint64 v = g_ascii_strtoll(env, NULL, 10);
-            if (v > 0) cached = v;
-        }
-    }
-    return cached;
-}
-
 typedef struct ns_idb_sibling_pages {
     gint64 pages;
     gint64 stamp_us;
@@ -802,6 +810,18 @@ ns_idb_origin_pages(JSContext *ctx, sqlite3 *current, const char *current_path)
     total += cached->pages;
     g_mutex_unlock(&g_idb_lock);
     return total;
+}
+
+gint64
+ns_idb_origin_usage_bytes(JSContext *ctx)
+{
+    return ns_idb_origin_pages(ctx, NULL, NULL) * NS_IDB_PAGE_BYTES;
+}
+
+gint64
+ns_idb_origin_quota_bytes(void)
+{
+    return ns_idb_max_origin_pages() * NS_IDB_PAGE_BYTES;
 }
 
 static JSValue

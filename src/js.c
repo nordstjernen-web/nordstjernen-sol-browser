@@ -12873,10 +12873,14 @@ ns_storage_estimate(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val; (void)argc; (void)argv;
     JSValue est = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, est, "usage", JS_NewInt64(ctx, 0));
+    gint64 idb_usage = ns_idb_origin_usage_bytes(ctx);
+    JS_SetPropertyStr(ctx, est, "usage", JS_NewInt64(ctx, idb_usage));
     JS_SetPropertyStr(ctx, est, "quota",
-                      JS_NewInt64(ctx, (int64_t)2 * 1024 * 1024 * 1024));
-    JS_SetPropertyStr(ctx, est, "usageDetails", JS_NewObject(ctx));
+                      JS_NewInt64(ctx, ns_idb_origin_quota_bytes()));
+    JSValue details = JS_NewObject(ctx);
+    if (idb_usage > 0)
+        JS_SetPropertyStr(ctx, details, "indexedDB", JS_NewInt64(ctx, idb_usage));
+    JS_SetPropertyStr(ctx, est, "usageDetails", details);
     return ns_promise_resolve_take(ctx, est);
 }
 

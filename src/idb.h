@@ -6,8 +6,12 @@
 #ifndef NS_IDB_H
 #define NS_IDB_H
 
+#include <glib.h>
+
 #include "ns_quickjs.h"
 
 void ns_idb_install(JSContext *ctx, JSValueConst global);
+gint64 ns_idb_origin_usage_bytes(JSContext *ctx);
+gint64 ns_idb_origin_quota_bytes(void);
 
 #endif
