@@ -198,6 +198,8 @@ ns_set_active_js(ns_js *js)
 }
 
 #define NS_TRANSIENT_ACTIVATION_US (5 * G_USEC_PER_SEC)
+#define NS_WPT_DRAG_THRESHOLD_PX 3.0
+#define NS_LAZY_FRAME_ATTR "data-nd-frame-lazy"
 #define NS_MOUSE_POINTER_ID 1
 
 static void
@@ -368,6 +370,8 @@ static void ns_text_selection_set_state(JSContext *ctx,
                                         uint32_t start, uint32_t end,
                                         const char *direction);
 static void ns_js_process_pending_iframes(ns_js *js);
+static void ns_js_schedule_iframe_src_change(ns_js *js, ns_node *iframe);
+static void ns_js_lazy_frame_loading_changed(ns_js *js, ns_node *iframe);
 static GBytes *ns_js_blob_url_lookup(ns_js *js, const char *url, char **out_type);
 static void ns_slot_note_child_change(ns_js *js, ns_node *parent);
 static void ns_slot_note_attr_change(ns_js *js, ns_node *target,
@@ -1047,6 +1051,7 @@ typedef struct ns_timer {
     JSContext *ctx;
     JSValue  cb;
     char    *code;
+    char    *code_filename;
     int      id;
     guint    glib_source;
     gboolean is_interval;
@@ -1465,6 +1470,7 @@ ns_timer_free(gpointer data)
     JSContext *ctx = t->ctx ? t->ctx : t->js->ctx;
     JS_FreeValue(ctx, t->cb);
     g_free(t->code);
+    g_free(t->code_filename);
     for (int i = 0; i < t->extra_args_count; i++)
         JS_FreeValue(ctx, t->extra_args[i]);
     g_free(t->extra_args);
@@ -2543,6 +2549,7 @@ ns_timer_fire(gpointer data)
     JSValue cb = JS_IsUndefined(t->cb) ? JS_UNDEFINED
                                        : JS_DupValue(callback_ctx, t->cb);
     char *code = t->code ? g_strdup(t->code) : NULL;
+    g_autofree char *code_filename = g_strdup(t->code_filename);
     int n_extra = t->extra_args_count;
     JSValue *extra = NULL;
     if (n_extra > 0) {
@@ -2555,7 +2562,8 @@ ns_timer_fire(gpointer data)
     js->callback_depth++;
     if (code) {
         ret = ns_js_can_compile_strings(callback_ctx)
-            ? JS_Eval(callback_ctx, code, strlen(code), "<timer>",
+            ? JS_Eval(callback_ctx, code, strlen(code),
+                      code_filename ? code_filename : "<timer>",
                       JS_EVAL_TYPE_GLOBAL)
             : JS_UNDEFINED;
     } else if (t->is_idle) {
@@ -2666,6 +2674,15 @@ ns_js_setTimeout(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     t->frame = ns_js_context_frame(js, ctx);
     t->cb = is_function ? JS_DupValue(ctx, argv[0]) : JS_UNDEFINED;
     t->code = code;
+    if (code) {
+        JSAtom caller = JS_GetScriptOrModuleName(ctx, 1);
+        const char *name = caller != JS_ATOM_NULL
+            ? JS_AtomToCString(ctx, caller) : NULL;
+        if (name && *name && name[0] != '<')
+            t->code_filename = g_strdup_printf("<timer:%s>", name);
+        if (name) JS_FreeCString(ctx, name);
+        JS_FreeAtom(ctx, caller);
+    }
     t->is_interval = is_interval;
     t->nesting_level = nesting;
     t->interval_ms = ms;
@@ -5329,6 +5346,10 @@ ns_invalidate_wrapper(ns_node *n)
     ns_canvas_state_forget_node(js, n);
     if (js && js->anim) ns_anim_forget_node(js->anim, n);
     if (js && js->focus_nav_start == n) js->focus_nav_start = NULL;
+    if (js && js->drag_candidate == n) js->drag_candidate = NULL;
+    if (js && js->drag_source == n) js->drag_source = NULL;
+    if (js && js->drag_immediate == n) js->drag_immediate = NULL;
+    if (js && js->drag_current == n) js->drag_current = NULL;
     if (js && js->focused_node == n) js->focused_node = NULL;
     if (js && js->hover_node == n) js->hover_node = NULL;
     if (js && js->change_pending == n) ns_js_forget_pending_change(js);
@@ -6567,7 +6588,7 @@ ns_element_attr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst val, 
             ns_js_start_image_load(js, n, s);
         }
         if (magic == 3 && ns_node_is_navigable_frame(n))
-            ns_js_schedule_iframe_load_full(js, n, TRUE);
+            ns_js_schedule_iframe_src_change(js, n);
         if (magic == 3 && ns_node_is_media_element(n))
             ns_media_run_load_algorithm(ctx, this_val, n);
         if (changed && ns_node_is_tag(n, NS_TAG_OBJECT) &&
@@ -33092,6 +33113,9 @@ ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
     }
     ns_slot_note_attr_change(js, target, name);
     ns_css_mark_attr_dirty(target, name, old_value);
+    if (js && target && name && !namespace_uri &&
+        g_ascii_strcasecmp(name, "loading") == 0)
+        ns_js_lazy_frame_loading_changed(js, target);
     ns_mut_record_emit(js, "attributes", target, NULL, NULL,
                        NULL, NULL, name, namespace_uri, old_value);
 }
@@ -35901,9 +35925,10 @@ ns_install_drag_event_support(JSContext *ctx)
         "dt._files=files;"
         "}"
         "function DataTransferItemList(dt){this._dt=dt;}"
-        "Object.defineProperty(DataTransferItemList.prototype,'length',{get:function(){return this._dt._items.length;}});"
+        "Object.defineProperty(DataTransferItemList.prototype,'length',{get:function(){return this._dt._mode==='disabled'?0:this._dt._items.length;}});"
         "DataTransferItemList.prototype.item=function(i){i=Number(i);return i>=0&&i<this._dt._items.length?this._dt._items[i]:null;};"
         "DataTransferItemList.prototype.add=function(data,type){"
+        "if(this._dt._mode!=='rw')throw new DOMException('The drag data store is not writable','InvalidStateError');"
         "var item;"
         "if(typeof data==='string')item=makeItem('string',lowerType(type||'text/plain'),String(data));"
         "else item=makeItem('file',data&&data.type?String(data.type):'',data);"
@@ -35911,30 +35936,36 @@ ns_install_drag_event_support(JSContext *ctx)
         "syncFiles(this._dt);"
         "return item;"
         "};"
-        "DataTransferItemList.prototype.remove=function(i){i=Number(i);if(i>=0&&i<this._dt._items.length){this._dt._items.splice(i,1);syncFiles(this._dt);}};"
-        "DataTransferItemList.prototype.clear=function(){this._dt._items.length=0;syncFiles(this._dt);};"
+        "DataTransferItemList.prototype.remove=function(i){if(this._dt._mode!=='rw')throw new DOMException('The drag data store is not writable','InvalidStateError');i=Number(i);if(i>=0&&i<this._dt._items.length){this._dt._items.splice(i,1);syncFiles(this._dt);}};"
+        "DataTransferItemList.prototype.clear=function(){if(this._dt._mode!=='rw')return;this._dt._items.length=0;syncFiles(this._dt);};"
         "DataTransferItemList.prototype[Symbol.iterator]=function(){return this._dt._items[Symbol.iterator]();};"
         "function DataTransfer(){"
-        "Object.defineProperties(this,{_dropEffect:{value:'none',writable:true},_effectAllowed:{value:'uninitialized',writable:true},_items:{value:[]},_itemList:{value:null,writable:true},_files:{value:[],writable:true}});"
+        "Object.defineProperties(this,{_dropEffect:{value:'none',writable:true},_effectAllowed:{value:'uninitialized',writable:true},_items:{value:[]},_itemList:{value:null,writable:true},_files:{value:[],writable:true},_mode:{value:'rw',writable:true}});"
         "this._itemList=new DataTransferItemList(this);"
         "}"
         "delete DataTransfer.prototype.constructor;"
-        "Object.defineProperties(DataTransfer.prototype,{dropEffect:{get:function(){return this._dropEffect;},set:function(v){this._dropEffect=String(v);},enumerable:true},effectAllowed:{get:function(){return this._effectAllowed;},set:function(v){this._effectAllowed=String(v);},enumerable:true},items:{get:function(){return this._itemList;},enumerable:true},types:{get:function(){"
+        "var DROP_EFFECTS=['none','copy','link','move'];"
+        "var EFFECTS_ALLOWED=['none','copy','copyLink','copyMove','link','linkMove','move','all','uninitialized'];"
+        "Object.defineProperties(DataTransfer.prototype,{dropEffect:{get:function(){return this._dropEffect;},set:function(v){v=String(v);if(DROP_EFFECTS.indexOf(v)>=0)this._dropEffect=v;},enumerable:true},effectAllowed:{get:function(){return this._effectAllowed;},set:function(v){v=String(v);if(this._mode==='rw'&&EFFECTS_ALLOWED.indexOf(v)>=0)this._effectAllowed=v;},enumerable:true},items:{get:function(){return this._itemList;},enumerable:true},types:{get:function(){"
+        "if(this._mode==='disabled')return [];"
         "var out=[];"
         "for(var i=0;i<this._items.length;i++){var it=this._items[i];if(it.kind==='string'&&out.indexOf(it.type)<0)out.push(it.type);}"
         "return out;"
-        "},enumerable:true},files:{get:function(){return this._files;},enumerable:true}});"
+        "},enumerable:true},files:{get:function(){return this._mode==='rw'||this._mode==='ro'?this._files:[];},enumerable:true}});"
         "DataTransfer.prototype.clearData=function(type){"
+        "if(this._mode!=='rw')return;"
         "if(arguments.length===0){for(var i=this._items.length-1;i>=0;i--)if(this._items[i].kind==='string')this._items.splice(i,1);return;}"
         "type=dataFormat(type);"
         "for(var j=this._items.length-1;j>=0;j--){if(this._items[j].kind==='string'&&this._items[j].type===type)this._items.splice(j,1);}"
         "};"
         "DataTransfer.prototype.getData=function(type){"
+        "if(this._mode!=='rw'&&this._mode!=='ro')return '';"
         "type=dataFormat(type);"
         "for(var i=0;i<this._items.length;i++){var it=this._items[i];if(it.kind==='string'&&it.type===type)return String(it._data);}"
         "return '';"
         "};"
         "DataTransfer.prototype.setData=function(type,data){"
+        "if(this._mode!=='rw')return;"
         "type=dataFormat(type);"
         "for(var i=this._items.length-1;i>=0;i--){if(this._items[i].kind==='string'&&this._items[i].type===type)this._items.splice(i,1);}"
         "this._items.push(makeItem('string',type,String(data)));"
@@ -36950,6 +36981,17 @@ ns_wpt_pointer(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     if (argc > 5) JS_ToInt32(ctx, &buttons, argv[5]);
     gboolean prevented = FALSE;
     ns_js_note_pointer_input(js, TRUE);
+    gboolean dragging = FALSE;
+    if (ns_js_drag_active(js) && g_str_has_prefix(type, "pointer"))
+        dragging = TRUE;
+    else if (strcmp(type, "mousemove") == 0)
+        dragging = ns_js_drag_pointer_move(js, target, x, y);
+    else if (strcmp(type, "mouseup") == 0)
+        dragging = ns_js_drag_pointer_up(js, target, x, y);
+    if (dragging) {
+        JS_FreeCString(ctx, type);
+        return JS_FALSE;
+    }
     ns_js_dispatch_mouse_event(js, target, type, x, y, x, y, button, buttons,
                                FALSE, FALSE, FALSE, FALSE, NULL, &prevented);
     if (!prevented && strcmp(type, "mousedown") == 0) {
@@ -36957,6 +36999,8 @@ ns_wpt_pointer(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         for (const ns_node *a = target; a && !focus; a = a->parent)
             if (ns_node_is_focusable(a)) focus = a;
         ns_js_set_focus(js, focus);
+        if (button == 0)
+            ns_js_drag_pointer_down(js, target, x, y, NS_WPT_DRAG_THRESHOLD_PX);
     }
     JS_FreeCString(ctx, type);
     return JS_NewBool(ctx, prevented);
@@ -38647,10 +38691,276 @@ ns_js_dispatch_drag_event(ns_js *js, ns_js_drag_session *session,
     related = ns_js_related_target_for(target, related);
     JS_SetPropertyStr(ctx, event, "relatedTarget",
                       related ? ns_make_element(ctx, related) : JS_NULL);
-    JS_SetPropertyStr(ctx, event, "dataTransfer",
-                      session ? ns_js_drag_session_transfer_for(session, target)
-                              : JS_NULL);
-    return ns_js_dispatch_built_event(js, target, type, event, default_prevented);
+    JSValue transfer = session ? ns_js_drag_session_transfer_for(session, target)
+                               : JS_NULL;
+    const char *mode = strcmp(type, "dragstart") == 0 ? "rw"
+                     : strcmp(type, "drop") == 0 ? "ro" : "protected";
+    if (JS_IsObject(transfer))
+        JS_SetPropertyStr(ctx, transfer, "_mode", JS_NewString(ctx, mode));
+    JS_SetPropertyStr(ctx, event, "dataTransfer", JS_DupValue(ctx, transfer));
+    gboolean ok = ns_js_dispatch_built_event(js, target, type, event,
+                                             default_prevented);
+    if (JS_IsObject(transfer))
+        JS_SetPropertyStr(ctx, transfer, "_mode", JS_NewString(ctx, "protected"));
+    JS_FreeValue(ctx, transfer);
+    return ok;
+}
+
+gboolean
+ns_js_drag_active(const ns_js *js)
+{
+    return js && js->drag_session;
+}
+
+static const ns_node *
+ns_drag_source_for(const ns_node *n)
+{
+    for (const ns_node *a = n; a; a = a->parent) {
+        if (a->kind != NS_NODE_ELEMENT) continue;
+        if (ns_node_is_editable(a) || ns_node_is_html_tag(a, NS_TAG_SELECT))
+            return NULL;
+        const char *d = ns_element_get_attr(a, "draggable");
+        if (d && g_ascii_strcasecmp(d, "true") == 0) return a;
+        if (d && g_ascii_strcasecmp(d, "false") == 0) return NULL;
+        if (ns_node_is_html_tag(a, NS_TAG_IMG) && ns_element_get_attr(a, "src"))
+            return a;
+        if (ns_node_is_html_tag(a, NS_TAG_A) && ns_element_get_attr(a, "href"))
+            return a;
+    }
+    return NULL;
+}
+
+static JSValue
+ns_drag_transfer(ns_js *js)
+{
+    return js->drag_session ? js->drag_session->data_transfer : JS_UNDEFINED;
+}
+
+static char *
+ns_drag_transfer_string(ns_js *js, const char *prop)
+{
+    JSValue dt = ns_drag_transfer(js);
+    if (!JS_IsObject(dt)) return g_strdup("");
+    JSContext *ctx = ns_js_main_context(js);
+    JSValue v = JS_GetPropertyStr(ctx, dt, prop);
+    const char *s = JS_IsString(v) ? JS_ToCString(ctx, v) : NULL;
+    char *out = g_strdup(s ? s : "");
+    if (s) JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, v);
+    return out;
+}
+
+static void
+ns_drag_set_drop_effect(ns_js *js, const char *effect)
+{
+    JSValue dt = ns_drag_transfer(js);
+    if (!JS_IsObject(dt)) return;
+    JSContext *ctx = ns_js_main_context(js);
+    JS_SetPropertyStr(ctx, dt, "_dropEffect", JS_NewString(ctx, effect));
+}
+
+static const char *
+ns_drag_initial_drop_effect(const char *allowed, const ns_node *source)
+{
+    if (strcmp(allowed, "none") == 0) return "none";
+    if (strcmp(allowed, "copy") == 0 || strcmp(allowed, "copyLink") == 0 ||
+        strcmp(allowed, "copyMove") == 0 || strcmp(allowed, "all") == 0)
+        return "copy";
+    if (strcmp(allowed, "link") == 0 || strcmp(allowed, "linkMove") == 0)
+        return "link";
+    if (strcmp(allowed, "move") == 0) return "move";
+    if (source && ns_node_is_html_tag(source, NS_TAG_A)) return "link";
+    return "copy";
+}
+
+static const char *
+ns_drag_operation_for(const char *allowed, const char *effect)
+{
+    gboolean any = strcmp(allowed, "uninitialized") == 0 ||
+                   strcmp(allowed, "all") == 0;
+    if (strcmp(effect, "copy") == 0 &&
+        (any || strcmp(allowed, "copy") == 0 ||
+         strcmp(allowed, "copyLink") == 0 || strcmp(allowed, "copyMove") == 0))
+        return "copy";
+    if (strcmp(effect, "link") == 0 &&
+        (any || strcmp(allowed, "link") == 0 ||
+         strcmp(allowed, "copyLink") == 0 || strcmp(allowed, "linkMove") == 0))
+        return "link";
+    if (strcmp(effect, "move") == 0 &&
+        (any || strcmp(allowed, "move") == 0 ||
+         strcmp(allowed, "copyMove") == 0 || strcmp(allowed, "linkMove") == 0))
+        return "move";
+    return "none";
+}
+
+static gboolean
+ns_drag_fire(ns_js *js, const ns_node *target, const char *type,
+             double x, double y, int buttons, const ns_node *related)
+{
+    if (!target || !js->drag_session) return FALSE;
+    JSContext *ctx = ns_js_main_context(js);
+    double px = x + ns_window_scroll_prop(ctx, "scrollX");
+    double py = y + ns_window_scroll_prop(ctx, "scrollY");
+    gboolean prevented = FALSE;
+    ns_js_dispatch_drag_event(js, js->drag_session, target, type, x, y, px, py,
+                              0, buttons, FALSE, FALSE, FALSE, FALSE, related,
+                              &prevented);
+    return prevented;
+}
+
+static void
+ns_drag_add_default_data(ns_js *js, const ns_node *source)
+{
+    const char *prop = ns_node_is_html_tag(source, NS_TAG_A) ? "href"
+                     : ns_node_is_html_tag(source, NS_TAG_IMG) ? "src" : NULL;
+    if (!prop) return;
+    JSContext *ctx = ns_js_main_context(js);
+    JSValue el = ns_make_element(ctx, source);
+    JSValue v = JS_GetPropertyStr(ctx, el, prop);
+    const char *url = JS_IsString(v) ? JS_ToCString(ctx, v) : NULL;
+    if (url && *url) {
+        ns_js_drag_session_set_data(js->drag_session, "text/uri-list", url);
+        ns_js_drag_session_set_data(js->drag_session, "text/plain", url);
+    }
+    if (url) JS_FreeCString(ctx, url);
+    JS_FreeValue(ctx, v);
+    JS_FreeValue(ctx, el);
+}
+
+static void
+ns_drag_finish(ns_js *js)
+{
+    JSValue dt = ns_drag_transfer(js);
+    if (JS_IsObject(dt)) {
+        JSContext *ctx = ns_js_main_context(js);
+        JS_SetPropertyStr(ctx, dt, "_mode", JS_NewString(ctx, "disabled"));
+    }
+    ns_js_drag_session_free(js->drag_session);
+    js->drag_session = NULL;
+    js->drag_candidate = NULL;
+    js->drag_source = NULL;
+    js->drag_immediate = NULL;
+    js->drag_current = NULL;
+    js->drag_operation = NULL;
+}
+
+static gboolean
+ns_drag_begin(ns_js *js, double x, double y)
+{
+    const ns_node *source = js->drag_candidate;
+    js->drag_candidate = NULL;
+    js->drag_session = ns_js_drag_session_new(js);
+    if (!js->drag_session) return FALSE;
+    js->drag_source = source;
+    js->drag_operation = "none";
+    ns_node_arm_js_invalidate((ns_node *)source);
+    ns_drag_add_default_data(js, source);
+    if (ns_drag_fire(js, source, "dragstart", x, y, 1, NULL)) {
+        ns_drag_finish(js);
+        return FALSE;
+    }
+    return js->drag_session != NULL;
+}
+
+static void
+ns_drag_update_target(ns_js *js, const ns_node *hit, double x, double y)
+{
+    if (!js->drag_session) return;
+    if (js->drag_source && ns_drag_fire(js, js->drag_source, "drag", x, y, 1,
+                                        NULL)) {
+        js->drag_operation = "none";
+        return;
+    }
+    g_autofree char *allowed = ns_drag_transfer_string(js, "effectAllowed");
+    if (hit != js->drag_immediate) {
+        js->drag_immediate = hit;
+        if (hit) ns_node_arm_js_invalidate((ns_node *)hit);
+        const ns_node *previous = js->drag_current;
+        const ns_node *next = hit;
+        if (!next && js->current_doc)
+            next = ns_node_find_first_element(js->current_doc, "body");
+        if (next) {
+            ns_drag_set_drop_effect(js,
+                ns_drag_initial_drop_effect(allowed, js->drag_source));
+            ns_drag_fire(js, next, "dragenter", x, y, 1, previous);
+        }
+        if (previous && previous != next)
+            ns_drag_fire(js, previous, "dragleave", x, y, 1, next);
+        js->drag_current = next;
+        if (next) ns_node_arm_js_invalidate((ns_node *)next);
+    }
+    if (!js->drag_session || !js->drag_current) {
+        js->drag_operation = "none";
+        return;
+    }
+    ns_drag_set_drop_effect(js,
+        ns_drag_initial_drop_effect(allowed, js->drag_source));
+    if (ns_drag_fire(js, js->drag_current, "dragover", x, y, 1, NULL)) {
+        g_autofree char *effect = ns_drag_transfer_string(js, "dropEffect");
+        g_autofree char *now_allowed = ns_drag_transfer_string(js, "effectAllowed");
+        js->drag_operation = ns_drag_operation_for(now_allowed, effect);
+    } else {
+        js->drag_operation = "none";
+    }
+}
+
+void
+ns_js_drag_pointer_down(ns_js *js, const ns_node *target, double x, double y,
+                        double threshold)
+{
+    if (!js || js->drag_session) return;
+    js->drag_candidate = ns_drag_source_for(target);
+    js->drag_start_x = x;
+    js->drag_start_y = y;
+    js->drag_threshold = threshold;
+    if (js->drag_candidate)
+        ns_node_arm_js_invalidate((ns_node *)js->drag_candidate);
+}
+
+gboolean
+ns_js_drag_pointer_move(ns_js *js, const ns_node *target, double x, double y)
+{
+    if (!js || js->halted) return FALSE;
+    if (!js->drag_session) {
+        if (!js->drag_candidate) return FALSE;
+        if (hypot(x - js->drag_start_x, y - js->drag_start_y) <
+            js->drag_threshold)
+            return FALSE;
+        if (!ns_drag_begin(js, js->drag_start_x, js->drag_start_y))
+            return FALSE;
+    }
+    ns_drag_update_target(js, target, x, y);
+    js->mutated = TRUE;
+    return TRUE;
+}
+
+gboolean
+ns_js_drag_pointer_up(ns_js *js, const ns_node *target, double x, double y)
+{
+    if (!js) return FALSE;
+    js->drag_candidate = NULL;
+    if (!js->drag_session) return FALSE;
+    (void)target;
+    const char *operation = js->drag_operation ? js->drag_operation : "none";
+    if (js->drag_current && strcmp(operation, "none") != 0) {
+        ns_drag_set_drop_effect(js, operation);
+        if (ns_drag_fire(js, js->drag_current, "drop", x, y, 0, NULL)) {
+            g_autofree char *effect = ns_drag_transfer_string(js, "dropEffect");
+            operation = strcmp(effect, "copy") == 0 ? "copy"
+                      : strcmp(effect, "link") == 0 ? "link"
+                      : strcmp(effect, "move") == 0 ? "move" : "none";
+        }
+    } else if (js->drag_current) {
+        ns_drag_fire(js, js->drag_current, "dragleave", x, y, 0, NULL);
+        operation = "none";
+    }
+    if (js->drag_session && js->drag_source) {
+        ns_drag_set_drop_effect(js, operation);
+        ns_drag_fire(js, js->drag_source, "dragend", x, y, 0, NULL);
+    }
+    if (js->drag_session) ns_drag_finish(js);
+    js->mutated = TRUE;
+    return TRUE;
 }
 
 static JSValue
@@ -40898,7 +41208,7 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         if (ns_node_is_navigable_frame(n) &&
             (g_ascii_strcasecmp(name, "src") == 0 ||
              g_ascii_strcasecmp(name, "srcdoc") == 0))
-            ns_js_schedule_iframe_load_full(js_from_ctx(ctx), n, TRUE);
+            ns_js_schedule_iframe_src_change(js_from_ctx(ctx), n);
         else if (changed && ns_node_is_tag(n, NS_TAG_OBJECT) &&
                  g_ascii_strcasecmp(name, "data") == 0)
             ns_js_schedule_iframe_load(js_from_ctx(ctx), n);
@@ -70911,6 +71221,17 @@ ns_js_import_map_resolve(ns_js *js, const ns_node *frame, const char *name)
 }
 
 static char *
+ns_js_module_fallback_base(ns_js *js, JSContext *ctx)
+{
+    if (!js) return NULL;
+    if (js->worker_host)
+        return g_strdup(js->worker_host->base_url);
+    ns_node *frame = ns_js_frame_of_realm(js, ctx);
+    if (frame) return g_strdup(ns_js_realm_url_or_current(js, ctx));
+    return ns_js_doc_base_url(js);
+}
+
+static char *
 ns_js_module_normalize(JSContext *ctx, const char *base_name,
                        const char *name, void *opaque)
 {
@@ -70925,6 +71246,13 @@ ns_js_module_normalize(JSContext *ctx, const char *base_name,
     }
     gboolean relative = name[0] == '/' || g_str_has_prefix(name, "./") ||
                         g_str_has_prefix(name, "../");
+    g_autofree char *fallback_base = NULL;
+    if (relative && base_name && g_str_has_prefix(base_name, "<timer:") &&
+        g_str_has_suffix(base_name, ">"))
+        base_name = fallback_base = g_strndup(base_name + 7,
+                                              strlen(base_name) - 8);
+    else if (relative && (!base_name || !*base_name || base_name[0] == '<'))
+        base_name = fallback_base = ns_js_module_fallback_base(js, ctx);
     char *abs_url = ns_url_resolve(relative && base_name && *base_name
                                        ? base_name : NULL, name);
     if (!abs_url && !relative) {
@@ -73418,6 +73746,14 @@ ns_js_iframe_source_loaded(ns_js *js, ns_node *iframe)
     return same;
 }
 
+static double
+ns_js_lazy_frame_limit(ns_js *js)
+{
+    double scroll_y = MAX(js->layout_root->scroll_y,
+                          ns_window_scroll_prop(ns_js_main_realm(js), "scrollY"));
+    return scroll_y + ns_css_viewport_h() + 1500.0;
+}
+
 static void
 ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe, gboolean force)
 {
@@ -73429,9 +73765,13 @@ ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe, gboolean force)
     if (!force && lazy && js->iframe_load_depth == 0) {
         const ns_box *box = js->layout_root
             ? ns_box_find_by_dom(js->layout_root, iframe) : NULL;
-        double limit = js->layout_root
-            ? js->layout_root->scroll_y + ns_css_viewport_h() + 1500.0 : 0;
+        double limit = js->layout_root ? ns_js_lazy_frame_limit(js) : 0;
         if (!box || box->y > limit) {
+            if (!ns_element_get_attr(iframe, NS_LAZY_FRAME_ATTR)) {
+                ns_element_set_attr(iframe, NS_LAZY_FRAME_ATTR, "");
+                ns_css_mark_attr_dirty(iframe, NS_LAZY_FRAME_ATTR, NULL);
+                js->mutated = TRUE;
+            }
             if (!js->deferred_iframe_loads)
                 js->deferred_iframe_loads = g_ptr_array_new();
             for (guint i = 0; i < js->deferred_iframe_loads->len; i++)
@@ -73462,6 +73802,29 @@ ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe)
 }
 
 static void
+ns_js_lazy_frame_loading_changed(ns_js *js, ns_node *iframe)
+{
+    if (!js->deferred_iframe_loads) return;
+    gboolean deferred = FALSE;
+    for (guint i = 0; i < js->deferred_iframe_loads->len && !deferred; i++)
+        deferred = g_ptr_array_index(js->deferred_iframe_loads, i) == iframe;
+    if (!deferred) return;
+    const char *loading = ns_element_get_attr(iframe, "loading");
+    if (loading && g_ascii_strcasecmp(loading, "lazy") == 0) return;
+    ns_js_schedule_iframe_load(js, iframe);
+}
+
+static void
+ns_js_schedule_iframe_src_change(ns_js *js, ns_node *iframe)
+{
+    const char *loading = iframe ? ns_element_get_attr(iframe, "loading") : NULL;
+    gboolean first_lazy_load =
+        loading && g_ascii_strcasecmp(loading, "lazy") == 0 &&
+        !ns_element_get_attr(iframe, "data-nd-frame-url");
+    ns_js_schedule_iframe_load_full(js, iframe, !first_lazy_load);
+}
+
+static void
 ns_js_promote_deferred_iframes(ns_js *js)
 {
     if (!js || !js->layout_root || !js->deferred_iframe_loads) return;
@@ -73469,7 +73832,7 @@ ns_js_promote_deferred_iframes(ns_js *js)
     while (i < js->deferred_iframe_loads->len) {
         ns_node *iframe = g_ptr_array_index(js->deferred_iframe_loads, i);
         const ns_box *box = ns_box_find_by_dom(js->layout_root, iframe);
-        double limit = js->layout_root->scroll_y + ns_css_viewport_h() + 1500.0;
+        double limit = ns_js_lazy_frame_limit(js);
         if (!box || box->y > limit) {
             i++;
             continue;
