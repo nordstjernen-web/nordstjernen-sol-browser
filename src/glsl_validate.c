@@ -106,14 +106,18 @@ static void
 ns_glsl_check_extension_directive(ns_glsl_scan *s, int line, const char *p,
                                   const char *end)
 {
-    char name[64];
+    char name[64], behavior[16];
     p = ns_glsl_skip_blanks(p, end);
-    ns_glsl_directive_word(p, end, name, sizeof name);
+    p += ns_glsl_directive_word(p, end, name, sizeof name);
+    p = ns_glsl_skip_blanks(p, end);
+    if (p < end && *p == ':') p = ns_glsl_skip_blanks(p + 1, end);
+    ns_glsl_directive_word(p, end, behavior, sizeof behavior);
     if (strcmp(name, "all") == 0) return;
     if (strcmp(name, "GL_OES_standard_derivatives") == 0 && s->es_version < 300)
         return;
-    ns_glsl_error(s, line, "'#extension' : extension '%s' is not available to "
-                  "WebGL shaders", name);
+    if (strcmp(behavior, "require") == 0)
+        ns_glsl_error(s, line, "'#extension' : extension '%s' is not available "
+                      "to WebGL shaders", name);
 }
 
 static const char *

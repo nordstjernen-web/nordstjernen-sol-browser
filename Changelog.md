@@ -9,6 +9,12 @@ Changelog:
   are cached in one database and the Medium chunks hit the per-database
   cap. `navigator.storage.estimate()` now reports the origin's real
   IndexedDB usage and that limit as its quota, instead of 0 and 2 GiB.
+* WebGL: an `#extension` directive for an extension the browser does not
+  expose is an error only with `require`, as GLSL ES specifies; `enable`,
+  `warn` and `disable` pass to the glslang validator, which warns. gl4es
+  starts its fixed-function shaders with
+  `#extension GL_EXT_shader_non_constant_global_initializers : enable`, so
+  every one of them failed to compile in Qwasm (Quake).
 * Build: the engine library reuses the platform library's objects instead
   of compiling its eleven shared sources a second time; the icon and
   translation directories install whole, so a new language or icon needs
