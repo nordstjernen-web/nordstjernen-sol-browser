@@ -3,6 +3,16 @@ Changelog:
 
 1.0.51:
 ======
+* PDF export: `--export=pdf:FILE` saves the page as a paged PDF, laid
+  out with print media at the `@page` size and margins, without opening
+  a window or needing `--headless` (ported from Northstar). It writes
+  only the finished file, creates a missing folder, and is rejected with
+  a hint for anything other than `pdf:FILE`. The command line now uses
+  the same writer as `ns_browser_render_pdf`, so `--dump=print:` gains
+  link annotations, the outline and the document title. Every element
+  with an `id` gets a named destination, so a contents page whose links
+  are `#fragment`s jumps to the right page and position; relative links
+  are resolved against the page URL instead of being dropped.
 * CSS module scripts: `import sheet from "./x.css" with { type: "css" }`
   (and the `import()` form) loads a `text/css` resource and exports a
   constructable `CSSStyleSheet`, ready for `adoptedStyleSheets`. Other

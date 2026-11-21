@@ -109,6 +109,8 @@ headless_add_output_dirs(int argc, char **argv)
             if      (g_str_has_prefix(v, "png:")) p = v + 4;
             else if (g_str_has_prefix(v, "pdf:")) p = v + 4;
             else if (g_str_has_prefix(v, "print:")) p = v + 6;
+        } else if (g_str_has_prefix(argv[i], "--export=pdf:")) {
+            p = argv[i] + 13;
         } else if (g_str_has_prefix(argv[i], "--screenshot=")) {
             p = argv[i] + 13;
         }
@@ -277,6 +279,17 @@ headless_parse(int argc, char **argv, ns_headless_opts *hopts)
             else if (g_str_has_prefix(v, "png:")) { hopts->dump = NS_DUMP_PNG; hopts->out_path = v + 4; }
             else if (g_str_has_prefix(v, "pdf:")) { hopts->dump = NS_DUMP_PDF; hopts->out_path = v + 4; }
             else if (g_str_has_prefix(v, "print:")) { hopts->dump = NS_DUMP_PRINT; hopts->out_path = v + 6; }
+        } else if (g_str_has_prefix(a, "--export=")) {
+            const char *v = a + 9;
+            if (!g_str_has_prefix(v, "pdf:") || !v[4]) {
+                fprintf(stderr,
+                        "nordstjernen: --export wants pdf:FILE, got '%s'\n", v);
+                return 2;
+            }
+            dump_set = TRUE;
+            hopts->dump = NS_DUMP_PRINT;
+            hopts->export_pdf = TRUE;
+            hopts->out_path = v + 4;
         } else if (g_str_has_prefix(a, "--viewport=")) {
             const char *spec = a + 11;
             char *end = NULL;
