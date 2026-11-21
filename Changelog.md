@@ -3,6 +3,19 @@ Changelog:
 
 1.0.51:
 ======
+* Web Audio: `PannerNode` has `positionX/Y/Z` and `orientationX/Y/Z`
+  AudioParams, the distance and cone attributes and the legacy
+  `setPosition`/`setOrientation`, and `AudioContext.listener` is an
+  `AudioListener` with `positionX/Y/Z`, `forwardX/Y/Z`, `upX/Y/Z`,
+  `setPosition` and `setOrientation`. Emscripten's OpenAL layer threw on
+  the missing methods and stopped the game loop.
+* Long WebAssembly work is no longer halted as runaway script: time spent
+  executing wasm does not count toward the 60-second page JavaScript
+  limit, which a game initializing in the interpreter exceeded.
+* Headless PNG and PDF captures honour cross-origin isolation like the
+  browser, and an error thrown in a `requestAnimationFrame` callback is
+  logged with its stack. `WebAssembly.Module` and `WebAssembly.Instance`
+  objects carry their `Symbol.toStringTag`.
 * WebAssembly threads: `new WebAssembly.Memory({shared: true, ...})`
   makes a shared memory whose `buffer` is a `SharedArrayBuffer` over the
   wasm linear memory (reserved up to its maximum, capped at 1 GiB, so it

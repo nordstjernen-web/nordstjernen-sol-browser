@@ -890,6 +890,17 @@ ns_js_microtasks_may_drain(const ns_js *js)
     return js && !(js->ctx && JS_IsRunningScript(js->ctx));
 }
 
+void
+ns_js_credit_wasm_time(JSContext *ctx, gint64 elapsed_us)
+{
+    ns_js *js = ctx ? js_from_ctx(ctx) : NULL;
+    if (!js || elapsed_us <= 0) return;
+    if (js->eval_deadline_us != 0)
+        js->eval_deadline_us += elapsed_us;
+    if (js->js_monitor_deadline_us != 0)
+        js->js_monitor_deadline_us += elapsed_us;
+}
+
 static void
 ns_js_credit_pumped_time(ns_js *js, gint64 pump_start_us)
 {
@@ -15083,6 +15094,111 @@ ns_audio_make_node(JSContext *ctx, const char *kind)
     return n;
 }
 
+static const char *const ns_audio_space_params[3][3] = {
+    { "positionX", "positionY", "positionZ" },
+    { "orientationX", "orientationY", "orientationZ" },
+    { "upX", "upY", "upZ" },
+};
+
+static const char *const ns_audio_forward_params[3] = {
+    "forwardX", "forwardY", "forwardZ",
+};
+
+static void
+ns_audio_set_param_values(JSContext *ctx, JSValueConst target,
+                          const char *const names[3], int argc,
+                          JSValueConst *argv, int first)
+{
+    for (int i = 0; i < 3; i++) {
+        double v = 0;
+        if (first + i >= argc || JS_ToFloat64(ctx, &v, argv[first + i]))
+            continue;
+        JSValue param = JS_GetPropertyStr(ctx, target, names[i]);
+        if (JS_IsObject(param))
+            JS_SetPropertyStr(ctx, param, "value", JS_NewFloat64(ctx, v));
+        JS_FreeValue(ctx, param);
+    }
+}
+
+static JSValue
+ns_audio_set_position(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    ns_audio_set_param_values(ctx, this_val, ns_audio_space_params[0],
+                              argc, argv, 0);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_audio_panner_set_orientation(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv)
+{
+    ns_audio_set_param_values(ctx, this_val, ns_audio_space_params[1],
+                              argc, argv, 0);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_audio_listener_set_orientation(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv)
+{
+    ns_audio_set_param_values(ctx, this_val, ns_audio_forward_params,
+                              argc, argv, 0);
+    ns_audio_set_param_values(ctx, this_val, ns_audio_space_params[2],
+                              argc, argv, 3);
+    return JS_UNDEFINED;
+}
+
+static void
+ns_audio_add_params(JSContext *ctx, JSValueConst target,
+                    const char *const names[3], const double defaults[3],
+                    JSValueConst audio_ctx)
+{
+    for (int i = 0; i < 3; i++) {
+        JSValue param = ns_audio_make_param(ctx, defaults[i]);
+        if (JS_IsObject(audio_ctx))
+            JS_SetPropertyStr(ctx, param, "_ac", JS_DupValue(ctx, audio_ctx));
+        JS_SetPropertyStr(ctx, target, names[i], param);
+    }
+}
+
+static void
+ns_audio_init_panner(JSContext *ctx, JSValueConst n, JSValueConst audio_ctx)
+{
+    static const double origin[3] = { 0, 0, 0 };
+    static const double facing[3] = { 1, 0, 0 };
+    ns_audio_add_params(ctx, n, ns_audio_space_params[0], origin, audio_ctx);
+    ns_audio_add_params(ctx, n, ns_audio_space_params[1], facing, audio_ctx);
+    JS_SetPropertyStr(ctx, n, "panningModel", JS_NewString(ctx, "equalpower"));
+    JS_SetPropertyStr(ctx, n, "distanceModel", JS_NewString(ctx, "inverse"));
+    JS_SetPropertyStr(ctx, n, "refDistance", JS_NewFloat64(ctx, 1));
+    JS_SetPropertyStr(ctx, n, "maxDistance", JS_NewFloat64(ctx, 10000));
+    JS_SetPropertyStr(ctx, n, "rolloffFactor", JS_NewFloat64(ctx, 1));
+    JS_SetPropertyStr(ctx, n, "coneInnerAngle", JS_NewFloat64(ctx, 360));
+    JS_SetPropertyStr(ctx, n, "coneOuterAngle", JS_NewFloat64(ctx, 360));
+    JS_SetPropertyStr(ctx, n, "coneOuterGain", JS_NewFloat64(ctx, 0));
+    JS_SetPropertyStr(ctx, n, "channelCountMode",
+                      JS_NewString(ctx, "clamped-max"));
+    ns_bind_fn(ctx, n, "setPosition", ns_audio_set_position, 3);
+    ns_bind_fn(ctx, n, "setOrientation", ns_audio_panner_set_orientation, 3);
+}
+
+static JSValue
+ns_audio_make_listener(JSContext *ctx, JSValueConst audio_ctx)
+{
+    static const double origin[3] = { 0, 0, 0 };
+    static const double forward[3] = { 0, 0, -1 };
+    static const double up[3] = { 0, 1, 0 };
+    JSValue l = JS_NewObject(ctx);
+    ns_audio_add_params(ctx, l, ns_audio_space_params[0], origin, audio_ctx);
+    ns_audio_add_params(ctx, l, ns_audio_forward_params, forward, audio_ctx);
+    ns_audio_add_params(ctx, l, ns_audio_space_params[2], up, audio_ctx);
+    ns_bind_fn(ctx, l, "setPosition", ns_audio_set_position, 3);
+    ns_bind_fn(ctx, l, "setOrientation", ns_audio_listener_set_orientation, 6);
+    ns_set_tostring_tag(ctx, l, "AudioListener");
+    return l;
+}
+
 static JSValue
 ns_audio_create_node(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv, int magic)
@@ -15098,6 +15214,8 @@ ns_audio_create_node(JSContext *ctx, JSValueConst this_val,
     const char *kind = magic >= 0 && magic < (int)G_N_ELEMENTS(kinds)
                      ? kinds[magic] : "gain";
     JSValue n = ns_audio_make_node(ctx, kind);
+    if (strcmp(kind, "panner") == 0)
+        ns_audio_init_panner(ctx, n, this_val);
     if (JS_IsObject(this_val)) {
         JS_SetPropertyStr(ctx, n, "context", JS_DupValue(ctx, this_val));
         /* Params find the context's clock through _ac, so automation that
@@ -15296,7 +15414,7 @@ ns_audio_context_build(JSContext *ctx, double sample_rate)
     JS_SetPropertyStr(ctx, a, "outputLatency", JS_NewFloat64(ctx, 0.02));
     JS_SetPropertyStr(ctx, a, "destination",
                       ns_audio_make_node(ctx, "destination"));
-    JS_SetPropertyStr(ctx, a, "listener", JS_NewObject(ctx));
+    JS_SetPropertyStr(ctx, a, "listener", ns_audio_make_listener(ctx, a));
     JS_SetPropertyStr(ctx, a, "onstatechange", JS_NULL);
     JS_SetPropertyStr(ctx, a, "_listeners", JS_NewArray(ctx));
     JSValue worklet = JS_NewObject(ctx);
@@ -37805,13 +37923,20 @@ ns_js_run_animation_frame_internal(ns_js *js)
         if (JS_IsException(ret)) {
             JSValue ex = JS_GetException(callback_ctx);
             const char *msg = JS_ToCString(callback_ctx, ex);
+            JSValue stack = JS_GetPropertyStr(callback_ctx, ex, "stack");
+            const char *stk = JS_IsUndefined(stack)
+                ? NULL : JS_ToCString(callback_ctx, stack);
             if (msg && js->log_cb) {
                 char *line = g_strdup_printf(
-                    "JS error in requestAnimationFrame: %s", msg);
+                    "JS error in requestAnimationFrame: %s%s%s", msg,
+                    stk ? "\n" : "", stk ? stk : "");
                 js->log_cb(line, js->log_user_data);
                 g_free(line);
             }
+            if (stk) JS_FreeCString(callback_ctx, stk);
+            JS_FreeValue(callback_ctx, stack);
             if (msg) JS_FreeCString(callback_ctx, msg);
+            ns_js_report_uncaught(js, ex, js->current_url);
             JS_FreeValue(callback_ctx, ex);
         }
         JS_FreeValue(callback_ctx, ret);

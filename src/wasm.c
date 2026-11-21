@@ -6,6 +6,7 @@
 #include "wasm.h"
 #include "js_classid.h"
 #include "js_cage.h"
+#include "js.h"
 
 #if !defined(NS_HAVE_WAMR)
 
@@ -60,6 +61,7 @@ static JSClassID ns_wasm_global_class_id;
 static JSClassID ns_wasm_func_class_id;
 
 static GMutex ns_wasm_link_mutex;
+static _Thread_local gint64 ns_wasm_entered_us;
 static GMutex ns_wasm_buffers_mutex;
 static GHashTable *ns_wasm_buffers;
 
@@ -1314,8 +1316,12 @@ ns_wasm_call_function(JSContext *ctx, ns_wasm_instance *wi,
     }
 
     wi->call_depth++;
+    gint64 outer_mark = ns_wasm_entered_us;
+    ns_wasm_entered_us = g_get_monotonic_time();
     gboolean ok = wasm_runtime_call_wasm_a(wi->exec_env, func, n_results,
                                            results, n_params, args);
+    ns_js_credit_wasm_time(ctx, g_get_monotonic_time() - ns_wasm_entered_us);
+    ns_wasm_entered_us = outer_mark;
     wi->call_depth--;
 
     JSValue ret = ns_wasm_call_result(ctx, wi, ok, n_results, results);
@@ -1650,6 +1656,16 @@ ns_wasm_memory_grow(JSContext *ctx, JSValueConst this_val, int argc,
     }
     return JS_NewUint32(ctx, old_pages);
 }
+
+static const JSCFunctionListEntry ns_wasm_module_proto_funcs[] = {
+    JS_PROP_STRING_DEF("[Symbol.toStringTag]", "WebAssembly.Module",
+                       JS_PROP_CONFIGURABLE),
+};
+
+static const JSCFunctionListEntry ns_wasm_instance_proto_funcs[] = {
+    JS_PROP_STRING_DEF("[Symbol.toStringTag]", "WebAssembly.Instance",
+                       JS_PROP_CONFIGURABLE),
+};
 
 static const JSCFunctionListEntry ns_wasm_memory_proto_funcs[] = {
     JS_CGETSET_DEF("buffer", ns_wasm_memory_buffer_get, NULL),
@@ -2207,7 +2223,11 @@ ns_wasm_native_dispatch(wasm_exec_env_t exec_env, uint64_t *args)
         }
     }
 
+    if (ns_wasm_entered_us)
+        ns_js_credit_wasm_time(ctx,
+                               g_get_monotonic_time() - ns_wasm_entered_us);
     JSValue ret = JS_Call(ctx, b->fn, JS_UNDEFINED, (int)argc, argv);
+    ns_wasm_entered_us = g_get_monotonic_time();
     for (guint i = 0; i < argc; i++)
         JS_FreeValue(ctx, argv[i]);
 
@@ -3439,9 +3459,14 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
     JS_SetClassProto(ctx, ns_wasm_global_class_id, global_proto);
 
     JSValue module_proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, module_proto, ns_wasm_module_proto_funcs,
+                               G_N_ELEMENTS(ns_wasm_module_proto_funcs));
     JS_SetClassProto(ctx, ns_wasm_module_class_id,
                      JS_DupValue(ctx, module_proto));
     JSValue instance_proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, instance_proto,
+                               ns_wasm_instance_proto_funcs,
+                               G_N_ELEMENTS(ns_wasm_instance_proto_funcs));
     JS_SetClassProto(ctx, ns_wasm_instance_class_id,
                      JS_DupValue(ctx, instance_proto));
 

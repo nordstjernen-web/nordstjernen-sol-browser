@@ -131,6 +131,8 @@ void ns_net_referrer_policy_register(gconstpointer owner, const char *doc_url,
                                      const char *value);
 void ns_net_referrer_policy_unregister(gconstpointer owner);
 void ns_net_coep_register(gconstpointer owner, const char *doc_url);
+gboolean ns_net_document_cross_origin_isolated(const char *url,
+                                               const char *raw_headers);
 void ns_net_coep_unregister(gconstpointer owner);
 void ns_net_connection_allowlist_register(gconstpointer owner,
                                           const char *doc_url,

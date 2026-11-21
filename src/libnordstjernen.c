@@ -1450,34 +1450,6 @@ browser_register_referrer_policy(const ns_node *doc, const char *url)
     ns_net_referrer_policy_register(doc, url, combined);
 }
 
-static gboolean
-browser_header_token_is(const char *value, const char *const *tokens)
-{
-    if (!value) return FALSE;
-    g_autofree char *first = g_strndup(value, strcspn(value, ";,"));
-    g_strstrip(first);
-    for (; *tokens; tokens++)
-        if (g_ascii_strcasecmp(first, *tokens) == 0) return TRUE;
-    return FALSE;
-}
-
-static gboolean
-browser_cross_origin_isolated(const char *url, const char *raw_headers)
-{
-    if (!url || !(g_str_has_prefix(url, "https://") ||
-                  g_str_has_prefix(url, "http://localhost") ||
-                  g_str_has_prefix(url, "http://127.0.0.1")))
-        return FALSE;
-    static const char *const coop_ok[] = { "same-origin", NULL };
-    static const char *const coep_ok[] = { "require-corp", "credentialless",
-                                           NULL };
-    g_autofree char *coop =
-        ns_net_raw_header_values(raw_headers, "Cross-Origin-Opener-Policy");
-    g_autofree char *coep =
-        ns_net_raw_header_values(raw_headers, "Cross-Origin-Embedder-Policy");
-    return browser_header_token_is(coop, coop_ok) &&
-           browser_header_token_is(coep, coep_ok);
-}
 
 static ns_browser *
 browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
@@ -2049,8 +2021,8 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     g_pending_connection_allowlist =
         ns_net_raw_header_values(resp->raw_headers, "Connection-Allowlist");
     g_pending_cross_origin_isolated =
-        browser_cross_origin_isolated(resp->final_url ? resp->final_url : url,
-                                      resp->raw_headers);
+        ns_net_document_cross_origin_isolated(
+            resp->final_url ? resp->final_url : url, resp->raw_headers);
     g_free(g_pending_referrer_policy);
     g_pending_referrer_policy =
         ns_net_raw_header_values(resp->raw_headers, "Referrer-Policy");
