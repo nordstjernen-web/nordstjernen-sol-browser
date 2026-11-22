@@ -12,6 +12,16 @@ Changelog:
   children without a basis, so they fell back to their content height.
   The hero collage on the Pinterest front page is 600 px tall as in
   Chrome, where it was 641 px and cropped differently.
+* A shrink-to-fit box (absolutely positioned, floated, inline-block, a
+  flex item or a table cell) whose inline-block child has a percentage
+  `min-width` is as wide as its content again. While the parent was being
+  measured, the child's `min-width: 100%` was resolved against the width
+  available to the parent, so the child reported that whole width and the
+  parent filled its containing block. A percentage `min-width` cannot be
+  resolved while the parent's own width is still being worked out, so the
+  child now counts with its content width there. The tooltips of the JW
+  Player controls on weather.com are 20 px wide as in Chrome, where they
+  were 660 px.
 * `offsetParent` is `null` for an element that has no box: one with
   `display: none` or inside such an element, one with `display: contents`,
   and one that is not in the document. It is also `null` for `<body>`.

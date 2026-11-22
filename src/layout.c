@@ -10987,6 +10987,21 @@ widen_atomic_to_max_content(ns_box *ab, const ns_style *parent_style,
     ab->content_width = w;
 }
 
+static void
+narrow_atomic_to_max_content(ns_box *ab, const ns_style *parent_style,
+                             GArray **saved)
+{
+    double w = measure_natural_width(ab, parent_style);
+    if (w < 0 || !(w < ab->content_width)) return;
+    if (!*saved) *saved = g_array_new(FALSE, FALSE, sizeof(ns_atomic_geometry));
+    ns_atomic_geometry g = {
+        .box = ab, .width = ab->content_width, .height = ab->content_height,
+        .margin = ab->margin, .padding = ab->padding, .border = ab->border,
+    };
+    g_array_append_val(*saved, g);
+    ab->content_width = w;
+}
+
 static GArray *
 measure_inline_atomics_begin(ns_box *box, const ns_style *parent_style,
                              gboolean max_content)
@@ -11016,6 +11031,9 @@ measure_inline_atomics_begin(ns_box *box, const ns_style *parent_style,
             layout_box(ab, basis, parent_style);
         if (max_content && shrinks)
             widen_atomic_to_max_content(ab, parent_style, basis, &saved);
+        if (max_content && shrinks && ab->style &&
+            value_is_percent(ab->style->values[NS_CSS_MIN_WIDTH]))
+            narrow_atomic_to_max_content(ab, parent_style, &saved);
         if (to_min_content) {
             double w = min_width_of(ab, parent_style);
             if (w >= 0 && w < ab->content_width) ab->content_width = w;
