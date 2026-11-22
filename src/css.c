@@ -3515,6 +3515,7 @@ typedef struct ns_calc_term {
     double vw, vh, vmin, vmax;
     double num;
     gboolean is_number;
+    int extra_length_powers;
     guint8 fn;
     guint8 n_args;
     guint8 arg_none;
@@ -3583,12 +3584,28 @@ calc_term_fn_add(ns_calc_term *out, const ns_calc_term *rhs, double sign)
     memcpy(out->args, r.args, sizeof out->args);
 }
 
+static gboolean
+calc_term_reads_viewport(const ns_calc_term *v)
+{
+    return v->vw != 0 || v->vh != 0 || v->vmin != 0 || v->vmax != 0;
+}
+
+static void
+calc_term_scale_viewport(ns_calc_term *v, double m)
+{
+    v->vw *= m;
+    v->vh *= m;
+    v->vmin *= m;
+    v->vmax *= m;
+}
+
 static void
 calc_term_scale(ns_calc_term *v, double m)
 {
     calc_term_fn_scale(v, m);
     if (v->is_number) {
         v->num *= m;
+        calc_term_scale_viewport(v, isfinite(m) ? m : 0);
     } else if (isfinite(m)) {
         v->px *= m;
         v->pct *= m;
@@ -3881,6 +3898,81 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
 }
 
 static gboolean
+calc_term_is_absolute(const ns_calc_term *v)
+{
+    return !v->fn && v->pct == 0 && v->em == 0 && v->rem == 0 && v->lh == 0;
+}
+
+static int
+calc_term_length_power(const ns_calc_term *v)
+{
+    return v->is_number ? 0 : 1 + v->extra_length_powers;
+}
+
+static double
+calc_term_magnitude(const ns_calc_term *v)
+{
+    return v->is_number ? v->num : v->px;
+}
+
+static gboolean
+calc_term_same_relative_unit(const ns_calc_term *a, const ns_calc_term *b,
+                             double *ratio)
+{
+    if (a->is_number || b->is_number || a->fn || b->fn || a->px != 0 ||
+        b->px != 0 || a->lh != 0 || b->lh != 0)
+        return FALSE;
+    int units_a = (a->pct != 0) + (a->em != 0) + (a->rem != 0);
+    int units_b = (b->pct != 0) + (b->em != 0) + (b->rem != 0);
+    if (units_a != 1 || units_b != 1) return FALSE;
+    if (a->pct != 0 && b->pct != 0) *ratio = a->pct / b->pct;
+    else if (a->em != 0 && b->em != 0) *ratio = a->em / b->em;
+    else if (a->rem != 0 && b->rem != 0) *ratio = a->rem / b->rem;
+    else return FALSE;
+    return TRUE;
+}
+
+static gboolean
+calc_term_combine(ns_calc_term *out, const ns_calc_term *rhs, gboolean divide)
+{
+    double same_unit_ratio;
+    if (divide && calc_term_same_relative_unit(out, rhs, &same_unit_ratio)) {
+        *out = (ns_calc_term){ .num = same_unit_ratio, .is_number = TRUE };
+        return TRUE;
+    }
+    if (!calc_term_is_absolute(out) || !calc_term_is_absolute(rhs))
+        return FALSE;
+    if (calc_term_reads_viewport(rhs) &&
+        (divide || calc_term_reads_viewport(out)))
+        return FALSE;
+    int power = calc_term_length_power(out) +
+                (divide ? -1 : 1) * calc_term_length_power(rhs);
+    if (power < 0) return FALSE;
+    double a = calc_term_magnitude(out), b = calc_term_magnitude(rhs);
+    ns_calc_term result = { .is_number = power == 0,
+                            .extra_length_powers = power > 0 ? power - 1 : 0 };
+    double magnitude = divide ? a / b : a * b;
+    if (result.is_number) result.num = magnitude;
+    else result.px = magnitude;
+    if (isfinite(a) && isfinite(b) && isfinite(magnitude)) {
+        const ns_calc_term *reader = calc_term_reads_viewport(rhs) ? rhs : out;
+        double other = reader == rhs ? a : divide ? 1.0 / b : b;
+        result.vw = reader->vw * other;
+        result.vh = reader->vh * other;
+        result.vmin = reader->vmin * other;
+        result.vmax = reader->vmax * other;
+    }
+    *out = result;
+    return TRUE;
+}
+
+static gboolean
+calc_term_is_plain_scalar(const ns_calc_term *v)
+{
+    return v->is_number && !calc_term_reads_viewport(v);
+}
+
+static gboolean
 calc_product_parse(const char **pp, const char *end, ns_calc_term *out,
                    int depth)
 {
@@ -3896,20 +3988,22 @@ calc_product_parse(const char **pp, const char *end, ns_calc_term *out,
         ns_calc_term rhs;
         if (!calc_primary_parse(&p, end, &rhs, depth)) return FALSE;
         if (op == '*') {
-            if (out->is_number && rhs.is_number) {
+            if (calc_term_is_plain_scalar(out) &&
+                calc_term_is_plain_scalar(&rhs)) {
                 out->num *= rhs.num;
-            } else if (out->is_number) {
+            } else if (calc_term_is_plain_scalar(out)) {
                 double m = out->num;
                 *out = rhs;
                 calc_term_scale(out, m);
-            } else if (rhs.is_number) {
+            } else if (calc_term_is_plain_scalar(&rhs)) {
                 calc_term_scale(out, rhs.num);
-            } else {
+            } else if (!calc_term_combine(out, &rhs, FALSE)) {
                 return FALSE;
             }
-        } else {
-            if (!rhs.is_number) return FALSE;
+        } else if (calc_term_is_plain_scalar(&rhs)) {
             calc_term_scale(out, 1.0 / rhs.num);
+        } else if (!calc_term_combine(out, &rhs, TRUE)) {
+            return FALSE;
         }
         *pp = p;
     }
@@ -3930,10 +4024,16 @@ calc_expr_parse(const char **pp, const char *end, ns_calc_term *out,
         char op = *p++;
         ns_calc_term rhs;
         if (!calc_product_parse(&p, end, &rhs, depth)) return FALSE;
-        if (out->is_number != rhs.is_number) return FALSE;
+        if (out->is_number != rhs.is_number ||
+            out->extra_length_powers != rhs.extra_length_powers)
+            return FALSE;
         if (out->is_number) {
-            if (op == '+') out->num += rhs.num;
-            else           out->num -= rhs.num;
+            double sign = op == '+' ? 1.0 : -1.0;
+            out->num += sign * rhs.num;
+            out->vw += sign * rhs.vw;
+            out->vh += sign * rhs.vh;
+            out->vmin += sign * rhs.vmin;
+            out->vmax += sign * rhs.vmax;
             *pp = p;
             continue;
         }
@@ -4906,7 +5006,7 @@ parse_calc_inner(const char *text)
     gboolean parsed = FALSE;
     if (calc_expr_parse(&p, end, &term, 0)) {
         calc_skip_ws(&p, end);
-        if (p == end) {
+        if (p == end && term.extra_length_powers == 0) {
             if (term.is_number) return calc_num_value(term.num);
             calc_term_lengthify(&term);
             px = term.px;
