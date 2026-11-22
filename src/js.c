@@ -20558,7 +20558,11 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
                              ratio->u.keyword &&
                              strcmp(ratio->u.keyword, "auto") == 0);
             }
-            if (!preserve && n->parent && js && js->style_table) {
+            gboolean out_of_flow = computed &&
+                (ns_css_keyword_is(computed->values[NS_CSS_POSITION], "absolute") ||
+                 ns_css_keyword_is(computed->values[NS_CSS_POSITION], "fixed"));
+            if (!preserve && !out_of_flow && n->parent && js &&
+                js->style_table) {
                 const ns_style *parent_style =
                     g_hash_table_lookup(js->style_table, n->parent);
                 ns_display pd = ns_css_display_of(parent_style);
@@ -20567,6 +20571,11 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             }
             return g_strdup(preserve ? "auto" : "0px");
         }
+    }
+    if (pid == NS_CSS_WORD_SPACING) {
+        const ns_css_value *spacing = computed ? computed->values[pid] : NULL;
+        if (!spacing || ns_css_keyword_is(spacing, "normal"))
+            return g_strdup("0px");
     }
     if (pid == NS_CSS_OPACITY && js && js->style_table) {
         const ns_style *s = g_hash_table_lookup(js->style_table, n);

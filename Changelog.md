@@ -3,6 +3,11 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `getComputedStyle()`: `word-spacing` is a length, so `normal` reads as
+  `0px` (it was `normal`, which `parseFloat()` turns into `NaN`). An
+  absolutely positioned child of a flex or grid container reports
+  `min-width` and `min-height` as `0px`, not `auto`: it is not a flex or
+  grid item, so it has no automatic minimum size.
 * `calc()` divides a length by a length, as CSS Values 4 allows. The
   result is a number, so `calc(16px * (100vw / 1280px))` and the usual
   fluid type formula
