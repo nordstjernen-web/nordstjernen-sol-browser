@@ -126,6 +126,25 @@ aspect_ratio_number(const ns_css_value *v, gboolean *with_auto)
     return v->u.size.w > 0 && v->u.size.h > 0 ? v->u.size.w / v->u.size.h : -1;
 }
 
+static double
+box_aspect_ratio_height(const ns_box *box, double content_width)
+{
+    if (!box->style || content_width <= 0) return -1;
+    gboolean with_auto = FALSE;
+    double ratio = aspect_ratio_number(box->style->values[NS_CSS_ASPECT_RATIO],
+                                       &with_auto);
+    if (ratio <= 0) return -1;
+    if (with_auto ||
+        !ns_css_keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box"))
+        return content_width / ratio;
+    double border_box_width = content_width + box->padding.left +
+                              box->padding.right + box->border.left +
+                              box->border.right;
+    double height = border_box_width / ratio - box->padding.top -
+                    box->padding.bottom - box->border.top - box->border.bottom;
+    return MAX(height, 0);
+}
+
 static gboolean
 value_is_percent(const ns_css_value *v)
 {
@@ -335,10 +354,7 @@ containing_block_definite_height(const ns_box *box)
             bottom && !length_is_auto(bottom) &&
             p->content_height > 0)
             return p->content_height;
-        double ratio = aspect_ratio_number(p->style->values[NS_CSS_ASPECT_RATIO], NULL);
-        if (ratio > 0 && p->content_width > 0)
-            return p->content_width / ratio;
-        return -1;
+        return box_aspect_ratio_height(p, p->content_width);
     }
     if (value_is_percent(h)) {
         double base = box_is_doc_root(p) ? box_viewport_height(p)
@@ -14355,15 +14371,6 @@ flex_column_inset_height(const ns_box *box)
 }
 
 static double
-box_aspect_ratio_height(const ns_box *box, double cw)
-{
-    if (!box->style || cw <= 0) return -1;
-    double ratio = aspect_ratio_number(box->style->values[NS_CSS_ASPECT_RATIO],
-                                       NULL);
-    return ratio > 0 ? cw / ratio : -1;
-}
-
-static double
 flex_column_own_height(ns_box *box, double cw, gboolean *is_content,
                        gboolean *from_ratio)
 {
@@ -14378,6 +14385,7 @@ flex_column_own_height(ns_box *box, double cw, gboolean *is_content,
     if (h < 0) {
         h = box_aspect_ratio_height(box, cw);
         *from_ratio = h >= 0;
+        if (*from_ratio) return h;
     }
     if (h < 0 && box_read_definite_height(box) > 0) return box->definite_height;
     *is_content = FALSE;
@@ -15906,8 +15914,9 @@ grid_row_basis(const ns_box *box, double cw)
     const ns_css_value *hv = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
     if (hv && !box->block_size_indefinite &&
         (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
-        return clamp_height_minmax_px(box->style,
-                                      resolve_used_height(box, hv, cw, -1));
+        return specified_height_to_content(
+            box, clamp_height_minmax_px(box->style,
+                                        resolve_used_height(box, hv, cw, -1)));
     double inset = box_inset_definite_height(box);
     if (inset > 0) return inset;
     if (box_read_definite_height(box) > 0) return box->definite_height;
@@ -16423,8 +16432,8 @@ static void
 grid_relayout_percent_height_item(ns_box *c, double area_h,
                                   const ns_style *child_inherited)
 {
-    if (c->kind != NS_BOX_BLOCK || !c->style || area_h <= 0 ||
-        c->cb_height_override > 0)
+    if ((c->kind != NS_BOX_BLOCK && c->kind != NS_BOX_IMAGE) || !c->style ||
+        area_h <= 0 || c->cb_height_override > 0)
         return;
     if (!value_is_percent(c->style->values[NS_CSS_HEIGHT])) return;
     c->cb_height_override = area_h;
@@ -17022,7 +17031,10 @@ layout_grid(ns_box *box, double cw,
         c->cb_width_set = TRUE;
         grid_preset_stretch_height(c, box, placed_row, rs, area_h, row_basis,
                                    rows_tracks, rows_subgrid);
+        c->block_size_indefinite = area_h <= 0 && c->style &&
+            value_is_percent(c->style->values[NS_CSS_HEIGHT]);
         layout_box(c, item_w + c->margin.left + c->margin.right, child_inherited);
+        c->block_size_indefinite = FALSE;
         g_pending_subgrid_cols = NULL;
         g_pending_subgrid_rows = NULL;
         gboolean auto_h_margin = c->style &&
@@ -18843,10 +18855,8 @@ flex_done: ;
         }
         box->content_height = explicit_h;
     } else {
-        double ratio = box->style
-            ? aspect_ratio_number(box->style->values[NS_CSS_ASPECT_RATIO], NULL) : -1;
-        if (ratio > 0 && box->content_width > 0) {
-            double aspect_h = box->content_width / ratio;
+        double aspect_h = box_aspect_ratio_height(box, box->content_width);
+        if (aspect_h >= 0) {
             gboolean content_floor =
                 !(mnh && (mnh->kind == NS_CSS_V_LENGTH ||
                           mnh->kind == NS_CSS_V_CALC)) &&

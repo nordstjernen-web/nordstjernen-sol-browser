@@ -43637,6 +43637,14 @@ ns_row_group_rect_for_this(JSContext *ctx, JSValueConst this_val,
 }
 
 static gboolean
+ns_element_is_display_contents(const ns_js *js, const ns_node *n)
+{
+    const ns_style *s = js->style_table
+        ? g_hash_table_lookup(js->style_table, n) : NULL;
+    return s && ns_display_is_contents(ns_css_display_of(s));
+}
+
+static gboolean
 ns_inline_rect_for_this(JSContext *ctx, JSValueConst this_val,
                         double *x, double *y, double *w, double *h)
 {
@@ -43646,6 +43654,7 @@ ns_inline_rect_for_this(JSContext *ctx, JSValueConst this_val,
     if (!js->layout_root) return FALSE;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
+    if (ns_element_is_display_contents(js, n)) return FALSE;
     return ns_box_inline_rect_for_dom(js->layout_root, n, x, y, w, h);
 }
 
@@ -44728,6 +44737,22 @@ ns_offset_parent_origin(JSContext *ctx, JSValueConst this_val,
     }
 }
 
+static gboolean ns_node_is_connected(const ns_node *n);
+
+static gboolean
+ns_element_generates_no_box(const ns_js *js, const ns_node *n)
+{
+    if (!js->style_table) return FALSE;
+    const ns_style *own = g_hash_table_lookup(js->style_table, n);
+    if (own && ns_display_is_contents(ns_css_display_of(own))) return TRUE;
+    for (const ns_node *p = n; p && p->kind != NS_NODE_DOCUMENT; p = p->parent) {
+        if (p->kind != NS_NODE_ELEMENT) continue;
+        const ns_style *s = g_hash_table_lookup(js->style_table, p);
+        if (s && ns_display_is_none(ns_css_display_of(s))) return TRUE;
+    }
+    return FALSE;
+}
+
 static JSValue
 ns_element_get_offsetParent(JSContext *ctx, JSValueConst this_val)
 {
@@ -44735,6 +44760,10 @@ ns_element_get_offsetParent(JSContext *ctx, JSValueConst this_val)
     if (js) ns_js_flush_layout(js);
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return JS_NULL;
+    if (ns_node_is_tag(n, NS_TAG_BODY) || ns_node_is_tag(n, NS_TAG_HTML))
+        return JS_NULL;
+    if (!ns_node_is_connected(n)) return JS_NULL;
+    if (js && ns_element_generates_no_box(js, n)) return JS_NULL;
     const ns_style *own = js && js->style_table
                         ? g_hash_table_lookup(js->style_table, n) : NULL;
     if (own && ns_css_keyword_is(own->values[NS_CSS_POSITION], "fixed"))
@@ -46913,6 +46942,7 @@ ns_element_getClientRects(JSContext *ctx, JSValueConst this_val,
         if (js && node && node->kind == NS_NODE_ELEMENT &&
             !ns_svg_foreign_ancestor(node)) {
             ns_js_flush_layout(js);
+            if (ns_element_is_display_contents(js, node)) return arr;
             GArray *rects = js->layout_root
                 ? ns_box_inline_rects_for_dom(js->layout_root, node) : NULL;
             if (rects && rects->len >= 8) {

@@ -13,6 +13,37 @@ Changelog:
   child now counts with its content width there. The tooltips of the JW
   Player controls on weather.com are 20 px wide as in Chrome, where they
   were 660 px.
+* `offsetParent` is `null` for an element that has no box: one with
+  `display: none` or inside such an element, one with `display: contents`,
+  and one that is not in the document. It is also `null` for `<body>`.
+  All of these returned an ancestor, usually `<body>`, so the common
+  visibility test `el.offsetParent !== null` saw hidden elements as
+  visible.
+* `getBoundingClientRect()`, `getClientRects()` and the `offset*`
+  properties of a `display: contents` element inside an inline element
+  report no box. The element's text still belongs to the line of the
+  inline parent, and its extent was returned as if it were the element's
+  own box. Chrome returns an empty rectangle and an empty list.
+* Grid: a grid item with a percentage height no longer takes that
+  percentage of the whole grid while the rows are being sized. Its row
+  has no height yet at that point, so the percentage counts as `auto`,
+  and the item is laid out again against its row afterwards (images
+  too). An item with `height: 100%` in the first of two `1fr` rows used
+  to become as tall as the grid and push the second row out. The product
+  tiles on the Amazon front page show their four pictures again instead
+  of two stretched ones.
+* Grid: the rows of a `box-sizing: border-box` grid with a height are
+  sized against its content height. They were sized against the whole
+  border box, so in a 100 px tall grid with 10 px padding two `1fr` rows
+  were 50 px each and ran 20 px past the padding, `50%` rows likewise,
+  and `repeat(auto-fill, 20px)` made one row too many.
+* `aspect-ratio` on a `box-sizing: border-box` box sets the ratio of the
+  border box. The height was computed from the content width alone, so a
+  400 px wide box with `aspect-ratio: 2 / 1`, 10 px padding and a 5 px
+  border was 215 px tall where it should be 200 px. `auto <ratio>` keeps
+  working on the content box, which is what Chrome does. Blocks, column
+  flex containers and the percentage heights of their children all use
+  the same height now.
 * Grid: the rows of a grid whose height comes from `aspect-ratio` fill
   that height. The ratio gave the box its height, but the rows were sized
   as if the height were indefinite: `1fr` rows and percentage rows of
