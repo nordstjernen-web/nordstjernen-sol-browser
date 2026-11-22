@@ -20879,8 +20879,7 @@ style_put(ns_style *s, ns_css_prop prop, ns_css_value *v)
 static ns_css_value *
 px_value(double px)
 {
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_LENGTH;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_LENGTH);
     v->u.length.unit = NS_CSS_UNIT_PX;
     v->u.length.v = px;
     return v;
@@ -20889,8 +20888,7 @@ px_value(double px)
 static ns_css_value *
 keyword_value_take(char *kw)
 {
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = kw;
     return v;
 }
@@ -20898,8 +20896,7 @@ keyword_value_take(char *kw)
 static ns_css_value *
 keyword_value(const char *kw)
 {
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = g_strdup(kw);
     return v;
 }
@@ -21080,8 +21077,7 @@ style_swap_words(ns_style *c, ns_css_prop prop, const char *const (*pairs)[2],
         ? ns_css_anchor_fn_flip(v->u.keyword, pairs, n_pairs, FALSE)
         : swap_words(v->u.keyword, pairs, n_pairs);
     if (!swapped) return;
-    ns_css_value *nv = g_new0(ns_css_value, 1);
-    nv->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *nv = ns_css_value_new(NS_CSS_V_KEYWORD);
     nv->u.keyword = swapped;
     ns_css_value_free(c->values[prop]);
     c->values[prop] = nv;
