@@ -15889,7 +15889,9 @@ grid_row_basis(const ns_box *box, double cw)
                                       resolve_used_height(box, hv, cw, -1));
     double inset = box_inset_definite_height(box);
     if (inset > 0) return inset;
-    return box_read_definite_height(box) > 0 ? box->definite_height : -1;
+    if (box_read_definite_height(box) > 0) return box->definite_height;
+    double ratio_h = hv ? -1 : box_aspect_ratio_height(box, cw);
+    return ratio_h < 0 ? -1 : clamp_height_minmax_px(box->style, ratio_h);
 }
 
 static double
@@ -15898,11 +15900,14 @@ grid_used_content_height(const ns_box *box, double cw)
     if (box_height_flexed_in_column(box)) return box->definite_height;
     double eh = box_style_definite_height(box, cw);
     if (eh < 0) {
+        double ratio_h = box->style->values[NS_CSS_HEIGHT]
+            ? -1 : box_aspect_ratio_height(box, cw);
         const ns_css_value *mnv = box->style->values[NS_CSS_MIN_HEIGHT];
         if (!mnv || (mnv->kind != NS_CSS_V_LENGTH && mnv->kind != NS_CSS_V_CALC))
-            return -1;
+            return ratio_h;
         double min_h = resolve_used_height(box, mnv, cw, -1);
-        return min_h > 0 ? specified_height_to_content(box, min_h) : -1;
+        min_h = min_h > 0 ? specified_height_to_content(box, min_h) : -1;
+        return MAX(min_h, ratio_h);
     }
     eh = clamp_height_minmax_px(box->style, eh);
     if (keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box"))
