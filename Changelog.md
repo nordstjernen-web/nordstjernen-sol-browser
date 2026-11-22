@@ -3,6 +3,16 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `calc()` divides a length by a length, as CSS Values 4 allows. The
+  result is a number, so `calc(16px * (100vw / 1280px))` and the usual
+  fluid type formula
+  `clamp(20px, 20px + (48px - 20px) * (100vw - 390px) / (1920px - 390px), 48px)`
+  now work. A divisor with a unit used to make the whole declaration
+  invalid, so the property kept its inherited or initial value: every
+  heading on anthropic.com came out at 16 px. Lengths can also be
+  multiplied as long as the units cancel by the end, a percentage can be
+  divided by a percentage, and em by em. A result that depends on a
+  viewport unit still follows the viewport when the window is resized.
 * A percentage height inside a box that gets its height from
   `aspect-ratio` resolves against the height the box really has. Two
   cases were wrong. `max-height` and `min-height` of the ratio box were
