@@ -3,6 +3,13 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: a track list whose tracks are not separated by white space, as
+  minifiers write it (`minmax(0,1fr)340px`, `100px[mid]1fr`,
+  `repeat(2,100px)minmax(0,1fr)`), is read as the same tracks as with
+  spaces. A function used to take everything up to the next space as part
+  of itself, so the declaration was dropped and the grid fell back to one
+  column. The CNN front page lays its lead story and its right-hand rail
+  out side by side again.
 * docs: second full WPT run (`docs/wpt-full-report-2026-11-22.md`):
   14,149 fully passing files (+2,253), 44.4 % file-weighted (+7.2 points),
   `encoding/` at 92 %; flags a reproducible crash in module-script loading.
