@@ -15896,8 +15896,9 @@ grid_row_basis(const ns_box *box, double cw)
     const ns_css_value *hv = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
     if (hv && !box->block_size_indefinite &&
         (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
-        return clamp_height_minmax_px(box->style,
-                                      resolve_used_height(box, hv, cw, -1));
+        return specified_height_to_content(
+            box, clamp_height_minmax_px(box->style,
+                                        resolve_used_height(box, hv, cw, -1)));
     double inset = box_inset_definite_height(box);
     if (inset > 0) return inset;
     if (box_read_definite_height(box) > 0) return box->definite_height;
