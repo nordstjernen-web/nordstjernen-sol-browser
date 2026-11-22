@@ -3,6 +3,9 @@ Changelog:
 
 1.0.51-dev:
 ======
+* docs: second full WPT run (`docs/wpt-full-report-2026-11-22.md`):
+  14,149 fully passing files (+2,253), 44.4 % file-weighted (+7.2 points),
+  `encoding/` at 92 %; flags a reproducible crash in module-script loading.
 * Legacy encodings: pages in Shift_JIS, EUC-JP, ISO-2022-JP, EUC-KR,
   Big5, GBK and the single-byte encodings now behave as their charset
   says. `document.characterSet` reports the encoding the page was decoded
