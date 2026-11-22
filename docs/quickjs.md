@@ -15,10 +15,12 @@ The whole binding, `src/js.c` and its satellites, is written against the
 quickjs-ng-style API; the engine supplies that API partly itself, through
 the browser hooks listed below, and partly through a small adapter.
 
-Until 2026-11 a second engine, a fork of quickjs-ng in `src/quickjs/`,
-could be built with `-Dquickjs=quickjs-ng`; it was removed. Why Bellard's
-engine became the default is in
-[`quickjs-bellard-default.md`](quickjs-bellard-default.md).
+Bellard's engine has been the default since 1.0.47. Before that it was
+fetched by `subprojects/quickjs.wrap` with a patch series; the heap
+hardening rewrites several hundred field accesses in `quickjs.c`, which a
+patch series cannot carry, so the engine became an in-tree fork. Until
+2026-11 a second engine, a fork of quickjs-ng in `src/quickjs/`, could be
+built with `-Dquickjs=quickjs-ng`; it and the option were removed.
 
 ## The in-tree fork of Bellard's QuickJS
 
@@ -67,23 +69,59 @@ Drop one when upstream fixes it.
 
 ### Moving to a newer upstream commit
 
-The engine is a fork now, so a refresh is a merge, as for the other
-vendored engines ([`vendored-engine-updates.md`](vendored-engine-updates.md)):
+The engine is a fork, so a refresh is a merge against upstream `master`:
 
 1. Clone bellard/quickjs, check out the base commit named in the table
    above and the new one.
-2. 3-way merge each file (`git merge-file ours base theirs`). Everything
-   but `quickjs.c`, `quickjs.h`, `quickjs-libc.c` and `list.h` is
-   unmodified and can be copied.
+2. Classify every carried file. One that only upstream changed is copied;
+   one that only we changed is kept; one that both changed is 3-way merged
+   (`git merge-file ours base theirs`), reviewing every hunk. Sources are
+   listed explicitly in `src/quickjs-bellard/meson.build`, so a new
+   upstream file in an unused area is simply not compiled.
 3. Declare any new pointer field of a heap structure `JS_CPTR(T)`, add it
-   to the `BELLARD_FIELDS` table in `scripts/quickjs-cage-rewrite.py`, run
+   to the `FIELDS` table in `scripts/quickjs-cage-rewrite.py`, run
    `scripts/quickjs-cage-rewrite.py --apply`, and convert
-   the sites it reports by hand.
+   the sites it reports by hand. A new native-pointer or `JSContext *`
+   field goes through the matching pointer table instead.
 4. Compile `quickjs.c` once with `-Wall` and read every `-Wint-conversion`
    and `-Wincompatible-pointer-types` warning: a compressed field read raw,
    or a raw field read through `js_cload`, shows up there. The library
    target itself builds with `-w`.
-5. Update the base commit in the table, then run the checks below.
+5. Fix the adapter if the binding no longer compiles, update the base
+   commit in the table and add a row to the refresh log, then run the
+   checks below.
+
+The encoder aborts on a pointer from outside the cage and the lists abort
+on a corrupted link, so a missed conversion fails loudly in the first test
+run rather than silently.
+
+Fork-local pieces a refresh touches, by file:
+
+| File | What is ours |
+|---|---|
+| `quickjs-cage.c`, `quickjs-cage.h` | the cage allocator; no upstream counterpart |
+| `quickjs-cptr.h`, `quickjs-hardening.h` | compressed fields, masking, pointer and context tables; included from `quickjs.c` |
+| `list.h` | neighbour checks in `__list_add` and `list_del` |
+| `quickjs.h` | `JS_CAGE_BOXING` layout, `JS_SetHeapCage`, `JS_Cage*`, and the browser hooks |
+| `quickjs.c` | the cage and pointer-table block near the top of the file, the trusted block path in the arena front end, the `js_cload` / `js_cstore` rewrites the script reproduces, buffer pointers read through `js_abuf_data` / `js_ta_ptr`, the carried security fixes, and the browser hooks at the end of the file |
+| `quickjs-libc.c` | SharedArrayBuffer memory for the host tools taken from the cage |
+| `libregexp.c`, `libregexp-opcode.h` | 16-bit capture indices and the anchored-pattern speedup (see "Browser hooks" below) |
+| `intl/*.c` | the default locale comes from `JS_GetDefaultLocale` instead of a fixed `en-US` |
+| `qjs.c`, `run-test262.c` | no second `Intl`/`Temporal` initialisation; portability edits |
+| `bcgen.c`, `meson.build` | ours entirely; upstream has neither |
+
+`git diff <fork commit> HEAD -- src/quickjs-bellard` is the authoritative
+list; every other file is upstream's and can be copied.
+
+### Refresh log
+
+| Date | Base | Notes |
+|---|---|---|
+| 2026-11-09 | `712e8c0` → `e5ac135` | Seventeen upstream commits, mostly memory-safety fixes (`ArrayBuffer` release callbacks run twice, #606; stale typed-array buffer length, #608; allocation failures in `JS_DefineProperty` and `add_fast_array_element`). The twelve carried fixes in the table above were added in the same change. |
+| 2026-11-10 | `e5ac135` → `e585640` | The engine moved from the wrap into `src/quickjs-bellard/`. Five upstream commits: the object-spread fix for strings (#611), stricter Temporal time zone validation and three Intl fixes for #610 points 3, 4 and 11. |
+
+The refreshes of the removed quickjs-ng and Lexbor forks, from 2026-06 to
+2026-11, are in the git history only.
 
 ## Browser hooks in Bellard's engine
 
@@ -201,6 +239,59 @@ engine code:
 
 `docs/heap-hardening.md` has the design, the inventory of what is still
 raw, and the measurements.
+
+### The hardening stages in this engine
+
+The stages were first built in the quickjs-ng fork and ported. Every one
+of them is in Bellard's engine:
+
+| Stage | In Bellard's engine |
+|---|---|
+| 1a cage | `quickjs-cage.c`. `JS_NewRuntime()` gives each runtime a heap in the process-wide 4 GB cage. The engine's small-block arena, whose bookkeeping is in-band, steps aside while the cage is active. Blocks are released by address, never by the header inside the cage. |
+| 2a buffers | `JSArrayBuffer.data` is a compressed field, so a foreign backing store cannot be stored; `JS_NewArrayBuffer` and the SharedArrayBuffer allocation hook refuse one with an exception. Typed-array element pointers are masked into the cage on every read. |
+| 2b tables | Host opaques go through the tagged external pointer table. C functions, data functions, jobs, C-module init functions and ArrayBuffer free hooks are indexes into the typed code pointer table; the entry holds `cproto`, `magic` and the argument count. Auto-init properties name their function-list entry by index. |
+| 3p trusted structures | `JSRuntime`, `JSContext`, the class table, the atom table and hash, the shape hash and async Atomics waiters are trusted blocks. Realm references in heap objects are context-table indexes checked against the runtime. Class and atom lookups reachable from heap data are bounded. |
+| 3a.1 caged values | `JS_CAGE_BOXING`: upstream already NaN-boxes values on x86-64 with a 47-bit pointer; the caged layout uses a 32-bit tag shift and a 32-bit cage offset. `JSObject` stays at 56 bytes. |
+| 3a.2 compressed fields | the `FIELDS` table in `scripts/quickjs-cage-rewrite.py`, plus the Map hash table, whose buckets are compressed slots. |
+| safe-linked lists | `list.h` checks both neighbours before every insert and unlink. |
+| 3b trusted bytecode | planned. |
+
+Where Bellard's code is shaped differently from the fork the design was
+first written for:
+
+- `JS_SetOpaque` serves built-in and host classes alike, so it picks the
+  encoding by class id. `Intl` and `Temporal` register ordinary class ids
+  and need no tag of their own.
+- A property's accessor pair and auto-init record are separate
+  allocations (`JSPropertyGetSet`, `JSPropertyAutoInit`), reached through
+  compressed fields. The auto-init record holds a context index, an id
+  that is bounded before it selects a function, and an opaque that is a
+  function-list index or a cage offset.
+- A zero-size allocation gets a real cage block while the cage is active,
+  because upstream's shared zero-size block lies in the runtime, outside
+  the cage, and could not be stored in a compressed field.
+- There are no weak-reference chains to convert: upstream counts weak
+  references on the object instead.
+
+Of the hardening review findings in `heap-hardening.md`, M1 does not
+apply to this engine: its engine-private name table and bitmap are
+trusted blocks outside the cage, and the brand of a native function lives
+in its code pointer table entry. M2 applies.
+
+### Cost
+
+When the hardening was ported (2026-11), an allocation-heavy
+microbenchmark (3 million object and array allocations, a 300 000-entry
+Map, 200 000 string concatenations) took about 570 to 650 ms on the
+hardened engine against 360 to 480 ms on unmodified upstream, on one
+4-core container. Most of that is the arena bypass: with the cage active
+every block comes from the cage allocator instead of upstream's in-band
+arena.
+
+A full parallel test262 run is several times slower than on upstream,
+with most of the time in the kernel: the runner creates and destroys a
+runtime per test, and each one commits and decommits cage chunks. A
+renderer creates a handful of runtimes in its lifetime.
 
 ## Checking a change
 

@@ -23,7 +23,7 @@ request a shell sends after spawning a renderer is `POST /hello`; the
 renderer answers
 
 ```json
-{"protocol": 1, "engine": "nordstjernen", "version": "1.0.44-dev"}
+{"protocol": 1, "engine": "nordstjernen", "version": "1.0.51-dev"}
 ```
 
 A shell refuses a renderer that does not answer, or whose `protocol` differs
@@ -47,13 +47,14 @@ Every request is `POST <path>` with an `application/json` body. The reply is
 
 | Area | Paths |
 |------|-------|
-| Lifecycle | `/hello`, `/quit`, `/viewport`, `/colorscheme`, `/clear-cache`, `/policy` |
+| Lifecycle | `/hello`, `/quit`, `/viewport`, `/colorscheme`, `/clear-cache`, `/policy`, `/carry` |
 | Navigation and rendering | `/open`, `/render`, `/tick`, `/favicon`, `/dump`, `/export`, `/print`, `/screenshot`, `/pdf` |
 | Pointer and keyboard | `/click`, `/hover`, `/scroll`, `/scrollbar-press`, `/scrollbar-drag`, `/scrollbar-release`, `/release`, `/key`, `/select`, `/link`, `/dropfiles`, `/contextmenu` |
 | Editing | `/focused-editable`, `/focused-editable-state`, `/focused-editable-selection`, `/clipboard`, `/find` |
 | Scripting and diagnostics | `/eval`, `/console`, `/remote-call`, `/webdriver` |
 | Popups and downloads | `/popup-poll`, `/popup-deliver`, `/download-start`, `/download-poll`, `/download-cancel` |
 | Permissions and capabilities | `/permission`, `/capability` (`/camera` and `/webgl` are deprecated aliases) |
+| Web Authentication | `/webauthn-poll`, `/webauthn-deliver` (see [webauthn.md](webauthn.md)) |
 | Storage | `/session-storage`, `/cookies` |
 | Media | `/media`, `/audio-event` |
 
@@ -62,6 +63,11 @@ These drive the `prefers-color-scheme` and `prefers-reduced-motion` media
 features. A renderer leaves the motion preference unchanged when the field
 is absent. At launch, the shell passes the same two preferences as
 `NS_COLOR_SCHEME` (`light`/`dark`) and `NS_REDUCED_MOTION` (`0`/`1`).
+
+`/carry` moves the state a tab keeps across a replacement of its renderer
+(the referrer, the pending navigation and a stashed form POST):
+`{"op": "get"}` answers it as text and `{"op": "set", "data": ...}` loads
+it into the new renderer.
 
 `/render` and `/tick` are the heartbeat: the shell calls them from its frame
 clock and the renderer reports page geometry, animation state and the
@@ -77,7 +83,8 @@ the next `/render` or `/tick` reply as an `X-*` header (or a field of the
 |--------|---------|
 | `X-Nav` | a script- or link-initiated navigation the shell must perform |
 | `X-Download` | a download offer (the shell decides, prompts and writes the file) |
-| `X-Popup` | a `window.open` request |
+| `X-Popup` | a `window.open` request is waiting; the shell fetches it with `/popup-poll` |
+| `X-WebAuthn` | a Web Authentication request is waiting; the shell fetches it with `/webauthn-poll` |
 | `X-Capability` | one or more `<kind> <origin>` entries separated by `;`: the page is suspended until the shell decides (see "Capabilities") |
 | `X-Camera` | deprecated: the origin of a pending camera request, kept for shells that predate `X-Capability` |
 | `X-WebGL` | WebGL activity, for the status bar |
@@ -85,6 +92,10 @@ the next `/render` or `/tick` reply as an `X-*` header (or a field of the
 | `X-Config` | a settings change requested by a privileged page |
 | `X-Window-Action` | fullscreen enter/exit |
 | `X-Pointer-Lock` | pointer-lock state |
+| `X-Clipboard` | the page has clipboard data waiting for the shell (`/clipboard`) |
+| `X-History-Clear` | a privileged page asked for the browsing history to be erased |
+| `X-Session-Gen` | the generation of the tab's `sessionStorage`, so the shell knows when to save it (`/session-storage`) |
+| `X-Wake` | on a `/render` reply, milliseconds until the page next needs a frame while it is animating |
 
 The shell validates every side-channel value before acting on it (allowed
 schemes, allowed actions, allowed paths; see
@@ -136,11 +147,11 @@ gate in the engine and nothing in the shell.
 
 A shell depends on `src/engine_protocol.h`, `src/rproc_http.h` and
 `src/ipc_http.h`, plus the platform library (settings, i18n, history,
-bookmarks, the sandbox). The GTK shell still includes three engine headers
-for one purpose, rasterising its own SVG icons through the engine's SVG
-renderer (`src/gtk/icons.c`); that is the remaining coupling to remove, by
-moving icon rasterisation behind the protocol or pre-rendering the icons at
-build time.
+bookmarks, the sandbox). Built with GTK 4.22 or newer the GTK shell links
+only that platform library. With an older GTK it also compiles
+`src/gtk/icons.c`, which rasterises the shell's SVG icons through the
+engine's SVG renderer, and then links the engine library
+(`src/gtk/meson.build`).
 
 ## WebDriver and cookies
 

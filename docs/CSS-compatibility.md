@@ -21,6 +21,8 @@ the 1.0.31-dev source. The `env()`, flow-relative property, sticky,
 `@keyframes` / `MediaList` object-model rows were revised for 1.0.50-dev
 after a check against CSS Snapshot 2026 (see
 [Checked against CSS Snapshot 2026](#checked-against-css-snapshot-2026)).
+The `grid-template-areas`, constructable-stylesheet and View Transitions
+rows were updated for 1.0.51-dev.
 
 **Legend:** ✅ implemented · 🟡 partial / approximated · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -125,7 +127,7 @@ after a check against CSS Snapshot 2026 (see
 | Topic | Status | Notes |
 |-------|:--:|------|
 | `grid-template-columns` / `-rows` (px, %, `fr`, `auto`, `minmax()`, `repeat()`, `auto-fit`/`auto-fill`) | ✅ | |
-| `grid-template-areas` | ✅ | named-area placement |
+| `grid-template-areas` | ✅ | named-area placement; rows are split into cells as the grid spec tokenizes them (`". .main. ."` is five cells), and areas that are not rectangles make the declaration invalid |
 | `grid-column` / `grid-row` / `-start` / `-end` / `grid-area` (line numbers & spans) | ✅ | |
 | `gap` / `row-gap` / `column-gap` | ✅ | |
 | Auto-placement (`grid-auto-flow`, `grid-auto-rows`, `grid-auto-columns`) | ✅ | row-major flow with spanning; `grid-auto-flow: dense` back-fills earlier holes; `grid-auto-flow: column` flows column-major down the explicit rows, creating implicit columns sized by `grid-auto-columns` (cycled, `auto` fallback) after the template tracks (`layout_grid` in `src/layout.c`); the legacy `grid-gap`/`grid-row-gap`/`grid-column-gap` aliases map to `gap`/`row-gap`/`column-gap` |
@@ -312,7 +314,7 @@ same task.
 | `insertRule` / `deleteRule` (sheet + grouping) | ✅ | index validation (`IndexSizeError`), parse errors (`SyntaxError`), `@import`/`@namespace` constraints; mutates the live `CSSRuleList` in place |
 | `CSSGroupingRule` / `CSSMediaRule` / `CSSSupportsRule` | ✅ | nested `cssRules`; `CSSMediaRule` serializes its media query list (lower-cased types/features, leading `all and` dropped), and `media.appendMedium` / `deleteMedium` / assignment change the rule's condition |
 | `CSSStyleDeclaration` (`el.style`) | ✅ | `getPropertyValue` / `setProperty` / `removeProperty` / `getPropertyPriority`, indexed `item()` + `length`, `Symbol.iterator`, `cssText` round-trip |
-| `new CSSStyleSheet()` + `adoptedStyleSheets` | 🟡 | `replace` / `replaceSync` apply styles and `adoptedStyleSheets` works on documents and shadow roots; rule introspection on a *constructed* sheet is limited |
+| `new CSSStyleSheet()` + `adoptedStyleSheets` | 🟡 | `replace` / `replaceSync` apply styles and `adoptedStyleSheets` works on documents and shadow roots; a CSS module script (`import sheet from "./x.css" with { type: "css" }`) yields such a sheet; rule introspection on a *constructed* sheet is limited |
 | Full selector serialization | ❌ | the CSSOM "serialize a group of selectors" canonicalisation (e.g. `*\|div` → `div`, `:after` → `::after`) is not implemented |
 
 ---
@@ -333,8 +335,8 @@ pass. What that check found and is still open:
 | `offset-path` (Motion Path 1) | ❌ | parsed, the box is not moved |
 | Ruby layout | ❌ | `<rt>` renders inline after its base |
 | `:state()` | ❌ | `ElementInternals.states` is a stub |
-| Parsed without effect | ❌ | `text-emphasis`, `box-decoration-break`, `text-combine-upright`, `text-orientation`, `mask-border`, `font-palette`, `font-size-adjust`, `font-synthesis`, `font-optical-sizing`, `hyphenate-character`, `line-break`, `image-orientation`, `margin-trim`, `display: run-in`, `view-transition-name` |
-| View Transitions 1 | 🟡 | `document.startViewTransition()` runs the callback and settles its promises; nothing is captured or cross-faded |
+| Parsed without effect | ❌ | `text-emphasis`, `box-decoration-break`, `text-combine-upright`, `mask-border`, `font-palette`, `font-size-adjust`, `font-synthesis`, `font-optical-sizing`, `hyphenate-character`, `line-break`, `image-orientation`, `margin-trim`, `display: run-in`, `view-transition-name` |
+| View Transitions 1 | 🟡 | `document.startViewTransition()` cross-fades the whole page over 250 ms; elements with `view-transition-name` are not animated separately and the `::view-transition-*` pseudo-elements cannot be styled |
 
 ## Design constraints
 

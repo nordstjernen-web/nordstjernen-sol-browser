@@ -10,17 +10,21 @@ is resolved from Alpine system packages, and `abuild`'s `tracedeps` derives
 the `depends=` automatically from the linked shared objects, so the
 dependency list is always exactly what the binary needs.
 
-The build is fully offline: Wuffs, pl_mpeg and web-text-lib (the
+The build is fully offline: pl_mpeg and web-text-lib (the
 text-shaping Pango fork, `src/web-text-lib/`) are vendored in the source
-tarball and built from it, so nothing is fetched during Alpine's
-network-isolated `build()` phase. `build()` passes `-Dwebgpu=disabled`:
-wgpu-native publishes no musl release. The APKBUILD
+tarball, and the pinned PDF.js, Wuffs and WAMR tarballs that meson would
+otherwise download through its wraps are listed in `source=` and copied
+into `subprojects/packagecache/` by `prepare()`, so nothing is fetched
+during Alpine's network-isolated `build()` phase. `build()` passes
+`-Dwebgpu=disabled`: wgpu-native publishes no musl release. The APKBUILD
 declares `arch="x86_64 aarch64"`.
 
-`makedepends` also lists every auto-detected optional library, so the
-package gets the full feature set: libjxl (JPEG XL), GStreamer with
-gst-plugins-base (H.264/AAC through the OS decoder), enchant2
-(spell-checking), brotli (WOFF2) and freetype. GStreamer still needs a decoder at runtime to play H.264 —
+`makedepends` lists `rust` (the HTML and URL parsers), the libraries
+meson requires on Linux (FFmpeg, GStreamer with gst-plugins-base for
+H.264/AAC, libseccomp, glslang) and every auto-detected optional one, so
+the package gets the full feature set: libavif, libjxl (JPEG XL), SDL3
+(the audio helper), enchant2 (spell-checking), brotli (WOFF2) and
+freetype. GStreamer still needs a decoder at runtime to play H.264 —
 `apk add gst-libav` or `gst-plugins-bad` — which the package does not
 pull in.
 
@@ -76,11 +80,13 @@ network-allowed fetch phase, then builds offline.
 ## Updating the version
 
 Bump `pkgver` in `data/packaging/APKBUILD` to the new release tag, reset
-`pkgrel=0`, then refresh the checksum:
+`pkgrel=0`, set `_pdfjs`, `_wuffs` and `_wamr` (and their URLs) to the
+versions the release's `subprojects/*.wrap` files pin, then refresh the
+checksums:
 
 ```sh
 cd data/packaging
-abuild checksum        # rewrites sha512sums from the fetched tarball
+abuild checksum        # rewrites sha512sums from the fetched tarballs
 ```
 
 The `source=` URL points at the GitHub release tarball

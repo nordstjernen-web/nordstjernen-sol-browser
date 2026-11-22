@@ -6,7 +6,7 @@ spawns the real **GUI shell** as a child, watches it, and restarts it if
 it crashes or hangs. The shell is thin and engine-free, so this guards
 the *UI* process; each tab's untrusted engine already runs in its own
 sandboxed renderer process, and the shell restarts a dead renderer
-per tab (see [tab-isolation.md](tab-isolation.md)). The two layers compose: a renderer
+per tab (see [Software-Architecture.md](Software-Architecture.md), §2). The two layers compose: a renderer
 crash is contained to its tab, and a crash/hang of the shell itself is
 caught by the supervisor.
 

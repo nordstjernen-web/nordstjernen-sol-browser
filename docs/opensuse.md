@@ -36,7 +36,9 @@ directly: [`nordstjernen-opensuse-x86_64.rpm`](https://www.nordstjernen.org/nigh
 Nordstjernen is **dual-licensed**: each recipient may take it under
 **either** the **Nordstjernen Source License v1.0 (NSL-1.0)** **or** the
 **GNU General Public License version 3 or later (GPL-3.0-or-later)**, at
-their option. The spec declares this as `License: LicenseRef-NSL-1.0 OR GPL-3.0-or-later`.
+their option. The spec declares this as
+`License: (LicenseRef-NSL-1.0 OR GPL-3.0-or-later) AND Apache-2.0`; the
+`Apache-2.0` part covers the bundled PDF.js.
 
 openSUSE:Factory (Tumbleweed's main / OSS distribution) only accepts free
 / OSI-approved licenses, checked by its automated
@@ -71,9 +73,12 @@ no longer the target: it is for software without a free license option.
 ## Release tarball package
 
 Factory requires sources that trace to an upstream release, so the OBS
-package is a classic one: `nordstjernen.spec`, `nordstjernen.changes`
-and `nordstjernen-<version>.tar.gz`, the GitHub archive of the release
-tag named by the spec's `Source0`:
+package is a classic one: `nordstjernen.spec`, `nordstjernen.changes`,
+`nordstjernen-<version>.tar.gz`, the GitHub archive of the release
+tag named by the spec's `Source0`, and the three pinned tarballs meson
+would otherwise download through its wraps (`Source1` PDF.js, `Source2`
+Wuffs, `Source3` WAMR), which `%prep` copies into
+`subprojects/packagecache/`:
 
 ```spec
 Source0:        https://github.com/nordstjernen-web/nordstjernen-sol-browser/archive/refs/tags/%{version}.tar.gz#/%{name}-%{version}.tar.gz
@@ -82,7 +87,7 @@ Source0:        https://github.com/nordstjernen-web/nordstjernen-sol-browser/arc
 %autosetup -n nordstjernen-sol-browser-%{version}
 ```
 
-The build workers have no network access, so the tarball is uploaded to
+The build workers have no network access, so the tarballs are uploaded to
 OBS with `osc`, never fetched at build time, and never committed to git.
 
 ## Build options and dependencies
@@ -122,13 +127,14 @@ them on Linux, and they carry inline WebM (VP9/VP8 + Opus/Vorbis). The Pango
 packages are what GTK builds against; web-text-lib itself needs the cairo,
 HarfBuzz, FriBiDi and fontconfig development files.
 
-The in-tree engines (QuickJS, WAMR, web-text-lib) and vendored single-file
-libraries (Wuffs, pl_mpeg) build via meson `subdir()` / wraps — no `cmake`,
-no system copies. The in-tree Rust HTML and URL parsers are compiled with
-plain `rustc` (1.100 or newer) — no Cargo, no crates. `mpv` and `myspell-en_US` are `Recommends` (external
-media playback and a spell-check dictionary).
+The in-tree engines (QuickJS, web-text-lib) build via meson `subdir()`,
+and WAMR, Wuffs and pl_mpeg as meson subprojects (the first two from the
+`Source2`/`Source3` tarballs) — no `cmake`, no system copies. The in-tree Rust HTML and URL parsers are compiled with
+plain `rustc` (1.100 or newer) — no Cargo, no crates. `myspell-en_US` is a `Recommends` (a spell-check dictionary). The spec
+also still recommends `mpv`, which the browser does not launch.
 
-The package is tagged `License: LicenseRef-NSL-1.0 OR GPL-3.0-or-later`;
+The package is tagged
+`License: (LicenseRef-NSL-1.0 OR GPL-3.0-or-later) AND Apache-2.0`;
 `License.md` and `COPYING` (the GPL version 3 text) are shipped as `%license`.
 
 ## Local RPM build
@@ -153,4 +159,4 @@ care about.
   from the spec.
 * **Sandbox warnings at runtime** (`seccomp: load failed`) — harmless
   outside a confined environment; the per-tab Landlock + seccomp sandbox
-  logs and continues. See `tab-isolation.md`.
+  logs and continues. See `security-model.md`.

@@ -56,7 +56,7 @@ GPL-configured, which is fine for a local developer build; the
 redistributable packages instead link the minimal LGPL FFmpeg that
 `scripts/build-ffmpeg-lgpl.sh` builds, as CI does.
 
-Both JavaScript engines and the text-shaping Pango fork, web-text-lib,
+The JavaScript engine and the text-shaping Pango fork, web-text-lib,
 are vendored in-tree, so the build clones nothing for them. MSYS2's stock `gtk4` must be
 4.22.1 or newer — meson enforces that floor on Windows.
 `mingw-w64-ucrt-x86_64-libavif` and `mingw-w64-ucrt-x86_64-libjxl` are optional and
@@ -77,7 +77,7 @@ fresh box gets them in one command:
   fallback paths, so dev builds reach `https://` without any
   env-var fiddling.
 - `mingw-w64-ucrt-x86_64-uchardet` is the charset detector used by
-  `ns_html_decode_body`. Per `CLAUDE.md` it's a hard dependency;
+  `ns_html_decode_body_full` (`src/html.c`). Per `CLAUDE.md` it's a hard dependency;
   without it `meson setup` fails the `uchardet` pkg-config check.
 - `mingw-w64-ucrt-x86_64-libwebp` is a hard build dependency for
   WebP. Both lossy VP8 — used by the BBC, Wikipedia thumbnails,
@@ -100,13 +100,16 @@ The QuickJS JS engine (forked from Fabrice Bellard's
 [QuickJS](https://github.com/bellard/quickjs)) is vendored in-tree at
 `src/quickjs-bellard/`; the HTML and WHATWG URL parsers are the project's own
 Rust crates at `src/html5_rs/` and `src/url_rs/`, compiled by meson with
-plain `rustc` (1.100 or newer, no Cargo); and Wuffs and pl_mpeg
-ship as single-file sources under `subprojects/`; web-text-lib (the
-text-shaping Pango fork) is vendored in-tree at `src/web-text-lib/`. The
-first `meson setup` still needs the network for one subproject: it
-downloads the pinned wgpu-native MinGW release for WebGPU
+plain `rustc` (1.100 or newer, no Cargo); pl_mpeg is vendored under
+`subprojects/plmpeg/`; web-text-lib (the text-shaping Pango fork) is
+vendored in-tree at `src/web-text-lib/`. The first `meson setup` needs the
+network for the wraps in `subprojects/`: it downloads the pinned Wuffs,
+WAMR and PDF.js releases, SIMDe when no system copy is
+installed, and the wgpu-native MinGW release for WebGPU
 (`subprojects/wgpu-native-windows-x86_64-gnu.wrap`), which is linked
-statically.
+statically. Meson checks each against the SHA-256 in its wrap file and
+keeps the archives in `subprojects/packagecache/`, so later setups work
+offline.
 
 Build artifacts:
 

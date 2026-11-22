@@ -29,10 +29,10 @@ upstream keep merging cleanly.
 The engine, the fork of Bellard's QuickJS in `src/quickjs-bellard/`,
 carries the hardening. The stages were first built in a quickjs-ng fork
 (`src/quickjs/`, removed in 2026-11) and ported; this document describes
-the design, and [`quickjs-bellard-default.md`](quickjs-bellard-default.md)
-lists, stage by stage, how Bellard's engine implements it and where it
-differed from that fork, whose function names some entries below still
-use.
+the design, and [`quickjs.md`](quickjs.md), "The hardening stages in this
+engine", lists, stage by stage, how Bellard's engine implements it and
+where it differed from that fork, whose function names some entries below
+still use.
 
 ## Status
 
@@ -49,8 +49,8 @@ use.
 
 Stage 1b, moving cookies, HSTS, the HTTP cache and storage behind the
 shell so a compromised renderer holds no credentials, is independent of
-the heap stages and remains the complementary architectural step that
-`docs/tab-isolation.md` already lists. It limits what a compromise is
+the heap stages and remains the complementary architectural step
+("Known gaps" in [security-model.md](security-model.md)). It limits what a compromise is
 worth; the stages here limit how a bug becomes a compromise.
 
 ## What is in place
@@ -85,7 +85,9 @@ compile the classic layouts and use the process heap.
 **Buffers.** Every ArrayBuffer backing store lives inside the cage: the
 engine refuses a foreign store (`JS_NewArrayBuffer` with an external
 buffer, `JS_RepointArrayBuffer`, a SharedArrayBuffer allocation hook
-returning out-of-cage memory). WebAssembly linear memory comes from a
+returning out-of-cage memory). A `SharedArrayBuffer` posted to a worker
+is shared, not copied: its backing store is reference-counted cage memory
+(`ns_js_sab_dup` / `ns_js_sab_free` in `src/js_cage.c`). WebAssembly linear memory comes from a
 locked shared heap inside the cage (`src/wasm.c`); WAMR's own runtime
 structures (module and memory instances, import tables, the execution
 stack) come from libc, outside it, because they hold raw pointers, bounds
@@ -325,8 +327,9 @@ rewrites that cannot be are reproducible:
   link.
 - The trusted block path, the `JS_NewRuntime` cage path, the Intl and
   WeakRef sentinel handling, the bytecode-tag sites and the few hand
-  conversions the script reports are listed in
-  `docs/vendored-engine-updates.md` for the person doing the refresh.
+  conversions the script reports are what the person doing the refresh
+  merges by hand; the steps are in [`quickjs.md`](quickjs.md), "Moving to
+  a newer upstream commit".
 
 ## Benchmarks
 

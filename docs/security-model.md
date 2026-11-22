@@ -14,16 +14,18 @@ of QuickJS (`src/quickjs-bellard/`) and Pango
 (`src/web-text-lib/`) and the Rust HTML and URL parsers; Linux sandbox
 escapes (Landlock or seccomp); bypasses of the macOS Seatbelt profile or
 the Windows process mitigations; same-origin, cookie and cache
-partitioning bypasses; HSTS, mixed-content, CSP and iframe-sandbox
-bypasses; URL-bar spoofing.
+partitioning bypasses; HSTS, mixed-content, CSP, iframe-sandbox,
+`Cross-Origin-Resource-Policy` and cross-origin isolation bypasses;
+URL-bar spoofing.
 
 **Out of scope:** bugs in third-party libraries used unmodified (libcurl,
 GTK, GLib, Wuffs, libwebp, libavif, libjxl, PDF.js, FFmpeg, SQLite,
 glslang, wgpu-native, OS media decoders, …) — report upstream;
-features we do not implement (WebRTC, EME/DRM, JIT, AI web APIs, COOP/COEP
-cross-origin isolation); Spectre-class side channels; attacks that already
+features we do not implement (WebRTC, EME/DRM, JIT, AI web APIs);
+Spectre-class side channels; attacks that already
 need local code execution as the user. WebGL, experimental WebGPU,
-service workers, unpacked extensions, MSE and inline media *are*
+WebAssembly, service workers, `SharedArrayBuffer` under cross-origin
+isolation, unpacked extensions, MSE and inline media *are*
 implemented and in scope.
 
 ## Architecture
@@ -32,8 +34,8 @@ Each tab's content is parsed, scripted, laid out and decoded in its own
 sandboxed `nordstjernen-renderer` process. The GTK shell parses no page
 bytes: it spawns renderers, blits their shared-memory framebuffers and
 owns the profile. The renderer still does its own networking and
-storage; per-site isolation and a network broker are future work
-(`docs/tab-isolation.md`). What a page may do beyond rendering — camera,
+storage; there is no per-site process and no network broker (see
+[Known gaps](#known-gaps)). What a page may do beyond rendering — camera,
 WebGL, downloads, popups, pointer lock, fullscreen — is a named capability
 (`src/capability.h`) that only the shell grants or revokes; the renderer
 asks and waits (`docs/engine-protocol.md`).
@@ -62,7 +64,12 @@ default-deny layers before touching untrusted bytes. Both are mandatory:
 a process that cannot enforce Landlock exits with code 78 (so the browser
 needs Linux 5.13+ with Landlock enabled), one that cannot load seccomp
 exits with 70. The shell runs under a wider Landlock and no seccomp,
-because it must spawn renderers and drive the GPU for the window.
+because it must spawn renderers and drive the GPU for the window: its
+ruleset also makes the renderer's directory executable and leaves
+`/dev/shm` writable, for the shared-memory framebuffer where
+`memfd_create` is unavailable (`src/gtk/appmain.c`). A seccomp filter for
+the shell would have to allow `execve` and `clone`, and the shell parses no
+page bytes.
 
 - **Landlock.** Read-only: system library directories, `/etc`, fonts,
   `/proc`, `/sys`, the display sockets and `$XAUTHORITY`, and of the XDG
@@ -146,13 +153,19 @@ shares no constructors or prototypes with its embedder, and it sees its
 parent only through a cross-origin proxy. The `sandbox` attribute is
 enforced (scripts, same-origin, forms, modals, popups, top navigation,
 downloads) and inherited by nested frames. `postMessage` checks the
-target origin.
+target origin. A call made through a cross-origin window proxy
+(`postMessage`, `location.href`, `location.replace`, `close`, `focus`,
+`blur`) runs a native of the target document; an error it throws is
+re-created in the caller's realm with only its name and message, so the
+caller never holds an object of the target's realm.
 
 ### GPU (`src/glsl_validate.c`, `src/webgpu.c`)
 
 Every WebGL shader is checked against the WebGL rules and compiled by
 glslang before the driver sees it, and every draw is checked against the
-vertex, index and uniform buffer ranges it reads. The GL context is created
+vertex, index and uniform buffer ranges it reads. Storage a page can read
+back (`bufferData(size)`, `texStorage2D/3D`, renderbuffers, the drawing
+buffer) starts as zeros. The GL context is created
 with robust buffer access where the driver offers it, and on Linux and the
 BSDs not at all otherwise; on Windows an ordinary context is used when the
 driver lacks the extension. WebGPU shaders are validated by naga in
@@ -188,6 +201,20 @@ hash sent to Google, never the address itself.
   cookies out of `document.cookie`.
 - `file:` documents are opaque origins: a local page cannot read other
   local files.
+- Only `https:` and real loopback hosts are trustworthy origins.
+  `ns_host_is_loopback` (`src/netutil.c`) parses the address: `localhost`,
+  `*.localhost`, `127.0.0.0/8` and `::1` qualify, a name that merely
+  starts with `127.` does not. The same check decides service-worker
+  registration and the address bar's "Not secure" chip.
+- `Cross-Origin-Resource-Policy` is honoured on every page. A top-level
+  document served from a trustworthy origin with
+  `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp` or `credentialless` is
+  cross-origin isolated: only then is `SharedArrayBuffer` exposed, in the
+  page and the dedicated workers it starts, and only then may a shared
+  buffer or a shared `WebAssembly.Memory` be posted to a worker. Its
+  cross-origin `no-cors` subresources must opt in with
+  `Cross-Origin-Resource-Policy`.
 - CSP is enforced for fetch directives, `base-uri`, `form-action`,
   `frame-ancestors`, `worker-src` and `upgrade-insecure-requests`,
   including nonces, hashes and `'unsafe-eval'` / `'wasm-unsafe-eval'`.
@@ -240,8 +267,17 @@ Both bind loopback only.
 
 ## Known gaps
 
+Findings of the latest source review that are still open are listed in
+[security-review-report-2026-11-21.md](security-review-report-2026-11-21.md).
+
 - Frames are a realm boundary, not a process boundary: a memory-safety
   bug in one frame is not contained from the rest of its tab.
+- The process boundary is per tab, not per site, and every renderer
+  fetches for itself and opens the profile's cookie, cache and storage
+  databases. A compromised renderer therefore holds the credentials of
+  every site, not only the one it shows. Moving networking, cookies, cache
+  and storage behind the shell is not built.
+- The shell has no seccomp filter (see "Linux sandbox" above).
 - Extensions have no permission model (content scripts are injected by
   `matches` alone) and run content scripts in the page's JavaScript
   world.

@@ -121,11 +121,11 @@ confinement as the engine at startup (`ns_browser_sandbox`, called right
 after `ns_browser_init` and before any page
 is opened), so a renderer crash is a per-tab failure and untrusted content
 always runs under a loaded syscall filter. The shell carries no bespoke
-in-process renderer any more; the optional `--single-process` mode serves the
-same renderer over a thread instead of a child process. The thin shell parses
+in-process renderer any more; the optional `--single-process` mode limits the
+browser to one tab and one renderer process. The thin shell parses
 no untrusted bytes but must `fork`/`execv`
 renderers and create POSIX shm, so it runs under a widened Landlock with
-seccomp skipped. The mechanics live in `docs/tab-isolation.md`.
+seccomp skipped. The mechanics live in `docs/security-model.md`.
 
 **The plan from here:**
 
@@ -209,7 +209,7 @@ committed, listed to keep the long view in one place:
 **Done:** process-per-tab renderers behind the IPC +
 shared-memory-framebuffer boundary (the GTK shell is a thin display
 client now; the legacy bespoke in-process renderer removed — see
-*Architecture & frontends* and `docs/tab-isolation.md`),
+*Architecture & frontends* and `docs/security-model.md`),
 10 embeddable `libnordstjernen` (built and header-installed
 from meson, see `docs/Embedding.md`; Java JNI binding and Swing app in
 `java/`, see `java/README.md`),

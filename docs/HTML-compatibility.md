@@ -19,10 +19,13 @@ references them.
 Snapshot: **1.0.16**, 2026-07-08 (rev 35). Function names and the
 WebGPU, audio, JavaScript-engine, CSS-animation, `color-mix()`,
 `@property` and `--act` notes were re-checked against the 1.0.31-dev
-source.
+source. The renderer-architecture section and the `iframe`, `video`,
+`audio`, `embed`/`object`, module-script, canvas, `OffscreenCanvas`,
+origin, worker and IndexedDB rows were updated for 1.0.51-dev; the other
+rows carry forward.
 
-§1–§16 row tally (counted across the section tables below): **141 ✅
-implemented · 31 🟡 partial · 0 ❌ absent · 7 🚫 absent by design**.
+§1–§16 row tally (counted across the section tables below): **143 ✅
+implemented · 29 🟡 partial · 0 ❌ absent · 7 🚫 absent by design**.
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -57,29 +60,31 @@ shared-memory framebuffer (`src/rproc_http.c`). The engine
 `src/net.c`, images) runs entirely inside the sandboxed child (Linux
 Landlock + seccomp); the UI process only blits frames and forwards
 input. `./nordstjernen` (the entry point in `src/gtk/appmain.c`) launches
-this shell; `--headless`/`--dump`/`--eval`/`--inspect`/`--act` run the
-same engine in-process without a display. The earlier in-process GTK
-renderer (`src/legacy/`) has been removed.
+this shell; `--headless`/`--dump`/`--export`/`--eval`/`--inspect`/`--act`
+run the same engine without a shell or a display, inside the renderer
+executable (`nordstjernen-renderer --headless-host`,
+`src/headless_main.c`). Requests named below (`/key`, `/find`, …) are the
+paths of the [engine protocol](engine-protocol.md).
 
 Every §1–§16 row below describes that one engine. The browser-chrome
 features layered on top by the GTK shell are tracked here:
 
 | Browser-chrome feature | GTK | Notes |
 |------------------------|:--:|------|
-| Page render · scroll · resize reflow | ✅ | whole shared-memory frames (`RENDER`/`RENDER_RECT`/`VIEWPORT`) |
+| Page render · scroll · resize reflow | ✅ | the renderer paints the page as tiles into shared memory and the shell composites and scrolls them (`/render`, `/viewport`; see [Rendering.md](Rendering.md)) |
 | Per-tab process isolation / sandbox | ✅ | each tab's engine runs in a Landlock+seccomp child |
 | Click activation (`pointerdown`→`mousedown`→`pointerup`→`mouseup`→`click`) | ✅ | full sequence in `ns_browser_click` (`src/libnordstjernen.c`) |
 | `:hover` CSS restyle + pointer move/over/out JS events | ✅ | `ns_browser_hover` tracks the hovered element and restyles (`ns_css_set_hover_node`) |
-| Keyboard input → JS + form/`contenteditable` editing | ✅ | `KEY` messages drive the shared text-entry machinery |
-| Form submit (GET query + POST body) + navigation | ✅ | stashes a pending POST and re-`OPEN`s |
-| Text selection (drag-select, select-all, copy) | ✅ | `SELECT` messages |
+| Keyboard input → JS + form/`contenteditable` editing | ✅ | `/key` requests drive the shared text-entry machinery |
+| Form submit (GET query + POST body) + navigation | ✅ | stashes a pending POST and opens the page again (`/open`) |
+| Text selection (drag-select, select-all, copy) | ✅ | `/select` requests |
 | Continuous CSS animation / `requestAnimationFrame` loop | ✅ | renderer frame loop while `ns_browser_animating()` is true |
 | Per-page zoom | ✅ | renderer-side `scale` |
-| Find-in-page | ✅ | Ctrl+F search bar (live match count, next/prev with wrap) over an IPC `FIND` message → `ns_browser_find`, reusing the engine's `ns_box_*_match*` primitives with all matches painted and the active one emphasized |
+| Find-in-page | ✅ | Ctrl+F search bar (live match count, next/prev with wrap) over a `/find` request → `ns_browser_find`, reusing the engine's `ns_box_*_match*` primitives with all matches painted and the active one emphasized |
 | Context menu (right-click) | ✅ | open/copy link, back/forward/reload, copy page address, select-all/copy selection, save as PDF/image |
-| DevTools / console | ✅ | F12 / Ctrl+Shift+J panel: streams `console.log`/`warn`/`error`/`info`/`debug` (`CONSOLE` poll) and evaluates JS in the live page (`EVAL` → `ns_browser_eval`). No DOM/network inspector |
-| Save / print / PDF export | ✅ | full-page PDF or PNG (context menu / Ctrl+P / Ctrl+S) via an `EXPORT` message → `ns_browser_render_image`; the sandboxed renderer writes to its runtime dir and the shell copies to the chosen path |
-| External audio/video player handoff | ✅ | clicking a `<video>`/`<audio>` in an undecodable format resolves the media URL (`MEDIA` → `ns_browser_media_at`) and reports it over the renderer protocol, for an embedder to hand to a player of its own; the GTK shell launches nothing |
+| DevTools / console | ✅ | F12 / Ctrl+Shift+J panel: streams `console.log`/`warn`/`error`/`info`/`debug` (`/console` poll) and evaluates JS in the live page (`/eval` → `ns_browser_eval`). No DOM/network inspector |
+| Save / print / PDF export | ✅ | full-page PDF or PNG (context menu / Ctrl+P / Ctrl+S) via an `/export` request → `ns_browser_render_image`; the sandboxed renderer writes to its runtime dir and the shell copies to the chosen path. Printing paginates for paper, and `--export=pdf:FILE` saves a paged PDF from the command line ([printing.md](printing.md)) |
+| External audio/video player handoff | ✅ | clicking a `<video>`/`<audio>` in an undecodable format resolves the media URL (`/media` → `ns_browser_media_at`) and reports it over the renderer protocol, for an embedder to hand to a player of its own; the GTK shell launches nothing |
 | App menu · About | ✅ | toolbar menu button with About, Settings, and bookmarks (it links the engine's config/bookmarks store: `ns_config_get`, `ns_bookmarks_load`/`_add`) |
 
 ---
@@ -184,11 +189,11 @@ elements (`head title meta link style script noscript template`) to
 | `picture` / `source` | ✅ | `pick_picture_source_url` matches `media`/`type` via `ns_css_media_query_matches` |
 | `img loading="lazy"` | ✅ | fetch/decode deferred until the image scrolls near the viewport (`src/engine.c`) |
 | Decode pipeline | ✅/🟡 | ICO (`src/image_ico.c`) → Wuffs (PNG/APNG, GIF, BMP, JPEG) → WebP via libwebp (lossy VP8 + lossless VP8L + animated via `WebPAnimDecoder`, `src/image_webp.c`) → AVIF via libavif (`src/image_avif.c`, if built). SVG renders in-engine (`src/svg.c`). Nothing follows: an unsupported format fails to decode |
-| `iframe` | 🟡 | `src`/`srcdoc` load; a **srcless or `about:blank`** frame, when connected, runs the load algorithm — a real same-origin `about:blank` content document is created and a `load` event fires (`ns_js_load_iframe_now`), so script that waits on `iframe.onload` proceeds; `sandbox` parsed **and enforced** — scripts, forms, popups, modals, and same-origin (cookie/storage) gated per the token list, restrictions inherited by nested frames (`ns_iframe_effective_sandbox` in `src/js.c`) |
-| `iframe srcdoc` | 🟡 | attribute and DOM reflection; embedded rendering still limited |
-| `embed` / `object` | 🚫 | no NPAPI/PPAPI plugin dispatch |
-| `video` | 🟡 | plays **inline** for MPEG-1 (`.mpg`/`.mpeg`/`.m1v`, always) and VP9/VP8 WebM (`.webm`, with FFmpeg libav), honouring `autoplay`/`loop`/`muted`/`poster`, play/pause, seeking, volume, `played` and timed events. `MediaSource`/`SourceBuffer` streams use the same standards path: YouTube- and Vimeo-style WebM segments are accumulated in the renderer, video is decoded there from the contiguous range around the playhead, audio in `nordstjernen-audio`, and segments are evicted when the page calls `SourceBuffer.remove()`. `SourceBuffer.buffered` reports every disjoint buffered range, so a seek past the buffer makes the player fetch the target segment and playback resumes there. Unsupported codecs retain the poster + play overlay. See [media.md](media.md) |
-| `audio` | 🟡 | MP3 (always) and, when FFmpeg libav is built in, Opus/Vorbis (`.opus`/`.webm`/`.ogg`) play via the unsandboxed `nordstjernen-audio` helper; for other codecs a click resolves the media URL and reports it over the renderer protocol for an embedder — the GTK shell launches no external player. See [media.md](media.md) |
+| `iframe` | 🟡 | `src`/`srcdoc` load; a **srcless or `about:blank`** frame, when connected, runs the load algorithm — a real same-origin `about:blank` content document is created and a `load` event fires (`ns_js_load_iframe_now`), so script that waits on `iframe.onload` proceeds; `sandbox` parsed **and enforced** — scripts, forms, popups, modals, and same-origin (cookie/storage) gated per the token list, restrictions inherited by nested frames (`ns_iframe_effective_sandbox` in `src/js.c`). A `loading="lazy"` frame keeps its box and loads once the page is scrolled within 1500 px of it, or at once when `loading` is removed or set to `eager`. Each frame is a realm of its own in the tab's JavaScript runtime, not a separate process |
+| `iframe srcdoc` | ✅ | the markup becomes the frame's document, rendered and scripted like any other frame; its URL is `about:srcdoc` and it inherits the embedder's origin and policies |
+| `embed` / `object` | 🚫 | no NPAPI/PPAPI plugin dispatch. A PDF in `<object>` or `<embed>` opens in the PDF viewer, and an `<object>` without a document shows its fallback content |
+| `video` | 🟡 | plays **inline** for MPEG-1 (`.mpg`/`.mpeg`/`.m1v`, always) and VP9/VP8 WebM (`.webm`, with FFmpeg libav) and H.264 MP4 through the operating system's decoder, honouring `autoplay`/`loop`/`muted`/`poster`, play/pause, seeking, volume, `played` and timed events. `MediaSource`/`SourceBuffer` streams use the same standards path: YouTube- and Vimeo-style WebM segments are accumulated in the renderer, video is decoded there from the contiguous range around the playhead, audio in `nordstjernen-audio`, and segments are evicted when the page calls `SourceBuffer.remove()`. `SourceBuffer.buffered` reports every disjoint buffered range, so a seek past the buffer makes the player fetch the target segment and playback resumes there. Unsupported codecs retain the poster + play overlay. See [media.md](media.md) |
+| `audio` | 🟡 | MP3 (always) and, when FFmpeg libav is built in, Opus/Vorbis (`.opus`/`.webm`/`.ogg`) and AAC through the operating system's decoder play via the `nordstjernen-audio` helper; for other codecs a click resolves the media URL and reports it over the renderer protocol for an embedder — the GTK shell launches no external player. See [media.md](media.md) |
 | `track` (captions) | 🟡 | parsed; `kind`/`src`/`srclang`/`label`/`default` reflected via the standard typed-reflection path. **Rendered**: a `<track default>` whose `kind` is `subtitles`/`captions` (the missing-value default) is fetched, its WebVTT parsed into timed cues (`ns_vtt_parse` in `src/video.c` — `[HH:]MM:SS.mmm` timings, cue-setting/identifier/`NOTE` skipping, `<…>` tag and entity stripping), and the cue active at the video's current time is painted as centred captions over the bottom of the inline video (`paint_video_caption` in `src/paint.c`). Only the `default` track auto-shows (per the spec's initial mode); JS `TextTrack.mode` switching and cue positioning settings (`line`/`position`/`align`) are not wired |
 | `map` / `area` (client-side image maps) | ✅ | `<img usemap>` clicks are hit-tested against the referenced `<map>`'s `<area>` elements — `rect`/`circle`/`poly`/`default` shapes in image-local coordinates — and the first matching area's `href` is navigated (`ns_image_map_resolve` in `src/dom.c`, wired into the GUI and headless click paths) |
 | `img ismap` (server-side image maps) | ✅ | clicking an `<img ismap>` nested in an `<a href>` appends the click position relative to the image's top-left corner as a `?x,y` suffix to the link URL before navigating (GUI path in `src/libnordstjernen.c`, headless click path in `src/headless.c`); coordinates are clamped to non-negative |
@@ -257,15 +262,15 @@ validation.
 |-------|:--:|------|
 | `script` inline / external | ✅ | `ns_js_run_scripts_in_doc` (`src/js.c`); `script.text` returns/sets the child text content per spec |
 | `async` / `defer` | ✅ | `defer` delays to end of parse |
-| `type="module"` / `nomodule` | 🟡 | modules detected and run; full module graph/`import` resolution limited |
+| `type="module"` / `nomodule` | ✅ | module graphs load with static and dynamic `import`, import maps (scoped to the document that declares them) and `import.meta.resolve()`; JSON modules and CSS module scripts (`import sheet from "./x.css" with { type: "css" }`, a constructable `CSSStyleSheet`) are supported. A module must be served with a JavaScript MIME type; an HTTP error status or a dependency that cannot be fetched fires `error` at the element and rejects `import()` |
 | Engine | ✅ | QuickJS, a fork of Bellard's engine (in-tree, **interpreter only, no JIT** — W^X holds); ES2023+ (see [quickjs.md](quickjs.md)); per-call eval budget plus a 60 s absolute execution monitor that halts a runaway page (armed on the outermost JS entry, enforced in the interrupt callback — `src/js.c`) |
 | `noscript` | ✅ | `display:none` when JS enabled |
 | `template` (`.content`) | ✅ | `template.content` is a `DocumentFragment` (snapshot clone of the parsed children); descendants of a `<template>` are hidden from the document's tree-walk: `document.querySelectorAll`, `getElementsByTagName`/`ClassName`/`Name`, `getElementById`, the CSS selector engine, and the id/class/tag indexes all stop at a `<template>` and don't descend into its children. The child accessors on the template element — `firstChild`, `lastChild`, `firstElementChild`, `lastElementChild`, `children`, `childNodes`, `childElementCount`, `hasChildNodes()` — all report empty/null, matching the spec model where template content lives in the content fragment rather than as children of the template element. Only `template.content`-rooted queries see the parsed nodes |
 | `slot` / shadow projection | 🟡 | `attachShadow` + slot assignment (bounded) |
-| `canvas` 2D context | ✅ | full Cairo-backed `CanvasRenderingContext2D` (paths, text, `drawImage`, gradients/patterns, `get/putImageData`, compositing, shadows) |
+| `canvas` 2D context | ✅ | full Cairo-backed `CanvasRenderingContext2D` (paths, text, `drawImage`, gradients/patterns, `get/putImageData`, compositing, shadows, `roundRect()` with elliptical corner radii, and layers through `beginLayer()` / `endLayer()`) |
 | `canvas` WebGL / WebGL2 context | 🟡 | `getContext("webgl"/"webgl2")` maps a pragmatic WebGL 1 / 2 core directly onto OpenGL ES via the toolkit-independent GL context + libepoxy (`src/webgl.c`). Enabled by default, globally switchable in Settings, and announced in the status bar when used. The supported extension set is deliberately small; data-transfer entry points are bounds-checked and zero-initialised. See [`docs/webgl.md`](webgl.md) |
 | `canvas` WebGPU context | 🟡 | experimental, on at runtime by default (switchable in Settings; `--enable-webgpu` / `NS_WEBGPU_ALLOW=1` force it on). Built over wgpu-native — required on glibc Linux, macOS and Windows, optional elsewhere; `navigator.gpu` + `getContext("webgpu")` cover most of the **render and compute** path: WGSL shaders (naga), bind groups / uniforms / samplers / textures (incl. `copyExternalImageToTexture`), render & depth pipelines, MSAA, **compute pipelines** + storage buffers, and texture-to-canvas output — enough that **three.js's `WebGPURenderer` renders on it**, including GPU-compute examples (`webgpu_compute_birds`). Real timestamp queries, storage textures, and some PBR feature paths remain. See [`docs/webgpu.md`](webgpu.md) |
-| `OffscreenCanvas` | 🟡 | constructs; no worker thread |
+| `OffscreenCanvas` | 🟡 | an `EventTarget` with a 2D context (`OffscreenCanvasRenderingContext2D`, layers included), `convertToBlob()` and `transferToImageBitmap()`; available in workers, where it draws |
 
 ## §4.13 Custom elements
 
@@ -326,7 +331,7 @@ surface).
 |-------|:--:|------|
 | Browsing context / `Window` | ✅ | single top-level context per tab; each tab's engine runs in its own sandboxed renderer process |
 | `WindowProxy` / named access | 🟡 | basic |
-| Origins & same-origin policy | ✅ | enforced for fetch/XHR/storage/cookies |
+| Origins & same-origin policy | ✅ | enforced for fetch/XHR/storage/cookies. The `Origin` interface (`new Origin()`, `Origin.from()`, `opaque`, `isSameOrigin()`, `isSameSite()`) is implemented. `Cross-Origin-Resource-Policy` is enforced, and a document served with COOP `same-origin` and COEP `require-corp` or `credentialless` is cross-origin isolated (`crossOriginIsolated`), which is what exposes `SharedArrayBuffer` — see [security-model.md](security-model.md) |
 | `iframe` sandboxing | ✅ | token list enforced: `allow-scripts`, `allow-forms`, `allow-same-origin`, `allow-popups`, `allow-modals`, `allow-top-navigation*`, `allow-downloads`, etc. parsed; scripts/forms/popups/modals and opaque-origin (cookie/storage) restrictions applied and inherited by nested frames |
 | Cross-origin (`postMessage`) | ✅ | `window.postMessage(message, targetOrigin, transfer)` — see §9 for the full behaviour. `targetOrigin` is enforced: `"*"`/`"/"` always match, a specific origin delivers only when it equals the document's origin, otherwise the message is silently dropped |
 | Session history & navigation | ✅ | back/forward |
@@ -396,8 +401,12 @@ SubtleCrypto surface — verified by computing `SHA-256` inside a worker).
 Worker script creation is guarded by mixed-content checks and CSP
 `worker-src` with the expected fallback through `child-src`,
 `script-src`, and `default-src`. Message payloads cross runtimes through
-QuickJS object serialization without bytecode or SharedArrayBuffer
-flags; functions and SharedArrayBuffer are rejected. A `postMessage`
+QuickJS object serialization without bytecode; functions are rejected.
+A `SharedArrayBuffer` is shared, not copied, between a cross-origin
+isolated page and its workers (`Atomics.wait` blocks in workers and
+`Atomics.notify` wakes waiters on other threads); in any other page the
+constructor is hidden. Workers fire `unhandledrejection` and
+`rejectionhandled` on their global. A `postMessage`
 transfer list transfers its `ArrayBuffer`s — they are serialized to the
 receiver and then detached in the sender (`JS_DetachArrayBuffer`), and a
 non-transferable entry throws `DataCloneError`.
@@ -440,8 +449,15 @@ named stores. The cache lives for the session and is per-runtime — the
 Service Worker thread has its own, which it can populate and serve from in
 its `FetchEvent` handler (`event.respondWith(caches.match(event.request))`).
 
-🚫 `SharedWorker`, worklets, transferable `MessagePort`s, and nested
-workers are not implemented yet.
+✅ **`SharedWorker`** is implemented (classic and module): every
+`new SharedWorker()` with the same script URL and name from the same
+origin, in the page or one of its same-origin frames, connects to one
+worker, and each connection gets its own `MessagePort`, delivered to the
+worker as a `connect` event. `MessagePort`s can be transferred. A page
+may run at most 64 workers at once (dedicated, shared and service workers
+together).
+
+🚫 Worklets and nested workers are not implemented.
 
 ## §12 Web storage
 
@@ -450,7 +466,7 @@ workers are not implemented yet.
 | `localStorage` | ✅ | persistent, origin-partitioned, **no quota enforced** |
 | `sessionStorage` | ✅ | per-session |
 | `storage` event | ✅ | the `StorageEvent` interface is complete — the constructor reflects every dictionary member (`key`/`oldValue`/`newValue`/`url`/`storageArea`) with spec defaults (`key`/`oldValue`/`newValue` `null`, `url` `""`, `storageArea` `null`), the legacy `initStorageEvent(type, bubbles, cancelable, key, oldValue, newValue, url, storageArea)` is provided (`ns_storage_event_ctor` in `src/js.c`), and `onstorage`/`addEventListener('storage')` deliver dispatched events with intact fields. A storage area mutation does **not** fire a `storage` event on the window that made the change (per spec), and with one browsing context per tab there is no other same-origin context to notify — so same-tab mutations correctly fire nothing |
-| IndexedDB | 🟡 | SQLite-backed, origin-partitioned; supports databases, version upgrades, object stores, indexes, key ranges, cursors, requests/events, and structured-clone persistence through QuickJS serialization. Transaction rollback/blocking semantics and cross-context versionchange coordination are simplified |
+| IndexedDB | 🟡 | SQLite-backed, origin-partitioned; supports databases, version upgrades, object stores, indexes, key ranges, cursors, requests/events, and structured-clone persistence through QuickJS serialization. Transaction rollback/blocking semantics and cross-context versionchange coordination are simplified. Available in workers. A database may grow to the origin's storage limit (1 GiB), which `navigator.storage.estimate()` reports as the quota |
 
 ## §13 The HTML syntax
 
@@ -710,15 +726,16 @@ defects, and will not be added:
   wgpu-native, and also on at runtime by default (Settings switch,
   `--enable-webgpu`); `navigator.gpu` plus a working `getContext("webgpu")`
   render/compute path — see [`docs/webgpu.md`](webgpu.md).)
-- Shared Workers and Worklets. (Service Worker `FetchEvent` interception
+- Worklets. (Service Worker `FetchEvent` interception
   of page `fetch()` **is** supported — see §10/§11; what remains is routing
   the C engine's navigations/subresources through the worker.)
 - **WebRTC** and **EME** (DRM media). MSE itself is implemented for inline
   segmented playback.
 - Plugin content (`embed`/`object` via NPAPI/PPAPI).
 - A broad vendored codec collection. MPEG-1/MP2 and MP3 are in-tree; WebM
-  playback uses optional system-provided FFmpeg components and the dedicated
-  audio helper process described in [`media.md`](media.md).
+  playback uses system-provided FFmpeg components, H.264 and AAC the
+  operating system's decoders, and sound the dedicated audio helper
+  process described in [`media.md`](media.md).
 - **JIT** (interpreter-only, to preserve W^X process-wide).
 - Telemetry, crash reporters, update pingers, "studies".
 - gettext / `.po` localisation tooling. (UI strings *are* translated to

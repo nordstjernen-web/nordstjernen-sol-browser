@@ -179,9 +179,13 @@ Not listed by design: the `navigator.*` device APIs are project non-goals.
 
 Full browsers are compared by total passing subtests across the
 entire WPT suite — a scale where Chrome scores roughly 6,000,000.
-Running all of WPT through Nordstjernen is impractical (days of
-wall-clock at the per-test timeout), so this score is estimated by
-sampling: a deterministic random sample of test files drawn from
+Since 2026-11 `scripts/wpt-full.py` runs every testharness.js URL of
+the suite in under an hour by keeping batch browsers running
+(`docs/wpt.md`, "Running the whole suite"); the measured result is in
+[wpt-full-report-2026-11-21.md](wpt-full-report-2026-11-21.md) and
+supersedes the estimates below. Before that a one-process-per-test
+run of all of WPT took days of wall-clock, so the score was estimated
+by sampling: a deterministic random sample of test files drawn from
 every browser-runnable testharness.js test in the checkout, run
 through the headless mode, with the mean passing-subtest count per
 file extrapolated to the whole population. The 95% interval is a
@@ -228,9 +232,10 @@ all-suite run would take about 25 to 26 hours. The timeout-heavy
 upper bound is about 5 days at the browser timeout alone, or about
 8.5 days with the script's 25 second outer timeout. Including worker
 and service-worker variants, reftests, crashtests, and wdspec would
-push a literal all-WPT run toward several days, and some of those
-harness types are not wired into Nordstjernen's current headless
-runner yet.
+push a literal all-WPT run toward several days with `wpt-run.sh`.
+`scripts/wpt-full.py` avoids that cost: its batch mode measured all
+40,472 testharness URLs, worker and service-worker variants included,
+in about 55 minutes on 2026-11-21.
 
 ## Running the slice
 

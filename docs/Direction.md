@@ -128,8 +128,7 @@ nothing was ever only in memory. The target closes the remaining gaps:
 ### D. Isolation first
 
 The process boundary is the security boundary. Per-tab renderers are
-sandboxed today; the next steps are listed in
-[tab-isolation.md](tab-isolation.md) and under "Known gaps" in
+sandboxed today; the next steps are listed under "Known gaps" in
 [security-model.md](security-model.md): broker
 network, cookies, cache and storage through the shell so a renderer holds
 only its own site's data, then run cross-site frames in their own renderer.

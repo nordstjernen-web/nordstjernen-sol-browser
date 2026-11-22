@@ -4,7 +4,7 @@ Nordstjernen's default architecture is **process-per-tab**: each tab's
 engine runs in its own sandboxed `nordstjernen-renderer` process, and
 the GTK shell is a thin client that blits a shared-memory framebuffer
 and forwards input over an HTTP/JSON IPC control channel (see
-[`tab-isolation.md`](tab-isolation.md)).
+[`Software-Architecture.md`](Software-Architecture.md), §2 and §3).
 
 Passing **`--single-process`** to the desktop shell limits the browser to
 one tab and therefore to one renderer process:
@@ -31,10 +31,9 @@ shell never runs the engine itself, so the renderer sandbox, crash
 containment (a renderer crash restarts the tab, not the browser) and
 the watchdog's ordinary 60-second hang timeout all apply unchanged.
 
-The mode used to host the engine inside the shell process. It no longer
-does: the GTK shell does not run page content in any mode. The
-in-process host (`src/rproc_inproc.c` over `src/renderer_serve.c`) is
-still used, inside the renderer executable, by the headless driver.
+The GTK shell does not run page content in any mode. The in-process
+host (`src/rproc_inproc.c` over `src/renderer_serve.c`) is used only
+inside the renderer executable, by the headless driver.
 
 ## When to use it
 

@@ -228,7 +228,7 @@ remain, both larger and correctness-sensitive, are:
 To reproduce the profile:
 
 ```sh
-meson setup builddir-prof --buildtype=debugoptimized -Db_lto=false
+meson setup builddir-prof --buildtype=debugoptimized -Dlto=false
 meson compile -C builddir-prof
 # in one shell, start a long-settle run of a complex-DOM suite, then:
 scripts/sample-profile.sh <pid> 150

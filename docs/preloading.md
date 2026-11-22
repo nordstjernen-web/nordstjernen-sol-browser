@@ -263,8 +263,7 @@ no state is shared between tabs even before the key's site partition is
 considered. In the headless driver, which can host several renderer
 sessions in one process, the site partition in the key is what keeps
 documents from different sites apart. See
-[tab-isolation.md](tab-isolation.md) and
-[single-process-mode.md](single-process-mode.md).
+[Software-Architecture.md](Software-Architecture.md), §2.
 
 ## Concurrency limits
 

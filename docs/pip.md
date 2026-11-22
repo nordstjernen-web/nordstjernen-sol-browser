@@ -3,7 +3,8 @@
 `pip/` is the [`nordstjernen-browser`](https://pypi.org/project/nordstjernen-browser/)
 package: `pip install nordstjernen-browser`, then `nordstjernen <url>`. It is
 the Python counterpart of the [npm package](npm.md) and installs the browser
-the same way:
+the same way, except that it does not use the release AppImage: on Linux it
+always builds from source.
 
 | System | Source |
 | --- | --- |
@@ -26,7 +27,8 @@ tools and libraries with their package names, and the library floors from
 ## Publishing
 
 `.github/workflows/pypi.yml` publishes when a GitHub release is published
-(or by hand for a tag): `prepare.py <tag>` checks that the tag builds that
+(or by hand for a tag, optionally as a post-release such as `<tag>.post1`
+to republish the package for the same release): `prepare.py <tag>` checks that the tag builds that
 version, writes the version into the package, records the source tarball's
 SHA-256 and copies the licence files; the sdist and wheel are built and
 checked with `twine check --strict`; and they are uploaded through PyPI

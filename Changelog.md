@@ -3,6 +3,17 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Documentation reviewed against the tree. Stale build instructions are
+  corrected (GStreamer, FFmpeg, Rust and the fetched wraps in the distro
+  guides, the Fedora nightly stage, renamed build options), and the
+  architecture, security-model, WebAssembly, threading and compatibility
+  documents describe what 1.0.51 does: shared memory under cross-origin
+  isolation, WebAssembly threads and exceptions, OS media decoders, one
+  IPC parser. Seven outdated documents are removed, with what was still
+  true moved into `docs/quickjs.md`, `docs/Debian.md` and
+  `docs/security-model.md`: the code-review and modernization reports,
+  `quickjs-bellard-default.md`, `vendored-engine-updates.md`,
+  `wpt-fast-scores.md`, `Debian-inclusion.md` and `tab-isolation.md`.
 * The optional Rust port of the renderer IPC parser (`-Dipc_rust`,
   `src/ipc_http_rs/`) is removed. It was off by default, built by no CI
   job, and had not followed the C parser since it was added: the response

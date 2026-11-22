@@ -13,12 +13,12 @@ print dialog with the current page paginated behind it. Paper size,
 orientation, printer and copies are the dialog's business; what
 Nordstjernen decides is where each sheet begins and ends.
 
-Printing works in every process mode. A cairo recording surface crosses
-no process boundary, so the renderer rasterises
-each sheet at `NS_PRINT_RASTER_SCALE` device pixels per CSS pixel, writes
+The page is paginated in the tab's renderer process. A cairo recording
+surface crosses no process boundary, so the renderer rasterises each
+sheet at `NS_PRINT_RASTER_SCALE` (3) device pixels per CSS pixel, writes
 it beside the page-export files in the runtime directory, and the shell
-loads the sheets back and prints them. The pagination is identical either
-way; only the sheets' resolution differs.
+loads the sheets back and prints them. The pagination is the one the PDF
+paths below produce; only the printed sheets are bitmaps.
 
 To get a file rather than a printer, from any mode and with no printer
 configured:
@@ -129,4 +129,4 @@ break starting sheet three.
 - [Controls.md](Controls.md) — the keyboard shortcuts.
 - [CSS-compatibility.md](CSS-compatibility.md) — the paged-media rows.
 - [Rendering.md](Rendering.md) — how the same box tree reaches the screen.
-- [single-process-mode.md](single-process-mode.md) — what `--single-process` changes.
+- [engine-protocol.md](engine-protocol.md) — the `/print` and `/pdf` requests.

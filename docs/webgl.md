@@ -13,10 +13,10 @@ GTK-less builds. There is no ANGLE layer and no GL
 command-stream validator between the page and the driver: WebGL calls
 become GL calls.
 
-Because that is a deliberately thin bridge to the GPU driver, WebGL use is
-can be disabled globally in Settings.
-The data-transfer entry points are bounds-checked and zero-initialised (see
-[Security](#security)).
+Because that is a deliberately thin bridge to the GPU driver, WebGL can be
+disabled globally in Settings. Shaders are validated before the driver
+sees them, draw calls and data transfers are bounds-checked, and storage a
+page can read back is zero-initialised (see [Security](#security)).
 
 ## Availability and control
 
@@ -148,6 +148,12 @@ Everything above, plus:
   `framebufferTextureLayer`, `invalidateFramebuffer`, `readBuffer`.
 - Buffers: `copyBufferSubData`, `getBufferSubData` (via `glMapBufferRange`),
   `clearBuffer{fv,iv,uiv,fi}`, `bindBufferBase`, `bindBufferRange`.
+- The overloads that take a view plus `srcOffset` (and a length):
+  `uniform*v` and `uniformMatrix*fv` (which also honour `transpose`),
+  `bufferData`, `bufferSubData`, `getBufferSubData`, `texImage2D/3D`,
+  `texSubImage2D/3D`, `readPixels` and the compressed texture uploads. A
+  range outside the view is `INVALID_VALUE`. Emscripten builds pass the
+  whole wasm heap with an offset and depend on these.
 - Sampler objects, uniform-block introspection / binding
   (`getUniformBlockIndex`, `uniformBlockBinding`, `getActiveUniforms`,
   `getActiveUniformBlockParameter`, `getActiveUniformBlockName`),
@@ -192,9 +198,8 @@ can honour them (desktop GL always can).
 
 ## Security
 
-The original cut shipped with "no security measures"; this is the
-hardened model. WebGL is a thin bridge to the GPU driver, so the
-mitigations focus on the parts a hostile page can actually reach.
+WebGL is a thin bridge to the GPU driver, so the mitigations focus on
+the parts a hostile page can actually reach.
 
 - **Global control.** The Settings switch can prevent all new context
   creation.
@@ -203,8 +208,10 @@ mitigations focus on the parts a hostile page can actually reach.
   the WebGL source rules — the GLSL ES source character set (other bytes
   only inside comments), identifiers of at most 256 characters, no
   `webgl_`/`_webgl_` names, a nesting cap, only the standard preprocessor
-  directives, `#version 100` (or `300 es` on a WebGL 2 context) and only the
-  `#extension` names WebGL exposes — then parses and links the shader with
+  directives, `#version 100` (or `300 es` on a WebGL 2 context), and an
+  `#extension` directive that `require`s an extension the browser does
+  not expose is an error (`enable`, `warn` and `disable` pass, as GLSL ES
+  specifies) — then parses and links the shader with
   the Khronos [glslang](https://github.com/KhronosGroup/glslang) front end
   as GLSL ES 1.00 or 3.00. For ES 1.00 the Appendix A limits apply (no
   `while` loops, inductive `for` loops only, constant-index-expressions for
@@ -302,9 +309,12 @@ mitigations focus on the parts a hostile page can actually reach.
   out as opaque session ids via an indirection table, not pointer values.
 
 What is **not** done: there is no full GL command-stream validator (the
-ANGLE model). Index-buffer bounds are now checked and shaders are
-validated before compilation, and vertex, index and uniform buffer ranges
-are checked at every draw (see above). Resources are initialised eagerly,
+ANGLE model). Shaders are validated before compilation, and vertex, index
+and uniform buffer ranges are checked at every draw (see above). Two
+findings of the 2026-11-21 source review in that draw-call validation are
+open (M3 and M4 in
+[security-review-report-2026-11-21.md](security-review-report-2026-11-21.md)).
+Resources are initialised eagerly,
 when they are allocated, rather than lazily on first use as ANGLE does.
 Users who do not want pages to reach the native GL stack can disable WebGL
 globally in Settings.
@@ -330,8 +340,8 @@ common WebGL content, not a full conformance suite.
 
 ## Trying it
 
-The interactive browser does not open `file://` URLs, so serve the page
-over HTTP (or render it with `--headless`, which accepts file paths):
+Open the page from a local server (or render it with `--headless`, which
+also accepts file paths):
 
 ```sh
 meson compile -C builddir

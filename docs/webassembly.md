@@ -2,10 +2,11 @@
 
 Nordstjernen ships a **complete WebAssembly JS API** backed by a vendored
 subset of [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime)
-(wasm-micro-runtime, Apache-2.0) — its fast interpreter, with
-**reference types** and **bulk memory** enabled. There is no JIT and no
-AOT: wasm executes in a portable interpreter, the same on Linux, macOS,
-Windows and Android.
+(wasm-micro-runtime, Apache-2.0, release 2.4.6) — its fast interpreter,
+with **reference types**, **bulk memory**, **SIMD**, **threads** (shared
+memories and atomics) and the original **exception handling** proposal
+enabled. There is no JIT and no AOT: wasm executes in a portable
+interpreter, the same on Linux, macOS, Windows and Android.
 
 This is enough to run real-world **wasm-bindgen** bundles (Rust →
 `wasm32-unknown-unknown`), including externref-heavy ones. The flagship
@@ -22,11 +23,14 @@ The `WebAssembly` namespace (`src/wasm.c`):
 | `WebAssembly.compile(bytes)` / `new Module(bytes)` | returns a reusable `Module` |
 | `WebAssembly.instantiate(bytes\|module, imports)` | resolves to `{module, instance}` / `Instance` |
 | `WebAssembly.instantiateStreaming` / `compileStreaming` | accepts a `Response` or a promise of one |
-| `Instance.exports` | functions, memories, tables as own enumerable properties |
+| `Instance.exports` | functions, memories, tables, globals and tags as own enumerable properties |
 | `Memory.buffer` | live `ArrayBuffer` over linear memory; detached on every grow (from JS *or* from wasm `memory.grow`) |
 | `Memory.grow(pages)` | returns the old page count |
 | `Table.get/set/grow/length` | funcref tables hand back callable wrappers; externref tables round-trip arbitrary JS values |
 | `new Memory({initial, maximum})` | standalone memory backed by staging bytes; adopted by the instance when passed as a memory import |
+| `new Memory({initial, maximum, shared: true})` | a shared memory whose `buffer` is a `SharedArrayBuffer` over the linear memory, reserved up to its maximum (capped at 1 GiB) so it never moves. A module that imports a shared memory adopts it, so a page and its workers run instances of one module on one memory, with the atomic instructions and `memory.atomic.wait32/64` / `notify` working across threads. Importing a non-shared memory where a shared one is declared, or the reverse, is a `LinkError` |
+| `WebAssembly.Tag` / `WebAssembly.Exception` | `is()`, `getArg()`, `traceStack`; tags can be imported and exported |
+| `postMessage` | a `WebAssembly.Module` can be posted to a worker and is shared, not recompiled; a shared `Memory` can be posted from a cross-origin isolated page (see [security-model.md](security-model.md)) |
 | `new Table({element})` / `new Global({value, mutable}, v)` | standalone constructors; a `Global` holds `i32`/`i64`/`f32`/`f64`/`externref`/`funcref` with a mutable `value` accessor and `valueOf` |
 | Imported memories/tables/globals | a provided `Memory`'s staging bytes seed the instance memory (data segments win); a provided `Global`'s (or plain number/BigInt) current value initializes the imported global at instantiate time |
 | `CompileError`, `LinkError`, `RuntimeError` | thrown from the matching phases; `LinkError` lists every unresolved import by name |
@@ -43,6 +47,14 @@ Marshalling at the JS ↔ wasm boundary:
   call — the pattern wasm-bindgen's `__wbindgen_throw` relies on.
 - Multi-value results come back as an array.
 
+Exception handling covers the original proposal (`try` / `catch` /
+`catch_all` / `throw` / `rethrow` / `delegate` with a tag section), which
+is what Emscripten's `-fwasm-exceptions` emits, in the fast interpreter, so
+SIMD keeps working alongside it. An exception that leaves wasm reaches JS
+as a `WebAssembly.Exception`; one thrown from JS, or any JS error passing
+through an import, can be caught by wasm and rethrown unchanged. Traps are
+not catchable by wasm.
+
 ## What is not implemented
 
 - **Live mutation of imported globals** — a `Global` passed as an
@@ -53,9 +65,9 @@ Marshalling at the JS ↔ wasm boundary:
 - **Ref-typed (`externref`/`funcref`) imported globals** — standalone
   `Global`s of these types work from JS, but linking one as a module
   import is skipped.
-- **Threads/atomics, GC, exception handling, memory64** — off in
-  the WAMR build. Pages that feature-detect get a clean
-  `CompileError` and fall back.
+- **GC, memory64 and the newer `try_table` / `exnref` form of exception
+  handling** — off in the WAMR build. Pages that feature-detect get a
+  clean `CompileError` and fall back.
 
 ## SIMD
 
@@ -77,8 +89,9 @@ an interpreter is several times faster than the scalar one.
 Meson fetches the pinned WAMR release through `subprojects/wamr.wrap`.
 `subprojects/packagefiles/wamr/` overlays the hand-written `meson.build`
 that builds the subset we use (interpreter, loader, common runtime,
-platform layers for Linux/macOS/Windows) and `ns_wamr.c`, the accessors
-into WAMR internals; `subprojects/packagefiles/wamr-nordstjernen.patch`
+platform layers for Linux/macOS/Windows), `ns_wamr.c`, the accessors
+into WAMR internals, and `ns_wamr_eh.c`, the exception-handling support;
+`subprojects/packagefiles/wamr-nordstjernen.patch`
 carries the local changes, which we make freely. So far:
 
 - `wasm_func_type_get_result_valkind` returned garbage for externref
@@ -93,6 +106,10 @@ carries the local changes, which we make freely. So far:
   freed memory after a wasm-side `memory.grow`.
 - Winsock init dropped from the Windows platform layer (no sockets
   are used) and the wasm-c-api coupling stubbed out.
+- Exception handling in the fast interpreter, which upstream offers only
+  in the classic one: the loader records each `try` as a handler range
+  with its `catch` clauses and the frame slots that receive the payload,
+  and a throw unwinds frame by frame to the innermost match.
 - `ns_wamr.{c,h}` — narrow accessors into runtime internals: table
   element access by export name (externref `get`/`set`/`grow`) and an
   externref reclaim trigger, called from the JS boundary between
@@ -123,4 +140,12 @@ software bounds checks on every memory access (the WAMR build sets
 — no guard-page tricks, no signal handlers). A wasm module
 can reach exactly what its JS imports hand it: there are no WASI
 syscalls, no filesystem, no sockets. The interpreter's operand stack is
-capped (1 MB) and traps surface as catchable `RuntimeError`s.
+capped (1 MB) and traps surface in JavaScript as catchable
+`RuntimeError`s. Linear memory is allocated inside the JavaScript heap
+cage and WAMR's own structures outside it
+([heap-hardening.md](heap-hardening.md)).
+
+Time spent executing wasm does not count toward the 60-second limit on
+page JavaScript ([threading.md](threading.md)), so a module that
+initialises for a long time in the interpreter is not halted as a runaway
+script.

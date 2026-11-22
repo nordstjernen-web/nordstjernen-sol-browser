@@ -130,6 +130,8 @@ interrupted run resumes. The default bases are
 resolves `*.localhost` itself; serve with
 `{"browser_host": "localhost", "check_subdomains": false}` and, for
 HTTPS, point `CURL_CA_BUNDLE` at a bundle that includes the server's CA.
+The latest whole-suite result, with its caveats and the ranked gaps, is
+[wpt-full-report-2026-11-21.md](wpt-full-report-2026-11-21.md).
 
 ## Related scripts
 
@@ -139,7 +141,8 @@ HTTPS, point `CURL_CA_BUNDLE` at a bundle that includes the server's CA.
   `wpt-runs/`.
 - `scripts/wpt-fast.sh [--fast-root=DIR] [--jobs=N] [PATH...]` — runs
   the [wpt-fast](https://github.com/nordstjernen-web/wpt-fast) checkout
-  in parallel; scores land in [wpt-fast-scores.md](wpt-fast-scores.md).
+  in parallel, writes a `wptreport.json` (`--out=FILE`) and prints the
+  per-standard scores through the checkout's `./wpt-score`.
 - `scripts/wpt-local.sh PATH...` — quick iteration against a plain
   static HTTP server instead of `./wpt serve` (no multi-origin or
   server-side tests).

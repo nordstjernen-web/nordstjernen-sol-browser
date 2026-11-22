@@ -67,8 +67,8 @@ paint (no opacity, transform, clip or filter), and records them in paint
 order. Content painted after the n-th of them goes to document layer n, so
 drawing the layers in order gives the same picture as one full paint. A page
 that cannot be split this way, for example one with `background-attachment:
-fixed`, a modal dialog in the top layer, sticky inside sticky, or a playing
-helper video inside a fixed element, is painted as full frames as before.
+fixed`, a modal dialog in the top layer or sticky inside sticky, is painted
+as full frames.
 
 The reply body lists the layers and tiles; the pixels are in the shared
 mapping. Tiles carry a generation number that changes whenever the page's
@@ -82,8 +82,9 @@ The shell (`src/gtk/pagelayers.c`) keeps the tiles as textures and moves them
 itself when the user scrolls, so scrolling does not wait for the renderer or
 for the page's scripts, and a scroll step uploads at most a few new tiles. A
 wheel gesture that starts over an inner scroll container is still sent to the
-renderer, which scrolls that container. A playing helper video is drawn under
-the tiles; the page paints a transparent hole where it shows.
+renderer, which scrolls that container. A playing video in a document layer
+is sent as a layer of its own and drawn under the tiles; the page paints a
+transparent hole where it shows (`paint_video_layer_hole` in `src/paint.c`).
 `NS_TILES=0` turns tiles off and brings back full frames.
 
 Resizing re-lays-out the page for the new CSS-pixel viewport width in the
@@ -97,7 +98,12 @@ untrusted page content cannot take down the UI; the shell detects a dead
 renderer and restarts the tab. The renderer confines itself with
 `ns_browser_sandbox` — Landlock + seccomp on Linux, a Seatbelt profile on
 macOS, process mitigation policies on Windows; see
-[tab-isolation.md](tab-isolation.md).
+[security-model.md](security-model.md).
+
+The framebuffer is the only memory a renderer shares. Decoded images are
+composited into it and stay private to the renderer that decoded them;
+there is no image cache shared between renderers, which would be state
+one site's renderer could write and another's would read.
 
 ## Long documents
 
