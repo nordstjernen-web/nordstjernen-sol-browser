@@ -3,6 +3,11 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: the rows of a `box-sizing: border-box` grid with a height are
+  sized against its content height. They were sized against the whole
+  border box, so in a 100 px tall grid with 10 px padding two `1fr` rows
+  were 50 px each and ran 20 px past the padding, `50%` rows likewise,
+  and `repeat(auto-fill, 20px)` made one row too many.
 * docs: second full WPT run (`docs/wpt-full-report-2026-11-22.md`):
   14,149 fully passing files (+2,253), 44.4 % file-weighted (+7.2 points),
   `encoding/` at 92 %; flags a reproducible crash in module-script loading.
