@@ -764,18 +764,19 @@ typedef struct ns_css_value {
             guint8 arg_none;
             ns_css_calc_arg args[4];
         } calc;
-        ns_css_shadow_list shadow;
-        ns_css_gradient  gradient;
-        ns_css_tracks    tracks;
-        char            *url;
-        ns_css_transform transform;
-        ns_css_areas     areas;
-        ns_css_anim_list anim;
+        ns_css_shadow_list *shadow;
+        ns_css_gradient  *gradient;
+        ns_css_tracks    *tracks;
+        char             *url;
+        ns_css_transform *transform;
+        ns_css_areas     *areas;
+        ns_css_anim_list *anim;
         struct { double v[4]; ns_css_unit unit[4]; gboolean is_auto[4]; } rect;
     } u;
 } ns_css_value;
 
 ns_css_value *ns_css_value_new(ns_css_value_kind kind);
+void          ns_css_value_set_kind(ns_css_value *v, ns_css_value_kind kind);
 
 int                 ns_css_font_stretch_rank(const ns_css_value *v);
 const ns_css_value *ns_css_value_layer(const ns_css_value *head, int index);

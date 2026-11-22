@@ -1743,14 +1743,14 @@ static gboolean
 style_columns_are_subgrid(const ns_style *s)
 {
     const ns_css_value *v = s ? s->values[NS_CSS_GRID_TEMPLATE_COLUMNS] : NULL;
-    return v && v->kind == NS_CSS_V_TRACKS && v->u.tracks.subgrid;
+    return v && v->kind == NS_CSS_V_TRACKS && v->u.tracks->subgrid;
 }
 
 static gboolean
 style_rows_are_subgrid(const ns_style *s)
 {
     const ns_css_value *v = s ? s->values[NS_CSS_GRID_TEMPLATE_ROWS] : NULL;
-    return v && v->kind == NS_CSS_V_TRACKS && v->u.tracks.subgrid;
+    return v && v->kind == NS_CSS_V_TRACKS && v->u.tracks->subgrid;
 }
 
 typedef struct ns_table_col_hint {
@@ -2848,7 +2848,7 @@ style_has_visible_control_box(const ns_style *s)
         return TRUE;
     if (s->values[NS_CSS_BOX_SHADOW] &&
         s->values[NS_CSS_BOX_SHADOW]->kind == NS_CSS_V_SHADOW &&
-        s->values[NS_CSS_BOX_SHADOW]->u.shadow.n > 0)
+        s->values[NS_CSS_BOX_SHADOW]->u.shadow->n > 0)
         return TRUE;
     if (s->values[NS_CSS_BACKGROUND_IMAGE] &&
         (s->values[NS_CSS_BACKGROUND_IMAGE]->kind == NS_CSS_V_URL ||
@@ -9366,7 +9366,7 @@ style_has_layer_transform(const ns_style *s)
     };
     for (guint i = 0; i < G_N_ELEMENTS(props); i++) {
         const ns_css_value *v = s->values[props[i]];
-        if (v && v->kind == NS_CSS_V_TRANSFORM && v->u.transform.n_ops > 0)
+        if (v && v->kind == NS_CSS_V_TRANSFORM && v->u.transform->n_ops > 0)
             return TRUE;
     }
     return FALSE;
@@ -10569,10 +10569,10 @@ static int
 grid_explicit_row_count(const ns_style *s)
 {
     const ns_css_value *rv = s ? s->values[NS_CSS_GRID_TEMPLATE_ROWS] : NULL;
-    if (!rv || rv->kind != NS_CSS_V_TRACKS || rv->u.tracks.subgrid ||
-        rv->u.tracks.auto_repeat != NS_CSS_AUTO_REPEAT_NONE)
+    if (!rv || rv->kind != NS_CSS_V_TRACKS || rv->u.tracks->subgrid ||
+        rv->u.tracks->auto_repeat != NS_CSS_AUTO_REPEAT_NONE)
         return 1;
-    return rv->u.tracks.n > 1 ? rv->u.tracks.n : 1;
+    return rv->u.tracks->n > 1 ? rv->u.tracks->n : 1;
 }
 
 static double
@@ -15896,8 +15896,8 @@ grid_extend_with_auto_tracks(ns_css_tracks *tracks, int from, int to,
                              const ns_css_value *auto_v)
 {
     const ns_css_tracks *pattern =
-        auto_v && auto_v->kind == NS_CSS_V_TRACKS && auto_v->u.tracks.n > 0 &&
-        !auto_v->u.tracks.subgrid ? &auto_v->u.tracks : NULL;
+        auto_v && auto_v->kind == NS_CSS_V_TRACKS && auto_v->u.tracks->n > 0 &&
+        !auto_v->u.tracks->subgrid ? auto_v->u.tracks : NULL;
     if (to > NS_CSS_TRACKS_MAX) to = NS_CSS_TRACKS_MAX;
     for (int i = from; i < to; i++) {
         ns_css_track t = { .kind = NS_CSS_TRACK_AUTO };
@@ -16051,13 +16051,13 @@ grid_intrinsic_items(ns_box *box, const ns_style *child_style,
 {
     const ns_css_value *cv = box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
     if (cv && cv->kind == NS_CSS_V_TRACKS &&
-        (cv->u.tracks.subgrid || cv->u.tracks.auto_repeat != NS_CSS_AUTO_REPEAT_NONE))
+        (cv->u.tracks->subgrid || cv->u.tracks->auto_repeat != NS_CSS_AUTO_REPEAT_NONE))
         return NULL;
     const ns_css_value *areas_v = box->style->values[NS_CSS_GRID_TEMPLATE_AREAS];
     const ns_css_areas *areas = areas_v && areas_v->kind == NS_CSS_V_AREAS
-        ? &areas_v->u.areas : NULL;
+        ? areas_v->u.areas : NULL;
     memset(cols, 0, sizeof(*cols));
-    if (cv && cv->kind == NS_CSS_V_TRACKS) *cols = cv->u.tracks;
+    if (cv && cv->kind == NS_CSS_V_TRACKS) *cols = *cv->u.tracks;
     int explicit_cols = cols->n;
     if (areas && areas->n_cols > explicit_cols) {
         grid_extend_with_auto_tracks(cols, explicit_cols, areas->n_cols,
@@ -16489,17 +16489,17 @@ layout_grid(ns_box *box, double cw,
 
     const ns_css_value *areas_v = box->style ? box->style->values[NS_CSS_GRID_TEMPLATE_AREAS] : NULL;
     const ns_css_areas *areas = areas_v && areas_v->kind == NS_CSS_V_AREAS
-        ? &areas_v->u.areas : NULL;
+        ? areas_v->u.areas : NULL;
     const ns_css_value *cols_v = box->style ? box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS] : NULL;
     gboolean cols_subgrid = cols_v && cols_v->kind == NS_CSS_V_TRACKS &&
-                            cols_v->u.tracks.subgrid && sg && sg->n > 0;
+                            cols_v->u.tracks->subgrid && sg && sg->n > 0;
     const ns_css_value *rows_v = box->style ? box->style->values[NS_CSS_GRID_TEMPLATE_ROWS]    : NULL;
     gboolean rows_subgrid = rows_v && rows_v->kind == NS_CSS_V_TRACKS &&
-                            rows_v->u.tracks.subgrid && sgr && sgr->n > 0;
+                            rows_v->u.tracks->subgrid && sgr && sgr->n > 0;
     ns_css_tracks default_cols = { .n = 1, .tracks = { { .kind = NS_CSS_TRACK_AUTO } } };
     const ns_css_tracks *cols_src =
-        (cols_v && cols_v->kind == NS_CSS_V_TRACKS && !cols_v->u.tracks.subgrid) ?
-        &cols_v->u.tracks : &default_cols;
+        (cols_v && cols_v->kind == NS_CSS_V_TRACKS && !cols_v->u.tracks->subgrid) ?
+        cols_v->u.tracks : &default_cols;
 
     double col_gap = gap_px(box->style ? box->style->values[NS_CSS_COLUMN_GAP] : NULL,
                             box->style ? box->style->values[NS_CSS_GAP] : NULL, cw);
@@ -16528,8 +16528,8 @@ layout_grid(ns_box *box, double cw,
     const ns_css_tracks *rows_template = NULL;
     int row_fit_start = 0, row_fit_count = 0;
     if (!rows_subgrid && rows_v && rows_v->kind == NS_CSS_V_TRACKS &&
-        !rows_v->u.tracks.subgrid) {
-        rows_buf = expand_auto_repeat_ex(&rows_v->u.tracks,
+        !rows_v->u.tracks->subgrid) {
+        rows_buf = expand_auto_repeat_ex(rows_v->u.tracks,
                                          grid_auto_repeat_height(box, row_basis, cw),
                                          row_gap, &row_fit_start, &row_fit_count);
         rows_template = &rows_buf;
@@ -16618,7 +16618,7 @@ layout_grid(ns_box *box, double cw,
         if (flow_rows <= 0) flow_rows = 1;
         if (flow_rows > NS_CSS_TRACKS_MAX) flow_rows = NS_CSS_TRACKS_MAX;
         int tmpl_cols = (cols_v && cols_v->kind == NS_CSS_V_TRACKS &&
-                         !cols_v->u.tracks.subgrid)
+                         !cols_v->u.tracks->subgrid)
                         ? cols->n : 0;
         gboolean occ[NS_CSS_TRACKS_MAX][NS_CSS_TRACKS_MAX] = {{FALSE}};
         int col_cursor[NS_CSS_TRACKS_MAX] = {0};
@@ -16682,9 +16682,9 @@ layout_grid(ns_box *box, double cw,
         const ns_css_value *acv =
             box->style->values[NS_CSS_GRID_AUTO_COLUMNS];
         const ns_css_tracks *auto_cols =
-            (acv && acv->kind == NS_CSS_V_TRACKS && acv->u.tracks.n > 0 &&
-             !acv->u.tracks.subgrid)
-            ? &acv->u.tracks : NULL;
+            (acv && acv->kind == NS_CSS_V_TRACKS && acv->u.tracks->n > 0 &&
+             !acv->u.tracks->subgrid)
+            ? acv->u.tracks : NULL;
         ns_css_tracks flow_cols = {0};
         flow_cols.n = used_cols;
         for (int c = 0; c < used_cols; c++) {
@@ -16707,8 +16707,8 @@ layout_grid(ns_box *box, double cw,
     const ns_css_tracks *rows_tracks = rows_template;
     const ns_css_tracks *auto_rows_tracks =
         (!rows_subgrid && auto_rows_v && auto_rows_v->kind == NS_CSS_V_TRACKS &&
-         !auto_rows_v->u.tracks.subgrid && auto_rows_v->u.tracks.n > 0)
-        ? &auto_rows_v->u.tracks : NULL;
+         !auto_rows_v->u.tracks->subgrid && auto_rows_v->u.tracks->n > 0)
+        ? auto_rows_v->u.tracks : NULL;
     int explicit_rows = rows_subgrid ? sgr->n : (rows_tracks ? rows_tracks->n : 0);
     GArray *occupied = grid_occupancy_new();
     int auto_row = 0;
@@ -20210,9 +20210,9 @@ grid_abs_containing_block(const ns_box *cb, const ns_style *st,
     const ns_css_value *rows_v = cb->style
         ? cb->style->values[NS_CSS_GRID_TEMPLATE_ROWS] : NULL;
     grid_lines col_lines = { cols_v && cols_v->kind == NS_CSS_V_TRACKS
-                             ? &cols_v->u.tracks : NULL, NULL, FALSE };
+                             ? cols_v->u.tracks : NULL, NULL, FALSE };
     grid_lines row_lines = { rows_v && rows_v->kind == NS_CSS_V_TRACKS
-                             ? &rows_v->u.tracks : NULL, NULL, TRUE };
+                             ? rows_v->u.tracks : NULL, NULL, TRUE };
     g_grid_lines = &col_lines;
     grid_abs_axis_lines(st, FALSE, cb->grid_explicit_cols, &cs, &ce);
     g_grid_lines = &row_lines;
@@ -20292,7 +20292,7 @@ ns_layout_grid_resolved_tracks(const ns_box *box, gboolean columns)
                                      : NS_CSS_GRID_TEMPLATE_ROWS]
         : NULL;
     const ns_css_tracks *tk = NULL;
-    if (tv && tv->kind == NS_CSS_V_TRACKS && tv->u.tracks.subgrid) {
+    if (tv && tv->kind == NS_CSS_V_TRACKS && tv->u.tracks->subgrid) {
         const ns_box *p = box->parent;
         while (p && !p->style) p = p->parent;
         if (p && ns_display_is_grid_container(ns_css_display_of(p->style)))
@@ -20301,17 +20301,17 @@ ns_layout_grid_resolved_tracks(const ns_box *box, gboolean columns)
     }
     ns_css_tracks expanded;
     if (tv && tv->kind == NS_CSS_V_TRACKS &&
-        tv->u.tracks.auto_repeat == NS_CSS_AUTO_REPEAT_NONE) {
-        tk = &tv->u.tracks;
+        tv->u.tracks->auto_repeat == NS_CSS_AUTO_REPEAT_NONE) {
+        tk = tv->u.tracks;
     } else if (tv && tv->kind == NS_CSS_V_TRACKS &&
-               tv->u.tracks.auto_repeat_count > 0) {
-        int count = tv->u.tracks.auto_repeat_count;
-        int others = tv->u.tracks.n - count;
+               tv->u.tracks->auto_repeat_count > 0) {
+        int count = tv->u.tracks->auto_repeat_count;
+        int others = tv->u.tracks->n - count;
         int explicit_n = columns ? box->grid_explicit_cols
                                  : box->grid_explicit_rows;
         if (explicit_n > others && (explicit_n - others) % count == 0) {
-            expanded = tv->u.tracks;
-            grid_expand_repeat_names(&tv->u.tracks,
+            expanded = *tv->u.tracks;
+            grid_expand_repeat_names(tv->u.tracks,
                                      (explicit_n - others) / count, &expanded);
             tk = &expanded;
         }
@@ -20487,7 +20487,7 @@ box_has_transform_style(const ns_box *b)
     const ns_style *s = b ? b->style : NULL;
     if (!s) return FALSE;
     const ns_css_value *tv = s->values[NS_CSS_TRANSFORM];
-    if (tv && tv->kind == NS_CSS_V_TRANSFORM && tv->u.transform.n_ops > 0)
+    if (tv && tv->kind == NS_CSS_V_TRANSFORM && tv->u.transform->n_ops > 0)
         return TRUE;
     return s->values[NS_CSS_TRANSLATE] || s->values[NS_CSS_ROTATE] ||
            s->values[NS_CSS_SCALE] || s->values[NS_CSS_PERSPECTIVE];
@@ -20540,8 +20540,8 @@ box_local_transform(const ns_box *b, double dx, double dy, ns_mat4 *out)
     double oz = 0;
     const ns_css_value *origin = s->values[NS_CSS_TRANSFORM_ORIGIN];
     if (origin && origin->kind == NS_CSS_V_TRANSFORM &&
-        origin->u.transform.n_ops > 0) {
-        const ns_css_transform_op *o = &origin->u.transform.ops[0];
+        origin->u.transform->n_ops > 0) {
+        const ns_css_transform_op *o = &origin->u.transform->ops[0];
         ox = bx + (o->a_is_percent ? o->a / 100.0 * bw : o->a);
         oy = by + (o->b_is_percent ? o->b / 100.0 * bh : o->b);
         oz = o->c;
@@ -21678,7 +21678,7 @@ box_paint_unbounded(const ns_box *b)
     const ns_style *s = b->style;
     if (!s) return FALSE;
     const ns_css_value *tv = s->values[NS_CSS_TRANSFORM];
-    if (tv && tv->kind == NS_CSS_V_TRANSFORM && tv->u.transform.n_ops > 0)
+    if (tv && tv->kind == NS_CSS_V_TRANSFORM && tv->u.transform->n_ops > 0)
         return TRUE;
     if (s->values[NS_CSS_ANIMATION] || s->values[NS_CSS_TRANSITION])
         return TRUE;

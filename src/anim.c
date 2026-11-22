@@ -2134,7 +2134,7 @@ style_has_transform(const ns_style *st)
     };
     for (int i = 0; i < 4; i++) {
         const ns_css_value *v = st->values[props[i]];
-        if (v && v->kind == NS_CSS_V_TRANSFORM && v->u.transform.n_ops > 0)
+        if (v && v->kind == NS_CSS_V_TRANSFORM && v->u.transform->n_ops > 0)
             return TRUE;
     }
     return FALSE;
@@ -2544,9 +2544,9 @@ ns_anim_get_transform(ns_anim *a, const ns_node *dom)
     ns_anim_state *s = g_hash_table_lookup(a->states, dom);
     if (!s) return NULL;
     const ns_css_value *v = state_prop_value(s, NS_CSS_TRANSFORM);
-    if (!v || v->kind != NS_CSS_V_TRANSFORM || v->u.transform.n_ops == 0)
+    if (!v || v->kind != NS_CSS_V_TRANSFORM || v->u.transform->n_ops == 0)
         return NULL;
-    return &v->u.transform;
+    return v->u.transform;
 }
 
 gboolean

@@ -817,7 +817,7 @@ style_has_inline_box_paint(const ns_style *s)
         return TRUE;
     if (s->values[NS_CSS_BOX_SHADOW] &&
         s->values[NS_CSS_BOX_SHADOW]->kind == NS_CSS_V_SHADOW &&
-        s->values[NS_CSS_BOX_SHADOW]->u.shadow.n > 0)
+        s->values[NS_CSS_BOX_SHADOW]->u.shadow->n > 0)
         return TRUE;
     if (s->values[NS_CSS_BACKGROUND_IMAGE] &&
         (s->values[NS_CSS_BACKGROUND_IMAGE]->kind == NS_CSS_V_URL ||
@@ -1257,7 +1257,7 @@ paint_inline_box_shadow(cairo_t *cr, const ns_style *s, double x, double y,
     if (!s || !s->values[NS_CSS_BOX_SHADOW] ||
         s->values[NS_CSS_BOX_SHADOW]->kind != NS_CSS_V_SHADOW)
         return;
-    const ns_css_shadow_list *sl = &s->values[NS_CSS_BOX_SHADOW]->u.shadow;
+    const ns_css_shadow_list *sl = s->values[NS_CSS_BOX_SHADOW]->u.shadow;
     for (int si = sl->n - 1; si >= 0; si--) {
         const ns_css_shadow *sh = &sl->s[si];
         if (sh->inset) continue;
@@ -1845,7 +1845,7 @@ paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
     for (int li = ns_css_value_layer_count(head) - 1; li >= 0; li--) {
         const ns_css_value *lv = ns_css_value_layer(head, li);
         if (lv->kind != NS_CSS_V_GRADIENT) continue;
-        paint_bg_gradient_layer(cr, &lv->u.gradient,
+        paint_bg_gradient_layer(cr, lv->u.gradient,
             ns_css_value_layer(s->values[NS_CSS_BACKGROUND_REPEAT], li),
             ns_css_value_layer(s->values[NS_CSS_BACKGROUND_SIZE], li),
             ns_css_value_layer(s->values[NS_CSS_BACKGROUND_POSITION_X], li),
@@ -2091,7 +2091,7 @@ paint_border_image(cairo_t *cr, const ns_box *b, const ns_style *s,
         cairo_surface_set_device_scale(owned, pw / iw, ph / ih);
         cairo_t *gc = cairo_create(owned);
         corner_radii square = {0};
-        paint_bg_gradient_core(gc, &src->u.gradient, 0, 0, iw, ih,
+        paint_bg_gradient_core(gc, src->u.gradient, 0, 0, iw, ih,
                                0, 0, iw, ih, square);
         cairo_destroy(gc);
         surf = owned;
@@ -2365,7 +2365,7 @@ paint_block(cairo_t *cr, const ns_box *b)
 
     if (s && s->values[NS_CSS_BOX_SHADOW] &&
         s->values[NS_CSS_BOX_SHADOW]->kind == NS_CSS_V_SHADOW) {
-        const ns_css_shadow_list *sl = &s->values[NS_CSS_BOX_SHADOW]->u.shadow;
+        const ns_css_shadow_list *sl = s->values[NS_CSS_BOX_SHADOW]->u.shadow;
         for (int si = sl->n - 1; si >= 0; si--) {
             const ns_css_shadow *sh = &sl->s[si];
             if (sh->inset) continue;
@@ -2428,7 +2428,7 @@ paint_block(cairo_t *cr, const ns_box *b)
         cairo_operator_t blend = bg_layer_blend_operator(s, li);
         if (lv->kind == NS_CSS_V_GRADIENT) {
             bg_layer_blend_begin(cr, blend);
-            paint_bg_gradient_layer(cr, &lv->u.gradient,
+            paint_bg_gradient_layer(cr, lv->u.gradient,
                 ns_css_value_layer(s->values[NS_CSS_BACKGROUND_REPEAT], li),
                 ns_css_value_layer(s->values[NS_CSS_BACKGROUND_SIZE], li),
                 ns_css_value_layer(s->values[NS_CSS_BACKGROUND_POSITION_X], li),
@@ -2473,7 +2473,7 @@ paint_block(cairo_t *cr, const ns_box *b)
 
     if (s && s->values[NS_CSS_BOX_SHADOW] &&
         s->values[NS_CSS_BOX_SHADOW]->kind == NS_CSS_V_SHADOW) {
-        const ns_css_shadow_list *sl = &s->values[NS_CSS_BOX_SHADOW]->u.shadow;
+        const ns_css_shadow_list *sl = s->values[NS_CSS_BOX_SHADOW]->u.shadow;
         for (int si = sl->n - 1; si >= 0; si--) {
             const ns_css_shadow *sh = &sl->s[si];
             if (!sh->inset) continue;
@@ -5907,8 +5907,8 @@ static const ns_css_shadow_list *
 style_text_shadow(const ns_style *s)
 {
     const ns_css_value *v = s ? s->values[NS_CSS_TEXT_SHADOW] : NULL;
-    if (!v || v->kind != NS_CSS_V_SHADOW || v->u.shadow.n <= 0) return NULL;
-    return inline_box_is_hidden(s) ? NULL : &v->u.shadow;
+    if (!v || v->kind != NS_CSS_V_SHADOW || v->u.shadow->n <= 0) return NULL;
+    return inline_box_is_hidden(s) ? NULL : v->u.shadow;
 }
 
 static gboolean
@@ -6070,9 +6070,9 @@ paint_inline_text_shadows(cairo_t *cr, const ns_box *b, const ns_style *s,
     }
     const ns_css_value *v = s ? s->values[NS_CSS_TEXT_SHADOW] : NULL;
     if (!v || v->kind != NS_CSS_V_SHADOW) return;
-    for (int si = v->u.shadow.n - 1; si >= 0; si--)
+    for (int si = v->u.shadow->n - 1; si >= 0; si--)
         paint_text_shadow_layer(cr, &src, text_x, y_origin,
-                                &v->u.shadow.s[si]);
+                                &v->u.shadow->s[si]);
 }
 
 static void
@@ -9846,7 +9846,7 @@ mask_gradient_pattern(const ns_css_gradient *gr,
 static gboolean
 mask_layer_is_gradient(const ns_css_value *v)
 {
-    return v && v->kind == NS_CSS_V_GRADIENT && !v->u.gradient.conic;
+    return v && v->kind == NS_CSS_V_GRADIENT && !v->u.gradient->conic;
 }
 
 static gboolean
@@ -9940,7 +9940,7 @@ mask_layers_pattern(cairo_t *cr, const ns_box *b, const cairo_matrix_t *tf,
     for (int i = n - 1; i >= 0; i--) {
         const ns_css_value *layer = ns_css_value_layer(mask, i);
         cairo_pattern_t *grad = mask_layer_is_gradient(layer)
-            ? mask_gradient_pattern(&layer->u.gradient, bx, by, bw, bh) : NULL;
+            ? mask_gradient_pattern(layer->u.gradient, bx, by, bw, bh) : NULL;
         cairo_save(cr);
         cairo_new_path(cr);
         mask_clip_box_path(cr, b, ns_css_value_layer(
@@ -10283,8 +10283,8 @@ box_transform_origin(const ns_box *b, double bx, double by, double bw,
     *oz = 0;
     const ns_css_value *origin = b->style ? b->style->values[prop] : NULL;
     if (origin && origin->kind == NS_CSS_V_TRANSFORM &&
-        origin->u.transform.n_ops > 0) {
-        const ns_css_transform_op *o = &origin->u.transform.ops[0];
+        origin->u.transform->n_ops > 0) {
+        const ns_css_transform_op *o = &origin->u.transform->ops[0];
         *ox = bx + (o->a_is_percent ? o->a / 100.0 * bw : o->a);
         *oy = by + (o->b_is_percent ? o->b / 100.0 * bh : o->b);
         *oz = o->c;
