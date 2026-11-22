@@ -746,6 +746,10 @@ void     ns_css_set_print_media(gboolean printing);
 typedef struct ns_css_value {
     ns_css_value_kind kind;
     int ref;
+    char *image_set_text;
+    char *specified;
+    char *scheme_text;
+    struct ns_css_value *next_layer;
     union {
         char *keyword;
         struct { double v; ns_css_unit unit; } length;
@@ -769,11 +773,9 @@ typedef struct ns_css_value {
         ns_css_anim_list anim;
         struct { double v[4]; ns_css_unit unit[4]; gboolean is_auto[4]; } rect;
     } u;
-    char *image_set_text;
-    char *specified;
-    char *scheme_text;
-    struct ns_css_value *next_layer;
 } ns_css_value;
+
+ns_css_value *ns_css_value_new(ns_css_value_kind kind);
 
 int                 ns_css_font_stretch_rank(const ns_css_value *v);
 const ns_css_value *ns_css_value_layer(const ns_css_value *head, int index);
