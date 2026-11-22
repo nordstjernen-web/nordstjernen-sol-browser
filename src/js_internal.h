@@ -155,6 +155,7 @@ struct ns_js {
     JSValue       history_state;
     JSValue       sab_ctor;
     gboolean      cross_origin_isolated;
+    char         *doc_charset;
     int           history_length;
     GPtrArray    *history_entries;
     int           history_pos;

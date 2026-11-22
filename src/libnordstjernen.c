@@ -1543,6 +1543,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_add_csp_header(b->js, csp_header);
         ns_js_set_permissions_policy(b->js, g_pending_permissions_policy);
         ns_js_set_cross_origin_isolated(b->js, cross_origin_isolated);
+        ns_js_set_document_charset(b->js, b->doc_charset);
         g_clear_pointer(&g_pending_permissions_policy, g_free);
         ns_js_set_connection_allowlist(b->js, base,
                                        g_pending_connection_allowlist);

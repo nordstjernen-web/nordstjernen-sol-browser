@@ -3,6 +3,22 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Legacy encodings: pages in Shift_JIS, EUC-JP, ISO-2022-JP, EUC-KR,
+  Big5, GBK and the single-byte encodings now behave as their charset
+  says. `document.characterSet` reports the encoding the page was decoded
+  with instead of always "UTF-8"; a declared encoding that iconv cannot
+  convert in one pass (an EUC-JP or Big5 page with one bad byte) is
+  decoded with the closest WHATWG codec, replacing only the bad bytes,
+  instead of falling through to a guess; and form submissions, link and
+  `src`/`action`/`data` URLs and `location` navigations encode non-ASCII
+  query text in the document's encoding, writing unmappable characters
+  as `&#NNNN;`, as the URL and HTML standards specify. `window.frames`,
+  `window.length` and `window.visualViewport` can be replaced by
+  assignment like other `[Replaceable]` attributes: a page script with
+  `var frames = …` at top level silently kept the WindowProxy, which
+  stalled every legacy-encoding form test in WPT. WPT `encoding/`: about
+  102,000 → 1,097,838 of 1,152,413 subtests; 584 form tests no longer
+  time out.
 * Documentation reviewed against the tree. Stale build instructions are
   corrected (GStreamer, FFmpeg, Rust and the fetched wraps in the distro
   guides, the Fedora nightly stage, renamed build options), and the

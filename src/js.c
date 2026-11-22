@@ -567,6 +567,11 @@ static void ns_js_eval_engine_bundle(ns_js *js, ns_engine_bundle *bundle,
 static JSValue ns_structured_clone_value(JSContext *ctx, JSValueConst v, JSValueConst transfer);
 static JSValue ns_iframe_cross_origin_window(JSContext *ctx, JSValue target);
 static void ns_install_cross_window_maker(JSContext *ctx, JSValueConst global);
+static char *ns_js_url_parse_in_document(ns_js *js, const ns_node *n,
+                                         const char *base, const char *raw,
+                                         gsize len);
+static char *ns_js_url_encode_query_for_document(ns_js *js, const ns_node *n,
+                                                 const char *raw);
 static char **ns_js_csp_headers_dup(const ns_js *js);
 static void ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev);
 static void ns_hide_shared_array_buffer(JSContext *ctx, JSValueConst global);
@@ -1442,7 +1447,12 @@ ns_form_charset_open(ns_form_charset *cs, const char *encoding)
     cs->cd = (GIConv)-1;
     cs->utf8 = !encoding || g_ascii_strcasecmp(encoding, "UTF-8") == 0;
     if (cs->utf8) return;
-    cs->cd = g_iconv_open(encoding, "UTF-8");
+    const char *codec = g_ascii_strcasecmp(encoding, "Shift_JIS") == 0 ? "CP932"
+                      : g_ascii_strcasecmp(encoding, "EUC-KR") == 0 ? "CP949"
+                      : encoding;
+    cs->cd = g_iconv_open(codec, "UTF-8");
+    if (cs->cd == (GIConv)-1 && codec != encoding)
+        cs->cd = g_iconv_open(encoding, "UTF-8");
     if (cs->cd == (GIConv)-1) cs->utf8 = TRUE;
 }
 
@@ -2180,6 +2190,17 @@ ns_js_feature_allowed(ns_js *js, JSContext *realm, const char *feature)
     if (!js || js->worker_host || !feature) return TRUE;
     return ns_js_frame_feature_allowed(js, ns_js_frame_of_realm(js, realm),
                                        feature);
+}
+
+void
+ns_js_set_document_charset(ns_js *js, const char *charset)
+{
+    if (!js) return;
+    const char *name = charset ? ns_html_encoding_for_label(charset) : NULL;
+    if (!name && charset && g_ascii_strcasecmp(charset, "CP932") == 0)
+        name = "Shift_JIS";
+    g_free(js->doc_charset);
+    js->doc_charset = g_strdup(name ? name : "UTF-8");
 }
 
 void
@@ -6577,7 +6598,8 @@ ns_element_attr_getter(JSContext *ctx, JSValueConst this_val, int magic)
         if (!v) return JS_NewString(ctx, "");
         g_autofree char *base = ns_js_doc_base_url(js_from_ctx(ctx));
         if (base && *base) {
-            char *resolved = ns_url_resolve(base, v);
+            char *resolved = ns_js_url_parse_in_document(js_from_ctx(ctx), n,
+                                                         base, v, v_len);
             if (resolved) {
                 JSValue ret = JS_NewString(ctx, resolved);
                 g_free(resolved);
@@ -8657,7 +8679,8 @@ ns_element_get_data(JSContext *ctx, JSValueConst this_val)
         if (!v) return JS_NewString(ctx, "");
         g_autofree char *base = ns_js_doc_base_url(js_from_ctx(ctx));
         if (base && *base) {
-            char *resolved = ns_url_resolve(base, v);
+            char *resolved = ns_js_url_parse_in_document(js_from_ctx(ctx), n,
+                                                         base, v, strlen(v));
             if (resolved) {
                 JSValue ret = JS_NewString(ctx, resolved);
                 g_free(resolved);
@@ -48706,6 +48729,150 @@ ns_js_doc_base_url(ns_js *js)
 }
 
 static char *
+ns_node_document_encoding(JSContext *ctx, const ns_node *n)
+{
+    const char *picked = NULL;
+    const ns_node *doc = n ? ns_node_root(n) : NULL;
+    gboolean attached = doc && doc->kind == NS_NODE_DOCUMENT &&
+                        !(doc->flags & NS_NODE_FRAGMENT);
+    if (ctx) {
+        JSValue dv = JS_UNDEFINED;
+        if (attached) {
+            dv = ns_make_element(ctx, doc);
+        } else if (n) {
+            JSValue nv = ns_make_element(ctx, n);
+            dv = JS_GetPropertyStr(ctx, nv, "ownerDocument");
+            JS_FreeValue(ctx, nv);
+        }
+        if (!JS_IsObject(dv)) {
+            JS_FreeValue(ctx, dv);
+            JSValue global = JS_GetGlobalObject(ctx);
+            dv = JS_GetPropertyStr(ctx, global, "document");
+            JS_FreeValue(ctx, global);
+        }
+        JSValue cs = JS_GetPropertyStr(ctx, dv, "characterSet");
+        const char *label = JS_IsString(cs) ? JS_ToCString(ctx, cs) : NULL;
+        if (label) {
+            picked = ns_html_encoding_for_label(label);
+            JS_FreeCString(ctx, label);
+        }
+        JS_FreeValue(ctx, cs);
+        JS_FreeValue(ctx, dv);
+    }
+    if (!picked || g_ascii_strcasecmp(picked, "replacement") == 0 ||
+        g_ascii_strncasecmp(picked, "UTF-16", 6) == 0)
+        picked = "UTF-8";
+    return g_strdup(picked);
+}
+
+static gboolean
+ns_url_query_uses_document_encoding(const char *url)
+{
+    return url && (g_ascii_strncasecmp(url, "http:", 5) == 0 ||
+                   g_ascii_strncasecmp(url, "https:", 6) == 0 ||
+                   g_ascii_strncasecmp(url, "ftp:", 4) == 0 ||
+                   g_ascii_strncasecmp(url, "file:", 5) == 0);
+}
+
+static gboolean
+ns_href_query_has_non_ascii(const char *raw, gsize len)
+{
+    const char *hash = memchr(raw, '#', len);
+    const char *query = memchr(raw, '?', len);
+    if (!query || (hash && hash < query)) return FALSE;
+    const char *query_end = hash ? hash : raw + len;
+    for (const char *p = query; p < query_end; p++)
+        if ((unsigned char)*p >= 0x80) return TRUE;
+    return FALSE;
+}
+
+static char *
+ns_href_with_encoded_query(const char *raw, gsize len, const char *encoding)
+{
+    const char *end = raw + len;
+    const char *hash = memchr(raw, '#', len);
+    const char *query = memchr(raw, '?', len);
+    if (!query || (hash && hash < query)) return NULL;
+    const char *query_end = hash ? hash : end;
+    gboolean ascii = TRUE;
+    for (const char *p = query; p < query_end && ascii; p++)
+        ascii = (unsigned char)*p < 0x80;
+    if (ascii) return NULL;
+
+    ns_form_charset cs;
+    ns_form_charset_open(&cs, encoding);
+    if (cs.utf8) {
+        ns_form_charset_close(&cs);
+        return NULL;
+    }
+    GString *out = g_string_new_len(raw, query - raw);
+    GString *bytes = g_string_new(NULL);
+    const char *p = query;
+    while (p < query_end) {
+        if ((unsigned char)*p < 0x80) {
+            g_string_append_c(out, *p++);
+            continue;
+        }
+        const char *next = g_utf8_find_next_char(p, query_end);
+        if (!next) next = query_end;
+        g_string_truncate(bytes, 0);
+        ns_form_charset_encode(&cs, bytes, p, (gsize)(next - p));
+        p = next;
+        gboolean unencodable = bytes->len > 3 && bytes->str[0] == '&' &&
+                               bytes->str[1] == '#' &&
+                               bytes->str[bytes->len - 1] == ';';
+        if (unencodable) {
+            g_string_append(out, "%26%23");
+            g_string_append_len(out, bytes->str + 2, (gssize)bytes->len - 3);
+            g_string_append(out, "%3B");
+            continue;
+        }
+        for (gsize i = 0; i < bytes->len; i++) {
+            unsigned char byte = (unsigned char)bytes->str[i];
+            gboolean plain = byte > 0x20 && byte < 0x7f && byte != '"' &&
+                             byte != '#' && byte != '<' && byte != '>' &&
+                             byte != '\'';
+            if (plain) g_string_append_c(out, (char)byte);
+            else g_string_append_printf(out, "%%%02X", byte);
+        }
+    }
+    g_string_append_len(out, query_end, end - query_end);
+    g_string_free(bytes, TRUE);
+    ns_form_charset_close(&cs);
+    return g_string_free(out, FALSE);
+}
+
+static char *
+ns_js_url_parse_in_document(ns_js *js, const ns_node *n, const char *base,
+                            const char *raw, gsize len)
+{
+    const char *against = base && *base ? base : NULL;
+    char *resolved = ns_url_resolve_len(against, raw, len);
+    if (!js || !ns_href_query_has_non_ascii(raw, len) ||
+        !ns_url_query_uses_document_encoding(resolved))
+        return resolved;
+    g_autofree char *encoding = ns_node_document_encoding(js->ctx, n);
+    if (g_ascii_strcasecmp(encoding, "UTF-8") == 0) return resolved;
+    g_autofree char *encoded = ns_href_with_encoded_query(raw, len, encoding);
+    if (!encoded) return resolved;
+    char *again = ns_url_resolve_len(against, encoded, strlen(encoded));
+    if (!again) return resolved;
+    g_free(resolved);
+    return again;
+}
+
+static char *
+ns_js_url_encode_query_for_document(ns_js *js, const ns_node *n,
+                                    const char *raw)
+{
+    if (!js || !raw || !ns_href_query_has_non_ascii(raw, strlen(raw)))
+        return NULL;
+    g_autofree char *encoding = ns_node_document_encoding(js->ctx, n);
+    if (g_ascii_strcasecmp(encoding, "UTF-8") == 0) return NULL;
+    return ns_href_with_encoded_query(raw, strlen(raw), encoding);
+}
+
+static char *
 ns_element_anchor_url(const ns_node *n, ns_js *js)
 {
     if (!n) return NULL;
@@ -48713,7 +48880,7 @@ ns_element_anchor_url(const ns_node *n, ns_js *js)
     const char *raw = ns_element_get_attr_len(n, "href", &len);
     if (!raw) return NULL;
     g_autofree char *base = ns_js_doc_base_url(js);
-    return ns_url_resolve_len(base && *base ? base : NULL, raw, len);
+    return ns_js_url_parse_in_document(js, n, base, raw, len);
 }
 
 static char *
@@ -58566,6 +58733,29 @@ ns_window_get_length(JSContext *ctx, JSValueConst this_val, int argc,
 }
 
 static JSValue
+ns_window_replace_attribute(JSContext *ctx, JSValueConst this_val,
+                            const char *name, JSValueConst val)
+{
+    if (!JS_IsObject(this_val)) return JS_UNDEFINED;
+    if (JS_DefinePropertyValueStr(ctx, this_val, name, JS_DupValue(ctx, val),
+                                  JS_PROP_C_W_E) < 0)
+        return JS_EXCEPTION;
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_window_set_frames(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    return ns_window_replace_attribute(ctx, this_val, "frames", val);
+}
+
+static JSValue
+ns_window_set_length(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    return ns_window_replace_attribute(ctx, this_val, "length", val);
+}
+
+static JSValue
 ns_element_getSVGDocument(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
@@ -66249,7 +66439,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
         JSAtom frames_atom = JS_NewAtom(ctx, "frames");
         JSValue fr_g = JS_NewCFunction2(ctx, ns_window_get_frames, "get frames", 0,
                                         JS_CFUNC_generic, 0);
-        JSValue fr_s = JS_NewCFunction2(ctx, (JSCFunction *)(void *)ns_element_noop_set,
+        JSValue fr_s = JS_NewCFunction2(ctx, (JSCFunction *)(void *)ns_window_set_frames,
                                         "set frames", 1, JS_CFUNC_setter, 0);
         JS_DefinePropertyGetSet(ctx, global, frames_atom, fr_g, fr_s,
                                 JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
@@ -66257,7 +66447,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
         JSAtom length_atom = JS_NewAtom(ctx, "length");
         JSValue len_g = JS_NewCFunction2(ctx, ns_window_get_length, "get length", 0,
                                          JS_CFUNC_generic, 0);
-        JSValue len_s = JS_NewCFunction2(ctx, (JSCFunction *)(void *)ns_element_noop_set,
+        JSValue len_s = JS_NewCFunction2(ctx, (JSCFunction *)(void *)ns_window_set_length,
                                          "set length", 1, JS_CFUNC_setter, 0);
         JS_DefinePropertyGetSet(ctx, global, length_atom, len_g, len_s,
                                 JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
@@ -69438,6 +69628,8 @@ ns_location_navigate_with(ns_js *js, const char *s, gboolean replace)
     }
     if (ns_location_nav_in_iframe(js)) return;
     if (!ns_js_realm_may_navigate_top(js, js->ctx)) return;
+    g_autofree char *encoded = ns_js_url_encode_query_for_document(js, NULL, s);
+    if (encoded) s = encoded;
     g_autofree char *abs_url = ns_url_resolve(ns_js_top_url(js), s);
     if (!abs_url || !ns_js_fragment_navigate(js, abs_url, replace))
         js->nav_cb(s, FALSE, js->nav_user_data);
@@ -70321,12 +70513,13 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
                               JS_NewString(ctx, js->current_url), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, document, "baseURI",
                               JS_NewString(ctx, js->current_url), JS_PROP_C_W_E);
+    const char *doc_charset = js->doc_charset ? js->doc_charset : "UTF-8";
     JS_DefinePropertyValueStr(ctx, document, "characterSet",
-                              JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
+                              JS_NewString(ctx, doc_charset), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, document, "charset",
-                              JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
+                              JS_NewString(ctx, doc_charset), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, document, "inputEncoding",
-                              JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
+                              JS_NewString(ctx, doc_charset), JS_PROP_C_W_E);
     gboolean xml_doc = doc && (doc->flags & NS_NODE_XML_DOC);
     JS_DefinePropertyValueStr(ctx, document, "contentType",
         JS_NewString(ctx, xml_doc ? "application/xhtml+xml" : "text/html"),
@@ -70418,6 +70611,7 @@ void
 ns_js_free(ns_js *js)
 {
     if (!js) return;
+    g_clear_pointer(&js->doc_charset, g_free);
     ns_js *resume_active = ns_active_js();
     if (resume_active == js) resume_active = NULL;
     ns_set_active_js(js);
@@ -77998,19 +78192,7 @@ ns_form_pick_encoding(JSContext *ctx, const ns_node *form)
         for (guint i = 0; labels[i] && !picked; i++)
             if (*labels[i]) picked = ns_html_encoding_for_label(labels[i]);
     } else {
-        const ns_node *doc = ns_node_root(form);
-        if (doc && doc->kind == NS_NODE_DOCUMENT &&
-            !(doc->flags & NS_NODE_FRAGMENT)) {
-            JSValue dv = ns_make_element(ctx, doc);
-            JSValue cs = JS_GetPropertyStr(ctx, dv, "characterSet");
-            const char *label = JS_IsString(cs) ? JS_ToCString(ctx, cs) : NULL;
-            if (label) {
-                picked = ns_html_encoding_for_label(label);
-                JS_FreeCString(ctx, label);
-            }
-            JS_FreeValue(ctx, cs);
-            JS_FreeValue(ctx, dv);
-        }
+        return ns_node_document_encoding(ctx, form);
     }
     if (!picked || g_ascii_strcasecmp(picked, "replacement") == 0 ||
         g_ascii_strncasecmp(picked, "UTF-16", 6) == 0)
@@ -78066,6 +78248,12 @@ ns_js_form_prepare_submission(ns_js *js, const ns_node *form,
         out->is_dialog = method && g_ascii_strcasecmp(method, "dialog") == 0;
         out->action = ns_form_submitter_attr(form, submitter,
                                              "action", "formaction");
+        char *encoded_action =
+            ns_js_url_encode_query_for_document(js, form, out->action);
+        if (encoded_action) {
+            g_free(out->action);
+            out->action = encoded_action;
+        }
         out->target = ns_form_submitter_attr(form, submitter,
                                              "target", "formtarget");
         GArray *entries = ns_form_entries_read(ctx, fd);

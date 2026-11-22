@@ -157,6 +157,7 @@ void   ns_js_set_early_inject_src(ns_js *js, const char *src);
 void   ns_js_add_csp_header(ns_js *js, const char *header_value);
 void   ns_js_set_permissions_policy(ns_js *js, const char *header_value);
 void   ns_js_set_cross_origin_isolated(ns_js *js, gboolean isolated);
+void   ns_js_set_document_charset(ns_js *js, const char *charset);
 void   ns_js_credit_wasm_time(struct JSContext *ctx, gint64 elapsed_us);
 void   ns_js_set_connection_allowlist(ns_js *js, const char *document_url,
                                       const char *header_value);
