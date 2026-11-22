@@ -30378,7 +30378,7 @@ ns_worker_script_text(const guint8 *data, gsize len, gsize *out_len)
         data += 3;
         len -= 3;
     }
-    char *text = g_utf8_make_valid((const char *)data, (gssize)len);
+    char *text = g_utf8_make_valid(len ? (const char *)data : "", (gssize)len);
     if (out_len) *out_len = strlen(text);
     return text;
 }
@@ -72971,7 +72971,7 @@ ns_js_load_module_bytes(ns_js *js, JSContext *ctx, const char *module_name,
                        GBytes *blob, ns_module_kind kind)
 {
     gsize body_len = 0;
-    const char *body = g_bytes_get_data(blob, &body_len);
+    const char *data = g_bytes_get_data(blob, &body_len);
     if (body_len > NS_MAX_SCRIPT_BYTES) {
         JS_ThrowRangeError(ctx, "blob module exceeds script size limit");
         return NULL;
@@ -72980,6 +72980,9 @@ ns_js_load_module_bytes(ns_js *js, JSContext *ctx, const char *module_name,
         js->module_load_count++;
         js->module_load_bytes += body_len;
     }
+    g_autofree char *body = g_malloc(body_len + 1);
+    if (body_len) memcpy(body, data, body_len);
+    body[body_len] = '\0';
     if (kind != NS_MODULE_JAVASCRIPT)
         return ns_js_make_data_module(ctx, module_name, body, body_len, kind);
     JSValue func_val =
@@ -73152,10 +73155,10 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
         if (js) js->module_fetch_failures++;
         return NULL;
     }
-    gsize copy_len = resp->body ? resp->body->len : 0;
+    gsize copy_len = resp->body && resp->body->data ? resp->body->len : 0;
     if (js) js->module_load_bytes += copy_len;
-    char *copy = g_strndup(resp->body ? (const char *)resp->body->data : "",
-                           copy_len);
+    char *copy = copy_len ? g_strndup((const char *)resp->body->data, copy_len)
+                          : g_strdup("");
     ns_response_free(resp);
     if (kind != NS_MODULE_JAVASCRIPT) {
         JSModuleDef *m = ns_js_make_data_module(ctx, module_name,

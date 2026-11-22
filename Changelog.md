@@ -10,6 +10,12 @@ Changelog:
   of itself, so the declaration was dropped and the grid fell back to one
   column. The CNN front page lays its lead story and its right-hand rail
   out side by side again.
+* Module scripts: an empty module no longer crashes the renderer. Since
+  empty modules were accepted, a response with no body handed the engine a
+  NULL source and `import()` of an empty file (the WPT `fetch/metadata`,
+  `import-maps` and `resource-timing` module tests) killed the process. Blob
+  and PDF.js modules are now copied into a NUL-terminated buffer before
+  compiling, since the parser reads one byte past the given length.
 * docs: second full WPT run (`docs/wpt-full-report-2026-11-22.md`):
   14,149 fully passing files (+2,253), 44.4 % file-weighted (+7.2 points),
   `encoding/` at 92 %; flags a reproducible crash in module-script loading.
