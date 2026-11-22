@@ -8,6 +8,7 @@
 #include "pdf.h"
 
 #include <math.h>
+#include <errno.h>
 #include <string.h>
 #include <uchardet.h>
 
@@ -769,6 +770,68 @@ utf8_make_valid_keeping_nul(const char *text, gsize len, gsize *len_out)
     return g_string_free(out, FALSE);
 }
 
+static GIConv
+charset_open_decoder(const char *declared)
+{
+    static const struct { const char *name; const char *codecs[4]; } map[] = {
+        { "EUC-JP",      { "EUC-JP-MS", "EUC-JP", NULL } },
+        { "EUC-KR",      { "CP949", "UHC", "EUC-KR", NULL } },
+        { "Big5",        { "BIG5-HKSCS", "BIG5", NULL } },
+        { "GBK",         { "GB18030", "GBK", NULL } },
+        { "gb18030",     { "GB18030", NULL } },
+        { "ISO-2022-JP", { "CP50221", "ISO-2022-JP-MS", "ISO-2022-JP", NULL } },
+        { "Shift_JIS",   { "CP932", "SHIFT_JIS", NULL } },
+    };
+    const char *name = ns_encoding_label_to_name(declared);
+    for (gsize i = 0; name && i < G_N_ELEMENTS(map); i++) {
+        if (g_ascii_strcasecmp(name, map[i].name) != 0) continue;
+        for (gsize k = 0; map[i].codecs[k]; k++) {
+            GIConv cd = g_iconv_open("UTF-8", map[i].codecs[k]);
+            if (cd != (GIConv)-1) return cd;
+        }
+    }
+    g_autofree char *fallback = charset_normalize(name ? name : declared);
+    return g_iconv_open("UTF-8", fallback);
+}
+
+static gboolean
+charset_is_seven_bit(const char *declared)
+{
+    const char *name = ns_encoding_label_to_name(declared);
+    return name && g_ascii_strcasecmp(name, "ISO-2022-JP") == 0;
+}
+
+static char *
+charset_decode_declared(const char *body, gsize len, const char *declared,
+                        gsize *len_out)
+{
+    GIConv cd = charset_open_decoder(declared);
+    if (cd == (GIConv)-1) return NULL;
+    GString *out = g_string_sized_new(len + len / 2 + 16);
+    char *in = (char *)body;
+    gsize in_left = len;
+    char chunk[4096];
+    while (in_left > 0) {
+        char *to = chunk;
+        gsize to_left = sizeof chunk;
+        gsize converted = g_iconv(cd, &in, &in_left, &to, &to_left);
+        int reason = errno;
+        g_string_append_len(out, chunk, to - chunk);
+        if (converted != (gsize)-1 || reason == E2BIG) continue;
+        g_string_append(out, "\xef\xbf\xbd");
+        if (reason != EILSEQ) break;
+        in++;
+        in_left--;
+    }
+    char *to = chunk;
+    gsize to_left = sizeof chunk;
+    if (g_iconv(cd, NULL, NULL, &to, &to_left) != (gsize)-1)
+        g_string_append_len(out, chunk, to - chunk);
+    g_iconv_close(cd);
+    *len_out = out->len;
+    return g_string_free(out, FALSE);
+}
+
 char *
 ns_html_decode_body_len(const char *body, gsize len,
                         const char *content_type, char **charset_out,
@@ -808,19 +871,23 @@ ns_html_decode_body_len(const char *body, gsize len,
     gboolean declared_utf8 = FALSE;
     if (declared) {
         char *cs = charset_normalize(declared);
-        g_free(declared);
         if (g_ascii_strcasecmp(cs, "UTF-8") == 0) {
             declared_utf8 = TRUE;
         } else if (!charset_is_dangerous(cs)) {
             char *out = g_convert(body, (gssize)len, "UTF-8", cs,
                                   NULL, len_out, NULL);
+            if (!out && (utf8_valid_span(body, len) != len ||
+                         charset_is_seven_bit(declared)))
+                out = charset_decode_declared(body, len, declared, len_out);
             if (out) {
                 charset_report(charset_out, cs);
                 g_free(cs);
+                g_free(declared);
                 return out;
             }
         }
         g_free(cs);
+        g_free(declared);
     }
 
     if (utf8_valid_span(body, len) == len) {

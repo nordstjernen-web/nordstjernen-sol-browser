@@ -2421,6 +2421,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     nav_cap.js = js;
     nav_cap.page_url = page_url;
     if (js) ns_js_set_form_submit_cb(js, headless_js_form_submit, &nav_cap);
+    ns_js_set_document_charset(js, g_headless_doc_charset);
     const char *isolation_url = resp->final_url ? resp->final_url : opts->url;
     gboolean cross_origin_isolated =
         js && ns_net_document_cross_origin_isolated(isolation_url,

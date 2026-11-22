@@ -9026,7 +9026,7 @@
                 get: function () { return Number(global.scrollY || global.pageYOffset) || 0; }
             });
             Object.defineProperty(global, 'visualViewport', {
-                configurable: true, enumerable: true,
+                configurable: true, enumerable: true, writable: true,
                 value: visualViewport
             });
         } catch (e) {}
