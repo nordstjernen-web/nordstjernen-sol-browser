@@ -43637,6 +43637,14 @@ ns_row_group_rect_for_this(JSContext *ctx, JSValueConst this_val,
 }
 
 static gboolean
+ns_element_is_display_contents(const ns_js *js, const ns_node *n)
+{
+    const ns_style *s = js->style_table
+        ? g_hash_table_lookup(js->style_table, n) : NULL;
+    return s && ns_display_is_contents(ns_css_display_of(s));
+}
+
+static gboolean
 ns_inline_rect_for_this(JSContext *ctx, JSValueConst this_val,
                         double *x, double *y, double *w, double *h)
 {
@@ -43646,6 +43654,7 @@ ns_inline_rect_for_this(JSContext *ctx, JSValueConst this_val,
     if (!js->layout_root) return FALSE;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
+    if (ns_element_is_display_contents(js, n)) return FALSE;
     return ns_box_inline_rect_for_dom(js->layout_root, n, x, y, w, h);
 }
 
@@ -46913,6 +46922,7 @@ ns_element_getClientRects(JSContext *ctx, JSValueConst this_val,
         if (js && node && node->kind == NS_NODE_ELEMENT &&
             !ns_svg_foreign_ancestor(node)) {
             ns_js_flush_layout(js);
+            if (ns_element_is_display_contents(js, node)) return arr;
             GArray *rects = js->layout_root
                 ? ns_box_inline_rects_for_dom(js->layout_root, node) : NULL;
             if (rects && rects->len >= 8) {

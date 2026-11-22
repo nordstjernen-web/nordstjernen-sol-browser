@@ -3,6 +3,11 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `getBoundingClientRect()`, `getClientRects()` and the `offset*`
+  properties of a `display: contents` element inside an inline element
+  report no box. The element's text still belongs to the line of the
+  inline parent, and its extent was returned as if it were the element's
+  own box. Chrome returns an empty rectangle and an empty list.
 * Grid: a grid item with a percentage height no longer takes that
   percentage of the whole grid while the rows are being sized. Its row
   has no height yet at that point, so the percentage counts as `auto`,
