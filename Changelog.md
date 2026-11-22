@@ -11,6 +11,25 @@ Changelog:
   19,000 values alive, so the renderer's peak memory drops by 9 to 18 %
   (median over 12 frozen sites 175 MB to 151 MB, AP News 326 MB to
   273 MB), and less memory to clear makes the load about 2 % cheaper.
+* `calc()` divides a length by a length, as CSS Values 4 allows. The
+  result is a number, so `calc(16px * (100vw / 1280px))` and the usual
+  fluid type formula
+  `clamp(20px, 20px + (48px - 20px) * (100vw - 390px) / (1920px - 390px), 48px)`
+  now work. A divisor with a unit used to make the whole declaration
+  invalid, so the property kept its inherited or initial value: every
+  heading on anthropic.com came out at 16 px. Lengths can also be
+  multiplied as long as the units cancel by the end, a percentage can be
+  divided by a percentage, and em by em. A result that depends on a
+  viewport unit still follows the viewport when the window is resized.
+* A percentage height inside a box that gets its height from
+  `aspect-ratio` resolves against the height the box really has. Two
+  cases were wrong. `max-height` and `min-height` of the ratio box were
+  ignored, so a child with `height: 100%` in a 2 / 1 box limited to
+  100 px came out 150 px tall. And a ratio box whose own `height` is a
+  percentage that cannot be resolved (the parent has no height) left its
+  children without a basis, so they fell back to their content height.
+  The hero collage on the Pinterest front page is 600 px tall as in
+  Chrome, where it was 641 px and cropped differently.
 * A shrink-to-fit box (absolutely positioned, floated, inline-block, a
   flex item or a table cell) whose inline-block child has a percentage
   `min-width` is as wide as its content again. While the parent was being
