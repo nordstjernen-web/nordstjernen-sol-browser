@@ -3,6 +3,15 @@ Changelog:
 
 1.0.51-dev:
 ======
+* A percentage height inside a box that gets its height from
+  `aspect-ratio` resolves against the height the box really has. Two
+  cases were wrong. `max-height` and `min-height` of the ratio box were
+  ignored, so a child with `height: 100%` in a 2 / 1 box limited to
+  100 px came out 150 px tall. And a ratio box whose own `height` is a
+  percentage that cannot be resolved (the parent has no height) left its
+  children without a basis, so they fell back to their content height.
+  The hero collage on the Pinterest front page is 600 px tall as in
+  Chrome, where it was 641 px and cropped differently.
 * `offsetParent` is `null` for an element that has no box: one with
   `display: none` or inside such an element, one with `display: contents`,
   and one that is not in the document. It is also `null` for `<body>`.
