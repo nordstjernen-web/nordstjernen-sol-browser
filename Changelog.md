@@ -3,6 +3,13 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: a grid that is stretched by its parent (a grid item in a `1fr`
+  row, a stretched flex item, a box sized by its insets) stretches its
+  own `auto` rows to that height. The stretched height was used to size
+  `fr` rows but not to hand the free space to `auto` rows, so an item in
+  the nested grid stayed as tall as its content: 0 px for an empty tile.
+  The grey and coloured tiles of the repository grid in the github.com
+  footer are painted again.
 * A shrink-to-fit box (absolutely positioned, floated, inline-block, a
   flex item or a table cell) whose inline-block child has a percentage
   `min-width` is as wide as its content again. While the parent was being
