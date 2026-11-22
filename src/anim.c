@@ -771,8 +771,7 @@ static ns_css_value *
 used_size_value(const ns_anim_state *s, int prop)
 {
     if (!s->has_used_size) return NULL;
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_LENGTH;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_LENGTH);
     v->u.length.v = s->used_size[prop == NS_CSS_HEIGHT ? 1 : 0];
     v->u.length.unit = NS_CSS_UNIT_PX;
     return v;
@@ -1369,7 +1368,8 @@ apply_animated_value(GHashTable *styles, ns_anim_state *s, ns_style *st,
                                                (GDestroyNotify)ns_css_value_free);
     if (!g_hash_table_contains(s->base_values, GINT_TO_POINTER(prop)))
         g_hash_table_insert(s->base_values, GINT_TO_POINTER(prop),
-                            base ? ns_css_value_dup(base) : g_new0(ns_css_value, 1));
+                            base ? ns_css_value_dup(base)
+                                 : ns_css_value_new(NS_CSS_V_KEYWORD));
     ns_css_value *resolved = ns_css_value_dup(current);
     ns_css_value_absolutize(resolved, prop, st);
     st->values[prop] = resolved;
@@ -2134,7 +2134,7 @@ style_has_transform(const ns_style *st)
     };
     for (int i = 0; i < 4; i++) {
         const ns_css_value *v = st->values[props[i]];
-        if (v && v->kind == NS_CSS_V_TRANSFORM && v->u.transform.n_ops > 0)
+        if (v && v->kind == NS_CSS_V_TRANSFORM && v->u.transform->n_ops > 0)
             return TRUE;
     }
     return FALSE;
@@ -2544,9 +2544,9 @@ ns_anim_get_transform(ns_anim *a, const ns_node *dom)
     ns_anim_state *s = g_hash_table_lookup(a->states, dom);
     if (!s) return NULL;
     const ns_css_value *v = state_prop_value(s, NS_CSS_TRANSFORM);
-    if (!v || v->kind != NS_CSS_V_TRANSFORM || v->u.transform.n_ops == 0)
+    if (!v || v->kind != NS_CSS_V_TRANSFORM || v->u.transform->n_ops == 0)
         return NULL;
-    return &v->u.transform;
+    return v->u.transform;
 }
 
 gboolean

@@ -3,6 +3,15 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Memory: a CSS value takes the room its kind needs. Every value was
+  2,704 bytes, the size of the largest kind (a grid track list), so a
+  keyword, a length or a colour cost as much as 24 grid tracks. Those now
+  take 264 bytes; shadows, gradients, transforms, track lists, grid areas
+  and animation lists keep their contents in a separate allocation of the
+  size they need. A front page keeps 8,000 to
+  19,000 values alive, so the renderer's peak memory drops by 9 to 18 %
+  (median over 12 frozen sites 175 MB to 151 MB, AP News 326 MB to
+  273 MB), and less memory to clear makes the load about 2 % cheaper.
 * Grid: a grid item with an `auto` left or right margin and no width is
   as wide as its content and the margin takes the rest of the area, so
   `margin: 0 auto` centres it. The item was stretched across its area

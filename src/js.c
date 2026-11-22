@@ -19461,9 +19461,9 @@ static char *
 ns_computed_transform_matrix(const ns_style *s, const ns_box *b)
 {
     const ns_css_value *tv = s ? s->values[NS_CSS_TRANSFORM] : NULL;
-    if (!tv || tv->kind != NS_CSS_V_TRANSFORM || tv->u.transform.n_ops == 0)
+    if (!tv || tv->kind != NS_CSS_V_TRANSFORM || tv->u.transform->n_ops == 0)
         return g_strdup("none");
-    const ns_css_transform eff = tv->u.transform;
+    const ns_css_transform eff = *tv->u.transform;
     double bw = 0, bh = 0;
     if (b) {
         bw = b->content_width + b->padding.left + b->padding.right +
@@ -19549,7 +19549,7 @@ ns_inset_style_has_transform(const ns_style *s)
     if (!s) return FALSE;
     for (int i = 0; i < 4; i++) {
         const ns_css_value *tv = s->values[tprops[i]];
-        if (tv && tv->kind == NS_CSS_V_TRANSFORM && tv->u.transform.n_ops > 0)
+        if (tv && tv->kind == NS_CSS_V_TRANSFORM && tv->u.transform->n_ops > 0)
             return TRUE;
     }
     const ns_css_value *pv = s->values[NS_CSS_PERSPECTIVE];
@@ -43669,8 +43669,8 @@ ns_box_transform_origin_2d(const ns_box *b, double bx, double by,
     const ns_css_value *origin =
         b->style ? b->style->values[NS_CSS_TRANSFORM_ORIGIN] : NULL;
     if (origin && origin->kind == NS_CSS_V_TRANSFORM &&
-        origin->u.transform.n_ops > 0) {
-        const ns_css_transform_op *o = &origin->u.transform.ops[0];
+        origin->u.transform->n_ops > 0) {
+        const ns_css_transform_op *o = &origin->u.transform->ops[0];
         *ox = bx + (o->a_is_percent ? o->a / 100.0 * bw : o->a);
         *oy = by + (o->b_is_percent ? o->b / 100.0 * bh : o->b);
         *oz = o->c;

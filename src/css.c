@@ -1074,10 +1074,91 @@ parse_css_wide_keyword(const char *text)
         g_free(kw);
         return NULL;
     }
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = kw;
     return v;
+}
+
+static gsize
+css_value_payload_size(ns_css_value_kind kind)
+{
+    switch (kind) {
+    case NS_CSS_V_SHADOW:    return sizeof(ns_css_shadow_list);
+    case NS_CSS_V_GRADIENT:  return sizeof(ns_css_gradient);
+    case NS_CSS_V_TRACKS:    return sizeof(ns_css_tracks);
+    case NS_CSS_V_TRANSFORM: return sizeof(ns_css_transform);
+    case NS_CSS_V_AREAS:     return sizeof(ns_css_areas);
+    case NS_CSS_V_ANIM:      return sizeof(ns_css_anim_list);
+    default:                 return 0;
+    }
+}
+
+static void
+css_value_set_payload(ns_css_value *v, gpointer payload)
+{
+    switch (v->kind) {
+    case NS_CSS_V_SHADOW:    v->u.shadow = payload; break;
+    case NS_CSS_V_GRADIENT:  v->u.gradient = payload; break;
+    case NS_CSS_V_TRACKS:    v->u.tracks = payload; break;
+    case NS_CSS_V_TRANSFORM: v->u.transform = payload; break;
+    case NS_CSS_V_AREAS:     v->u.areas = payload; break;
+    case NS_CSS_V_ANIM:      v->u.anim = payload; break;
+    default:                 break;
+    }
+}
+
+static gpointer
+css_value_payload(const ns_css_value *v)
+{
+    switch (v->kind) {
+    case NS_CSS_V_SHADOW:    return v->u.shadow;
+    case NS_CSS_V_GRADIENT:  return v->u.gradient;
+    case NS_CSS_V_TRACKS:    return v->u.tracks;
+    case NS_CSS_V_TRANSFORM: return v->u.transform;
+    case NS_CSS_V_AREAS:     return v->u.areas;
+    case NS_CSS_V_ANIM:      return v->u.anim;
+    default:                 return NULL;
+    }
+}
+
+ns_css_value *
+ns_css_value_new(ns_css_value_kind kind)
+{
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = kind;
+    gsize payload = css_value_payload_size(kind);
+    if (payload) css_value_set_payload(v, g_malloc0(payload));
+    return v;
+}
+
+void
+ns_css_value_set_kind(ns_css_value *v, ns_css_value_kind kind)
+{
+    g_free(css_value_payload(v));
+    v->kind = kind;
+    memset(&v->u, 0, sizeof v->u);
+    gsize payload = css_value_payload_size(kind);
+    if (payload) css_value_set_payload(v, g_malloc0(payload));
+}
+
+static ns_css_value *
+css_value_copy_shallow(const ns_css_value *v)
+{
+    ns_css_value *copy = g_new(ns_css_value, 1);
+    *copy = *v;
+    const void *payload = css_value_payload(v);
+    gsize payload_size = css_value_payload_size(v->kind);
+    if (payload_size) {
+        void *own = g_malloc0(payload_size);
+        if (payload) memcpy(own, payload, payload_size);
+        css_value_set_payload(copy, own);
+    }
+    copy->ref = 0;
+    copy->image_set_text = g_strdup(v->image_set_text);
+    copy->specified = g_strdup(v->specified);
+    copy->scheme_text = g_strdup(v->scheme_text);
+    if (copy->next_layer) copy->next_layer->ref++;
+    return copy;
 }
 
 ns_css_value *
@@ -1095,14 +1176,15 @@ ns_css_value_free(ns_css_value *v)
         if (v->ref > 0) { v->ref--; return; }
         if (v->kind == NS_CSS_V_KEYWORD) g_free(v->u.keyword);
         else if (v->kind == NS_CSS_V_URL) g_free(v->u.url);
-        else if (v->kind == NS_CSS_V_AREAS) {
-            for (int i = 0; i < v->u.areas.n_rects; i++)
-                g_free(v->u.areas.rects[i].name);
+        else if (v->kind == NS_CSS_V_AREAS && v->u.areas) {
+            for (int i = 0; i < v->u.areas->n_rects; i++)
+                g_free(v->u.areas->rects[i].name);
         }
-        else if (v->kind == NS_CSS_V_ANIM) {
-            for (int i = 0; i < v->u.anim.n; i++)
-                g_free(v->u.anim.entries[i].name);
+        else if (v->kind == NS_CSS_V_ANIM && v->u.anim) {
+            for (int i = 0; i < v->u.anim->n; i++)
+                g_free(v->u.anim->entries[i].name);
         }
+        g_free(css_value_payload(v));
         g_free(v->image_set_text);
         g_free(v->specified);
         g_free(v->scheme_text);
@@ -4210,8 +4292,7 @@ calc_arg_is_number(const char *text)
 static ns_css_value *
 calc_px_value(double px)
 {
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_LENGTH;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_LENGTH);
     v->u.length.v = px;
     v->u.length.unit = NS_CSS_UNIT_PX;
     return v;
@@ -4220,8 +4301,7 @@ calc_px_value(double px)
 static ns_css_value *
 calc_num_value(double n)
 {
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_LENGTH;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_LENGTH);
     v->u.length.v = n;
     v->u.length.unit = NS_CSS_UNIT_NUMBER;
     return v;
@@ -4726,8 +4806,7 @@ calc_stepped_result(guint8 fn, const calc_arg *a, double r)
     if (numbers == n) return calc_num_value(r);
     if (numbers > 0) return NULL;
     if (!basis) return calc_px_value(r);
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_CALC;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_CALC);
     v->u.calc.px = r;
     v->u.calc.fn = fn;
     v->u.calc.n_args = (guint8)n;
@@ -4980,8 +5059,7 @@ parse_calc_inner(const char *text)
                 if (values_pct[i] != 0) basis_dependent = TRUE;
         }
         if (!basis_dependent) return calc_px_value(out_px);
-        ns_css_value *mv = g_new0(ns_css_value, 1);
-        mv->kind = NS_CSS_V_CALC;
+        ns_css_value *mv = ns_css_value_new(NS_CSS_V_CALC);
         mv->u.calc.px = out_px;
         mv->u.calc.fn = (guint8)fn;
         mv->u.calc.n_args = (guint8)n;
@@ -5018,8 +5096,7 @@ parse_calc_inner(const char *text)
         }
     }
     if (!parsed) return NULL;
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_CALC;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_CALC);
     if (term.fn) {
         v->u.calc.px = px + (em + lh * 1.2) * 16.0 + rem * g_root_font_px +
                        pct * 0.01 * g_viewport_w;
@@ -5425,8 +5502,7 @@ font_shorthand_size_value(const char *size_only)
     ns_css_value *v = NULL;
     if (kw > 0 || g_ascii_strcasecmp(size_only, "larger") == 0 ||
         g_ascii_strcasecmp(size_only, "smaller") == 0) {
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_LENGTH;
+        v = ns_css_value_new(NS_CSS_V_LENGTH);
         if (kw > 0) {
             v->u.length.v = kw;
             v->u.length.unit = NS_CSS_UNIT_PX;
@@ -5865,18 +5941,17 @@ static ns_css_value *
 parse_tracks(const char *text)
 {
     if (!text || !*text) return NULL;
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_TRACKS;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_TRACKS);
     const char *p = text;
     const char *full_end = text + strlen(text);
     while (p < full_end && is_ws(*p)) p++;
     if (g_ascii_strncasecmp(p, "subgrid", 7) == 0 &&
         (p + 7 >= full_end || is_ws(p[7]) || p[7] == '[')) {
-        v->u.tracks.subgrid = TRUE;
+        v->u.tracks->subgrid = TRUE;
         return v;
     }
     gboolean last_was_names = FALSE;
-    while (p < full_end && v->u.tracks.n < NS_CSS_TRACKS_MAX) {
+    while (p < full_end && v->u.tracks->n < NS_CSS_TRACKS_MAX) {
         while (p < full_end && is_ws(*p)) p++;
         if (p >= full_end) break;
         if (*p == '[') {
@@ -5890,8 +5965,8 @@ parse_tracks(const char *text)
             }
             last_was_names = TRUE;
             p++;
-            if (!tracks_add_names(&v->u.tracks, names, names_len,
-                                  v->u.tracks.n + 1)) {
+            if (!tracks_add_names(v->u.tracks, names, names_len,
+                                  v->u.tracks->n + 1)) {
                 g_free(v);
                 return NULL;
             }
@@ -5929,31 +6004,31 @@ parse_tracks(const char *text)
                 if (n > NS_CSS_TRACKS_MAX) n = NS_CSS_TRACKS_MAX;
             }
             if (ar != NS_CSS_AUTO_REPEAT_NONE) {
-                if (v->u.tracks.auto_repeat != NS_CSS_AUTO_REPEAT_NONE) {
+                if (v->u.tracks->auto_repeat != NS_CSS_AUTO_REPEAT_NONE) {
                     g_free(v);
                     return NULL;
                 }
-                v->u.tracks.auto_repeat = ar;
-                v->u.tracks.auto_repeat_start = v->u.tracks.n;
-                v->u.tracks.auto_repeat_names_start = v->u.tracks.n_line_names;
+                v->u.tracks->auto_repeat = ar;
+                v->u.tracks->auto_repeat_start = v->u.tracks->n;
+                v->u.tracks->auto_repeat_names_start = v->u.tracks->n_line_names;
                 int cnt = 0;
-                if (!tracks_append_repeat_body(&v->u.tracks, body, body_len,
+                if (!tracks_append_repeat_body(v->u.tracks, body, body_len,
                                                1, &cnt)) {
                     g_free(v);
                     return NULL;
                 }
-                v->u.tracks.auto_repeat_names_end = v->u.tracks.n_line_names;
-                for (int k = v->u.tracks.auto_repeat_start; k < v->u.tracks.n; k++)
-                    if (!track_is_fixed_size(&v->u.tracks.tracks[k])) {
+                v->u.tracks->auto_repeat_names_end = v->u.tracks->n_line_names;
+                for (int k = v->u.tracks->auto_repeat_start; k < v->u.tracks->n; k++)
+                    if (!track_is_fixed_size(&v->u.tracks->tracks[k])) {
                         g_free(v);
                         return NULL;
                     }
-                if (cnt > v->u.tracks.n - v->u.tracks.auto_repeat_start)
-                    cnt = v->u.tracks.n - v->u.tracks.auto_repeat_start;
-                v->u.tracks.auto_repeat_count = cnt;
+                if (cnt > v->u.tracks->n - v->u.tracks->auto_repeat_start)
+                    cnt = v->u.tracks->n - v->u.tracks->auto_repeat_start;
+                v->u.tracks->auto_repeat_count = cnt;
                 continue;
             }
-            if (!tracks_append_repeat_body(&v->u.tracks, body, body_len, n, NULL)) {
+            if (!tracks_append_repeat_body(v->u.tracks, body, body_len, n, NULL)) {
                 g_free(v);
                 return NULL;
             }
@@ -5977,24 +6052,24 @@ parse_tracks(const char *text)
             g_free(v);
             return NULL;
         }
-        v->u.tracks.tracks[v->u.tracks.n++] = t;
+        v->u.tracks->tracks[v->u.tracks->n++] = t;
         const char *next = tstarts[0] + tlens[0];
         while (next < full_end && is_ws(*next)) next++;
         if (next < full_end && *next == ',') next++;
         if (next <= p) next = p + 1;
         p = next;
     }
-    if (v->u.tracks.n == 0) { g_free(v); return NULL; }
-    if (v->u.tracks.n == 0 && v->u.tracks.n_line_names > 0) {
+    if (v->u.tracks->n == 0) { g_free(v); return NULL; }
+    if (v->u.tracks->n == 0 && v->u.tracks->n_line_names > 0) {
         g_free(v);
         return NULL;
     }
-    if (v->u.tracks.auto_repeat != NS_CSS_AUTO_REPEAT_NONE) {
-        for (int k = 0; k < v->u.tracks.n; k++) {
-            if (k >= v->u.tracks.auto_repeat_start &&
-                k < v->u.tracks.auto_repeat_start + v->u.tracks.auto_repeat_count)
+    if (v->u.tracks->auto_repeat != NS_CSS_AUTO_REPEAT_NONE) {
+        for (int k = 0; k < v->u.tracks->n; k++) {
+            if (k >= v->u.tracks->auto_repeat_start &&
+                k < v->u.tracks->auto_repeat_start + v->u.tracks->auto_repeat_count)
                 continue;
-            if (!track_is_fixed_size(&v->u.tracks.tracks[k])) {
+            if (!track_is_fixed_size(&v->u.tracks->tracks[k])) {
                 g_free(v);
                 return NULL;
             }
@@ -6076,10 +6151,9 @@ parse_areas(const char *text)
                 g_free(grid[r][k]);
         return NULL;
     }
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_AREAS;
-    v->u.areas.n_rows = rows;
-    v->u.areas.n_cols = cols;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_AREAS);
+    v->u.areas->n_rows = rows;
+    v->u.areas->n_cols = cols;
     gboolean used[NS_CSS_TRACKS_MAX][NS_CSS_TRACKS_MAX] = {{0}};
     for (int r = 0; r < rows; r++) {
         for (int c = 0; c < cols; c++) {
@@ -6100,8 +6174,8 @@ parse_areas(const char *text)
                 if (!ok) break;
                 r1++;
             }
-            for (int k = 0; k < v->u.areas.n_rects; k++) {
-                if (strcmp(v->u.areas.rects[k].name, name) == 0) {
+            for (int k = 0; k < v->u.areas->n_rects; k++) {
+                if (strcmp(v->u.areas->rects[k].name, name) == 0) {
                     for (int rr = 0; rr < rows; rr++)
                         for (int kk = 0; kk < NS_CSS_TRACKS_MAX; kk++)
                             g_free(grid[rr][kk]);
@@ -6109,8 +6183,8 @@ parse_areas(const char *text)
                     return NULL;
                 }
             }
-            if (v->u.areas.n_rects < NS_CSS_AREAS_MAX) {
-                ns_css_area_rect *rect = &v->u.areas.rects[v->u.areas.n_rects++];
+            if (v->u.areas->n_rects < NS_CSS_AREAS_MAX) {
+                ns_css_area_rect *rect = &v->u.areas->rects[v->u.areas->n_rects++];
                 rect->name = g_strdup(name);
                 rect->r0 = r; rect->r1 = r1;
                 rect->c0 = c; rect->c1 = c1;
@@ -6327,8 +6401,7 @@ parse_box_shadow(const char *text)
 {
     while (*text && is_ws(*text)) text++;
     if (!*text) return NULL;
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_SHADOW;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_SHADOW);
     char *copy = g_strdup(text);
     int depth = 0;
     char *seg = copy;
@@ -6339,9 +6412,9 @@ parse_box_shadow(const char *text)
         if ((*q == ',' && depth == 0) || at_end) {
             char saved = *q;
             *q = '\0';
-            if (v->u.shadow.n < NS_CSS_SHADOWS_MAX) {
-                if (parse_one_shadow(seg, &v->u.shadow.s[v->u.shadow.n]))
-                    v->u.shadow.n++;
+            if (v->u.shadow->n < NS_CSS_SHADOWS_MAX) {
+                if (parse_one_shadow(seg, &v->u.shadow->s[v->u.shadow->n]))
+                    v->u.shadow->n++;
             }
             if (at_end) break;
             *q = saved;
@@ -6349,7 +6422,7 @@ parse_box_shadow(const char *text)
         }
     }
     g_free(copy);
-    if (v->u.shadow.n == 0) { g_free(v); return NULL; }
+    if (v->u.shadow->n == 0) { g_free(v); return NULL; }
     return v;
 }
 
@@ -8471,9 +8544,8 @@ parse_gradient_text(const char *t, gboolean allow_trailing)
         gradient_parse_clear(&gp);
         return NULL;
     }
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_GRADIENT;
-    v->u.gradient = gp.gr;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_GRADIENT);
+    *v->u.gradient = gp.gr;
     if (!gp.all_legacy && !allow_trailing) v->specified = g_strdup(t);
     gradient_parse_clear(&gp);
     return v;
@@ -8792,9 +8864,8 @@ parse_transform(const char *text)
         g_free(fn_lc);
     }
     if (tf.n_ops == 0) return NULL;
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_TRANSFORM;
-    v->u.transform = tf;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_TRANSFORM);
+    *v->u.transform = tf;
     return v;
 }
 
@@ -8837,9 +8908,8 @@ parse_transform_origin(const char *text)
         if (ys) parse_origin_axis(ys, TRUE, &op->b, &op->b_is_percent);
         g_free(xs);
         g_free(ys);
-        ns_css_value *v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_TRANSFORM;
-        v->u.transform = tf;
+        ns_css_value *v = ns_css_value_new(NS_CSS_V_TRANSFORM);
+        *v->u.transform = tf;
         return v;
     }
     char *toks[4] = {0};
@@ -8880,19 +8950,17 @@ parse_transform_origin(const char *text)
         if (zpct) op->c = 0;
     }
     for (int i = 0; i < nt; i++) g_free(toks[i]);
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_TRANSFORM;
-    v->u.transform = tf;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_TRANSFORM);
+    *v->u.transform = tf;
     return v;
 }
 
 static ns_css_value *
 transform_value_one_op(const ns_css_transform_op *op)
 {
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_TRANSFORM;
-    v->u.transform.n_ops = 1;
-    v->u.transform.ops[0] = *op;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_TRANSFORM);
+    v->u.transform->n_ops = 1;
+    v->u.transform->ops[0] = *op;
     return v;
 }
 
@@ -9075,9 +9143,9 @@ ns_css_individual_transform_serialize(const ns_css_value *v, int prop)
     if (!v) return NULL;
     if (v->kind == NS_CSS_V_KEYWORD)
         return g_strdup(v->u.keyword);
-    if (v->kind != NS_CSS_V_TRANSFORM || v->u.transform.n_ops < 1)
+    if (v->kind != NS_CSS_V_TRANSFORM || v->u.transform->n_ops < 1)
         return NULL;
-    const ns_css_transform_op *op = &v->u.transform.ops[0];
+    const ns_css_transform_op *op = &v->u.transform->ops[0];
     GString *s = g_string_new(NULL);
     if (prop == NS_CSS_SCALE) {
         gboolean ab_same = (op->a == op->b) || (isnan(op->a) && isnan(op->b));
@@ -9171,14 +9239,14 @@ ns_css_style_effective_transform(const ns_style *st,
     };
     for (int i = 0; i < 3; i++) {
         const ns_css_value *v = st ? st->values[independent[i]] : NULL;
-        if (v && v->kind == NS_CSS_V_TRANSFORM && v->u.transform.n_ops > 0 &&
+        if (v && v->kind == NS_CSS_V_TRANSFORM && v->u.transform->n_ops > 0 &&
             out->n_ops < NS_CSS_TRANSFORM_OPS_MAX)
-            out->ops[out->n_ops++] = v->u.transform.ops[0];
+            out->ops[out->n_ops++] = v->u.transform->ops[0];
     }
     const ns_css_transform *tf = transform_override;
     if (!tf && st && st->values[NS_CSS_TRANSFORM] &&
         st->values[NS_CSS_TRANSFORM]->kind == NS_CSS_V_TRANSFORM)
-        tf = &st->values[NS_CSS_TRANSFORM]->u.transform;
+        tf = st->values[NS_CSS_TRANSFORM]->u.transform;
     if (tf)
         for (int i = 0; i < tf->n_ops && out->n_ops < NS_CSS_TRANSFORM_OPS_MAX; i++)
             out->ops[out->n_ops++] = tf->ops[i];
@@ -9688,8 +9756,7 @@ keyword_value_take(GString *canon, gboolean ok)
         g_string_free(canon, TRUE);
         return NULL;
     }
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = g_string_free(canon, FALSE);
     return v;
 }
@@ -9815,8 +9882,7 @@ parse_animation_duration(const char *t)
         g_string_free(canon, TRUE);
         return NULL;
     }
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = g_string_free(canon, FALSE);
     return v;
 }
@@ -9906,8 +9972,7 @@ parse_anim_longhand(ns_css_prop prop, const char *t)
         g_string_free(canon, TRUE);
         return NULL;
     }
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = g_string_free(canon, FALSE);
     return v;
 }
@@ -10223,7 +10288,7 @@ ns_css_animation_shorthand_canonical(const char *text, gboolean is_animation)
 {
     ns_css_value *v = parse_anim_value(text, is_animation);
     if (!v) return NULL;
-    char *r = ns_css_anim_shorthand_serialize(&v->u.anim, is_animation);
+    char *r = ns_css_anim_shorthand_serialize(v->u.anim, is_animation);
     ns_css_value_free(v);
     return r;
 }
@@ -10820,13 +10885,12 @@ ns_css_list_style_serialize(const char *type, const char *position,
 static ns_css_value *
 parse_anim_value(const char *text, gboolean is_animation)
 {
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_ANIM;
-    v->u.anim.n = 0;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_ANIM);
+    v->u.anim->n = 0;
     const char *p = text;
     const char *end = text + strlen(text);
     gboolean valid = TRUE;
-    while (p < end && v->u.anim.n < NS_CSS_ANIM_ENTRIES_MAX && valid) {
+    while (p < end && v->u.anim->n < NS_CSS_ANIM_ENTRIES_MAX && valid) {
         char term = 0;
         const char *seg = css_scan_until(p, end, ",", &term);
         char *item_buf = css_trim_dup_range(p, seg);
@@ -10836,7 +10900,7 @@ parse_anim_value(const char *text, gboolean is_animation)
             valid = FALSE;
             break;
         }
-        ns_css_anim_entry *e = &v->u.anim.entries[v->u.anim.n];
+        ns_css_anim_entry *e = &v->u.anim->entries[v->u.anim->n];
         memset(e, 0, sizeof *e);
         e->target = NS_CSS_ANIM_TARGET_ALL;
         e->timing = (ns_css_timing){ .kind = NS_CSS_TIMING_EASE };
@@ -10973,18 +11037,18 @@ parse_anim_value(const char *text, gboolean is_animation)
         if (valid && !is_animation && e->target == NS_CSS_ANIM_TARGET_NONE) {
             if (got_dur || got_delay || got_timing || got_behavior) valid = FALSE;
         }
-        if (valid) v->u.anim.n++;
+        if (valid) v->u.anim->n++;
         else g_free(e->name), e->name = NULL;
         g_free(item_buf);
         p = term == ',' ? seg + 1 : seg;
     }
-    if (!valid || v->u.anim.n == 0 || p < end) {
+    if (!valid || v->u.anim->n == 0 || p < end) {
         ns_css_value_free(v);
         return NULL;
     }
-    if (!is_animation && v->u.anim.n > 1)
-        for (int i = 0; i < v->u.anim.n; i++)
-            if (v->u.anim.entries[i].target == NS_CSS_ANIM_TARGET_NONE) {
+    if (!is_animation && v->u.anim->n > 1)
+        for (int i = 0; i < v->u.anim->n; i++)
+            if (v->u.anim->entries[i].target == NS_CSS_ANIM_TARGET_NONE) {
                 ns_css_value_free(v);
                 return NULL;
             }
@@ -11973,8 +12037,7 @@ parse_time_property(const char *t)
         }
     }
     if (!any) return NULL;
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = g_strdup(t);
     return v;
 }
@@ -12149,14 +12212,12 @@ parse_integer_property(ns_css_prop prop, const char *t)
 {
     const char *kw = integer_prop_keyword(prop);
     if (kw && g_ascii_strcasecmp(t, kw) == 0) {
-        ns_css_value *v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = g_strdup(kw);
         return v;
     }
     if (css_is_integer_token(t)) {
-        ns_css_value *v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_LENGTH;
+        ns_css_value *v = ns_css_value_new(NS_CSS_V_LENGTH);
         v->u.length.v = css_integer_clamp((double)g_ascii_strtoll(t, NULL, 10));
         v->u.length.unit = NS_CSS_UNIT_NUMBER;
         return v;
@@ -12759,8 +12820,8 @@ grid_track_list_canonical(const grid_tok *toks, int n, ns_css_prop prop,
                     strcmp(v->u.keyword, "none") == 0;
     gboolean ok = v && (v->kind == NS_CSS_V_TRACKS || none);
     if (ok && explicit_only)
-        ok = !none && !v->u.tracks.subgrid &&
-             v->u.tracks.auto_repeat == NS_CSS_AUTO_REPEAT_NONE;
+        ok = !none && !v->u.tracks->subgrid &&
+             v->u.tracks->auto_repeat == NS_CSS_AUTO_REPEAT_NONE;
     ns_css_value_free(v);
     return ok ? grid_track_tokens_canonical(toks, n) : NULL;
 }
@@ -13062,8 +13123,7 @@ word_is_one_of(const char *w, const char *choices)
 static ns_css_value *
 keyword_value_dup(const char *canonical)
 {
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = g_strdup(canonical);
     return v;
 }
@@ -13153,8 +13213,7 @@ parse_keyword_choice(const char *text, const char *choices)
         g_free(kw);
         return NULL;
     }
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = kw;
     return v;
 }
@@ -13206,8 +13265,7 @@ parse_alignment_keyword(const char *text, const char *choices)
         }
     }
     if (full) {
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = full;
     }
     for (int i = 0; i < n; i++) g_free(tokens[i]);
@@ -13462,8 +13520,7 @@ parse_image_reference(const char *t)
     while (*p && is_ws(*p)) p++;
     char *iset = pick_image_set_url(p);
     if (iset) {
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_URL;
+        v = ns_css_value_new(NS_CSS_V_URL);
         v->u.url = iset;
         return v;
     }
@@ -13480,8 +13537,7 @@ parse_image_reference(const char *t)
         while (*end && *end != ')' && !is_ws(*end)) end++;
     }
     if (!end || end <= u) return NULL;
-    v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_URL;
+    v = ns_css_value_new(NS_CSS_V_URL);
     v->u.url = css_unescape_url(u, (gsize)(end - u));
     return v;
 }
@@ -13489,8 +13545,7 @@ parse_image_reference(const char *t)
 static ns_css_value *
 keyword_value(char *owned)
 {
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = owned;
     return v;
 }
@@ -13755,8 +13810,7 @@ parse_vertical_align_length(const char *t)
     if (v || !parse_length(t, &num, &unit) ||
         (unit == NS_CSS_UNIT_NUMBER && num != 0))
         return v;
-    v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_LENGTH;
+    v = ns_css_value_new(NS_CSS_V_LENGTH);
     v->u.length.v = num;
     v->u.length.unit = unit == NS_CSS_UNIT_NUMBER ? NS_CSS_UNIT_PX : unit;
     return v;
@@ -13836,8 +13890,7 @@ will_change_value_new(const char *t)
         g_free(text);
     }
     g_strfreev(items);
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = g_string_free(out, FALSE);
     return v;
 }
@@ -13938,8 +13991,7 @@ parse_keyword_value(ns_css_prop prop, const char *t)
 {
     ns_css_value *v = NULL;
     if (parse_keyword_special(prop, t, &v)) return v;
-    v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
+    v = ns_css_value_new(NS_CSS_V_KEYWORD);
     v->u.keyword = ascii_lower(t, strlen(t));
     return v;
 }
@@ -14141,8 +14193,7 @@ font_size_adjust_mix(const ns_css_value *a, const ns_css_value *b, double wa, do
         return NULL;
     x.value = MAX(x.value * wa + y.value * wb, 0.0);
     x.is_calc = FALSE;
-    ns_css_value *out = g_new0(ns_css_value, 1);
-    out->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *out = ns_css_value_new(NS_CSS_V_KEYWORD);
     out->u.keyword = font_size_adjust_text(&x, FALSE);
     return out;
 }
@@ -14193,8 +14244,7 @@ ns_css_value_interpolate_prop(int prop, const ns_css_value *a, const ns_css_valu
         };
         char *mix = ns_css_filter_interpolate(a->u.keyword, b->u.keyword, t, &cx);
         if (!mix) return NULL;
-        ns_css_value *out = g_new0(ns_css_value, 1);
-        out->kind = NS_CSS_V_KEYWORD;
+        ns_css_value *out = ns_css_value_new(NS_CSS_V_KEYWORD);
         out->u.keyword = mix;
         return out;
     }
@@ -14322,8 +14372,7 @@ contain_intrinsic_mix(const ns_css_value *a, const ns_css_value *b, double t)
         an || bn || aa != ba)
         return NULL;
     double px = MAX(ap + (bp - ap) * t, 0.0);
-    ns_css_value *out = g_new0(ns_css_value, 1);
-    out->kind = NS_CSS_V_KEYWORD;
+    ns_css_value *out = ns_css_value_new(NS_CSS_V_KEYWORD);
     out->u.keyword = g_strdup_printf(aa ? "auto %gpx" : "%gpx", px);
     return out;
 }
@@ -14696,12 +14745,10 @@ parse_color_value(const char *t, gboolean allow_invert)
     guint8 rgba[4];
     ns_css_value *v = NULL;
     if (parse_color(t, &r, &g, &b, &a)) {
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_COLOR;
+        v = ns_css_value_new(NS_CSS_V_COLOR);
         v->u.color.r = r; v->u.color.g = g; v->u.color.b = b; v->u.color.a = a;
     } else if (strchr(t, '(') && ns_css_color_resolve(t, opaque_black, rgba)) {
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_COLOR;
+        v = ns_css_value_new(NS_CSS_V_COLOR);
         v->u.color.r = rgba[0]; v->u.color.g = rgba[1];
         v->u.color.b = rgba[2]; v->u.color.a = rgba[3];
     } else {
@@ -14710,8 +14757,7 @@ parse_color_value(const char *t, gboolean allow_invert)
                    strcmp(kw, "inherit") == 0 ||
                    strcmp(kw, "transparent") == 0 ||
                    (allow_invert && strcmp(kw, "invert") == 0))) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = kw;
         } else {
             g_free(kw);
@@ -14729,8 +14775,7 @@ line_width_keyword_value(const prop_def *def, const char *kw)
                      : strcmp(kw, "thick") == 0 ? 5 : -1;
     if (border_px < 0) return NULL;
     if (def->prop != NS_CSS_WEBKIT_TEXT_STROKE_WIDTH) return calc_px_value(border_px);
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_LENGTH;
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_LENGTH);
     v->u.length.v = border_px / 48.0;
     v->u.length.unit = NS_CSS_UNIT_EM;
     return v;
@@ -14753,8 +14798,7 @@ parse_def_length(const prop_def *def, const char *t)
         double num;
         ns_css_unit unit;
         if (!parse_length(t, &num, &unit)) return NULL;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_LENGTH;
+        v = ns_css_value_new(NS_CSS_V_LENGTH);
         v->u.length.v = num;
         v->u.length.unit = unit;
     }
@@ -14798,8 +14842,7 @@ parse_def_number(const prop_def *def, const char *t)
         double num;
         ns_css_unit unit;
         if (!parse_length(t, &num, &unit)) return NULL;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_LENGTH;
+        v = ns_css_value_new(NS_CSS_V_LENGTH);
         v->u.length.v = num;
         v->u.length.unit = unit;
     }
@@ -15073,8 +15116,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         char *canon = ns_css_anchor_fn_canonical(t, anchor_mode == 1, TRUE);
         g_free(t);
         if (!canon) return NULL;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         return v;
     }
@@ -15082,8 +15124,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         char *canon = contain_intrinsic_canonical(t, NULL);
         g_free(t);
         if (!canon) return NULL;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         return v;
     }
@@ -15091,8 +15132,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         char *canon = font_size_adjust_canonical(t);
         g_free(t);
         if (!canon) return NULL;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         return v;
     }
@@ -15102,8 +15142,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         if (is_shape) {
             g_free(t);
             if (!canon) return NULL;
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = canon;
             return v;
         }
@@ -15113,8 +15152,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         char *canon = shape_prop_canonical(prop, t);
         g_free(t);
         if (!canon) return NULL;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         return v;
     }
@@ -15123,8 +15161,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         char *canon = anchor_prop_canonical(prop, t, &specified);
         g_free(t);
         if (!canon) return NULL;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         if (specified && strcmp(specified, canon) != 0) v->specified = specified;
         else g_free(specified);
@@ -15163,8 +15200,7 @@ parse_value_for(ns_css_prop prop, const char *text)
                 t = g_strdup(pair[0]);
                 collapsed = TRUE;
             } else if (ok) {
-                v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_SIZE;
+                v = ns_css_value_new(NS_CSS_V_SIZE);
                 v->u.size.w = num[0];
                 v->u.size.h = num[1];
                 v->u.size.w_unit = unit[0];
@@ -15182,8 +15218,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_DISPLAY: {
         char *norm = normalize_display_value(t);
         if (!norm) break;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = norm;
         break;
     }
@@ -15250,8 +15285,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_BACKGROUND_CLIP: {
         char *canon = bg_clip_canonical(t);
         if (!canon) break;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         break;
     }
@@ -15392,8 +15426,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         break;
     case NS_CSS_CLIP: {
         if (g_ascii_strcasecmp(t, "auto") == 0) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = g_strdup("auto");
             break;
         }
@@ -15419,8 +15452,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         g_strfreev(parts);
         g_free(inner);
         if (idx == 4) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_RECT;
+            v = ns_css_value_new(NS_CSS_V_RECT);
             for (int i = 0; i < 4; i++) {
                 v->u.rect.v[i] = cv[i];
                 v->u.rect.unit[i] = cu[i];
@@ -15448,8 +15480,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_STROKE: {
         guint8 r, g, b, a;
         if (parse_color(t, &r, &g, &b, &a)) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_COLOR;
+            v = ns_css_value_new(NS_CSS_V_COLOR);
             v->u.color.r = r; v->u.color.g = g; v->u.color.b = b; v->u.color.a = a;
             break;
         }
@@ -15460,8 +15491,7 @@ parse_value_for(ns_css_prop prop, const char *text)
                    strcmp(kw, "context-fill") == 0 ||
                    strcmp(kw, "context-stroke") == 0 ||
                    g_str_has_prefix(kw, "url("))) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             if (g_str_has_prefix(kw, "url(")) {
                 g_free(kw);
                 kw = g_strdup(t);
@@ -15516,8 +15546,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             g_strfreev(parts);
         }
         if (ok) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = kw;
         } else {
             g_free(kw);
@@ -15542,8 +15571,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             g_strfreev(parts);
         }
         if (ok) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = kw;
         } else {
             g_free(kw);
@@ -15591,8 +15619,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         if (prop == NS_CSS_FONT_SIZE) {
             if (g_ascii_strcasecmp(t, "larger") == 0 ||
                 g_ascii_strcasecmp(t, "smaller") == 0) {
-                v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_LENGTH;
+                v = ns_css_value_new(NS_CSS_V_LENGTH);
                 v->u.length.v = g_ascii_strcasecmp(t, "larger") == 0
                     ? 1.2 : 0.833333333333;
                 v->u.length.unit = NS_CSS_UNIT_EM;
@@ -15600,8 +15627,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             }
             double fs = font_size_keyword_px(t);
             if (fs > 0) {
-                v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_LENGTH;
+                v = ns_css_value_new(NS_CSS_V_LENGTH);
                 v->u.length.v = fs;
                 v->u.length.unit = NS_CSS_UNIT_PX;
                 break;
@@ -15615,8 +15641,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             else if (g_ascii_strcasecmp(t, "medium") == 0) bw = 3;
             else if (g_ascii_strcasecmp(t, "thick")  == 0) bw = 5;
             if (bw >= 0) {
-                v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_LENGTH;
+                v = ns_css_value_new(NS_CSS_V_LENGTH);
                 v->u.length.v = bw;
                 v->u.length.unit = NS_CSS_UNIT_PX;
                 break;
@@ -15641,16 +15666,14 @@ parse_value_for(ns_css_prop prop, const char *text)
               g_ascii_strcasecmp(t, "stretch") == 0 ||
               g_ascii_strcasecmp(t, "-webkit-fill-available") == 0 ||
               g_ascii_strcasecmp(t, "-moz-available") == 0))) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = ascii_lower(t, strlen(t));
         } else if ((v = parse_calc(t))) {
         } else {
             double num;
             ns_css_unit u;
             if (parse_length(t, &num, &u)) {
-                v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_LENGTH;
+                v = ns_css_value_new(NS_CSS_V_LENGTH);
                 v->u.length.v = num;
                 v->u.length.unit = u;
             }
@@ -15703,8 +15726,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_COLUMN_SPAN:
         if (g_ascii_strcasecmp(t, "none") == 0 ||
             g_ascii_strcasecmp(t, "all") == 0) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = ascii_lower(t, strlen(t));
         }
         break;
@@ -15726,7 +15748,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         if (!canon && !strstr(t, "var(")) break;
         g_free(canon);
         v = parse_box_shadow(t);
-        if (v) v->u.shadow.is_text = (prop == NS_CSS_TEXT_SHADOW);
+        if (v) v->u.shadow->is_text = (prop == NS_CSS_TEXT_SHADOW);
         break;
     }
     case NS_CSS_GRID_TEMPLATE_COLUMNS:
@@ -15734,14 +15756,14 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_GRID_AUTO_ROWS:
     case NS_CSS_GRID_AUTO_COLUMNS: {
         v = parse_tracks(t);
-        if (v && v->u.tracks.subgrid &&
+        if (v && v->u.tracks->subgrid &&
             (prop == NS_CSS_GRID_AUTO_ROWS || prop == NS_CSS_GRID_AUTO_COLUMNS)) {
             ns_css_value_free(v);
             v = NULL;
         }
         if (v) {
             v->specified = grid_track_text_canonical(t);
-            if (v->u.tracks.subgrid && !v->specified) {
+            if (v->u.tracks->subgrid && !v->specified) {
                 ns_css_value_free(v);
                 v = NULL;
             }
@@ -15778,8 +15800,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         }
         if (pct >= 0) {
             g_free(kw);
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_LENGTH;
+            v = ns_css_value_new(NS_CSS_V_LENGTH);
             v->u.length.v = pct;
             v->u.length.unit = NS_CSS_UNIT_PERCENT;
         } else {
@@ -15787,8 +15808,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             double num;
             ns_css_unit u;
             if (parse_length(t, &num, &u)) {
-                v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_LENGTH;
+                v = ns_css_value_new(NS_CSS_V_LENGTH);
                 v->u.length.v = num;
                 v->u.length.unit = u;
             }
@@ -15800,8 +15820,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         char *kw = ascii_lower(t, strlen(t));
         if (kw && (strcmp(kw, "cover") == 0 || strcmp(kw, "contain") == 0 ||
                    strcmp(kw, "auto") == 0)) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = kw;
         } else {
             g_free(kw);
@@ -15839,8 +15858,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             if (ok) {
                 legacy_em_normalize(&w, &wu);
                 legacy_em_normalize(&h, &hu);
-                v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_SIZE;
+                v = ns_css_value_new(NS_CSS_V_SIZE);
                 v->u.size.w = w;
                 v->u.size.h = h;
                 v->u.size.w_unit = wu;
@@ -15863,8 +15881,7 @@ parse_value_for(ns_css_prop prop, const char *text)
                 ? bg_repeat_canonical(pair[0], pair[1]) : NULL;
         for (int i = 0; i < nt; i++) g_free(pair[i]);
         if (!kw) break;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = kw;
         break;
     }
@@ -15872,8 +15889,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         char *canon = strstr(t, "var(") ? g_strdup(t)
                                         : ns_css_content_canonical(t);
         if (!canon) break;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         break;
     }
@@ -15882,30 +15898,26 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_COUNTER_SET: {
         char *canon = counter_list_canonical(t, prop);
         if (!canon) break;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         break;
     }
     case NS_CSS_LIST_STYLE_TYPE: {
         char *canon = list_style_type_canonical(t);
         if (!canon) break;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         break;
     }
     case NS_CSS_OVERFLOW_CLIP_MARGIN: {
         char *canon = overflow_clip_margin_canonical(t);
         if (!canon) break;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         break;
     }
     case NS_CSS_QUOTES: {
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = g_strstrip(g_strdup(t));
         break;
     }
@@ -15915,8 +15927,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         if (!v) {
             char *kw = ascii_lower(t, strlen(t));
             if (strcmp(kw, "none") == 0) {
-                v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_KEYWORD;
+                v = ns_css_value_new(NS_CSS_V_KEYWORD);
                 v->u.keyword = kw;
             } else {
                 g_free(kw);
@@ -15964,8 +15975,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         if (!v) {
             char *kw = iset_computed ? g_strdup(iset_computed)
                                      : ascii_lower(t, strlen(t));
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = kw;
         }
         g_free(iset_computed);
@@ -15982,8 +15992,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             char *lc = g_ascii_strdown(t, -1);
             g_strstrip(lc);
             if (strcmp(lc, "none") == 0) {
-                v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_KEYWORD;
+                v = ns_css_value_new(NS_CSS_V_KEYWORD);
                 v->u.keyword = g_strdup("none");
             }
             g_free(lc);
@@ -16036,8 +16045,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             plain_unit == NS_CSS_UNIT_NUMBER && plain != 0)
             break;
         if (resolve_to_px_pct(t, strlen(t), &px, &pct) && px > 0 && pct == 0) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_LENGTH;
+            v = ns_css_value_new(NS_CSS_V_LENGTH);
             v->u.length.v = px;
             v->u.length.unit = NS_CSS_UNIT_PX;
         } else if (g_ascii_strcasecmp(t, "none") == 0) {
@@ -16093,13 +16101,12 @@ parse_value_for(ns_css_prop prop, const char *text)
             has_ratio = TRUE;
         }
         if (bad || (!with_auto && !has_ratio)) break;
-        v = g_new0(ns_css_value, 1);
         if (!has_ratio) {
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = g_strdup("auto");
             break;
         }
-        v->kind = NS_CSS_V_SIZE;
+        v = ns_css_value_new(NS_CSS_V_SIZE);
         v->u.size.w = a;
         v->u.size.h = b;
         v->u.size.w_unit = NS_CSS_UNIT_NUMBER;
@@ -16110,16 +16117,14 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_CONTAINER_NAME: {
         char *canon = ns_css_container_name_canonical(t);
         if (!canon) break;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         break;
     }
     case NS_CSS_FONT_STRETCH: {
         char *kw = ascii_lower(t, strlen(t));
         if (is_font_stretch_keyword(kw)) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = kw;
         } else {
             g_free(kw);
@@ -16127,8 +16132,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             ns_css_unit u;
             if (parse_length(t, &num, &u) &&
                 u == NS_CSS_UNIT_PERCENT && num > 0) {
-                v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_LENGTH;
+                v = ns_css_value_new(NS_CSS_V_LENGTH);
                 v->u.length.v = num;
                 v->u.length.unit = u;
             }
@@ -16140,8 +16144,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         if (strcmp(kw, "auto") == 0 ||
             strcmp(kw, "normal") == 0 ||
             strcmp(kw, "none") == 0) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = kw;
         } else {
             g_free(kw);
@@ -16151,8 +16154,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_FONT_VARIANT_LIGATURES: {
         char *kw = ascii_lower(t, strlen(t));
         if (is_font_ligatures_value(kw)) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = kw;
         } else {
             g_free(kw);
@@ -16162,8 +16164,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_FONT_FEATURE_SETTINGS: {
         char *kw = ascii_lower(t, strlen(t));
         if (strcmp(kw, "normal") == 0 || is_font_feature_settings_value(t)) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = strcmp(kw, "normal") == 0 ? kw : g_strdup(t);
             if (v->u.keyword != kw) g_free(kw);
         } else {
@@ -16174,8 +16175,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_FONT_VARIATION_SETTINGS: {
         char *kw = ascii_lower(t, strlen(t));
         if (strcmp(kw, "normal") == 0 || is_font_variation_settings_value(t)) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = strcmp(kw, "normal") == 0 ? kw : g_strdup(t);
             if (v->u.keyword != kw) g_free(kw);
         } else {
@@ -16204,8 +16204,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         double len; ns_css_unit u;
         if (parse_length(t, &len, &u) && u != NS_CSS_UNIT_PERCENT &&
             len >= 0) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_LENGTH;
+            v = ns_css_value_new(NS_CSS_V_LENGTH);
             v->u.length.v = len;
             v->u.length.unit = u;
         }
@@ -16228,8 +16227,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         if (ok && w >= 0 && h >= 0) {
             legacy_em_normalize(&w, &wu);
             legacy_em_normalize(&h, &hu);
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_SIZE;
+            v = ns_css_value_new(NS_CSS_V_SIZE);
             v->u.size.w = w;
             v->u.size.h = h;
             v->u.size.w_unit = wu;
@@ -16246,8 +16244,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         for (gsize i = 0; i < G_N_ELEMENTS(ok); i++)
             if (strcmp(kw, ok[i]) == 0) { valid = TRUE; break; }
         if (!valid) { g_free(kw); g_free(t); return NULL; }
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = kw;
         break;
     }
@@ -16276,8 +16273,7 @@ parse_value_for(ns_css_prop prop, const char *text)
                          strcmp(kw, "auto") == 0 ||
                          strcmp(kw, "hidden") == 0;
         if (!valid) { g_free(kw); break; }
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = kw;
         break;
     }
@@ -16291,8 +16287,7 @@ parse_value_for(ns_css_prop prop, const char *text)
                          strcmp(kw, "tb") == 0 ||
                          strcmp(kw, "tb-rl") == 0;
         if (!valid) { g_free(kw); break; }
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = kw;
         break;
     }
@@ -16307,16 +16302,14 @@ parse_value_for(ns_css_prop prop, const char *text)
                          strcmp(kw, "sideways") == 0 ||
                          strcmp(kw, "use-glyph-orientation") == 0;
         if (!valid) { g_free(kw); break; }
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = kw;
         break;
     }
     case NS_CSS_CURSOR: {
         if (strchr(t, '(')) {
             char *kw = ascii_lower(t, strlen(t));
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = kw;
             break;
         }
@@ -16333,8 +16326,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         for (gsize i = 0; i < G_N_ELEMENTS(ok); i++)
             if (strcmp(kw, ok[i]) == 0) { valid = TRUE; break; }
         if (!valid) { g_free(kw); g_free(t); return NULL; }
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = kw;
         break;
     }
@@ -16344,8 +16336,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             strcmp(kw, "bolder") == 0 || strcmp(kw, "lighter") == 0 ||
             strstr(kw, "var(") || strstr(kw, "attr(") ||
             strstr(kw, "env(") || strchr(kw, '"') || strchr(kw, '\'')) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = kw;
             break;
         }
@@ -16367,8 +16358,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             if (end && end != t && *end == '\0') { num = d; got = TRUE; }
         }
         if (got && isfinite(num) && num >= 1 && num <= 1000) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = g_strdup_printf("%g", num);
         }
         break;
@@ -16376,16 +16366,14 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_FONT_FAMILY: {
         char *canon = ns_css_font_family_canonical(t);
         if (!canon) break;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         break;
     }
     case NS_CSS_GRID_AUTO_FLOW: {
         char *canon = grid_auto_flow_canonical(t);
         if (!canon) break;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = canon;
         break;
     }
@@ -16401,8 +16389,7 @@ parse_value_for(ns_css_prop prop, const char *text)
             ? grid_placement_canonical(t, prop == NS_CSS_GRID_AREA)
             : grid_line_canonical(t, NULL);
         if (!canon) break;
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_KEYWORD;
+        v = ns_css_value_new(NS_CSS_V_KEYWORD);
         v->u.keyword = grid_placement_fold_math(canon);
         break;
     }
@@ -17853,7 +17840,7 @@ anim_shorthand_emit_longhands(GArray *decls, ns_css_value *shorthand,
         }
         return;
     }
-    const ns_css_anim_list *list = &shorthand->u.anim;
+    const ns_css_anim_list *list = shorthand->u.anim;
     for (gsize i = 0; i < n; i++) {
         GString *text = g_string_new(NULL);
         gboolean single = lh[i] == NS_CSS_ANIMATION_TIMELINE ||
@@ -17867,8 +17854,7 @@ anim_shorthand_emit_longhands(GArray *decls, ns_css_value *shorthand,
         }
         ns_css_value *v = list->n > 0 ? parse_value_for(lh[i], text->str) : NULL;
         if (!v) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
+            v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = g_strdup("initial");
         }
         ns_css_decl d = { .prop = lh[i], .value = v, .important = important };
@@ -20478,8 +20464,7 @@ parse_declaration_block(const char **pp, const char *end,
                            g_ascii_strcasecmp(tk, "dotted") == 0 ||
                            g_ascii_strcasecmp(tk, "dashed") == 0 ||
                            g_ascii_strcasecmp(tk, "wavy")   == 0) {
-                    ns_css_value *v = g_new0(ns_css_value, 1);
-                    v->kind = NS_CSS_V_KEYWORD;
+                    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
                     v->u.keyword = g_ascii_strdown(tk, -1);
                     ns_css_decl d = {
                         .prop = NS_CSS_TEXT_DECORATION_STYLE,
@@ -20487,8 +20472,7 @@ parse_declaration_block(const char **pp, const char *end,
                     };
                     g_array_append_val(decls_out, d);
                 } else if (parse_color(tk, &cr, &cg, &cb, &ca)) {
-                    ns_css_value *v = g_new0(ns_css_value, 1);
-                    v->kind = NS_CSS_V_COLOR;
+                    ns_css_value *v = ns_css_value_new(NS_CSS_V_COLOR);
                     v->u.color.r = cr; v->u.color.g = cg;
                     v->u.color.b = cb; v->u.color.a = ca;
                     ns_css_decl d = {
@@ -20499,8 +20483,7 @@ parse_declaration_block(const char **pp, const char *end,
                 }
             }
             if (lines->len > 0) {
-                ns_css_value *v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_KEYWORD;
+                ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
                 v->u.keyword = g_string_free(lines, FALSE);
                 lines = NULL;
                 ns_css_decl d = {
@@ -20574,15 +20557,13 @@ parse_declaration_block(const char **pp, const char *end,
                         { NS_CSS_FONT_FAMILY, "system-ui" },
                     };
                     for (gsize j = 0; j < G_N_ELEMENTS(sys_props); j++) {
-                        ns_css_value *sv = g_new0(ns_css_value, 1);
-                        sv->kind = NS_CSS_V_KEYWORD;
+                        ns_css_value *sv = ns_css_value_new(NS_CSS_V_KEYWORD);
                         sv->u.keyword = g_strdup(sys_props[j].value);
                         ns_css_decl sd = { .prop = sys_props[j].prop, .value = sv,
                                            .important = important };
                         g_array_append_val(decls_out, sd);
                     }
-                    ns_css_value *sz = g_new0(ns_css_value, 1);
-                    sz->kind = NS_CSS_V_LENGTH;
+                    ns_css_value *sz = ns_css_value_new(NS_CSS_V_LENGTH);
                     sz->u.length.v = 13.3333;
                     sz->u.length.unit = NS_CSS_UNIT_PX;
                     ns_css_decl szd = { .prop = NS_CSS_FONT_SIZE, .value = sz,
@@ -20619,8 +20600,7 @@ parse_declaration_block(const char **pp, const char *end,
                 NS_CSS_FONT_STRETCH, NS_CSS_LINE_HEIGHT,
             };
             for (gsize j = 0; j < G_N_ELEMENTS(font_reset_props); j++) {
-                ns_css_value *rv = g_new0(ns_css_value, 1);
-                rv->kind = NS_CSS_V_KEYWORD;
+                ns_css_value *rv = ns_css_value_new(NS_CSS_V_KEYWORD);
                 rv->u.keyword = g_strdup("normal");
                 ns_css_decl rd = { .prop = font_reset_props[j], .value = rv,
                                    .important = important };
@@ -20651,8 +20631,7 @@ parse_declaration_block(const char **pp, const char *end,
                     prop = NS_CSS_FONT_STRETCH; kw = t;
                 }
                 if (prop != NS_CSS_PROP_COUNT) {
-                    ns_css_value *v = g_new0(ns_css_value, 1);
-                    v->kind = NS_CSS_V_KEYWORD;
+                    ns_css_value *v = ns_css_value_new(NS_CSS_V_KEYWORD);
                     v->u.keyword = g_ascii_strdown(kw, -1);
                     ns_css_decl d = {
                         .prop = prop, .value = v, .important = important
@@ -20730,8 +20709,7 @@ parse_declaration_block(const char **pp, const char *end,
                     { NS_CSS_FONT_VARIATION_SETTINGS, "normal" },
                 };
                 for (gsize j = 0; j < G_N_ELEMENTS(reset_props); j++) {
-                    ns_css_value *rv = g_new0(ns_css_value, 1);
-                    rv->kind = NS_CSS_V_KEYWORD;
+                    ns_css_value *rv = ns_css_value_new(NS_CSS_V_KEYWORD);
                     rv->u.keyword = g_strdup(reset_props[j].value);
                     ns_css_decl rd = {
                         .prop = reset_props[j].prop,
@@ -20744,8 +20722,7 @@ parse_declaration_block(const char **pp, const char *end,
                 g_free(family_buf);
                 family_buf = canon_family;
                 if (family_buf) {
-                    ns_css_value *fv = g_new0(ns_css_value, 1);
-                    fv->kind = NS_CSS_V_KEYWORD;
+                    ns_css_value *fv = ns_css_value_new(NS_CSS_V_KEYWORD);
                     fv->u.keyword = family_buf;
                     ns_css_decl fd = {
                         .prop = NS_CSS_FONT_FAMILY, .value = fv,
@@ -29807,11 +29784,10 @@ static ns_css_value *
 transform_identity_like(const ns_css_value *src)
 {
     if (!src || src->kind != NS_CSS_V_TRANSFORM) return NULL;
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_TRANSFORM;
-    v->u.transform = src->u.transform;
-    for (int i = 0; i < v->u.transform.n_ops; i++) {
-        ns_css_transform_op *op = &v->u.transform.ops[i];
+    ns_css_value *v = ns_css_value_new(NS_CSS_V_TRANSFORM);
+    *v->u.transform = *src->u.transform;
+    for (int i = 0; i < v->u.transform->n_ops; i++) {
+        ns_css_transform_op *op = &v->u.transform->ops[i];
         switch (op->kind) {
         case NS_CSS_TFN_TRANSLATE:
             op->a = op->b = op->c = op->a_pct = op->b_pct = 0;
@@ -30150,16 +30126,16 @@ ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t)
         out->u.color.a = lerp_channel(a->u.color.a, b->u.color.a, t);
         return out;
     case NS_CSS_V_SHADOW: {
-        const ns_css_shadow_list *sa = &a->u.shadow, *sb = &b->u.shadow;
+        const ns_css_shadow_list *sa = a->u.shadow, *sb = b->u.shadow;
         if (sa->n != sb->n || sa->is_text != sb->is_text) break;
         for (int i = 0; i < sa->n; i++)
             if (sa->s[i].inset != sb->s[i].inset) { g_free(out); return NULL; }
-        out->kind = NS_CSS_V_SHADOW;
-        out->u.shadow.n = sa->n;
-        out->u.shadow.is_text = sa->is_text;
+        ns_css_value_set_kind(out, NS_CSS_V_SHADOW);
+        out->u.shadow->n = sa->n;
+        out->u.shadow->is_text = sa->is_text;
         for (int i = 0; i < sa->n; i++) {
             const ns_css_shadow *x = &sa->s[i], *y = &sb->s[i];
-            ns_css_shadow *o = &out->u.shadow.s[i];
+            ns_css_shadow *o = &out->u.shadow->s[i];
             o->x = x->x + (y->x - x->x) * t;
             o->y = x->y + (y->y - x->y) * t;
             o->blur = x->blur + (y->blur - x->blur) * t;
@@ -30173,11 +30149,12 @@ ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t)
         return out;
     }
     case NS_CSS_V_TRANSFORM:
-        if (!transform_list_interpolate(&a->u.transform, &b->u.transform, t,
-                                        &out->u.transform))
-            break;
-        out->kind = NS_CSS_V_TRANSFORM;
-        return out;
+        ns_css_value_set_kind(out, NS_CSS_V_TRANSFORM);
+        if (transform_list_interpolate(a->u.transform, b->u.transform, t,
+                                       out->u.transform))
+            return out;
+        ns_css_value_free(out);
+        return NULL;
     default:
         break;
     }
@@ -30210,8 +30187,7 @@ value_add_lengths(const ns_css_value *a, const ns_css_value *b)
 {
     if (a->kind == NS_CSS_V_LENGTH && b->kind == NS_CSS_V_LENGTH &&
         a->u.length.unit == b->u.length.unit) {
-        ns_css_value *out = g_new0(ns_css_value, 1);
-        out->kind = NS_CSS_V_LENGTH;
+        ns_css_value *out = ns_css_value_new(NS_CSS_V_LENGTH);
         out->u.length.unit = a->u.length.unit;
         out->u.length.v = a->u.length.v + b->u.length.v;
         return out;
@@ -30290,24 +30266,23 @@ static ns_css_value *
 value_composite_transform(const ns_css_value *a, const ns_css_value *b,
                           gboolean accumulate)
 {
-    const ns_css_transform *ta = &a->u.transform, *tb = &b->u.transform;
-    ns_css_value *out = g_new0(ns_css_value, 1);
-    out->kind = NS_CSS_V_TRANSFORM;
+    const ns_css_transform *ta = a->u.transform, *tb = b->u.transform;
+    ns_css_value *out = ns_css_value_new(NS_CSS_V_TRANSFORM);
     if (accumulate && ta->n_ops == tb->n_ops) {
         gboolean ok = TRUE;
-        out->u.transform.n_ops = ta->n_ops;
+        out->u.transform->n_ops = ta->n_ops;
         for (int i = 0; ok && i < ta->n_ops; i++)
             ok = transform_op_accumulate(&ta->ops[i], &tb->ops[i],
-                                         &out->u.transform.ops[i]);
+                                         &out->u.transform->ops[i]);
         if (ok) return out;
     }
     if (ta->n_ops + tb->n_ops > NS_CSS_TRANSFORM_OPS_MAX) {
         g_free(out);
         return NULL;
     }
-    out->u.transform.n_ops = ta->n_ops + tb->n_ops;
-    for (int i = 0; i < ta->n_ops; i++) out->u.transform.ops[i] = ta->ops[i];
-    for (int i = 0; i < tb->n_ops; i++) out->u.transform.ops[ta->n_ops + i] = tb->ops[i];
+    out->u.transform->n_ops = ta->n_ops + tb->n_ops;
+    for (int i = 0; i < ta->n_ops; i++) out->u.transform->ops[i] = ta->ops[i];
+    for (int i = 0; i < tb->n_ops; i++) out->u.transform->ops[ta->n_ops + i] = tb->ops[i];
     return out;
 }
 
@@ -30315,23 +30290,22 @@ static ns_css_value *
 value_composite_shadow(const ns_css_value *a, const ns_css_value *b,
                        gboolean accumulate)
 {
-    const ns_css_shadow_list *sa = &a->u.shadow, *sb = &b->u.shadow;
-    ns_css_value *out = g_new0(ns_css_value, 1);
-    out->kind = NS_CSS_V_SHADOW;
-    out->u.shadow.is_text = sb->is_text;
+    const ns_css_shadow_list *sa = a->u.shadow, *sb = b->u.shadow;
+    ns_css_value *out = ns_css_value_new(NS_CSS_V_SHADOW);
+    out->u.shadow->is_text = sb->is_text;
     if (accumulate) {
         if (sa->n != sb->n) {
             g_free(out);
             return NULL;
         }
-        out->u.shadow.n = sa->n;
+        out->u.shadow->n = sa->n;
         for (int i = 0; i < sa->n; i++) {
             const ns_css_shadow *x = &sa->s[i], *y = &sb->s[i];
             if (x->inset != y->inset) {
                 g_free(out);
                 return NULL;
             }
-            ns_css_shadow *o = &out->u.shadow.s[i];
+            ns_css_shadow *o = &out->u.shadow->s[i];
             *o = *y;
             o->x = x->x + y->x;
             o->y = x->y + y->y;
@@ -30348,9 +30322,9 @@ value_composite_shadow(const ns_css_value *a, const ns_css_value *b,
         g_free(out);
         return NULL;
     }
-    out->u.shadow.n = sa->n + sb->n;
-    for (int i = 0; i < sa->n; i++) out->u.shadow.s[i] = sa->s[i];
-    for (int i = 0; i < sb->n; i++) out->u.shadow.s[sa->n + i] = sb->s[i];
+    out->u.shadow->n = sa->n + sb->n;
+    for (int i = 0; i < sa->n; i++) out->u.shadow->s[i] = sa->s[i];
+    for (int i = 0; i < sb->n; i++) out->u.shadow->s[sa->n + i] = sb->s[i];
     return out;
 }
 
@@ -30361,14 +30335,13 @@ ns_css_value_composite(int prop, const ns_css_value *underlying, const ns_css_va
     if (prop == NS_CSS_TRANSLATE || prop == NS_CSS_ROTATE || prop == NS_CSS_SCALE ||
         prop == NS_CSS_TRANSFORM_ORIGIN || prop == NS_CSS_PERSPECTIVE_ORIGIN) {
         if (underlying && v && underlying->kind == NS_CSS_V_TRANSFORM &&
-            v->kind == NS_CSS_V_TRANSFORM && underlying->u.transform.n_ops == 1 &&
-            v->u.transform.n_ops == 1) {
-            ns_css_value *out = g_new0(ns_css_value, 1);
-            out->kind = NS_CSS_V_TRANSFORM;
-            out->u.transform.n_ops = 1;
-            ns_css_transform_op *o = &out->u.transform.ops[0];
-            const ns_css_transform_op *x = &underlying->u.transform.ops[0];
-            const ns_css_transform_op *y = &v->u.transform.ops[0];
+            v->kind == NS_CSS_V_TRANSFORM && underlying->u.transform->n_ops == 1 &&
+            v->u.transform->n_ops == 1) {
+            ns_css_value *out = ns_css_value_new(NS_CSS_V_TRANSFORM);
+            out->u.transform->n_ops = 1;
+            ns_css_transform_op *o = &out->u.transform->ops[0];
+            const ns_css_transform_op *x = &underlying->u.transform->ops[0];
+            const ns_css_transform_op *y = &v->u.transform->ops[0];
             if (x->kind == NS_CSS_TFN_SCALE && y->kind == NS_CSS_TFN_SCALE && !accumulate) {
                 *o = *y;
                 o->a = x->a * y->a;
@@ -30409,8 +30382,7 @@ ns_css_value_composite(int prop, const ns_css_value *underlying, const ns_css_va
             char *sum = ns_css_filter_composite(underlying->u.keyword, v->u.keyword,
                                                 accumulate, &cx);
             if (!sum) return NULL;
-            out = g_new0(ns_css_value, 1);
-            out->kind = NS_CSS_V_KEYWORD;
+            out = ns_css_value_new(NS_CSS_V_KEYWORD);
             out->u.keyword = sum;
             return out;
         }
@@ -30422,8 +30394,7 @@ ns_css_value_composite(int prop, const ns_css_value *underlying, const ns_css_va
             };
             char *sum = ns_css_shape_add(underlying->u.keyword, v->u.keyword, &cx);
             if (!sum) return NULL;
-            out = g_new0(ns_css_value, 1);
-            out->kind = NS_CSS_V_KEYWORD;
+            out = ns_css_value_new(NS_CSS_V_KEYWORD);
             out->u.keyword = sum;
             return out;
         }
@@ -30433,22 +30404,19 @@ ns_css_value_composite(int prop, const ns_css_value *underlying, const ns_css_va
         if (!g_ascii_isdigit((guchar)v->u.keyword[0]) && v->u.keyword[0] != '-' &&
             v->u.keyword[0] != '.')
             return NULL;
-        out = g_new0(ns_css_value, 1);
-        out->kind = NS_CSS_V_KEYWORD;
+        out = ns_css_value_new(NS_CSS_V_KEYWORD);
         out->u.keyword = g_strdup_printf("%g", na + nb);
         return out;
     }
     case NS_CSS_V_COLOR:
-        out = g_new0(ns_css_value, 1);
-        out->kind = NS_CSS_V_COLOR;
+        out = ns_css_value_new(NS_CSS_V_COLOR);
         out->u.color.r = add_channel(underlying->u.color.r, v->u.color.r);
         out->u.color.g = add_channel(underlying->u.color.g, v->u.color.g);
         out->u.color.b = add_channel(underlying->u.color.b, v->u.color.b);
         out->u.color.a = add_channel(underlying->u.color.a, v->u.color.a);
         return out;
     case NS_CSS_V_RECT:
-        out = g_new0(ns_css_value, 1);
-        out->kind = NS_CSS_V_RECT;
+        out = ns_css_value_new(NS_CSS_V_RECT);
         for (int i = 0; i < 4; i++) {
             if (underlying->u.rect.is_auto[i] != v->u.rect.is_auto[i] ||
                 underlying->u.rect.unit[i] != v->u.rect.unit[i]) {
@@ -30533,10 +30501,10 @@ ns_css_declarations_free(GArray *decls)
 static gboolean
 inline_transform_is_plain(const ns_css_value *v)
 {
-    if (!v || v->kind != NS_CSS_V_TRANSFORM || v->u.transform.n_ops <= 0)
+    if (!v || v->kind != NS_CSS_V_TRANSFORM || v->u.transform->n_ops <= 0)
         return FALSE;
-    for (int i = 0; i < v->u.transform.n_ops; i++) {
-        const ns_css_transform_op *op = &v->u.transform.ops[i];
+    for (int i = 0; i < v->u.transform->n_ops; i++) {
+        const ns_css_transform_op *op = &v->u.transform->ops[i];
         for (int k = 0; k < 3; k++)
             if (op->em[k] != 0.0 || op->rem[k] != 0.0 || op->lh[k] != 0.0)
                 return FALSE;
@@ -30737,13 +30705,13 @@ value_serialize_one(const ns_css_value *v)
     }
     case NS_CSS_V_SHADOW: {
         GString *s = g_string_new(NULL);
-        for (int i = 0; i < v->u.shadow.n; i++) {
-            const ns_css_shadow *sh = &v->u.shadow.s[i];
+        for (int i = 0; i < v->u.shadow->n; i++) {
+            const ns_css_shadow *sh = &v->u.shadow->s[i];
             if (i > 0) g_string_append(s, ", ");
             ns_css_append_color(s, sh->r, sh->g, sh->b, sh->a);
             g_string_append_printf(s, " %gpx %gpx %gpx",
                                    sh->x, sh->y, sh->blur);
-            if (!v->u.shadow.is_text)
+            if (!v->u.shadow->is_text)
                 g_string_append_printf(s, " %gpx", sh->spread);
             if (sh->inset)
                 g_string_append(s, " inset");
@@ -30755,27 +30723,27 @@ value_serialize_one(const ns_css_value *v)
         ns_gradient_parse gp;
         gboolean reparsed = v->specified &&
                             gradient_parse(v->specified, &gp, NULL, TRUE) &&
-                            gp.gr.n_stops == v->u.gradient.n_stops;
-        gradient_serialize_computed(s, &v->u.gradient, reparsed ? gp.stop_colors : NULL);
+                            gp.gr.n_stops == v->u.gradient->n_stops;
+        gradient_serialize_computed(s, v->u.gradient, reparsed ? gp.stop_colors : NULL);
         if (v->specified) gradient_parse_clear(&gp);
         return g_string_free(s, FALSE);
     }
     case NS_CSS_V_TRACKS: {
-        if (v->u.tracks.subgrid)
+        if (v->u.tracks->subgrid)
             return g_strdup(v->specified ? v->specified : "subgrid");
         GString *s = g_string_new(NULL);
-        for (int i = 0; i <= v->u.tracks.n; i++) {
+        for (int i = 0; i <= v->u.tracks->n; i++) {
             gboolean open = FALSE;
-            for (int k = 0; k < v->u.tracks.n_line_names; k++) {
-                if (v->u.tracks.line_names[k].line != i + 1) continue;
+            for (int k = 0; k < v->u.tracks->n_line_names; k++) {
+                if (v->u.tracks->line_names[k].line != i + 1) continue;
                 g_string_append(s, open ? " " : (s->len ? " [" : "["));
-                g_string_append(s, v->u.tracks.line_names[k].name);
+                g_string_append(s, v->u.tracks->line_names[k].name);
                 open = TRUE;
             }
             if (open) g_string_append_c(s, ']');
-            if (i == v->u.tracks.n) break;
+            if (i == v->u.tracks->n) break;
             if (s->len) g_string_append_c(s, ' ');
-            const ns_css_track *t = &v->u.tracks.tracks[i];
+            const ns_css_track *t = &v->u.tracks->tracks[i];
             switch (t->kind) {
             case NS_CSS_TRACK_PX:      g_string_append_printf(s, "%gpx", t->v); break;
             case NS_CSS_TRACK_PERCENT: g_string_append_printf(s, "%g%%", t->v); break;
@@ -30794,13 +30762,13 @@ value_serialize_one(const ns_css_value *v)
         return g_strdup_printf("url(\"%s\")", v->u.url ? v->u.url : "");
     case NS_CSS_V_AREAS: {
         GString *s = g_string_new(NULL);
-        for (int r = 0; r < v->u.areas.n_rows; r++) {
+        for (int r = 0; r < v->u.areas->n_rows; r++) {
             if (r) g_string_append_c(s, ' ');
             g_string_append_c(s, '"');
-            for (int c = 0; c < v->u.areas.n_cols; c++) {
+            for (int c = 0; c < v->u.areas->n_cols; c++) {
                 const char *name = ".";
-                for (int k = 0; k < v->u.areas.n_rects; k++) {
-                    const ns_css_area_rect *rect = &v->u.areas.rects[k];
+                for (int k = 0; k < v->u.areas->n_rects; k++) {
+                    const ns_css_area_rect *rect = &v->u.areas->rects[k];
                     if (r >= rect->r0 && r <= rect->r1 &&
                         c >= rect->c0 && c <= rect->c1) {
                         name = rect->name; break;
@@ -30815,9 +30783,9 @@ value_serialize_one(const ns_css_value *v)
     }
     case NS_CSS_V_ANIM: {
         GString *s = g_string_new(NULL);
-        for (int i = 0; i < v->u.anim.n; i++) {
+        for (int i = 0; i < v->u.anim->n; i++) {
             if (i) g_string_append(s, ", ");
-            const ns_css_anim_entry *e = &v->u.anim.entries[i];
+            const ns_css_anim_entry *e = &v->u.anim->entries[i];
             if (e->name) g_string_append_printf(s, "%s ", e->name);
             g_string_append_printf(s, "%gms", e->duration_ms);
             if (e->delay_ms != 0)
@@ -30827,8 +30795,8 @@ value_serialize_one(const ns_css_value *v)
     }
     case NS_CSS_V_TRANSFORM: {
         GString *s = g_string_new(NULL);
-        for (int i = 0; i < v->u.transform.n_ops; i++) {
-            const ns_css_transform_op *op = &v->u.transform.ops[i];
+        for (int i = 0; i < v->u.transform->n_ops; i++) {
+            const ns_css_transform_op *op = &v->u.transform->ops[i];
             if (i) g_string_append_c(s, ' ');
             switch (op->kind) {
             case NS_CSS_TFN_TRANSLATE:
@@ -32173,7 +32141,7 @@ ns_css_tracks_computed_serialize(const ns_style *s, const ns_style *root,
 {
     const ns_css_value *v = s && prop >= 0 && prop < NS_CSS_PROP_COUNT
         ? s->values[prop] : NULL;
-    if (!v || v->kind != NS_CSS_V_TRACKS || v->u.tracks.subgrid ||
+    if (!v || v->kind != NS_CSS_V_TRACKS || v->u.tracks->subgrid ||
         !v->specified)
         return NULL;
     return tracks_computed_text(v->specified, style_font_px(s),
@@ -33502,14 +33470,8 @@ static ns_css_value *
 ns_css_value_cow(ns_style *out, int prop)
 {
     ns_css_value *v = out->values[prop];
-    if (!v || v->ref == 0) return v;
-    ns_css_value *copy = g_new0(ns_css_value, 1);
-    *copy = *v;
-    copy->ref = 0;
-    copy->image_set_text = g_strdup(v->image_set_text);
-    copy->specified = g_strdup(v->specified);
-    copy->scheme_text = g_strdup(v->scheme_text);
-    if (copy->next_layer) copy->next_layer->ref++;
+    if (v->ref == 0) return v;
+    ns_css_value *copy = css_value_copy_shallow(v);
     v->ref--;
     out->values[prop] = copy;
     return copy;
@@ -33530,8 +33492,8 @@ calc_value_is_finite(const ns_css_value *v)
 {
     if (v->kind == NS_CSS_V_LENGTH) return isfinite(v->u.length.v);
     if (v->kind == NS_CSS_V_TRANSFORM) {
-        for (int k = 0; k < v->u.transform.n_ops; k++) {
-            const ns_css_transform_op *op = &v->u.transform.ops[k];
+        for (int k = 0; k < v->u.transform->n_ops; k++) {
+            const ns_css_transform_op *op = &v->u.transform->ops[k];
             if (op->kind != NS_CSS_TFN_TRANSLATE && op->kind != NS_CSS_TFN_SCALE)
                 continue;
             if (!isfinite(op->a) || !isfinite(op->b) || !isfinite(op->c) ||
@@ -33558,8 +33520,8 @@ calc_value_clamp_finite(ns_css_value *v)
         return;
     }
     if (v->kind == NS_CSS_V_TRANSFORM) {
-        for (int k = 0; k < v->u.transform.n_ops; k++) {
-            ns_css_transform_op *op = &v->u.transform.ops[k];
+        for (int k = 0; k < v->u.transform->n_ops; k++) {
+            ns_css_transform_op *op = &v->u.transform->ops[k];
             if (op->kind != NS_CSS_TFN_TRANSLATE && op->kind != NS_CSS_TFN_SCALE)
                 continue;
             op->a = calc_clamp_finite(op->a);
@@ -33775,13 +33737,7 @@ layer_value_cow(ns_css_value *prev)
 {
     ns_css_value *v = prev->next_layer;
     if (v->ref == 0) return v;
-    ns_css_value *copy = g_new0(ns_css_value, 1);
-    *copy = *v;
-    copy->ref = 0;
-    copy->image_set_text = g_strdup(v->image_set_text);
-    copy->specified = g_strdup(v->specified);
-    copy->scheme_text = g_strdup(v->scheme_text);
-    if (copy->next_layer) copy->next_layer->ref++;
+    ns_css_value *copy = css_value_copy_shallow(v);
     v->ref--;
     prev->next_layer = copy;
     return copy;
@@ -33853,8 +33809,7 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         fs->u.length.v = my_font_px;
         fs->u.length.unit = NS_CSS_UNIT_PX;
     } else {
-        ns_css_value *fs = g_new0(ns_css_value, 1);
-        fs->kind = NS_CSS_V_LENGTH;
+        ns_css_value *fs = ns_css_value_new(NS_CSS_V_LENGTH);
         fs->u.length.v = my_font_px;
         fs->u.length.unit = NS_CSS_UNIT_PX;
         out->values[NS_CSS_FONT_SIZE] = fs;
@@ -33882,15 +33837,15 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         }
         if (v->kind == NS_CSS_V_SHADOW) {
             gboolean needs = FALSE;
-            for (int k = 0; k < v->u.shadow.n && !needs; k++)
+            for (int k = 0; k < v->u.shadow->n && !needs; k++)
                 for (int m = 0; m < 4; m++)
-                    if (v->u.shadow.s[k].em[m] != 0 ||
-                        v->u.shadow.s[k].rem[m] != 0)
+                    if (v->u.shadow->s[k].em[m] != 0 ||
+                        v->u.shadow->s[k].rem[m] != 0)
                         needs = TRUE;
             if (!needs) continue;
             v = ns_css_value_cow(out, i);
-            for (int k = 0; k < v->u.shadow.n; k++) {
-                ns_css_shadow *sh = &v->u.shadow.s[k];
+            for (int k = 0; k < v->u.shadow->n; k++) {
+                ns_css_shadow *sh = &v->u.shadow->s[k];
                 double *fields[4] = { &sh->x, &sh->y, &sh->blur, &sh->spread };
                 for (int m = 0; m < 4; m++) {
                     *fields[m] += sh->em[m] * my_font_px + sh->rem[m] * root_px;
@@ -33903,8 +33858,8 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         }
         if (v->kind == NS_CSS_V_TRACKS) {
             gboolean needs = FALSE;
-            for (int k = 0; k < v->u.tracks.n && !needs; k++) {
-                const ns_css_track *t = &v->u.tracks.tracks[k];
+            for (int k = 0; k < v->u.tracks->n && !needs; k++) {
+                const ns_css_track *t = &v->u.tracks->tracks[k];
                 needs = t->em != 0 || t->rem != 0 || t->min_em != 0 ||
                         t->min_rem != 0 ||
                         track_math_has_font_units(t->math) ||
@@ -33912,8 +33867,8 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             }
             if (!needs) continue;
             v = ns_css_value_cow(out, i);
-            for (int k = 0; k < v->u.tracks.n; k++) {
-                ns_css_track *t = &v->u.tracks.tracks[k];
+            for (int k = 0; k < v->u.tracks->n; k++) {
+                ns_css_track *t = &v->u.tracks->tracks[k];
                 t->v += t->em * my_font_px + t->rem * root_px;
                 t->em = 0;
                 t->rem = 0;
@@ -33930,10 +33885,10 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             continue;
         }
         if (v->kind == NS_CSS_V_TRANSFORM) {
-            if (!transform_has_font_units(&v->u.transform)) continue;
+            if (!transform_has_font_units(v->u.transform)) continue;
             v = ns_css_value_cow(out, i);
-            for (int k = 0; k < v->u.transform.n_ops; k++) {
-                ns_css_transform_op *op = &v->u.transform.ops[k];
+            for (int k = 0; k < v->u.transform->n_ops; k++) {
+                ns_css_transform_op *op = &v->u.transform->ops[k];
                 double *axes[3] = { &op->a, &op->b, &op->c };
                 for (int m = 0; m < 3; m++) {
                     *axes[m] += op->em[m] * my_font_px + op->rem[m] * root_px +
@@ -34502,8 +34457,7 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
                 out->currentcolor_bits |= 1u << i;
             } else if (strcmp(v->u.keyword, "transparent") == 0) {
                 ns_css_value_free(out->values[color_props[i]]);
-                ns_css_value *t = g_new0(ns_css_value, 1);
-                t->kind = NS_CSS_V_COLOR;
+                ns_css_value *t = ns_css_value_new(NS_CSS_V_COLOR);
                 t->u.color.r = t->u.color.g = t->u.color.b = 0;
                 t->u.color.a = 0;
                 out->values[color_props[i]] = t;
@@ -34515,12 +34469,12 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             ns_css_value *v = out->values[shadow_props[i]];
             if (!v || v->kind != NS_CSS_V_SHADOW) continue;
             gboolean needs = FALSE;
-            for (int k = 0; k < v->u.shadow.n; k++)
-                if (v->u.shadow.s[k].currentcolor) needs = TRUE;
+            for (int k = 0; k < v->u.shadow->n; k++)
+                if (v->u.shadow->s[k].currentcolor) needs = TRUE;
             if (!needs) continue;
             v = ns_css_value_cow(out, shadow_props[i]);
-            for (int k = 0; k < v->u.shadow.n; k++) {
-                ns_css_shadow *sh = &v->u.shadow.s[k];
+            for (int k = 0; k < v->u.shadow->n; k++) {
+                ns_css_shadow *sh = &v->u.shadow->s[k];
                 if (!sh->currentcolor) continue;
                 sh->currentcolor = FALSE;
                 if (cur && cur->kind == NS_CSS_V_COLOR) {
@@ -34550,8 +34504,7 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
         ns_display used = display_after_blockification(
             legacy_webkit_box_display(out, d), out, layout_parent, is_root);
         if (memcmp(&d, &used, sizeof d) != 0) {
-            ns_css_value *nv = g_new0(ns_css_value, 1);
-            nv->kind = NS_CSS_V_KEYWORD;
+            ns_css_value *nv = ns_css_value_new(NS_CSS_V_KEYWORD);
             nv->u.keyword = ns_css_display_serialize(used);
             ns_css_value_free(out->values[NS_CSS_DISPLAY]);
             out->values[NS_CSS_DISPLAY] = nv;
