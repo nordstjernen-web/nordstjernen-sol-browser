@@ -18,7 +18,8 @@ Snaps give Nordstjernen a single, distro-agnostic binary that runs on
 any Ubuntu release (and most other Linux distributions) with automatic
 updates from the store and no dependency hunting. The snap ships its own
 copies of the non-platform libraries (libcurl, OpenSSL, uchardet, libpsl,
-SQLite, libseccomp, libwebp, SDL3, Enchant, FFmpeg's `libav*`) and pulls GTK 4, Pango, Cairo, and
+SQLite, libseccomp, libwebp, SDL3, Enchant, glslang, FFmpeg's `libav*`,
+GStreamer) and pulls GTK 4, Pango, Cairo, and
 GTK's stack from the shared **GNOME platform snap** via the `gnome`
 extension, so the package stays small.
 
@@ -44,7 +45,11 @@ From a clean checkout:
 
 This reads `snap/snapcraft.yaml`, spins up a `core24` (Ubuntu 24.04)
 build container, compiles the engine with meson/ninja, stages the
-runtime libraries, and emits a single artefact:
+runtime libraries, and emits a single artefact. Ubuntu 24.04's own
+packages do not meet the build's floors (its libcurl is 8.5 with no
+WebSocket support, the floor is 8.11, and it has no SDL3 package; see
+`Linux.md`), so on that base the recipe has to build libcurl and SDL3 as
+parts of their own, or use a newer base:
 
     nordstjernen_<version>_amd64.snap
 
@@ -100,7 +105,9 @@ inside the snap's `$SNAP/usr/bin` with no path patching. (The
 `NS_RENDERER` environment variable can still override the renderer path
 if needed.)
 
-`build-packages` are the `-dev` packages from `Linux.md`;
+`build-packages` are the `-dev` packages from `Linux.md`, plus `rustc`
+1.100 or newer for the HTML and URL parsers (newer than Ubuntu 24.04's
+package; `scripts/ensure-rust.sh` installs one with rustup);
 `stage-packages` are the matching runtime shared libraries that the
 GNOME platform snap does **not** provide, so they get bundled into the
 snap.

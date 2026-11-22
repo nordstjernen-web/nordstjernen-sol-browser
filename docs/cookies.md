@@ -201,13 +201,8 @@ keep tabs consistent with each other:
   writes;
 - a row changed by two processes resolves last-writer-wins.
 
-When networking moves behind the renderer IPC, as
-[tab-isolation.md](tab-isolation.md) step 6 plans, the shell owns the
-single store, attaches cookies to the requests it makes on the renderer's
-behalf, and `data_version` polling is dropped. The renderer then keeps a
-read-only snapshot of its partition for the synchronous `document.cookie`
-getter, and Landlock removes the cookies directory from its filesystem
-view.
+Every renderer can therefore read every site's cookies; see "Known gaps"
+in [security-model.md](security-model.md).
 
 ### Security
 

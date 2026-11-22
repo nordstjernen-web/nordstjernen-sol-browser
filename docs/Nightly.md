@@ -23,6 +23,7 @@ files are stale. The root contains:
 | Source tarballs (`.tar.gz`, `.tar.xz`) | `git archive` on the host | `source/` |
 | Debian package (`.deb`) + binary zip | `debian:trixie` container | `linux/debian/` |
 | Ubuntu package (`.deb`) + binary zip | `ubuntu:26.04` container | `linux/ubuntu/` |
+| Fedora package (`.rpm`) + binary zip | `fedora:45` container | `linux/fedora/` |
 | openSUSE package (`.rpm`) + binary zip | `opensuse/tumbleweed` container | `linux/opensuse/` |
 | Alpine (musl) package (`.apk`) + binary zip | `alpine:edge` container | `linux/alpine/` |
 | Windows bundle (`.zip`) + MSIX (`.msix`) + `nordstjernen.exe` | GitHub Actions `windows.yml` | `windows/` |
@@ -31,7 +32,7 @@ files are stale. The root contains:
 | NetBSD portable zip | GitHub Actions `netbsd.yml` (vmactions VM) | `netbsd/` |
 | Java API jar + sources + javadoc + browsable API docs | `debian:trixie` container (native libs) + JDK 21 on the host | `java/` |
 
-Each glibc Linux artifact (Debian/Ubuntu/openSUSE zip, `.deb`, `.rpm`) also
+Each glibc Linux artifact (Debian/Ubuntu/Fedora/openSUSE zip, `.deb`, `.rpm`) also
 ships **experimental WebGPU**: `scripts/pack-linux.sh` fetches the pinned
 wgpu-native release with `scripts/fetch-wgpu-native.sh`, builds the `webgpu`
 feature in, and bundles `libwgpu_native.so` beside the binaries (zip) or under
@@ -63,6 +64,7 @@ back to the Debian and then the openSUSE build:
 - `https://www.nordstjernen.org/nightly/nordstjernen-macos-arm64` (Apple Silicon, unbundled binary)
 - `https://www.nordstjernen.org/nightly/nordstjernen-debian-amd64.deb`
 - `https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb`
+- `https://www.nordstjernen.org/nightly/nordstjernen-fedora-x86_64.rpm`
 - `https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm`
 - `https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip` (musl)
@@ -93,9 +95,12 @@ re-running CI and the `concurrency`-group cancellation that a redundant
 dispatch would cause. The Linux
 packages are built locally in distro containers so each binary links
 against that distro's own glibc / GTK, and the source tarball is a
-plain `git archive` (the engine — the Rust HTML and URL parsers, quickjs, wuffs — is
-in-tree, as is the web-text-lib Pango fork; wgpu-native is not, so a fully
-offline build of the tarball needs `-Dwebgpu=disabled`).
+plain `git archive` (the engine — the Rust HTML and URL parsers, quickjs — is
+in-tree, as is the web-text-lib Pango fork; Wuffs, WAMR, PDF.js and
+wgpu-native are fetched by meson wraps, so a fully offline build of the
+tarball needs their archives in `subprojects/packagecache/`, which
+`scripts/fetch-wrap-sources.sh subprojects/packagecache` fills, and
+`-Dwebgpu=disabled`).
 
 The FreeBSD and NetBSD builds run the same way as Windows/macOS —
 driven through GitHub Actions — but GitHub has no native BSD runners, so
@@ -136,7 +141,9 @@ The Java API stage runs `javac`/`jar`/`javadoc` on the host, so the host
 needs a JDK 21. Its native libraries are built in the `debian:trixie`
 container; the engine build dependencies below are only needed on the host
 when no container engine is available and the natives fall back to a host
-build:
+build. That fallback needs a host that meets the meson version floors, which
+Ubuntu 24.04 does not (its libcurl is 8.5, the floor is 8.11, and it has no
+`libsdl3-dev` package); on a 24.04 server keep the container engine:
 
 ```sh
 # Update apt and install OpenJDK 21
@@ -147,7 +154,7 @@ sudo apt install -y openjdk-21-jdk
 sudo apt install -y build-essential clang pkg-config meson ninja-build rustc \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl3-dev glslang-dev \
-    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
+    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
 # Point JAVA_HOME at the JDK 21 install (and persist it for the cron user)
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
@@ -270,7 +277,7 @@ to the command (keep the cron file `chmod 600`):
 | `--no-gha` | — | Skip the Windows/macOS GitHub Actions builds. |
 | `--no-java` | — | Skip the Java API jar/javadoc stage. |
 | `--no-tarball` | — | Skip the source tarball. |
-| `--no-parallel` / `NIGHTLY_PARALLEL` | `1` | Build the four Linux containers concurrently; `0`/`--no-parallel` builds them one at a time. |
+| `--no-parallel` / `NIGHTLY_PARALLEL` | `1` | Build the five Linux containers concurrently; `0`/`--no-parallel` builds them one at a time. |
 | `--no-pull` / `NIGHTLY_PULL` | `1` | Fast-forward the checkout to `origin/main` and re-exec before building; `0`/`--no-pull` to disable. |
 | `NIGHTLY_PULL_BRANCH` | `main` | Branch the working tree is fast-forwarded to. |
 | `JAVA_HOME` | autodetected from `javac` | JDK 21 used by the Java stage. |
@@ -279,6 +286,7 @@ to the command (keep the cron file `chmod 600`):
 | `NIGHTLY_GHA_DISPATCH` | `1` | Dispatch a fresh run if none exists for the commit; set `0` to only reuse. |
 | `NIGHTLY_DEBIAN_IMAGE` | `debian:trixie` | Override the Debian base image. |
 | `NIGHTLY_UBUNTU_IMAGE` | `ubuntu:26.04` | Override the Ubuntu base image. |
+| `NIGHTLY_FEDORA_IMAGE` | `fedora:45` | Override the Fedora base image. Each Fedora release gets its own RPM, because the package requires that release's FFmpeg sonames. |
 | `NIGHTLY_OPENSUSE_IMAGE` | `opensuse/tumbleweed` | Override the openSUSE base image. |
 | `NIGHTLY_ALPINE_IMAGE` | `alpine:edge` | Override the Alpine (musl) base image. |
 | `NS_WEBGPU` | `auto` | WebGPU in the Linux builds: `auto` builds it when wgpu-native is fetched, `0` forces it off, `1` makes a missing wgpu-native fatal. Forwarded into the distro containers. |
@@ -320,18 +328,18 @@ prefer a dedicated vhost, point its `root` at `/var/www/html/nightly`
   (`NS_BUILD_JOBS`) and disables LTO for the nightly packages
   (`NS_BUILD_LTO=false`) — nightly binaries are functionally identical,
   just slightly larger. Override either env if your box has plenty of
-  RAM (`NS_BUILD_LTO=true NS_BUILD_JOBS=16`). By default the four
+  RAM (`NS_BUILD_LTO=true NS_BUILD_JOBS=16`). By default the five
   distro containers build concurrently, with that job budget split
   between them; pass `--no-parallel` to build one distro at a time on a
   tight box, and don't launch a second heavy build alongside a nightly.
 - **`meson setup` stops with "Nordstjernen needs newer system
   libraries than this machine has"** — the image is older than the
-  version floors (GTK 4.14, libcurl 8.5, and the GLib/cairo/HarfBuzz/
+  version floors (GTK 4.14, libcurl 8.11, and the GLib/cairo/HarfBuzz/
   fontconfig floors of the web-text-lib text stack). The default image is
   `debian:trixie` (Debian 13), the oldest Debian release that meets them;
   `debian:12` (bookworm) cannot build the browser. If you override
   `NIGHTLY_DEBIAN_IMAGE` or `NIGHTLY_UBUNTU_IMAGE`, pick Debian 13 /
-  Ubuntu 24.04 or newer. The container
+  Ubuntu 25.04 or newer (Ubuntu 24.04's libcurl 8.5 is below the floor). The container
   helper also installs a modern meson via pip, since older Debian meson
   predates the `c_std` fallback-list syntax the project uses.
 - **Stale orchestrator** — `nightly.sh` fast-forwards its own checkout

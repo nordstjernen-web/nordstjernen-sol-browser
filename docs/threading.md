@@ -30,11 +30,14 @@ outputs (a response, decoded pixels) that are transferred by ownership.
 | **Fetch pool** (≤32) | `net.c`, GLib `GTask` thread pool | per request | no |
 | **Network I/O** (1) | `net.c`, owns the shared `CURLM` | first fetch → shutdown | no |
 | **Image decode** (`async_image_decode`, on by default) | `image.c`, GLib `GTask` thread pool | per image | no |
-| **Web Worker** (1 per `Worker`) | `js.c` | until terminated | no (own `JSContext`) |
+| **Web Worker** (1 per `Worker` or `SharedWorker`; at most 64 workers per page, service workers included) | `js.c` | until terminated | no (own `JSContext`) |
 | **Service Worker** (1 per registered worker) | `js.c` | until terminated | no (own `JSContext`) |
 | **WebSocket** (1 per socket) | `ws.c` | connection lifetime | no |
 | **EventSource** (1 per source) | `eventsource.c` | connection lifetime | no |
 | **RNG warm-up** (transient) | `net.c` | one-shot at startup | no |
+| **Cookie flusher** (1) | `cookies.c` | first cookie write → shutdown | no (writes the cookie database; see [cookies.md](cookies.md)) |
+| **Safe Browsing updater** (1, when the build has an API key) | `safebrowsing_google.c` | started once per process | no (updates the hash-prefix lists) |
+| **Parent watch** (1, macOS only) | `renderer_http.c` | whole process | no (exits the renderer when the shell dies) |
 
 The shell process (`src/gtk/procview.c`) has its
 own main/UI thread plus one **per-view worker thread** that runs the
@@ -107,7 +110,7 @@ Every blocking or unbounded operation has a bound:
 | WebSocket connect | 15 s | `CURLOPT_CONNECTTIMEOUT`, `ws.c` |
 | WebSocket transfer | none (long-lived); 10 ms poll cadence | `ws.c` |
 | Page JS eval slice | `js_eval_budget_ms` (default 60 s, max 1 h; `NS_JS_EVAL_BUDGET_MS` for one run) | `ns_js_budget_push`, `js.c` |
-| Page JS hard monitor | 60 s of wall-clock per top-level entry, or `js_eval_budget_ms` when that is larger | `NS_JS_MONITOR_LIMIT_US`, `js.c` |
+| Page JS hard monitor | 60 s of wall-clock per top-level entry, or `js_eval_budget_ms` when that is larger; time spent executing WebAssembly is not counted (`ns_js_credit_wasm_time`) | `NS_JS_MONITOR_LIMIT_US`, `js.c` |
 | JS heap (page runtime) | `js_memory_cap_mb` (config default 2048; 2048 no-config fallback, no clamp) | `JS_SetMemoryLimit`, `js.c` |
 | JS heap (worker runtime) | `js_memory_cap_mb` clamped to ≤512; 256 no-config fallback | `JS_SetMemoryLimit`, `js.c` |
 | Per-origin in-flight requests | 6 | `NS_NET_MAX_PER_ORIGIN`, `net.c` |
@@ -205,7 +208,13 @@ flags (`closing`, `owner_alive`, `joined`); `host->lock` guards the
 Message passing is structured-clone over `JS_WriteObject` /
 `JS_ReadObject` (no shared JS heap; values named in a transfer list, such
 as `ArrayBuffer`s, are detached on the sending side, and `MessagePort`s
-travel with the message):
+travel with the message). The one exception is a `SharedArrayBuffer` or a
+shared `WebAssembly.Memory`, which only a cross-origin isolated page and
+its workers may post: `postMessage` shares the backing memory, which is
+reference-counted in the JS heap cage (`src/js_cage.c`), so both threads
+read and write the same bytes. `Atomics.wait` blocks in workers and
+`Atomics.notify` wakes waiters on other threads; a posted
+`WebAssembly.Module` is shared, not recompiled. Delivery:
 
 - owner → worker: `g_main_context_invoke_full(host->context, …)` runs
   `ns_worker_deliver_worker` **on the worker thread**.
@@ -246,9 +255,8 @@ with `g_child_watch_add`, and restarts it on crash/hang with capped burst
 control plus session recovery. Inside the shell, a **hang-monitor thread**
 (`ns_watchdog_hang_thread`) compares an atomic heartbeat (`g_beat`, bumped
 by a 2 s shell-main-loop timeout) against a 60 s deadline; if the
-loop stops beating it `_Exit`s with code 70 so the supervisor restarts. In
-the default multiprocess mode the shell runs no page JS, so its loop is
-never legitimately blocked long.
+loop stops beating it `_Exit`s with code 70 so the supervisor restarts.
+The shell runs no page JS, so its loop is never legitimately blocked long.
 This supervises the *shell*; per-tab engine crashes are already contained
 to their renderer process.
 
@@ -262,9 +270,8 @@ emitting thread**. Listeners therefore must be thread-safe: they must
 not touch the DOM directly and must not dereference an object that
 another thread can free. Page `console.*` output is captured by the JS
 log callback into a bounded per-page buffer, which the shell drains over
-the IPC `/console` message for the DevTools console panel (see
-`docs/tab-isolation.md`); it is never handed to a UI object from a worker
-thread.
+the IPC `/console` message for the DevTools console panel; it is never
+handed to a UI object from a worker thread.
 
 ### SQLite storage (`cache.c`, `history.c`, `idb.c`)
 
@@ -276,16 +283,14 @@ Three SQLite databases back the browser, each opened `WAL` +
   `g_cache_mutex`.
 - **History** (`history.c`) — a single persistent handle guarded by
   `g_history_mutex`, touched from the main thread.
-- **IndexedDB** (`idb.c`) — **main thread only**. The backend primitives
-  (`__nd_idb.*`) are called synchronously by the IndexedDB polyfill,
-  which fakes async with `setTimeout`. Workers do not get IndexedDB, so
-  no locking is needed.
+- **IndexedDB** (`idb.c`) — the page's main thread and worker threads.
+  The backend primitives (`__nd_idb.*`) are called synchronously by the
+  IndexedDB polyfill, which fakes async with `setTimeout`; workers install
+  the same backend (`ns_idb_install`), so the table of open connections is
+  guarded by `g_idb_lock` and each handle is reference-counted.
 
-IndexedDB previously **opened and closed the SQLite file on every
-operation** (`open` + full `CREATE TABLE` schema + `close` per
-`get`/`put`/…), which dominated the per-op cost and was the real
-main-thread stall. Connections are now **cached** in a process-global
-`key → handle` table (main-thread-only, so unlocked), opened and
+IndexedDB connections are **cached** in a process-global
+`key → handle` table, opened and
 schema-checked once; `deleteDatabase` evicts (closes) the cached handle
 before unlinking the file and its `-wal`/`-shm`. The cache key is the
 cheap raw `partition\x1fname` string, so a cache hit (the common case)
@@ -298,19 +303,19 @@ handle carries a `last_used` stamp), and each connection caps its page
 cache at 512 KiB (`PRAGMA cache_size=-512`), so a long session that
 touches many origins cannot accumulate unbounded file descriptors or
 SQLite page-cache memory; an evicted database simply reopens on next use. This
-collapses a typical IndexedDB op from a file open/close round-trip to a
-single indexed query — sub-millisecond on the main thread — so a
-dedicated DB worker thread would only add dispatch overhead for the
-common case; it is reserved for pathological bulk operations and is not
-currently warranted.
+makes a typical IndexedDB op a single indexed query — sub-millisecond on
+the calling thread — so a dedicated DB thread would only add dispatch
+overhead.
 
 All three databases process **attacker-influenced bytes** (response
 bodies, visited URLs/titles, page-controlled IndexedDB values), so each
 connection is hardened immediately after open: `DEFENSIVE` mode, load
 extensions disabled, `TRUSTED_SCHEMA` off, double-quoted string literals
 off (`DQS_DDL`/`DQS_DML`), and `SQLITE_OPEN_NOFOLLOW` where available.
-IndexedDB additionally caps each database at `max_page_count` (256 MiB)
-so a page cannot fill the disk.
+IndexedDB additionally caps each database at `max_page_count`, set to the
+origin's storage limit (1 GiB, `NS_IDB_MAX_ORIGIN_PAGES`), so a page
+cannot fill the disk; `navigator.storage.estimate()` reports the origin's
+IndexedDB usage against that limit.
 
 ## Invariants for contributors
 

@@ -13,7 +13,7 @@ its Google, Apple and passkey buttons from browsers without it).
 |---|---|---|
 | Page API | `data/js/polyfills.js` (`installWebAuthn`) | WebIDL surface, option normalisation (§5.1.3 / §5.1.4), timeouts, `AbortSignal`, `toJSON()`, `parse*OptionsFromJSON()`, `getPublicKey()` from the attestation's COSE key |
 | Engine | `src/js_webauthn.c` | Accepts requests only from the top-level document's realm, attaches the document origin the engine navigated to, re-serialises the options with QuickJS's own JSON (page code cannot inject into the message) and settles the promise when the shell answers |
-| Transport | `src/renderer_serve.c`, `src/rproc_http.c` | `X-WebAuthn: 1` on render/tick replies → shell `GET /webauthn-poll`; answers go back on `POST /webauthn-deliver` |
+| Transport | `src/renderer_serve.c`, `src/rproc_http.c` | `X-WebAuthn: 1` on render/tick replies → shell `POST /webauthn-poll`; answers go back on `POST /webauthn-deliver` |
 | Shell | `src/gtk/ns_webauthn.c` | The trust boundary (below), one ceremony per tab, cancelled on navigation and tab close |
 | Authenticator | `src/gtk/webauthn_win.c` | Windows: `webauthn.dll`, loaded at runtime — Windows Hello, security keys over USB/NFC/BLE, and phones (hybrid) |
 
@@ -21,7 +21,7 @@ The sandboxed renderer never talks to an authenticator. The shell treats
 everything the renderer sends as untrusted:
 
 - the request's origin must be the origin of the page the tab is showing,
-  and be `https:` (or `http://localhost`);
+  and be `https:` (or `http:` on `localhost` or a `*.localhost` name);
 - the effective domain must be a domain, not an IP address;
 - the RP ID must equal the page's host or be a registrable-domain suffix of
   it that is not a public suffix (checked with libpsl);

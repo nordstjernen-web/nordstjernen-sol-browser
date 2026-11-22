@@ -105,8 +105,9 @@ that shaped the manifest:
     the URI as a command-line argument, which the binary already
     accepts. (Same mechanism Firefox's MSIX uses.)
   - `windows.fileTypeAssociation` for `.htm .html .xht .xhtml .svg`.
-  - `windows.appExecutionAlias` so `nordstjernen.exe` works from a
-    console regardless of install path.
+  - `windows.appExecutionAlias` so `nordstjernen.exe` (and
+    `open-browser-nordstjernen.exe`) works from a console regardless
+    of install path.
   - A single `en-US` package resource. UI translation is in-app
     (`src/i18n.c` picks the OS language at startup), not
     Windows-resource-based, so declaring 40 package languages would

@@ -44,7 +44,9 @@ renderer use — viewport rendering into a caller buffer
 (`ns_browser_render_rgba`, `ns_browser_render_argb32`), input
 (`ns_browser_click`, `ns_browser_key`, `ns_browser_hover`,
 `ns_browser_scroll_at`), `ns_browser_tick` to keep scripts and animations
-running after the initial settle, `ns_browser_eval`, find-in-page, and the
+running after the initial settle, `ns_browser_eval`, find-in-page,
+`ns_browser_render_pdf` for a paged PDF as bytes
+([printing.md](printing.md)), and the
 `ns_browser_take_pending_*` queues for navigation, downloads and other
 page requests. Each is documented by its comment in `src/libnordstjernen.h`.
 

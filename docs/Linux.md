@@ -25,7 +25,11 @@ On openSUSE:
         libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel libseccomp-devel \
         libwebp-devel SDL3-devel glslang-devel
 
-GStreamer is required on Linux too (H.264/AAC, and VP9/AV1/HEVC in hardware):
+The Fedora and openSUSE lists are not complete on their own: add the
+GStreamer and FFmpeg development packages named below, both of which
+`meson setup` requires on Linux.
+
+GStreamer is required on Linux (H.264/AAC, and VP9/AV1/HEVC in hardware):
 `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian/Ubuntu,
 `gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora,
 `gstreamer-devel gstreamer-plugins-base-devel` on openSUSE. At runtime install
@@ -45,13 +49,15 @@ builds a browser whose renderer fails at startup.
 On Arch Linux (packaging and the AUR: `Arch.md`):
 
     sudo pacman -S --needed base-devel rust meson gtk4 libepoxy curl uchardet \
-        libpsl sqlite libseccomp libwebp sdl3 glslang ffmpeg
+        libpsl sqlite libseccomp libwebp sdl3 glslang ffmpeg gstreamer \
+        gst-plugins-base-libs
 
 On Alpine (musl libc):
 
     sudo apk add build-base linux-headers pkgconf rust meson ninja gtk4.0-dev \
         libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev \
-        libseccomp-dev libwebp-dev sdl3-dev glslang-dev
+        libseccomp-dev libwebp-dev sdl3-dev glslang-dev ffmpeg-dev \
+        gstreamer-dev gst-plugins-base-dev
 
 Alpine builds against musl rather than glibc, so the resulting binary
 is not interchangeable with the glibc portable zip — run a musl build
@@ -65,7 +71,9 @@ VP9/WebM, which would otherwise not play inline.
 
     sudo apt install libavformat-dev libavcodec-dev libavutil-dev \
         libswscale-dev libswresample-dev                       # Debian / Ubuntu
-    sudo dnf install ffmpeg-devel                               # Fedora / RHEL (RPM Fusion)
+    sudo dnf install 'pkgconfig(libavformat)' 'pkgconfig(libavcodec)' \
+        'pkgconfig(libavutil)' 'pkgconfig(libswscale)' \
+        'pkgconfig(libswresample)'                              # Fedora (its own ffmpeg-free, or RPM Fusion's ffmpeg-devel)
     sudo zypper install ffmpeg-9-libavformat-devel ffmpeg-9-libavcodec-devel \
         ffmpeg-9-libavutil-devel ffmpeg-9-libswscale-devel \
         ffmpeg-9-libswresample-devel                            # openSUSE Tumbleweed (OSS)
@@ -76,6 +84,11 @@ PDFs are shown by PDF.js, which meson fetches through
 `share/nordstjernen/pdfjs/`, which the browser reads when a PDF opens
 (`-Dpdfjs=disabled`, or a build with `--wrap-mode=nodownload` and no cached
 copy, leaves it out).
+
+WebAssembly SIMD uses the header-only SIMDe library: the system package
+when installed (`libsimde-dev` on Debian/Ubuntu, `simde` on Arch), else the
+pinned release fetched by `subprojects/simde.wrap`; `-Dwasm_simd=disabled`
+drops it.
 
 Optional, auto-detected:
 `libenchant-2-dev` plus a dictionary such as `hunspell-en-us`
@@ -93,12 +106,16 @@ ws/wss, for development builds on Ubuntu 24.04 (Claude's cloud containers).
 That build has no WebSocket, so never package it.
 
 web-text-lib, the Pango fork that shapes text, is vendored in-tree at
-`src/web-text-lib/` and builds with no network. On glibc
-`x86_64`/`aarch64` the first `meson setup` does fetch the pinned
-wgpu-native release for WebGPU (`subprojects/wgpu-native-linux-*.wrap`)
-unless a system `wgpu_native` pkg-config file or `-Dwgpu_native_root`
-supplies it. For an offline build pass `-Dwebgpu=disabled`, as the distro
-packages do.
+`src/web-text-lib/` and builds with no network. The first `meson setup`
+does download the pinned releases of the wraps in `subprojects/`: Wuffs
+(image decoders), WAMR (WebAssembly), PDF.js, SIMDe when no system copy is
+installed, and, on glibc `x86_64`/`aarch64`, wgpu-native for WebGPU
+(`subprojects/wgpu-native-linux-*.wrap`) unless a system `wgpu_native`
+pkg-config file or `-Dwgpu_native_root` supplies it. Each download is
+checked against the SHA-256 in its wrap file. For an offline build, put the
+Wuffs, WAMR and PDF.js archives in `subprojects/packagecache/` beforehand
+(`scripts/fetch-wrap-sources.sh subprojects/packagecache`), install the
+system SIMDe and pass `-Dwebgpu=disabled`, as the distro packages do.
 
 `ccache` is the biggest build-time win — `meson` picks it up
 automatically. With ccache warm, a clean `meson setup builddir &&
@@ -154,8 +171,8 @@ found), the application icons, the desktop entry, `README.md`,
 `libwgpu_native.so` ships beside the binaries, found through an `$ORIGIN`
 rpath (`NS_WEBGPU=0` packages without it).
 
-The in-tree browser engine — the Rust HTML and URL parsers, quickjs, wuffs
-and wamr — is statically linked. The GTK desktop stack stays dynamic because it
+The browser engine — the in-tree Rust HTML and URL parsers and QuickJS,
+and the Wuffs and WAMR subprojects — is statically linked. The GTK desktop stack stays dynamic because it
 expects to find pixbuf loaders, IM modules, and font/theme data on the
 host at runtime; fully-static GTK isn't practical. Runtime requirements:
 
@@ -168,6 +185,8 @@ host at runtime; fully-static GTK isn't practical. Runtime requirements:
   (where the distribution ships it as a shared library)
 - FFmpeg 6.0+ runtime libraries (libavformat, libavcodec, libavutil,
   libswscale, libswresample)
+- GStreamer 1.20+ (core, app and video libraries), plus decoder plugins
+  for H.264/AAC playback
 - libavif, when the build found it
 - fontconfig + a font set, harfbuzz, freetype, libstdc++
 - ca-certificates (TLS trust store)

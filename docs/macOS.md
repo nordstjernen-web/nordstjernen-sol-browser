@@ -128,14 +128,16 @@ meson setup builddir
 meson compile -C builddir
 ```
 
-QuickJS, WAMR, Wuffs, pl_mpeg, minimp3 and the web-text-lib
+QuickJS, pl_mpeg, minimp3 and the web-text-lib
 text-layout fork (`src/web-text-lib/`) are vendored in-tree, so there are no
 submodules. The HTML and URL parsers (`src/html5_rs/`, `src/url_rs/`) are
-in-tree Rust, compiled by meson with plain `rustc` (1.100 or newer); no Cargo. The first `meson setup` does download one pinned subproject
-through its wrap: the wgpu-native release behind WebGPU
+in-tree Rust, compiled by meson with plain `rustc` (1.100 or newer); no Cargo. The first `meson setup` downloads the pinned subprojects
+through their wraps in `subprojects/`: Wuffs, WAMR, PDF.js, SIMDe (when no
+system copy is installed) and the wgpu-native release behind WebGPU
 (`subprojects/wgpu-native-macos-<arch>.wrap`, skipped when wgpu-native is
 found through pkg-config or `-Dwgpu_native_root`; see
-[`webgpu.md`](webgpu.md)).
+[`webgpu.md`](webgpu.md)). Meson verifies each against the SHA-256 in its
+wrap file and keeps the archives in `subprojects/packagecache/`.
 
 This plain `meson setup` links the macOS SDK's system libcurl rather than
 Homebrew's keg-only curl; see

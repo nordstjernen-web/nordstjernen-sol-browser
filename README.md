@@ -158,14 +158,15 @@ system.
   on macOS, over OpenGL 4.1; [docs/webgl.md](docs/webgl.md)); experimental
   `navigator.gpu` over wgpu-native, on by default and switchable in Settings
   ([docs/webgpu.md](docs/webgpu.md)); the core WebAssembly JS API (MVP,
-  reference types, bulk memory and SIMD) on the WAMR interpreter
+  reference types, bulk memory, SIMD, threads with shared memory, and
+  exception handling) on the WAMR interpreter
   ([docs/webassembly.md](docs/webassembly.md)).
 - **MathML** — a minimalist presentation-MathML renderer for fractions,
   roots, scripts, under/over and tables, laid out inline on the text baseline.
 - **Process per tab** — the GTK app is a thin shell that composites the
   shared-memory tiles each tab's sandboxed `nordstjernen-renderer` paints and
   forwards input over an HTTP/JSON control channel, so a page can't take down
-  the UI ([docs/tab-isolation.md](docs/tab-isolation.md)). `--single-process`
+  the UI ([docs/security-model.md](docs/security-model.md)). `--single-process`
   limits the browser to one tab and one renderer process
   ([docs/single-process-mode.md](docs/single-process-mode.md)). A watchdog
   restarts the browser after a crash or hang and reopens its tabs

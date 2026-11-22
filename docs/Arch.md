@@ -10,9 +10,9 @@ plain build-from-source instructions see `Linux.md`.
 ## Build from source
 
 ```sh
-sudo pacman -S --needed base-devel git meson gtk4 libepoxy curl uchardet \
+sudo pacman -S --needed base-devel git rust meson gtk4 libepoxy curl uchardet \
     libpsl sqlite libseccomp libwebp sdl3 glslang ffmpeg gstreamer gst-plugins-base-libs \
-    libavif libjxl enchant
+    libavif libjxl enchant simde
 git clone https://github.com/nordstjernen-web/nordstjernen-sol-browser.git
 cd nordstjernen-sol-browser
 meson setup builddir && meson compile -C builddir
@@ -33,6 +33,9 @@ The package:
 - passes `-Dwebgpu=disabled`. wgpu-native is not in the Arch repositories
   (only in the AUR), and meson would otherwise download a prebuilt release
   during `build()`.
+- lists the pinned PDF.js, Wuffs and WAMR tarballs in `source=` and copies
+  them into `subprojects/packagecache/` in `prepare()`, so meson does not
+  download its wraps; SIMDe comes from the `simde` package.
 - requires AVIF, JPEG XL, GStreamer and the audio helper explicitly, so a
   missing dependency fails the build instead of dropping a feature.
 - drops `libnordstjernen.so` and its header (the embedding API, unversioned
@@ -60,7 +63,9 @@ git commit -m "Initial upload: nordstjernen-browser 1.0.36"
 git push
 ```
 
-For each release, set `pkgver`, reset `pkgrel=1`, run `updpkgsums`, then
+For each release, set `pkgver`, reset `pkgrel=1`, set `_pdfjs`, `_wuffs`
+and `_wamr` (and their URLs) to the versions the release's
+`subprojects/*.wrap` files pin, run `updpkgsums`, then
 `makepkg --printsrcinfo > .SRCINFO`, and commit both files here and in the
 AUR repository.
 

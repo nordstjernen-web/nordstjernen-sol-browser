@@ -62,8 +62,9 @@ How libav is obtained differs by platform, to keep it redistributable:
   `gstreamer-plugin-openh264` package may lag behind its `libopenh264` and is
   not needed.
 - **macOS / Windows** vendor a **minimal, LGPL-only FFmpeg** built from source
-  (`scripts/build-ffmpeg-lgpl.sh`), carrying just the matroska/ogg demuxers,
-  the native VP8/VP9/Theora/Opus/Vorbis decoders and the VP9/AV1 GPU decoders
+  (`scripts/build-ffmpeg-lgpl.sh`), carrying just the matroska, ogg, mov,
+  FLAC and WAV demuxers, the native VP8/VP9/Theora/Opus/Vorbis/FLAC/PCM
+  decoders and the VP9/AV1 GPU decoders
   (D3D11VA on Windows, VideoToolbox on macOS; see below) — no GPL parts, no
   external codec libraries.
 - **Android** does not cross-build FFmpeg, so the inline libav WebM path is
@@ -249,8 +250,9 @@ helper with the same play/pause/seek commands that drive the video clock.
 
 ## Other media
 
-Beyond MPEG-1/MP2, MP3, and the optional WebM (VP9/VP8 + Opus/Vorbis) path,
-Nordstjernen ships no media codecs. Other `<audio>` and other `<video>` codecs
+Beyond MPEG-1/MP2, MP3, the WebM (VP9/VP8 + Opus/Vorbis) path and the
+operating system's H.264/AAC decoders, Nordstjernen plays no media codecs.
+Other `<audio>` and other `<video>` codecs
 render a poster and a play overlay instead of playing. Clicking one resolves
 the source URL inside the sandboxed renderer process (`ns_browser_media_at`),
 and the renderer's HTTP protocol reports it to whoever drives the renderer —

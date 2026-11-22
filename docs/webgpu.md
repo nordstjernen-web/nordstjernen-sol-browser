@@ -129,7 +129,7 @@ are resolved by polling wgpu-native's event loop synchronously, so
 `await navigator.gpu.requestAdapter()` works without integrating with the
 page event loop.
 
-### Since the first cut
+### Further coverage
 
 - Every interface (`GPUDevice`, `GPUBuffer`, `GPURenderPassEncoder`,
   `GPURenderBundleEncoder`, ...) is a global interface object whose
@@ -227,11 +227,13 @@ skipped.
   not auditable by a single maintainer. This is why it is never vendored
   (only its headers are), is fetched as a pinned release, and can be switched
   off at runtime in Settings or dropped at build time with `-Dwebgpu=disabled`.
-- Real (hardware) GPU backends need device access and a large driver attack
-  surface that the sandboxed renderer otherwise denies; running WebGPU
-  against a hardware backend inside the sandbox is an open design question
-  (a GPU-broker process is the likely answer). The software backend used for
-  development does not need device access.
+- Hardware GPU backends run inside the sandboxed renderer: while WebGL or
+  WebGPU is enabled the renderer's Landlock rules leave the GPU device
+  nodes writable, and its seccomp filter has to allow executable memory,
+  because GPU drivers compile shaders to machine code
+  ([security-model.md](security-model.md), "Linux sandbox"). That driver
+  surface is reachable from page content; there is no separate GPU
+  process. Switching both APIs off in Settings removes it.
 
 ## Quick check
 

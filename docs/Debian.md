@@ -59,7 +59,10 @@ debian/
 ├── control            # Section: web (main), build-deps, binary package
 ├── copyright          # DEP-5; GPL-3+ or NSL-1.0, plus bundled-code licenses
 ├── rules              # dh sequencer; feature switches, reproducible date
+├── nordstjernen-browser.postinst   # registers the open-browser-nordstjernen alternative
+├── nordstjernen-browser.prerm      # removes it
 ├── source/format      # 3.0 (quilt)
+├── source/include-binaries   # the vendored wrap tarballs (debian/vendor/)
 ├── upstream/metadata  # DEP-12: repository, bug tracker, security contact
 └── watch              # tracks upstream tags through the GitHub API
 ```
@@ -74,8 +77,10 @@ Key choices:
 * **`Section: web`** — the package targets `main`, distributed under the
   GPL option of the dual license.
 * **`debian/rules`** is a small `dh` file. Hardening is on via
-  `DEB_BUILD_MAINT_OPTIONS = hardening=+all`; the
-  meson build already enables PIE, stack protector, and FORTIFY itself.
+  `DEB_BUILD_MAINT_OPTIONS = hardening=+all,-fortify`; dpkg's fortify
+  flag is left out because the meson build already sets
+  `-D_FORTIFY_SOURCE=3` (with PIE and the stack protector), which dpkg's
+  `=2` would override.
   The `dh_auto_configure` override passes `-Dwebgpu=disabled`
   (wgpu-native is not packaged; web-text-lib, the text-shaping Pango fork,
   is vendored at `src/web-text-lib/` and builds offline in sbuild/pbuilder
@@ -86,13 +91,16 @@ Key choices:
   `debian/changelog` and the build is reproducible.
   An `execute_after_dh_auto_install` hook drops `libnordstjernen.so` and its
   header: that is the embedding API for other applications, nothing in the
-  package links it, and it carries no SONAME version.
+  package links it, and it carries no SONAME version. The same hook
+  removes the installed `open-browser-nordstjernen` link, which
+  `nordstjernen-browser.postinst` registers through `update-alternatives`
+  instead.
 * **`debian/copyright`** is DEP-5. `Files: *` declares
   `License: GPL-3+ or NSL-1.0`, with a `GPL-3+` stanza pointing at
   `/usr/share/common-licenses/GPL-3` and an `NSL-1.0` stanza for the
   alternative. It also spells out the free licenses of the in-tree
-  engines (QuickJS — Expat; WAMR — Apache-2.0 with
-  LLVM exception), the vendored single-file libraries (Wuffs —
+  engine and the fetched ones (QuickJS — Expat; WAMR — Apache-2.0 with
+  LLVM exception), the single-file libraries (Wuffs —
   Apache-2.0; pl_mpeg — Expat; minimp3 — CC0-1.0), the wgpu-native
   headers (BSD-3-Clause; Expat or Apache-2.0) and the CLDR data tables
   in `src/quickjs-bellard/intl/` (Unicode-3.0). `Files-Excluded` drops the
@@ -119,11 +127,15 @@ GStreamer decodes H.264/AAC, `libbrotli-dev` enables WOFF2 web fonts,
 `libjxl-dev`/`libavif-dev` add JPEG XL and AVIF images. `libfontconfig-dev` and
 `libfreetype-dev`, with GTK's cairo, HarfBuzz and FriBiDi development
 packages, are what the in-tree web-text-lib text stack builds against.
+`libsimde-dev` supplies the header-only SIMDe library for WebAssembly
+SIMD, so meson does not fetch `subprojects/simde.wrap`, and `glslang-dev`
+is the shader validator WebGL is built with.
 
 `libseccomp-dev` is marked `[linux-any]` in `debian/control`; all Debian
 release architectures are Linux, so it always applies. `cmake` is **not**
-a build dependency: QuickJS, WAMR, and web-text-lib build in-tree
-via meson `subdir()` and there are no CMake subprojects. `rustc` (1.100 or
+a build dependency: QuickJS and web-text-lib build in-tree via meson
+`subdir()`, Wuffs and WAMR build as meson subprojects from their wrap
+tarballs, and there are no CMake subprojects. `rustc` (1.100 or
 newer) **is** one: meson compiles the in-tree Rust HTML and URL parsers
 (`src/html5_rs/`, `src/url_rs/`) with plain `rustc`, without Cargo or any
 crates.
@@ -229,8 +241,9 @@ Updates ship by adding the new `.deb` to the repo and re-publishing;
 
 ## Path 2 — Debian `main`
 
-With a Debian Developer willing to sponsor it (progress and reviewer
-feedback are tracked in `Debian-inclusion.md`):
+With a Debian Developer willing to sponsor it (where the review stands is
+under [Status of the Debian submission](#status-of-the-debian-submission)
+below):
 
 1. **File an ITP** (Intent To Package) bug against `wnpp`:
 
@@ -247,8 +260,10 @@ feedback are tracked in `Debian-inclusion.md`):
    bundled-engine licenses must all be listed.
 
 3. **Note the embedded code copies.** Debian discourages bundled library
-   copies (Debian Policy §4.13). Nordstjernen *forks* QuickJS
-   and WAMR in-tree and modifies them for tight integration, so they
+   copies (Debian Policy §4.13). Nordstjernen *forks* QuickJS in-tree
+   (`src/quickjs-bellard/`) and builds WAMR from its release tarball with
+   a local patch (`subprojects/packagefiles/wamr-nordstjernen.patch`),
+   both modified for tight integration, so they
    cannot simply be swapped for system packages. Expect the sponsor and
    FTP-masters to ask about this: explain the reasoning, keep the
    `debian/copyright` accounting exhaustive, and expect the forks to be
@@ -261,6 +276,52 @@ feedback are tracked in `Debian-inclusion.md`):
 `debian/watch` lets `uscan` track upstream GitHub tags (through the
 GitHub API, which the tags HTML page no longer serves reliably) so the
 sponsor can spot new releases.
+
+### Status of the Debian submission
+
+The package is reviewed through sponsorship on
+[mentors.debian.net](https://mentors.debian.net/package/nordstjernen/).
+Update this section after each upload and each review.
+
+| Upload | Version | Date | Result |
+|---|---|---|---|
+| #1 | `nordstjernen 1.0.35+ds-1` | 2026-10-20 | Needs work (two reviews, 2026-10-21); deleted from mentors by the uploader |
+| #2 | `nordstjernen-browser 1.0.36+ds-1` | 2026-10-23 | Uploaded; source lintian clean, binary build verified in `debian:unstable` |
+
+The two reviews of upload #1 asked for an ITP closed from a single
+`Initial release` changelog entry, `execute_after_dh_auto_install`
+instead of an override that re-ran `dh_auto_install`, plain `rm` instead
+of `rm -f`, no `Rules-Requires-Root: no`, and debhelper compat 14; one
+suggested keeping the packaging in a separate salsa.debian.org repository.
+Upload #2 carries all of those except the ITP and the salsa move, and
+renamed the source and binary package from `nordstjernen` to
+`nordstjernen-browser`.
+
+Still to do before the next upload:
+
+- File the ITP bug against `wnpp` (step 1 above) and close it from the
+  changelog: `* Initial release (Closes: #NNNNNNN)`, distribution
+  `unstable`.
+- Collapse `debian/changelog` to that one entry for the upload. In the
+  tree it has one `UNRELEASED` entry per upstream release since, which
+  the third-party repository path uses.
+- Resolve the downloaded sources: the PDF.js tarball holds minified
+  script (see "Downloaded sources in an offline build"), so build with
+  `-Dpdfjs=disabled` or package its source.
+- File the RFS (Request For Sponsorship) bug against
+  `sponsorship-requests` once the upload is clean.
+- Decide whether to move the packaging to a separate salsa.debian.org
+  repository (gbp branches `upstream/latest`, `pristine-tar`,
+  `debian/latest`, plus `debian/salsa-ci.yml`) and point `Vcs-*` there.
+  Recommended by the first reviewer, not required.
+- `debian-watch-does-not-check-openpgp-signature` (lintian X): GitHub
+  tarballs are unsigned; either sign release tags or state in
+  `debian/watch` that there is no signature to check.
+- `no-manual-page` (lintian W, seen in a local binary build): ship man
+  pages for `nordstjernen`, `nordstjernen-renderer` and
+  `nordstjernen-audio`.
+- `very-long-line-length-in-source-file` (lintian X, vendored and
+  generated files): ignore or add `debian/source/lintian-overrides`.
 
 ## Updating the package
 
@@ -284,4 +345,4 @@ For both paths the per-release flow is:
   `debian/copyright` to match `THIRD-PARTY-LICENSES.md`.
 * **Sandbox warnings at runtime** (`seccomp: load failed`) — harmless
   outside a confined environment; the per-tab Landlock + seccomp sandbox
-  logs and continues if the host policy blocks it. See `tab-isolation.md`.
+  logs and continues if the host policy blocks it. See `security-model.md`.

@@ -25,7 +25,10 @@ the free binary only. Treat Play as reach and reputation.
 - The same engine, cross-compiled to a per-ABI `libnordstjernen.so`.
   On Android it drops GTK 4 (see `android/README.md`),
   so its only native deps are the GLib/cairo/pango stack plus
-  libcurl/sqlite3/uchardet/libpsl — all plain C, no Rust.
+  libcurl/sqlite3/uchardet/libpsl — all plain C. The engine's own Rust
+  HTML and URL parsers are cross-compiled with it, so the build needs
+  `rustc` 1.100 or newer with the ABI's Android target installed
+  (`rustup target add aarch64-linux-android x86_64-linux-android`).
 - Targets: `compileSdk` **37** (Android 17), `targetSdk` **36**, `minSdk`
   **34** (Android 14); ABIs **arm64-v8a** + **x86_64**.
   AGP 9.5.0 with its built-in Kotlin, Gradle 9.8.2, build-tools 37.0.0,
@@ -125,7 +128,8 @@ linked and pages render.
 
 Run it for **both** shipped ABIs before `bundleRelease` — `jniLibs/` is
 git-ignored, so a fresh clone stages nothing and the bundle would ship the stub
-bridge. It needs `ANDROID_NDK_HOME` and `NORDSTJERNEN_ANDROID_SYSROOT`:
+bridge. It needs `ANDROID_NDK_HOME`, `NORDSTJERNEN_ANDROID_SYSROOT` and a
+`rustc` with the ABI's Android target:
 
 ```sh
 ANDROID_NDK_HOME=~/Android/Sdk/ndk/30.0.16248370 \
@@ -199,7 +203,7 @@ yearly.
   memory pages ([docs](https://developer.android.com/guide/practices/page-sizes)).
   Pure-JVM apps pass automatically; ours ships native `.so`s, so every ELF
   segment must be 16 KB-aligned. Wired in three places: AGP ≥ 8.5.1 zip-aligns
-  packaging (covered by 9.4.0), the CMake bridge build passes
+  packaging (covered by 9.5.0), the CMake bridge build passes
   `-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON` (belt-and-braces now that
   `ndkVersion` is r30 — it was required back on r27, and `build-deps.sh` may
   still be pointed at an older NDK), and `build-deps.sh` puts
@@ -258,7 +262,8 @@ Versioning: `versionCode` is a monotonic int and Play rejects a repeat;
 `android/app/build.gradle` and are **not** derived from `meson.build`, so they
 are bumped by hand. The ladder so far: 1.0.22 = 7, 1.0.23 = 8, 1.0.24 = 9,
 1.0.25 = 10, 1.0.26 = 11, 1.0.27 = 12, 1.0.28 = 13, 1.0.29 = 14,
-1.0.30 = 15, 1.0.31 = 17 (16 was already taken on Play), 1.0.32 = 18, 1.0.33 = 19, 1.0.36 = 20.
+1.0.30 = 15, 1.0.31 = 17 (16 was already taken on Play), 1.0.32 = 18, 1.0.33 = 19, 1.0.36 = 20,
+1.0.38 = 21, then one per release up to 1.0.50 = 33.
 
 For a critical security fix, halt rollout, then re-submit on a fast rollout.
 
