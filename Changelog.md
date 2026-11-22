@@ -3,6 +3,11 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `getComputedStyle()`: `word-spacing` is a length, so `normal` reads as
+  `0px` (it was `normal`, which `parseFloat()` turns into `NaN`). An
+  absolutely positioned child of a flex or grid container reports
+  `min-width` and `min-height` as `0px`, not `auto`: it is not a flex or
+  grid item, so it has no automatic minimum size.
 * Memory: a CSS value takes the room its kind needs. Every value was
   2,704 bytes, the size of the largest kind (a grid track list), so a
   keyword, a length or a colour cost as much as 24 grid tracks. Those now
