@@ -5065,6 +5065,16 @@ parse_one_track(const char *start, gsize len, ns_css_track *out)
     return parse_one_track_depth(start, len, out, 0);
 }
 
+static const char *
+track_token_end(const char *p, const char *end)
+{
+    char term = 0;
+    const char *stop = css_scan_until(p, end, " \t\n\r\f,[(", &term);
+    if (term != '(') return stop;
+    const char *close = css_scan_until(stop + 1, end, ")", &term);
+    return term == ')' ? close + 1 : end;
+}
+
 static int
 split_tracks_top(const char *text, gsize len, const char **starts, gsize *lens, int max)
 {
@@ -5075,8 +5085,7 @@ split_tracks_top(const char *text, gsize len, const char **starts, gsize *lens, 
         while (p < end && is_ws(*p)) p++;
         if (p >= end) break;
         const char *tok_start = p;
-        char term = 0;
-        p = css_scan_until(p, end, " \t\n\r\f,", &term);
+        p = track_token_end(p, end);
         starts[n] = tok_start;
         lens[n]   = (gsize)(p - tok_start);
         n++;
@@ -5626,8 +5635,7 @@ tracks_append_repeat_body(ns_css_tracks *tk, const char *body, gsize body_len,
             while (p < end && *p != ']') p++;
             if (p < end) p++;
         } else {
-            char term = 0;
-            p = css_scan_until(p, end, " \t\n\r\f,[", &term);
+            p = track_token_end(p, end);
         }
         tstarts[nb] = tok_start;
         tlens[nb] = (gsize)(p - tok_start);
