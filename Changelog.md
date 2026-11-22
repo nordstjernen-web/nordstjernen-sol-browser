@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: a grid item with an `auto` left or right margin and no width is
+  as wide as its content and the margin takes the rest of the area, so
+  `margin: 0 auto` centres it. The item was stretched across its area
+  and the `auto` margins counted as 0, which only worked when a
+  `max-width` happened to stop it. The centred headings on zoom.com sit
+  where Chrome puts them.
 * `flex-flow` sets both of its longhands. `flex-flow: wrap` only set
   `flex-wrap` and left an earlier `flex-direction: column` in place, where
   the shorthand must reset the direction to `row`; `flex-flow: column`
