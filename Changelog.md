@@ -3,6 +3,11 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: the rows of a `box-sizing: border-box` grid with a height are
+  sized against its content height. They were sized against the whole
+  border box, so in a 100 px tall grid with 10 px padding two `1fr` rows
+  were 50 px each and ran 20 px past the padding, `50%` rows likewise,
+  and `repeat(auto-fill, 20px)` made one row too many.
 * `aspect-ratio` on a `box-sizing: border-box` box sets the ratio of the
   border box. The height was computed from the content width alone, so a
   400 px wide box with `aspect-ratio: 2 / 1`, 10 px padding and a 5 px
