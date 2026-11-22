@@ -324,6 +324,19 @@ box_is_inline_flow(const ns_box *b)
 }
 
 static double
+box_ratio_height_within_limits(const ns_box *box)
+{
+    double height = box_aspect_ratio_height(box, box->content_width);
+    if (height < 0) return -1;
+    double extras = 0;
+    if (ns_css_keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box"))
+        extras = box->padding.top + box->padding.bottom + box->border.top +
+                 box->border.bottom;
+    height = clamp_height_minmax_px(box->style, height + extras) - extras;
+    return MAX(height, 0);
+}
+
+static double
 containing_block_definite_height(const ns_box *box)
 {
     double known = box_cb_height_known(box);
@@ -354,12 +367,12 @@ containing_block_definite_height(const ns_box *box)
             bottom && !length_is_auto(bottom) &&
             p->content_height > 0)
             return p->content_height;
-        return box_aspect_ratio_height(p, p->content_width);
+        return box_ratio_height_within_limits(p);
     }
     if (value_is_percent(h)) {
         double base = box_is_doc_root(p) ? box_viewport_height(p)
                                          : containing_block_definite_height(p);
-        if (base < 0) return -1;
+        if (base < 0) return box_ratio_height_within_limits(p);
         double ch = h->kind == NS_CSS_V_CALC
             ? h->u.calc.pct / 100.0 * base + h->u.calc.px
             : h->u.length.v * base / 100.0;
