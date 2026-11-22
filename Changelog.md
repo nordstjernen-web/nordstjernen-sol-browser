@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `flex-flow` sets both of its longhands. `flex-flow: wrap` only set
+  `flex-wrap` and left an earlier `flex-direction: column` in place, where
+  the shorthand must reset the direction to `row`; `flex-flow: column`
+  likewise kept an earlier `flex-wrap: wrap`. A value with two directions,
+  two wrap keywords or an unknown word is now invalid as a whole instead
+  of being applied in part. The event cards in the marquee on github.com
+  put the repository name and the date on one line again, and 50 more
+  elements on the CNN front page match Chrome.
 * Grid: a grid that is stretched by its parent (a grid item in a `1fr`
   row, a stretched flex item, a box sized by its insets) stretches its
   own `auto` rows to that height. The stretched height was used to size
