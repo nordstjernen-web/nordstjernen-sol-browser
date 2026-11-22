@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `offsetParent` is `null` for an element that has no box: one with
+  `display: none` or inside such an element, one with `display: contents`,
+  and one that is not in the document. It is also `null` for `<body>`.
+  All of these returned an ancestor, usually `<body>`, so the common
+  visibility test `el.offsetParent !== null` saw hidden elements as
+  visible.
 * Grid: the rows of a grid whose height comes from `aspect-ratio` fill
   that height. The ratio gave the box its height, but the rows were sized
   as if the height were indefinite: `1fr` rows and percentage rows of
