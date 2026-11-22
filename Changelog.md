@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: a grid item with a percentage height no longer takes that
+  percentage of the whole grid while the rows are being sized. Its row
+  has no height yet at that point, so the percentage counts as `auto`,
+  and the item is laid out again against its row afterwards (images
+  too). An item with `height: 100%` in the first of two `1fr` rows used
+  to become as tall as the grid and push the second row out. The product
+  tiles on the Amazon front page show their four pictures again instead
+  of two stretched ones.
 * Grid: the rows of a grid whose height comes from `aspect-ratio` fill
   that height. The ratio gave the box its height, but the rows were sized
   as if the height were indefinite: `1fr` rows and percentage rows of
