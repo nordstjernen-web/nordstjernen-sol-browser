@@ -14816,6 +14816,33 @@ parse_def_value(const prop_def *def, const char *t)
     return canon ? keyword_value(canon) : NULL;
 }
 
+static gboolean
+aspect_ratio_number(const char **pp, const char *end, double *out)
+{
+    const char *p = *pp;
+    if (!css_starts_math_fn(p, end)) {
+        char *num_end = NULL;
+        *out = g_ascii_strtod(p, &num_end);
+        if (!num_end || num_end == p || *out < 0 || !isfinite(*out)) return FALSE;
+        *pp = num_end;
+        return TRUE;
+    }
+    char term = 0;
+    const char *open = css_scan_until(p, end, "(", &term);
+    const char *close = css_scan_until(open + 1, end, ")", &term);
+    if (term != ')') return FALSE;
+    char *text = g_strndup(p, (gsize)(close + 1 - p));
+    ns_css_value *number = parse_calc(text);
+    g_free(text);
+    gboolean ok = number && number->kind == NS_CSS_V_LENGTH &&
+                  number->u.length.unit == NS_CSS_UNIT_NUMBER &&
+                  isfinite(number->u.length.v);
+    if (ok) *out = MAX(number->u.length.v, 0);
+    ns_css_value_free(number);
+    *pp = close + 1;
+    return ok;
+}
+
 static ns_css_value *
 parse_value_for(ns_css_prop prop, const char *text)
 {
@@ -15852,20 +15879,14 @@ parse_value_for(ns_css_prop prop, const char *text)
                 continue;
             }
             if (has_ratio) { bad = TRUE; break; }
-            char *ea = NULL;
-            a = g_ascii_strtod(rp, &ea);
-            if (!ea || ea == rp || a < 0 || !isfinite(a) ||
-                (ea < rend && !is_ws(*ea) && *ea != '/')) { bad = TRUE; break; }
-            rp = ea;
+            if (!aspect_ratio_number(&rp, rend, &a) ||
+                (rp < rend && !is_ws(*rp) && *rp != '/')) { bad = TRUE; break; }
             while (rp < rend && is_ws(*rp)) rp++;
             if (rp < rend && *rp == '/') {
                 rp++;
                 while (rp < rend && is_ws(*rp)) rp++;
-                char *eb = NULL;
-                b = g_ascii_strtod(rp, &eb);
-                if (!eb || eb == rp || b < 0 || !isfinite(b) ||
-                    (eb < rend && !is_ws(*eb))) { bad = TRUE; break; }
-                rp = eb;
+                if (!aspect_ratio_number(&rp, rend, &b) ||
+                    (rp < rend && !is_ws(*rp))) { bad = TRUE; break; }
             }
             has_ratio = TRUE;
         }

@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `aspect-ratio` accepts math functions for its two numbers, as in
+  `aspect-ratio: calc(var(--w) * var(--cols)) / calc(var(--h) * var(--rows))`.
+  Only plain numbers were read, so such a declaration was dropped and the
+  box got no ratio. The repository grid in the footer of github.com is
+  written this way and was 82 px too short. A negative result counts as 0,
+  as in Chrome.
 * docs: second full WPT run (`docs/wpt-full-report-2026-11-22.md`):
   14,149 fully passing files (+2,253), 44.4 % file-weighted (+7.2 points),
   `encoding/` at 92 %; flags a reproducible crash in module-script loading.
