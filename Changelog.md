@@ -3,6 +3,11 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `getBoundingClientRect()`, `getClientRects()` and the `offset*`
+  properties of a `display: contents` element inside an inline element
+  report no box. The element's text still belongs to the line of the
+  inline parent, and its extent was returned as if it were the element's
+  own box. Chrome returns an empty rectangle and an empty list.
 * Grid: the rows of a grid whose height comes from `aspect-ratio` fill
   that height. The ratio gave the box its height, but the rows were sized
   as if the height were indefinite: `1fr` rows and percentage rows of
