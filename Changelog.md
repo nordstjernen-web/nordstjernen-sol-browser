@@ -3,6 +3,20 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: the rows of a grid whose height comes from `aspect-ratio` fill
+  that height. The ratio gave the box its height, but the rows were sized
+  as if the height were indefinite: `1fr` rows and percentage rows of
+  empty items came out 0 px tall, and `auto` rows were not stretched. The
+  height from the ratio, limited by `min-height` and `max-height`, now
+  counts as the definite height the rows are sized against. The tiles of
+  the repository grid in the github.com footer are 77 px tall as in
+  Chrome, where they were 57 px.
+* `aspect-ratio` accepts math functions for its two numbers, as in
+  `aspect-ratio: calc(var(--w) * var(--cols)) / calc(var(--h) * var(--rows))`.
+  Only plain numbers were read, so such a declaration was dropped and the
+  box got no ratio. The repository grid in the footer of github.com is
+  written this way and was 82 px too short. A negative result counts as 0,
+  as in Chrome.
 * Grid: `min()`, `max()` and `clamp()` in a track size resolve their
   percentages against the grid container. They were evaluated once, when
   the style sheet was parsed, against the viewport width, so
