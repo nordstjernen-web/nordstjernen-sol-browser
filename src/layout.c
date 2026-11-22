@@ -16414,8 +16414,8 @@ static void
 grid_relayout_percent_height_item(ns_box *c, double area_h,
                                   const ns_style *child_inherited)
 {
-    if (c->kind != NS_BOX_BLOCK || !c->style || area_h <= 0 ||
-        c->cb_height_override > 0)
+    if ((c->kind != NS_BOX_BLOCK && c->kind != NS_BOX_IMAGE) || !c->style ||
+        area_h <= 0 || c->cb_height_override > 0)
         return;
     if (!value_is_percent(c->style->values[NS_CSS_HEIGHT])) return;
     c->cb_height_override = area_h;
@@ -17013,7 +17013,10 @@ layout_grid(ns_box *box, double cw,
         c->cb_width_set = TRUE;
         grid_preset_stretch_height(c, box, placed_row, rs, area_h, row_basis,
                                    rows_tracks, rows_subgrid);
+        c->block_size_indefinite = area_h <= 0 && c->style &&
+            value_is_percent(c->style->values[NS_CSS_HEIGHT]);
         layout_box(c, item_w + c->margin.left + c->margin.right, child_inherited);
+        c->block_size_indefinite = FALSE;
         g_pending_subgrid_cols = NULL;
         g_pending_subgrid_rows = NULL;
         gboolean auto_h_margin = c->style &&
