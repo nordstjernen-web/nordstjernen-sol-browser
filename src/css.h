@@ -560,11 +560,17 @@ typedef enum ns_css_track_kind {
 
 #define NS_CSS_TRACKS_MAX 24
 
+typedef struct ns_css_calc_arg {
+    double px, pct, em, rem;
+} ns_css_calc_arg;
+
 typedef struct ns_css_track {
     ns_css_track_kind kind;
+    guint16 math;
     double v;
     double em, rem, pct;
     ns_css_track_kind min_kind;
+    guint16 min_math;
     double min_v;
     double min_em, min_rem, min_pct;
     gboolean has_min;
@@ -752,7 +758,7 @@ typedef struct ns_css_value {
             guint8 fn;
             guint8 n_args;
             guint8 arg_none;
-            struct { double px, pct, em, rem; } args[4];
+            ns_css_calc_arg args[4];
         } calc;
         ns_css_shadow_list shadow;
         ns_css_gradient  gradient;
@@ -776,6 +782,7 @@ int                 ns_css_value_layer_count(const ns_css_value *head);
 double   ns_css_length_or(const ns_css_value *v, double fallback);
 gboolean ns_css_calc_is_math_fn(const ns_css_value *v);
 double   ns_css_calc_math_fn_px(const ns_css_value *v, double basis);
+double   ns_css_track_math_px(guint16 math, double basis);
 gboolean ns_css_keyword_is(const ns_css_value *v, const char *kw);
 gboolean ns_css_filter_list_valid(const char *s);
 char    *ns_css_font_family_for_pango(const char *css_family);

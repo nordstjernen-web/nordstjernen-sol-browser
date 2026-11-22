@@ -14695,9 +14695,26 @@ layout_flex_column(ns_box *box, double cw,
 }
 
 static double
+grid_track_fixed_px(const ns_css_track *t, double avail)
+{
+    if (t->math) return ns_css_track_math_px(t->math, avail);
+    if (t->kind == NS_CSS_TRACK_PX) return t->v + t->pct * avail / 100.0;
+    if (t->kind == NS_CSS_TRACK_PERCENT) return t->v * avail / 100.0;
+    return 0;
+}
+
+static gboolean
+grid_track_needs_percent_basis(const ns_css_track *t)
+{
+    return t->math || t->kind == NS_CSS_TRACK_PERCENT ||
+           (t->kind == NS_CSS_TRACK_PX && t->pct != 0);
+}
+
+static double
 track_min_px(const ns_css_track *t, double avail)
 {
     if (!t->has_min) return 0;
+    if (t->min_math) return ns_css_track_math_px(t->min_math, avail);
     switch (t->min_kind) {
     case NS_CSS_TRACK_PX:      return t->min_v + t->min_pct * avail / 100.0;
     case NS_CSS_TRACK_PERCENT: return t->min_v * avail / 100.0;
@@ -14816,9 +14833,7 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
         switch (t->kind) {
         case NS_CSS_TRACK_PX:
         case NS_CSS_TRACK_PERCENT:
-            fixed = t->kind == NS_CSS_TRACK_PX
-                ? t->v + t->pct * pct_basis / 100.0
-                : t->v * pct_basis / 100.0;
+            fixed = grid_track_fixed_px(t, pct_basis);
             if (t->fit_content)
                 fixed = MIN(fixed, content_max ? content_max[i] : 0);
             if (t->has_min && track_is_intrinsic(t->min_kind) &&
@@ -14974,9 +14989,7 @@ grid_track_repeat_px(const ns_css_track *t, double available_main)
 {
     double min_px = track_min_px(t, available_main);
     if (t->kind == NS_CSS_TRACK_PX || t->kind == NS_CSS_TRACK_PERCENT) {
-        double max_px = t->kind == NS_CSS_TRACK_PX
-            ? t->v + t->pct * available_main / 100.0
-            : t->v * available_main / 100.0;
+        double max_px = grid_track_fixed_px(t, available_main);
         return max_px > min_px ? max_px : min_px;
     }
     return min_px;
@@ -15585,11 +15598,8 @@ static double
 grid_track_px(const ns_css_track *t, double basis)
 {
     if (!t) return 0;
-    if (t->kind == NS_CSS_TRACK_PX)
-        return t->v + (basis >= 0 ? t->pct * basis / 100.0 : 0);
-    if (t->kind == NS_CSS_TRACK_PERCENT && basis >= 0)
-        return t->v * basis / 100.0;
-    return 0;
+    if (basis < 0 && grid_track_needs_percent_basis(t)) return 0;
+    return grid_track_fixed_px(t, basis);
 }
 
 static gboolean
@@ -15597,11 +15607,12 @@ grid_track_is_fixed(const ns_css_track *t, double basis)
 {
     if (!t) return FALSE;
     if (t->kind == NS_CSS_TRACK_PX) {
-        if (t->pct != 0 && basis < 0) return FALSE;
+        if ((t->pct != 0 || t->math) && basis < 0) return FALSE;
     } else if (t->kind != NS_CSS_TRACK_PERCENT || basis < 0) {
         return FALSE;
     }
     if (!t->has_min) return TRUE;
+    if (t->min_math && basis < 0) return FALSE;
     return t->min_kind == NS_CSS_TRACK_PX ||
            (t->min_kind == NS_CSS_TRACK_PERCENT && basis >= 0);
 }
@@ -15658,14 +15669,6 @@ grid_track_min_is_intrinsic(const ns_css_track *t)
 {
     return t->has_min ? track_is_intrinsic(t->min_kind)
                       : track_is_intrinsic(t->kind);
-}
-
-static double
-grid_track_fixed_px(const ns_css_track *t, double avail)
-{
-    if (t->kind == NS_CSS_TRACK_PX) return t->v + t->pct * avail / 100.0;
-    if (t->kind == NS_CSS_TRACK_PERCENT) return t->v * avail / 100.0;
-    return 0;
 }
 
 static gboolean
@@ -15961,8 +15964,9 @@ grid_min_track_is_fixed(const ns_css_track *t, double *px)
     ns_css_track_kind k = t->has_min ? t->min_kind : t->kind;
     double v = t->has_min ? t->min_v : t->v;
     double pct = t->has_min ? t->min_pct : t->pct;
+    guint16 math = t->has_min ? t->min_math : t->math;
     if (!t->has_min && t->kind == NS_CSS_TRACK_FR) return FALSE;
-    if (k != NS_CSS_TRACK_PX || pct != 0) return FALSE;
+    if (k != NS_CSS_TRACK_PX || pct != 0 || math) return FALSE;
     *px = v > 0 ? v : 0;
     return TRUE;
 }
@@ -15970,7 +15974,8 @@ grid_min_track_is_fixed(const ns_css_track *t, double *px)
 static double
 grid_max_track_limit(const ns_css_track *t)
 {
-    if (t->kind == NS_CSS_TRACK_PX && t->pct == 0) return t->v > 0 ? t->v : 0;
+    if (t->kind == NS_CSS_TRACK_PX && t->pct == 0 && !t->math)
+        return t->v > 0 ? t->v : 0;
     return -1;
 }
 
@@ -16731,6 +16736,7 @@ layout_grid(ns_box *box, double cw,
             rows_buf.tracks[t].kind = NS_CSS_TRACK_PX;
             rows_buf.tracks[t].v = 0;
             rows_buf.tracks[t].pct = 0;
+            rows_buf.tracks[t].math = 0;
             rows_buf.tracks[t].has_min = FALSE;
         }
     }
@@ -16749,6 +16755,7 @@ layout_grid(ns_box *box, double cw,
             col_collapsed[t] = TRUE;
             cols_buf.tracks[t].kind = NS_CSS_TRACK_PX;
             cols_buf.tracks[t].v = 0;
+            cols_buf.tracks[t].math = 0;
             cols_buf.tracks[t].has_min = FALSE;
         }
     }
@@ -17204,12 +17211,15 @@ layout_grid(ns_box *box, double cw,
     if (grid_rows->len > 0) cursor_y -= row_gap;
 
     double measured = cursor_y - inner_y;
-    if (!rows_subgrid && row_basis <= 0 && rows_tracks && measured > 0) {
+    if (!rows_subgrid && row_basis <= 0 && measured > 0) {
         gboolean changed = FALSE;
-        for (int r = 0; r < n_rows && r < rows_tracks->n; r++) {
-            const ns_css_track *tk = &rows_tracks->tracks[r];
-            if (tk->kind != NS_CSS_TRACK_PERCENT) continue;
-            double resolved = tk->v * measured / 100.0;
+        for (int r = 0; r < n_rows; r++) {
+            const ns_css_track *tk = NULL;
+            if (rows_tracks && r < rows_tracks->n) tk = &rows_tracks->tracks[r];
+            else if (auto_rows_tracks && auto_rows_tracks->n > 0)
+                tk = &auto_rows_tracks->tracks[(r - explicit_rows) % auto_rows_tracks->n];
+            if (!tk || !grid_track_needs_percent_basis(tk)) continue;
+            double resolved = grid_track_fixed_px(tk, measured);
             if (fabs(resolved - row_height[r]) > 0.01) {
                 row_height[r] = resolved;
                 changed = TRUE;
