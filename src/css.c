@@ -1171,10 +1171,10 @@ calc_stepped_eval(guint8 fn, const double *k)
 }
 
 static double
-calc_clamp_eval(const ns_css_value *v, const double *k)
+calc_clamp_eval(guint8 arg_none, const double *k)
 {
-    double lo  = (v->u.calc.arg_none & 1u) ? -HUGE_VAL : k[0];
-    double hi  = (v->u.calc.arg_none & 4u) ?  HUGE_VAL : k[2];
+    double lo  = (arg_none & 1u) ? -HUGE_VAL : k[0];
+    double hi  = (arg_none & 4u) ?  HUGE_VAL : k[2];
     double out = k[1];
     if (out > hi) out = hi;
     if (out < lo) out = lo;
@@ -1182,30 +1182,119 @@ calc_clamp_eval(const ns_css_value *v, const double *k)
 }
 
 static double
-calc_minmax_eval(const ns_css_value *v, const double *k, int n)
+calc_minmax_eval(guint8 fn, const double *k, int n)
 {
     double out = k[0];
     for (int i = 1; i < n; i++) {
-        if (v->u.calc.fn == 1 && k[i] < out) out = k[i];
-        if (v->u.calc.fn == 2 && k[i] > out) out = k[i];
+        if (fn == 1 && k[i] < out) out = k[i];
+        if (fn == 2 && k[i] > out) out = k[i];
     }
     return out;
+}
+
+static double
+calc_math_fn_eval(guint8 fn, guint8 arg_none, const ns_css_calc_arg *args,
+                  int n, double basis)
+{
+    if (n > 4) n = 4;
+    double k[4] = {0, 0, 0, 0};
+    for (int i = 0; i < n; i++)
+        k[i] = args[i].px + args[i].pct * 0.01 * basis + args[i].em * 16.0 +
+               args[i].rem * g_root_font_px;
+    if (fn >= NS_CALC_FN_ROUND) return calc_stepped_eval(fn, k);
+    if (fn == 3) return calc_clamp_eval(arg_none, k);
+    return calc_minmax_eval(fn, k, n);
 }
 
 double
 ns_css_calc_math_fn_px(const ns_css_value *v, double basis)
 {
-    int n = v->u.calc.n_args;
-    if (n > 4) n = 4;
-    double k[4] = {0, 0, 0, 0};
-    for (int i = 0; i < n; i++)
-        k[i] = v->u.calc.args[i].px + v->u.calc.args[i].pct * 0.01 * basis +
-               v->u.calc.args[i].em * 16.0 +
-               v->u.calc.args[i].rem * g_root_font_px;
-    if (v->u.calc.fn >= NS_CALC_FN_ROUND)
-        return calc_stepped_eval(v->u.calc.fn, k);
-    if (v->u.calc.fn == 3) return calc_clamp_eval(v, k);
-    return calc_minmax_eval(v, k, n);
+    return calc_math_fn_eval(v->u.calc.fn, v->u.calc.arg_none, v->u.calc.args,
+                             v->u.calc.n_args, basis);
+}
+
+typedef struct track_math {
+    guint8 fn, n_args, arg_none;
+    ns_css_calc_arg args[4];
+} track_math;
+
+#define NS_CSS_TRACK_MATH_MAX 1024
+
+static GArray *g_track_math;
+
+static guint16
+track_math_intern(const track_math *m)
+{
+    if (!g_track_math)
+        g_track_math = g_array_new(FALSE, FALSE, sizeof(track_math));
+    for (guint i = 0; i < g_track_math->len; i++)
+        if (memcmp(&g_array_index(g_track_math, track_math, i), m,
+                   sizeof *m) == 0)
+            return (guint16)(i + 1);
+    if (g_track_math->len >= NS_CSS_TRACK_MATH_MAX) return 0;
+    g_array_append_val(g_track_math, *m);
+    return (guint16)g_track_math->len;
+}
+
+static const track_math *
+track_math_get(guint16 math)
+{
+    if (!math || !g_track_math || math > g_track_math->len) return NULL;
+    return &g_array_index(g_track_math, track_math, math - 1);
+}
+
+double
+ns_css_track_math_px(guint16 math, double basis)
+{
+    const track_math *m = track_math_get(math);
+    return m ? calc_math_fn_eval(m->fn, m->arg_none, m->args, m->n_args, basis)
+             : 0;
+}
+
+static guint16
+track_math_from_calc(const ns_css_value *v)
+{
+    track_math m;
+    memset(&m, 0, sizeof m);
+    m.fn = v->u.calc.fn;
+    m.n_args = MIN(v->u.calc.n_args, 4);
+    m.arg_none = v->u.calc.arg_none;
+    for (int i = 0; i < m.n_args; i++) {
+        m.args[i].px = v->u.calc.args[i].px;
+        m.args[i].pct = v->u.calc.args[i].pct;
+        m.args[i].em = v->u.calc.args[i].em;
+        m.args[i].rem = v->u.calc.args[i].rem;
+    }
+    return track_math_intern(&m);
+}
+
+static gboolean
+track_math_has_font_units(guint16 math)
+{
+    const track_math *m = track_math_get(math);
+    for (int i = 0; m && i < m->n_args; i++)
+        if (m->args[i].em != 0 || m->args[i].rem != 0) return TRUE;
+    return FALSE;
+}
+
+static void
+track_math_fold_font_units(guint16 *math, double *px, double font_px,
+                           double root_px)
+{
+    const track_math *m = track_math_get(*math);
+    if (!m) return;
+    track_math folded = *m;
+    gboolean has_pct = FALSE;
+    for (int i = 0; i < folded.n_args; i++) {
+        folded.args[i].px += folded.args[i].em * font_px +
+                             folded.args[i].rem * root_px;
+        folded.args[i].em = 0;
+        folded.args[i].rem = 0;
+        if (folded.args[i].pct != 0) has_pct = TRUE;
+    }
+    *px = calc_math_fn_eval(folded.fn, folded.arg_none, folded.args,
+                            folded.n_args, has_pct ? g_viewport_w : 0);
+    *math = has_pct ? track_math_intern(&folded) : 0;
 }
 
 static double
@@ -4970,7 +5059,11 @@ parse_math_track(const char *start, gsize len, ns_css_track *out)
         out->v = cv->u.length.v;
         ok = TRUE;
     } else if (cv->kind == NS_CSS_V_CALC) {
-        if (cv->u.calc.pct != 0 && cv->u.calc.px == 0 &&
+        if (ns_css_calc_is_math_fn(cv)) {
+            out->kind = NS_CSS_TRACK_PX;
+            out->v = cv->u.calc.px;
+            out->math = track_math_from_calc(cv);
+        } else if (cv->u.calc.pct != 0 && cv->u.calc.px == 0 &&
             cv->u.calc.em == 0 && cv->u.calc.rem == 0 && cv->u.calc.lh == 0) {
             out->kind = NS_CSS_TRACK_PERCENT;
             out->v = cv->u.calc.pct;
@@ -5020,6 +5113,7 @@ parse_minmax_token(const char *body, gsize len, ns_css_track *out, int depth)
     out->min_em   = mn.em;
     out->min_rem  = mn.rem;
     out->min_pct  = mn.pct;
+    out->min_math = mn.math;
     out->has_min  = TRUE;
     return TRUE;
 }
@@ -33683,7 +33777,9 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             for (int k = 0; k < v->u.tracks.n && !needs; k++) {
                 const ns_css_track *t = &v->u.tracks.tracks[k];
                 needs = t->em != 0 || t->rem != 0 || t->min_em != 0 ||
-                        t->min_rem != 0;
+                        t->min_rem != 0 ||
+                        track_math_has_font_units(t->math) ||
+                        track_math_has_font_units(t->min_math);
             }
             if (!needs) continue;
             v = ns_css_value_cow(out, i);
@@ -33695,6 +33791,12 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
                 t->min_v += t->min_em * my_font_px + t->min_rem * root_px;
                 t->min_em = 0;
                 t->min_rem = 0;
+                if (track_math_has_font_units(t->math))
+                    track_math_fold_font_units(&t->math, &t->v, my_font_px,
+                                               root_px);
+                if (track_math_has_font_units(t->min_math))
+                    track_math_fold_font_units(&t->min_math, &t->min_v,
+                                               my_font_px, root_px);
             }
             continue;
         }

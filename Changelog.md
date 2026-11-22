@@ -3,6 +3,19 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: `min()`, `max()` and `clamp()` in a track size resolve their
+  percentages against the grid container. They were evaluated once, when
+  the style sheet was parsed, against the viewport width, so
+  `max(340px, 33.33% - 16px)` in a 1,216 px grid came out 411 px wide
+  where Chrome gives 389 px, and `minmax(min(100%, 300px), 1fr)` never
+  shrank below 300 px in a narrow container. The function is kept with
+  the track and evaluated at layout, in column and row templates,
+  `minmax()`, `fit-content()`, `repeat()` and the `grid-auto-*`
+  properties. In a grid with no definite height, a row sized by such a
+  function, by a percentage or by `calc()` with a percentage is first
+  sized as `auto` and then resolved against the height that gives, for
+  implicit rows as well. On the frozen CNN front page 715 more elements
+  land where Chrome puts them.
 * Grid: a track list whose tracks are not separated by white space, as
   minifiers write it (`minmax(0,1fr)340px`, `100px[mid]1fr`,
   `repeat(2,100px)minmax(0,1fr)`), is read as the same tracks as with
