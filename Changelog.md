@@ -3,6 +3,13 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `aspect-ratio` on a `box-sizing: border-box` box sets the ratio of the
+  border box. The height was computed from the content width alone, so a
+  400 px wide box with `aspect-ratio: 2 / 1`, 10 px padding and a 5 px
+  border was 215 px tall where it should be 200 px. `auto <ratio>` keeps
+  working on the content box, which is what Chrome does. Blocks, column
+  flex containers and the percentage heights of their children all use
+  the same height now.
 * Grid: the rows of a grid whose height comes from `aspect-ratio` fill
   that height. The ratio gave the box its height, but the rows were sized
   as if the height were indefinite: `1fr` rows and percentage rows of
