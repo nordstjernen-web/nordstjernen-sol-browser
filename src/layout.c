@@ -15943,14 +15943,18 @@ grid_used_content_height(const ns_box *box, double cw)
     if (box_height_flexed_in_column(box)) return box->definite_height;
     double eh = box_style_definite_height(box, cw);
     if (eh < 0) {
-        double ratio_h = box->style->values[NS_CSS_HEIGHT]
-            ? -1 : box_aspect_ratio_height(box, cw);
+        const ns_css_value *hv = box->style->values[NS_CSS_HEIGHT];
+        double given_h = box_inset_definite_height(box);
+        if (given_h <= 0 && (!hv || length_is_auto(hv)))
+            given_h = box_read_definite_height(box) > 0 ? box->definite_height
+                                                        : -1;
+        if (given_h <= 0 && !hv) given_h = box_aspect_ratio_height(box, cw);
         const ns_css_value *mnv = box->style->values[NS_CSS_MIN_HEIGHT];
         if (!mnv || (mnv->kind != NS_CSS_V_LENGTH && mnv->kind != NS_CSS_V_CALC))
-            return ratio_h;
+            return given_h;
         double min_h = resolve_used_height(box, mnv, cw, -1);
         min_h = min_h > 0 ? specified_height_to_content(box, min_h) : -1;
-        return MAX(min_h, ratio_h);
+        return MAX(min_h, given_h);
     }
     eh = clamp_height_minmax_px(box->style, eh);
     if (keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box"))
@@ -16993,8 +16997,14 @@ layout_grid(ns_box *box, double cw,
         const ns_css_value *iwv = c->style ? c->style->values[NS_CSS_WIDTH] : NULL;
         gboolean i_has_w = iwv && (iwv->kind == NS_CSS_V_LENGTH ||
                                    iwv->kind == NS_CSS_V_CALC);
+        gboolean auto_margin_left = c->style &&
+            keyword_is(c->style->values[NS_CSS_MARGIN_LEFT], "auto");
+        gboolean auto_margin_right = c->style &&
+            keyword_is(c->style->values[NS_CSS_MARGIN_RIGHT], "auto");
+        gboolean fits_for_auto_margins =
+            (auto_margin_left || auto_margin_right) && !i_has_w;
         double item_w = cw_for_item;
-        if (!j_stretch && !i_has_w) {
+        if ((!j_stretch || fits_for_auto_margins) && !i_has_w) {
             item_w = grid_item_fit_border_width(c, child_inherited, item_w);
         }
         ns_subgrid_cols subctx = {0};
@@ -17050,9 +17060,14 @@ layout_grid(ns_box *box, double cw,
         c->block_size_indefinite = FALSE;
         g_pending_subgrid_cols = NULL;
         g_pending_subgrid_rows = NULL;
-        gboolean auto_h_margin = c->style &&
-            (keyword_is(c->style->values[NS_CSS_MARGIN_LEFT], "auto") ||
-             keyword_is(c->style->values[NS_CSS_MARGIN_RIGHT], "auto"));
+        gboolean auto_h_margin = auto_margin_left || auto_margin_right;
+        if (fits_for_auto_margins) {
+            double free_w = cw_for_item - c->content_width - c->padding.left -
+                            c->padding.right - c->border.left - c->border.right;
+            double dx = !auto_margin_left ? 0
+                      : auto_margin_right ? free_w / 2.0 : free_w;
+            if (dx > 0) shift_box_tree(c, dx, 0);
+        }
         if ((!j_stretch || i_has_w) && !auto_h_margin) {
             double used_w = c->content_width +
                             c->padding.left + c->padding.right +

@@ -3,6 +3,27 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: a grid item with an `auto` left or right margin and no width is
+  as wide as its content and the margin takes the rest of the area, so
+  `margin: 0 auto` centres it. The item was stretched across its area
+  and the `auto` margins counted as 0, which only worked when a
+  `max-width` happened to stop it. The centred headings on zoom.com sit
+  where Chrome puts them.
+* `flex-flow` sets both of its longhands. `flex-flow: wrap` only set
+  `flex-wrap` and left an earlier `flex-direction: column` in place, where
+  the shorthand must reset the direction to `row`; `flex-flow: column`
+  likewise kept an earlier `flex-wrap: wrap`. A value with two directions,
+  two wrap keywords or an unknown word is now invalid as a whole instead
+  of being applied in part. The event cards in the marquee on github.com
+  put the repository name and the date on one line again, and 50 more
+  elements on the CNN front page match Chrome.
+* Grid: a grid that is stretched by its parent (a grid item in a `1fr`
+  row, a stretched flex item, a box sized by its insets) stretches its
+  own `auto` rows to that height. The stretched height was used to size
+  `fr` rows but not to hand the free space to `auto` rows, so an item in
+  the nested grid stayed as tall as its content: 0 px for an empty tile.
+  The grey and coloured tiles of the repository grid in the github.com
+  footer are painted again.
 * `calc()` divides a length by a length, as CSS Values 4 allows. The
   result is a number, so `calc(16px * (100vw / 1280px))` and the usual
   fluid type formula
