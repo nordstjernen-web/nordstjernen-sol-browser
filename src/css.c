@@ -20878,26 +20878,34 @@ parse_declaration_block(const char **pp, const char *end,
         if (strcmp(pname, "flex-flow") == 0) {
             char *tokens[4] = {0};
             int n = split_ws(vtext, tokens);
-            for (int i = 0; i < n; i++) {
+            const char *direction = NULL, *wrap = NULL;
+            gboolean valid = n >= 1 && n <= 2;
+            for (int i = 0; i < n && valid; i++) {
                 char *t = tokens[i];
                 if (g_ascii_strcasecmp(t, "row") == 0 ||
                     g_ascii_strcasecmp(t, "row-reverse") == 0 ||
                     g_ascii_strcasecmp(t, "column") == 0 ||
                     g_ascii_strcasecmp(t, "column-reverse") == 0) {
-                    ns_css_value *v = parse_value_for(NS_CSS_FLEX_DIRECTION, t);
-                    if (v) {
-                        ns_css_decl d = { .prop = NS_CSS_FLEX_DIRECTION, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
+                    valid = direction == NULL;
+                    direction = t;
                 } else if (g_ascii_strcasecmp(t, "wrap") == 0 ||
                            g_ascii_strcasecmp(t, "nowrap") == 0 ||
                            g_ascii_strcasecmp(t, "wrap-reverse") == 0) {
-                    ns_css_value *v = parse_value_for(NS_CSS_FLEX_WRAP, t);
-                    if (v) {
-                        ns_css_decl d = { .prop = NS_CSS_FLEX_WRAP, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
+                    valid = wrap == NULL;
+                    wrap = t;
+                } else {
+                    valid = FALSE;
                 }
+            }
+            const struct { ns_css_prop prop; const char *text; } parts[] = {
+                { NS_CSS_FLEX_DIRECTION, direction ? direction : "row" },
+                { NS_CSS_FLEX_WRAP, wrap ? wrap : "nowrap" },
+            };
+            for (gsize k = 0; valid && k < G_N_ELEMENTS(parts); k++) {
+                ns_css_value *v = parse_value_for(parts[k].prop, parts[k].text);
+                if (!v) continue;
+                ns_css_decl d = { .prop = parts[k].prop, .value = v, .important = important };
+                g_array_append_val(decls_out, d);
             }
             for (int i = 0; i < n; i++) g_free(tokens[i]);
             g_free(pname);
