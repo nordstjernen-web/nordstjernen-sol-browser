@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51-dev:
 ======
+* An inline flex or grid container whose first item is a childless box
+  (an icon: an `<svg>`, an `<img>`, a `<canvas>`, an empty element) sits
+  on the baseline that item gives it, the item's bottom edge. The
+  container had no baseline of its own and was placed by its bottom
+  margin edge, which made its line up to 6 px taller. Icon buttons of the
+  form `display: inline-grid; align-items: center` around an `<svg>` no
+  longer stretch the row they are in; 63 more elements on anthropic.com
+  match Chrome.
 * `getComputedStyle()`: `word-spacing` is a length, so `normal` reads as
   `0px` (it was `normal`, which `parseFloat()` turns into `NaN`). An
   absolutely positioned child of a flex or grid container reports
