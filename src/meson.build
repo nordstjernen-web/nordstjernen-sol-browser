@@ -7,7 +7,8 @@ embed_text = files('../scripts/embed-text.py')
 engine_bytecode = not meson.is_cross_build()
 engine_bundles = {}
 foreach name, src : {'polyfills': '../data/js/polyfills.js',
-                     'streaming': '../data/js/streaming.js'}
+                     'streaming': '../data/js/streaming.js',
+                     'typedom': '../data/js/typed-om.js'}
   embed_input = src
   embed_args = ['ns_js_' + name + '_src']
   if engine_bytecode
@@ -28,6 +29,7 @@ foreach name, src : {'polyfills': '../data/js/polyfills.js',
 endforeach
 polyfills_h = engine_bundles['polyfills']
 streaming_h = engine_bundles['streaming']
+typedom_h = engine_bundles['typedom']
 
 sb_key_h = custom_target(
   'ns_sb_key.h',
@@ -329,7 +331,7 @@ endif
 nordstjernen_embed_sources = nordstjernen_engine_sources + files(
   'embed_shim.c',
   'libnordstjernen.c',
-) + [polyfills_h, streaming_h, remote_page_h, webdriver_page_h]
+) + [polyfills_h, streaming_h, typedom_h, remote_page_h, webdriver_page_h]
 
 if is_android
   nordstjernen_embed_sources += files(

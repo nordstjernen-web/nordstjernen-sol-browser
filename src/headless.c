@@ -747,6 +747,8 @@ rdrv_thread(gpointer data)
         g_idle_add(rdrv_quit, c->loop);
         return NULL;
     }
+    if (ns_css_device_pixel_ratio() != 1.0)
+        ns_rproc_http_set_device_pixel_ratio(r, ns_css_device_pixel_ratio());
 
     ns_rproc_http_page pg;
     if (ns_rproc_http_open(r, o->url, vw, vh, o->settle_ms, &pg) != 0) {

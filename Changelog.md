@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.51-dev:
+1.0.51:
 ======
 * `::first-letter` now lays out like Chrome. A large first letter only
   changed the font of the glyph: the line kept the height of the
@@ -19,6 +19,50 @@ Changelog:
   colour of an enclosing link or coloured span and moves with a
   `position: relative` span. 353 more first-letter tests of the CSS 2
   suite pass.
+* Security: clicking a box that is the root of a 3D-transformed subtree
+  with its own background or border no longer overflows the renderer's
+  stack. The 3D hit test picked the box's own quad, hit-tested the box,
+  and that re-entered the 3D pick for the same box without end; the
+  renderer crashed and the tab reloaded. On Google Maps this made the
+  Layers button reload the page instead of switching to satellite view.
+* WebGL: `getContext("webgl")` on a canvas that already has a WebGL 2
+  context returns `null`, as does `getContext("webgl2")` on a WebGL 1
+  canvas. Both returned the existing context of the other version, so
+  script probing for one version got the other.
+* Headless: `--device-scale=N` sets the device pixel ratio the page sees
+  (`devicePixelRatio`, resolution media queries), for reproducing HiDPI
+  layouts without a HiDPI screen.
+* Security: private browsing no longer writes anything to disk. Each
+  private-mode process made a `nordstjernen-private-XXXXXX` directory in
+  the temporary directory holding a copy of the HSTS list (hosts from the
+  normal profile) and removed it only on a clean exit, so killed renderers
+  left one behind every time; on Windows, a process without `TEMP`/`TMP`
+  put them in the root of the drive, where other users can read them.
+  Private mode now reads the HSTS list read-only and keeps what it learns
+  in memory.
+* An absolutely positioned box with `top: auto` inside a flex or grid
+  item sits at the top of its parent, not below the items beside it. Its
+  static position took the bottom of every earlier box in the document,
+  including sibling items laid out next to it, so on Bing the "matprat.no"
+  line of a sponsored result fell onto the result's title.
+* CSS validation is stricter where it was too lenient: a `calc()` that
+  resolves to a plain number is no longer a valid length (`width: calc(0)`),
+  border, outline and column-rule widths, `outline-offset` and
+  `column-width` reject percentages, and `background-image`,
+  `list-style-image` and `mask-image` reject values that are not images
+  (`0`, `3.14%`, `calc(2 + 3)`). `CSS.supports()` agrees. CSS Typed OM
+  builds on this: `styleMap.set()` throws for values of the wrong type,
+  named colors reify as `CSSStyleValue`, and dashed identifiers as
+  `CSSKeywordValue`; it now passes 11,400 of the 12,336
+  `css/css-typed-om` subtests.
+* CSS Typed OM: `CSSStyleValue` and its numeric, math, keyword, unparsed,
+  image, transform and color subclasses, the `CSS.px()`-style unit
+  factories, `element.attributeStyleMap`, `CSSStyleRule.styleMap` and
+  `element.computedStyleMap()`. The maps read and write through the
+  existing CSSOM; `computedStyleMap()` reports computed rather than
+  resolved values, without forcing a layout. Scripts and frameworks that
+  feature-detect Typed OM now take their native path. It passes 11,162
+  of the 12,336 web-platform-tests subtests in `css/css-typed-om`.
 * Huge sizes saturate at 33,554,400 px, the largest size Chrome lays
   out, instead of breaking layout. An extreme `aspect-ratio`
   (`1e-160 / 1e160`), a length such as `height: 1e30px`, a grid track of

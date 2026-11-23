@@ -10742,8 +10742,24 @@ quad_pick_cand_cmp(gconstpointer pa, gconstpointer pb)
 
 static GArray *collect_root_quads(const ns_box *b);
 
+static GPtrArray *g_paint_3d_picking;
+
+static const ns_box *paint_3d_pick_quads(const ns_box *root3d, double x, double y);
+
 const ns_box *
 ns_paint_3d_pick(const ns_box *root3d, double x, double y)
+{
+    if (!g_paint_3d_picking) g_paint_3d_picking = g_ptr_array_new();
+    for (guint i = 0; i < g_paint_3d_picking->len; i++)
+        if (g_ptr_array_index(g_paint_3d_picking, i) == root3d) return NULL;
+    g_ptr_array_add(g_paint_3d_picking, (gpointer)root3d);
+    const ns_box *result = paint_3d_pick_quads(root3d, x, y);
+    g_ptr_array_remove_index(g_paint_3d_picking, g_paint_3d_picking->len - 1);
+    return result;
+}
+
+static const ns_box *
+paint_3d_pick_quads(const ns_box *root3d, double x, double y)
 {
     GArray *quads = g_paint_3d_reg
         ? g_hash_table_lookup(g_paint_3d_reg, (gpointer)root3d) : NULL;

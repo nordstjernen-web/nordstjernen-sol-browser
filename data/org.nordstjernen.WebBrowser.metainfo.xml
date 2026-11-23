@@ -60,6 +60,18 @@
   </branding>
 
   <releases>
+    <release version="1.0.51" date="2026-11-23">
+      <description>
+        <p>CSS, layout, WebAssembly and security release.</p>
+        <ul>
+          <li>CSS Typed OM: style values as typed objects through attributeStyleMap, computedStyleMap() and CSS.px(), with stricter CSS value validation.</li>
+          <li>Grid, flex and aspect-ratio layout match other browsers in many more cases, and huge sizes no longer break layout.</li>
+          <li>WebAssembly threads, shared memory and exception handling, on the WAMR 2.4.6 security release.</li>
+          <li>Canvas layers, in-page drag and drop, CSS module scripts, service worker interfaces and PDF export.</li>
+          <li>Security fixes, among them WebGL memory, loopback address checks, cross-origin frames and Web Audio bounds.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.50" date="2026-11-20">
       <description>
         <p>HTML parser, CSS, security and interface release.</p>

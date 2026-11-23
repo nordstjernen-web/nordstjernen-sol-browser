@@ -11,7 +11,7 @@
 
 
 Name:           nordstjernen
-Version:        1.0.50
+Version:        1.0.51
 Release:        0
 Summary:        Small, hand-written GTK web browser
 License:        (LicenseRef-NSL-1.0 OR GPL-3.0-or-later) AND Apache-2.0
