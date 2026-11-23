@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Flex: the items of a row flex container whose height comes from
+  `aspect-ratio` stretch to that height. The container got its height
+  from the ratio after layout, but the line was sized by its content, so
+  empty items were 0 px tall and `align-items: center` centred in a line
+  of content height. `min-height` and `max-height` limit the ratio height
+  as they do for the box.
 * A border with a style but no declared width is `medium`, 3 px.
   `border-style: solid` alone drew nothing, because a missing width
   counted as 0, and `getComputedStyle()` reported `0px`. A side whose
