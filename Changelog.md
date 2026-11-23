@@ -1,7 +1,7 @@
 Changelog:
 ==Significant changes in each release:
 
-1.0.51-dev:
+1.0.51:
 ======
 * CSS validation is stricter where it was too lenient: a `calc()` that
   resolves to a plain number is no longer a valid length (`width: calc(0)`),
