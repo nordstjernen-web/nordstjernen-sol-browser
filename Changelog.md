@@ -3,6 +3,15 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Border shorthands accept a math function as the width: `border-left:
+  max(1px, .0625rem) solid red`, `border: calc(1px + 1px) solid`, and the
+  same in `border-inline` and `border-block`. The width token was only
+  recognised when it was a plain length, so a `max()`, `min()`, `clamp()`
+  or `calc()` width was dropped: the side shorthands then drew the
+  default 3 px border, and `border-inline` / `border-block` drew none.
+  `border-inline` and `border-block` also take `thin`, `medium` and
+  `thick` now. github.com writes its 1 px grid lines this way; 178 more
+  elements there match Chrome.
 * Security: resolving a link, `src`, `action` or `data` URL with
   non-ASCII query text in a legacy-encoded page read the document's
   encoding through page-visible properties (`document.characterSet`,
