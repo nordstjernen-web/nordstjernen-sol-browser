@@ -1214,6 +1214,13 @@ ns_css_value_layer(const ns_css_value *head, int index)
 }
 
 double
+ns_css_length_saturate(double px)
+{
+    if (isnan(px)) return 0;
+    return CLAMP(px, -NS_CSS_LENGTH_LIMIT, NS_CSS_LENGTH_LIMIT);
+}
+
+double
 ns_css_length_or(const ns_css_value *v, double fallback)
 {
     if (!v) return fallback;
@@ -33486,13 +33493,71 @@ ns_css_value_cow(ns_style *out, int prop)
     return copy;
 }
 
-#define NS_CSS_CALC_LIMIT 33554400.0
-
 static double
 calc_clamp_finite(double v)
 {
     if (isnan(v)) return 0;
-    if (isinf(v)) return v < 0 ? -NS_CSS_CALC_LIMIT : NS_CSS_CALC_LIMIT;
+    if (isinf(v)) return v < 0 ? -NS_CSS_LENGTH_LIMIT : NS_CSS_LENGTH_LIMIT;
+    return v;
+}
+
+static gboolean
+beyond_layout_limit(double v)
+{
+    return !(fabs(v) <= NS_CSS_LENGTH_LIMIT);
+}
+
+static gboolean
+length_beyond_layout_limit(const ns_css_value *v)
+{
+    if (v->kind == NS_CSS_V_LENGTH)
+        return (v->u.length.unit == NS_CSS_UNIT_PX ||
+                v->u.length.unit == NS_CSS_UNIT_PERCENT) &&
+               beyond_layout_limit(v->u.length.v);
+    if (v->kind == NS_CSS_V_TRACKS) {
+        for (int k = 0; k < v->u.tracks->n; k++) {
+            const ns_css_track *t = &v->u.tracks->tracks[k];
+            if (beyond_layout_limit(t->v) || beyond_layout_limit(t->pct) ||
+                beyond_layout_limit(t->min_v) ||
+                beyond_layout_limit(t->min_pct))
+                return TRUE;
+        }
+        return FALSE;
+    }
+    if (v->kind != NS_CSS_V_CALC) return FALSE;
+    if (beyond_layout_limit(v->u.calc.px) || beyond_layout_limit(v->u.calc.pct))
+        return TRUE;
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++)
+        if (beyond_layout_limit(v->u.calc.args[i].px) ||
+            beyond_layout_limit(v->u.calc.args[i].pct))
+            return TRUE;
+    return FALSE;
+}
+
+static ns_css_value *
+style_saturate_length(ns_style *out, int prop)
+{
+    ns_css_value *v = ns_css_value_cow(out, prop);
+    if (v->kind == NS_CSS_V_LENGTH) {
+        v->u.length.v = ns_css_length_saturate(v->u.length.v);
+        return v;
+    }
+    if (v->kind == NS_CSS_V_TRACKS) {
+        for (int k = 0; k < v->u.tracks->n; k++) {
+            ns_css_track *t = &v->u.tracks->tracks[k];
+            t->v = ns_css_length_saturate(t->v);
+            t->pct = ns_css_length_saturate(t->pct);
+            t->min_v = ns_css_length_saturate(t->min_v);
+            t->min_pct = ns_css_length_saturate(t->min_pct);
+        }
+        return v;
+    }
+    v->u.calc.px = ns_css_length_saturate(v->u.calc.px);
+    v->u.calc.pct = ns_css_length_saturate(v->u.calc.pct);
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++) {
+        v->u.calc.args[i].px = ns_css_length_saturate(v->u.calc.args[i].px);
+        v->u.calc.args[i].pct = ns_css_length_saturate(v->u.calc.args[i].pct);
+    }
     return v;
 }
 
@@ -33844,6 +33909,7 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             v = ns_css_value_cow(out, i);
             calc_value_clamp_finite(v);
         }
+        if (length_beyond_layout_limit(v)) v = style_saturate_length(out, i);
         if (v->kind == NS_CSS_V_SHADOW) {
             gboolean needs = FALSE;
             for (int k = 0; k < v->u.shadow->n && !needs; k++)
@@ -33891,6 +33957,7 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
                     track_math_fold_font_units(&t->min_math, &t->min_v,
                                                my_font_px, root_px);
             }
+            if (length_beyond_layout_limit(v)) style_saturate_length(out, i);
             continue;
         }
         if (v->kind == NS_CSS_V_TRANSFORM) {
@@ -33934,6 +34001,7 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             v->u.calc.vmin = 0;
             v->u.calc.vmax = 0;
             if (line_pct) calc_fold_percent(v, my_font_px);
+            if (length_beyond_layout_limit(v)) style_saturate_length(out, i);
             continue;
         }
         if (v->kind == NS_CSS_V_SIZE) {
@@ -33987,6 +34055,7 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         default:
             break;
         }
+        if (length_beyond_layout_limit(v)) style_saturate_length(out, i);
     }
     resolve_layer_units(out, &lc);
 }

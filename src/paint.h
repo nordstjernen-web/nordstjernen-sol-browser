@@ -8,12 +8,22 @@
 
 #include <cairo.h>
 #include <glib.h>
+#include <math.h>
 #include "ns_pango.h"
 
 #include "js.h"
 #include "layout.h"
 
 G_BEGIN_DECLS
+
+static inline int
+ns_paint_int_saturate(double v)
+{
+    if (isnan(v)) return 0;
+    if (v >= (double)G_MAXINT) return G_MAXINT;
+    if (v <= (double)G_MININT) return G_MININT;
+    return (int)v;
+}
 
 struct ns_selection;
 struct ns_anim;

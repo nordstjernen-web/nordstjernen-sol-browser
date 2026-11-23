@@ -161,7 +161,7 @@ ns_paint_pango_font_size(double size_px)
 {
     if (!(size_px > 0)) return 0;
     if (size_px > 65535) size_px = 65535;
-    return (int)(size_px * NS_PANGO_SCALE);
+    return ns_paint_int_saturate(size_px * NS_PANGO_SCALE);
 }
 
 static NsPangoStretch
@@ -220,7 +220,7 @@ ns_paint_inline_font_attr(const ns_inline_attr *r)
             ns_paint_pango_font_size(r->font_size_px));
     case NS_INLINE_LETTER_SPACING:
         return ns_pango_attr_letter_spacing_new(
-            (int)lround(r->letter_spacing_px * NS_PANGO_SCALE));
+            ns_paint_int_saturate(round(r->letter_spacing_px * NS_PANGO_SCALE)));
     case NS_INLINE_FONT_FAMILY: {
         if (!r->family) return NULL;
         char *family = ns_css_font_family_for_pango(r->family);
@@ -229,11 +229,11 @@ ns_paint_inline_font_attr(const ns_inline_attr *r)
         return a;
     }
     case NS_INLINE_RISE:
-        return ns_pango_attr_rise_new((int)lround(r->rise_px * NS_PANGO_SCALE));
+        return ns_pango_attr_rise_new(ns_paint_int_saturate(round(r->rise_px * NS_PANGO_SCALE)));
     case NS_INLINE_SMALL_CAPS:
         return ns_pango_attr_variant_new(NS_PANGO_VARIANT_SMALL_CAPS);
     case NS_INLINE_SPACER: {
-        NsPangoRectangle rect = { 0, 0, (int)(r->box_w * NS_PANGO_SCALE), 0 };
+        NsPangoRectangle rect = { 0, 0, ns_paint_int_saturate(r->box_w * NS_PANGO_SCALE), 0 };
         return ns_pango_attr_shape_new(&rect, &rect);
     }
     default:
@@ -4394,7 +4394,7 @@ apply_nowrap_align_width(NsPangoLayout *layout, const ns_box *b)
     int pw, ph;
     ns_pango_layout_get_pixel_size(layout, &pw, &ph);
     if (pw <= b->content_width)
-        ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
+        ns_pango_layout_set_width(layout, ns_paint_int_saturate(b->content_width * NS_PANGO_SCALE));
 }
 
 static void paint_walk(cairo_t *cr, const ns_box *b, const char *highlight);
@@ -5021,14 +5021,14 @@ inline_layout_begin(const ns_box *b, const ns_style *s,
     if (ns_style_is_nowrap(s) && !ns_paint_text_ellipsizes(s))
         ns_pango_layout_set_width(layout, -1);
     else
-        ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
+        ns_pango_layout_set_width(layout, ns_paint_int_saturate(b->content_width * NS_PANGO_SCALE));
     ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for_box(b, s));
     if (!(b->inline_atomics && b->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, s);
     {
         double ti = ns_inline_text_indent_px(b, s, b->content_width);
         if (ti > 0)
-            ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
+            ns_pango_layout_set_indent(layout, ns_paint_int_saturate(ti * NS_PANGO_SCALE));
     }
     if (ns_paint_text_ellipsizes(s))
         ns_pango_layout_set_ellipsize(layout, ns_paint_ellipsize_mode(s));
@@ -6818,8 +6818,8 @@ inline_point_to_index(const ns_box *b, double rel_x, double rel_y,
     ns_inline_unshift_point(b, layout, &layout_x, &layout_y);
     if (layout_y < 0) layout_y = 0;
     *inside = ns_pango_layout_xy_to_index(layout,
-                                          (int)(layout_x * NS_PANGO_SCALE),
-                                          (int)(layout_y * NS_PANGO_SCALE),
+                                          ns_paint_int_saturate(layout_x * NS_PANGO_SCALE),
+                                          ns_paint_int_saturate(layout_y * NS_PANGO_SCALE),
                                           index, trailing);
 
     g_object_unref(layout);
@@ -8433,8 +8433,8 @@ paint_image_alt_text(cairo_t *cr, const ns_box *b, const char *alt,
     g_string_free(text, TRUE);
     if (wrap)
         ns_pango_layout_set_width(layout,
-            (int)(b->content_width * NS_PANGO_SCALE));
-    ns_pango_layout_set_indent(layout, (int)(indent * NS_PANGO_SCALE));
+            ns_paint_int_saturate(b->content_width * NS_PANGO_SCALE));
+    ns_pango_layout_set_indent(layout, ns_paint_int_saturate(indent * NS_PANGO_SCALE));
     rgba fg = rgba_anim(b, NS_CSS_ANIM_TARGET_COLOR,
                         b->style ? b->style->values[NS_CSS_COLOR] : NULL,
                         0, 0, 0, 1);

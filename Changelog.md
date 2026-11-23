@@ -3,6 +3,20 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Huge sizes saturate at 33,554,400 px, the largest size Chrome lays
+  out, instead of breaking layout. An extreme `aspect-ratio`
+  (`1e-160 / 1e160`), a length such as `height: 1e30px`, a grid track of
+  `1e308px`, a percentage like `1e30%` or a `flex-grow` of `1e308` gave
+  boxes infinite or NaN sizes and positions: the content after them was
+  laid out at 0 px, and `offsetHeight`, `offsetTop`, `clientWidth`,
+  `scrollHeight` and the other integer geometry properties read
+  -2147483648 through an out-of-range float-to-int conversion, which is
+  undefined behaviour in C. Lengths, percentages and grid tracks now
+  saturate when styles are computed, as `calc()` results already did;
+  aspect ratios, the sizes they give and flex factors saturate in
+  layout; and the integer geometry properties clamp to the same limit.
+  Text layout also no longer overflows Pango's integer units for boxes
+  wider than about 2 million px.
 * Security: a class change on an element with a long class list took
   time quadratic in its length. Style invalidation looked up every added
   or removed class name by scanning the whole other list, before asking
