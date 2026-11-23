@@ -34376,6 +34376,25 @@ cascade_mirror_flow_relative(GArray *matches, const ns_style *parent_style)
 }
 
 static void
+border_widths_default_to_medium(ns_style *out)
+{
+    static const struct { ns_css_prop width, style; } sides[] = {
+        { NS_CSS_BORDER_TOP_WIDTH, NS_CSS_BORDER_TOP_STYLE },
+        { NS_CSS_BORDER_RIGHT_WIDTH, NS_CSS_BORDER_RIGHT_STYLE },
+        { NS_CSS_BORDER_BOTTOM_WIDTH, NS_CSS_BORDER_BOTTOM_STYLE },
+        { NS_CSS_BORDER_LEFT_WIDTH, NS_CSS_BORDER_LEFT_STYLE },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(sides); i++) {
+        const ns_css_value *style = out->values[sides[i].style];
+        if (out->values[sides[i].width] || !style ||
+            ns_css_keyword_is(style, "none") ||
+            ns_css_keyword_is(style, "hidden"))
+            continue;
+        out->values[sides[i].width] = calc_px_value(3);
+    }
+}
+
+static void
 cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             const ns_style *layout_parent, gboolean is_root, double root_px)
 {
@@ -34425,6 +34444,7 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             }
         }
     }
+    border_widths_default_to_medium(out);
     out->scheme_dark = style_uses_dark_scheme(out);
     if (out->scheme_dark) style_resolve_dark_colors(out);
     if (ns_css_keyword_is(out->values[NS_CSS_COLOR], "currentcolor"))
