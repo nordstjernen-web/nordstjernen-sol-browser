@@ -6493,7 +6493,8 @@ ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
 
     ns_webgl *existing = g_hash_table_lookup(g_webgl_by_node, canvas);
     if (existing)
-        return JS_DupValue(ctx, existing->js_obj);
+        return existing->version == version ? JS_DupValue(ctx, existing->js_obj)
+                                            : JS_NULL;
 
     if (g_hash_table_size(g_webgl_by_node) >= NS_WEBGL_MAX_CONTEXTS)
         return JS_NULL;
