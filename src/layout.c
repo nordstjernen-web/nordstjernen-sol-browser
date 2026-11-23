@@ -8434,6 +8434,7 @@ inline_atomic_baseline(const ns_box *ab, double *out)
     if (block_flow) return box_last_baseline(ab, out);
     if (box_first_baseline(ab, out)) return TRUE;
     return (box_is_flex_container(ab) || box_is_grid_container(ab)) &&
+           !style_has_layout_containment(ab->style) &&
            first_childless_item_bottom_edge(ab, out);
 }
 
