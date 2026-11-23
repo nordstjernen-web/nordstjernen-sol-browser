@@ -1,6 +1,9 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.52-dev:
+======
+
 1.0.51:
 ======
 * Security: clicking a box that is the root of a 3D-transformed subtree
