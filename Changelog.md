@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51-dev:
 ======
+* CSS Typed OM: `CSSStyleValue` and its numeric, math, keyword, unparsed,
+  image, transform and color subclasses, the `CSS.px()`-style unit
+  factories, `element.attributeStyleMap`, `CSSStyleRule.styleMap` and
+  `element.computedStyleMap()`. The maps read and write through the
+  existing CSSOM; `computedStyleMap()` reports computed rather than
+  resolved values, without forcing a layout. Scripts and frameworks that
+  feature-detect Typed OM now take their native path. It passes 11,162
+  of the 12,336 web-platform-tests subtests in `css/css-typed-om`.
 * Huge sizes saturate at 33,554,400 px, the largest size Chrome lays
   out, instead of breaking layout. An extreme `aspect-ratio`
   (`1e-160 / 1e160`), a length such as `height: 1e30px`, a grid track of

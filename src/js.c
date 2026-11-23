@@ -24,6 +24,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 }
 #include "polyfills.h"
 #include "streaming.h"
+#include "typedom.h"
 #include "remote_page.h"
 #include "webdriver_page.h"
 #include "version.h"
@@ -561,6 +562,7 @@ typedef struct {
 
 static ns_engine_bundle ns_polyfills_bundle = NS_ENGINE_BUNDLE(polyfills);
 static ns_engine_bundle ns_streaming_bundle = NS_ENGINE_BUNDLE(streaming);
+static ns_engine_bundle ns_typedom_bundle = NS_ENGINE_BUNDLE(typedom);
 
 static void ns_js_eval_engine_bundle(ns_js *js, ns_engine_bundle *bundle,
                                      const char *origin);
@@ -20125,6 +20127,7 @@ ns_computed_keyword_shorthand(JSContext *ctx, const ns_node *n, const char *name
 }
 
 static gboolean g_computed_inline_side_mirrored;
+static gboolean g_computed_unresolved;
 
 static char *
 ns_computed_rtl_inline_side(JSContext *ctx, const ns_node *n, const char *name)
@@ -20363,7 +20366,8 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     }
 
     ns_js *js = js_from_ctx(ctx);
-    gboolean needs_layout = ns_computed_needs_layout(name);
+    gboolean needs_layout = !g_computed_unresolved &&
+                            ns_computed_needs_layout(name);
     if (js) {
         if (needs_layout) ns_js_flush_layout(js);
         else ns_js_flush_style(js);
@@ -21429,6 +21433,25 @@ ns_cssom_element_is_rendered(JSContext *ctx, JSValueConst v)
             return FALSE;
     }
     return p == js->current_doc;
+}
+
+static JSValue
+ns_window_computed_value(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 2 || !ns_cssom_element_is_rendered(ctx, argv[0]))
+        return JS_NewString(ctx, "");
+    const ns_node *n = ns_unwrap_element(argv[0]);
+    const char *name = n ? JS_ToCString(ctx, argv[1]) : NULL;
+    if (!name) return JS_NewString(ctx, "");
+    g_computed_unresolved = TRUE;
+    char *val = ns_computed_lookup(ctx, n, name);
+    g_computed_unresolved = FALSE;
+    JS_FreeCString(ctx, name);
+    JSValue r = JS_NewString(ctx, val ? val : "");
+    g_free(val);
+    return r;
 }
 
 static JSValue
@@ -32175,6 +32198,7 @@ ns_worker_js_new(ns_worker_host *host)
     ns_idb_install(ctx, global);
     ns_zlib_install(ctx, global);
     ns_js_eval_engine_bundle(js, &ns_polyfills_bundle, "<polyfills>");
+    ns_js_eval_engine_bundle(js, &ns_typedom_bundle, "<typed-om>");
     {
         JSValue g = JS_GetGlobalObject(ctx);
         ns_install_event_attribute_getters(ctx, g);
@@ -65850,6 +65874,7 @@ ns_js_setup_window_globals(ns_js *js, JSContext *ctx)
     ns_bind_fn(ctx, global, "__ndAdoptCss",          ns_window_nd_adopt_css,           2);
     ns_bind_fn(ctx, global, "__ndAdoptStyleElement", ns_window_nd_adopt_style_element, 1);
     ns_bind_fn(ctx, global, "getComputedStyle",      ns_window_getComputedStyle,       1);
+    ns_bind_fn(ctx, global, "__ndComputedValue",     ns_window_computed_value,         2);
     JS_DefinePropertyValueStr(ctx, global, "__ns_css_supported",
         JS_NewCFunction(ctx, ns_css_supported_property, "__ns_css_supported", 1),
         0);
@@ -70467,6 +70492,7 @@ ns_js_setup_realm_scripts(ns_js *js, JSContext *ctx)
 {
     ns_js_eval_engine_bundle(js, &ns_polyfills_bundle, "<polyfills>");
     ns_js_eval_engine_bundle(js, &ns_streaming_bundle, "<streaming>");
+    ns_js_eval_engine_bundle(js, &ns_typedom_bundle, "<typed-om>");
     ns_drain_microtasks(js);
     {
         JSValue g = JS_GetGlobalObject(ctx);
