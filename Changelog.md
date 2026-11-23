@@ -3,6 +3,16 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Performance: a class change no longer restyles the whole subtree just
+  because the page has an attribute selector on `class` somewhere
+  (`[class*="col-"]`, `[class^="icon"]`). One such selector switched off
+  the check that skips class names no rule uses, and queued the
+  invalidation set for the `class` attribute on every change. Both now
+  test the attribute selectors against the old and the new value, and
+  only count when one of them gives a different answer. Only the tokens
+  that were added or removed are looked up, not every class of the
+  element. Toggling a class that no rule uses on `<html>` of the frozen
+  CNN front page takes 1.2 ms where it took 132 ms (Chrome: 2.7 ms).
 * Grid: a `1fr` row in a grid with a definite height no longer grows to
   the content of an item that has `min-height: 0`, an explicit
   `min-height`, or a scrollable overflow. Such an item has no automatic

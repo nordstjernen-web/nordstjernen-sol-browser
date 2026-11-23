@@ -35573,6 +35573,7 @@ incr_inv_note_compound_reach(const ns_css_simple *c,
     }
 }
 static gboolean       g_class_keys_loose;
+static GPtrArray     *g_class_value_preds;
 static gboolean       g_id_keys_loose;
 static GPtrArray     *g_has_anchors;
 static GPtrArray     *g_has_subject_anchors;
@@ -36683,6 +36684,26 @@ incr_collect_name_keys_group(const GPtrArray *group, int depth)
         incr_collect_name_keys_selector(g_ptr_array_index(group, i), depth);
 }
 
+#define NS_INCR_CLASS_VALUE_PREDS_MAX 512
+
+static void
+incr_note_class_value_pred(const ns_css_attr_pred *a)
+{
+    if (g_class_keys_loose) return;
+    if (!g_class_value_preds)
+        g_class_value_preds = g_ptr_array_new_with_free_func(incr_attr_dep_free);
+    if (g_class_value_preds->len >= NS_INCR_CLASS_VALUE_PREDS_MAX) {
+        g_class_keys_loose = TRUE;
+        return;
+    }
+    ns_css_attr_pred *copy = g_new0(ns_css_attr_pred, 1);
+    *copy = *a;
+    copy->name = g_strdup(a->name);
+    copy->name_cased = g_strdup(a->name_cased);
+    copy->value = g_strdup(a->value);
+    g_ptr_array_add(g_class_value_preds, copy);
+}
+
 static void
 incr_collect_name_keys_simple(const ns_css_simple *c, int depth,
                               gboolean desc)
@@ -36711,7 +36732,7 @@ incr_collect_name_keys_simple(const ns_css_simple *c, int depth,
         if (desc)
             g_hash_table_add(g_desc_attr_keys, g_ascii_strdown(a->name, -1));
         if (g_ascii_strcasecmp(a->name, "class") == 0)
-            g_class_keys_loose = TRUE;
+            incr_note_class_value_pred(a);
         else if (g_ascii_strcasecmp(a->name, "id") == 0)
             g_id_keys_loose = TRUE;
     }
@@ -36848,13 +36869,28 @@ incr_name_in_keys(const char *name, gsize len, GHashTable *keys)
 }
 
 static gboolean
-incr_class_tokens_in_keys(const char *value)
+incr_class_list_has_token(const char *list, const char *tok, gsize len)
 {
-    for (const char *p = value; p && *p; ) {
+    for (const char *p = list; p && *p; ) {
+        while (*p && g_ascii_isspace((guchar)*p)) p++;
+        const char *start = p;
+        while (*p && !g_ascii_isspace((guchar)*p)) p++;
+        if ((gsize)(p - start) == len && strncmp(start, tok, len) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+incr_class_tokens_only_in_first_hit_keys(const char *first, const char *second)
+{
+    for (const char *p = first; p && *p; ) {
         while (*p && g_ascii_isspace((guchar)*p)) p++;
         const char *tok = p;
         while (*p && !g_ascii_isspace((guchar)*p)) p++;
-        if (p > tok && incr_name_in_keys(tok, (gsize)(p - tok), g_class_keys))
+        gsize len = (gsize)(p - tok);
+        if (len > 0 && !incr_class_list_has_token(second, tok, len) &&
+            incr_name_in_keys(tok, len, g_class_keys))
             return TRUE;
     }
     return FALSE;
@@ -36866,15 +36902,35 @@ incr_id_in_keys(const char *value)
     return value && incr_name_in_keys(value, strlen(value), g_id_keys);
 }
 
+static gboolean incr_attr_pred_matches_value(const ns_node *n,
+                                             const ns_css_attr_pred *wanted,
+                                             const char *value);
+
+static gboolean
+incr_class_value_preds_tell_apart(const ns_node *target, const char *before,
+                                  const char *after)
+{
+    for (guint i = 0; g_class_value_preds && i < g_class_value_preds->len; i++) {
+        const ns_css_attr_pred *pred = g_ptr_array_index(g_class_value_preds, i);
+        if (incr_attr_pred_matches_value(target, pred, before) !=
+            incr_attr_pred_matches_value(target, pred, after))
+            return TRUE;
+    }
+    return FALSE;
+}
+
 static gboolean
 incr_name_change_unused(const ns_node *target, const char *name,
                         const char *old_value)
 {
     if (!g_struct_ready || !name) return FALSE;
-    if (g_ascii_strcasecmp(name, "class") == 0)
+    if (g_ascii_strcasecmp(name, "class") == 0) {
+        const char *value = ns_element_get_attr(target, "class");
         return g_class_keys && !g_class_keys_loose &&
-               !incr_class_tokens_in_keys(old_value) &&
-               !incr_class_tokens_in_keys(ns_element_get_attr(target, "class"));
+               !incr_class_tokens_only_in_first_hit_keys(old_value, value) &&
+               !incr_class_tokens_only_in_first_hit_keys(value, old_value) &&
+               !incr_class_value_preds_tell_apart(target, old_value, value);
+    }
     if (g_ascii_strcasecmp(name, "id") == 0)
         return g_id_keys && !g_id_keys_loose &&
                !incr_id_in_keys(old_value) &&
@@ -37002,6 +37058,7 @@ incr_ensure_struct_keys(const ns_css_stylesheet *ua,
     else g_inv_sets = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                                             incr_inv_set_free);
     g_class_keys_loose = FALSE;
+    if (g_class_value_preds) g_ptr_array_set_size(g_class_value_preds, 0);
     g_id_keys_loose = FALSE;
     g_struct_loose = FALSE;
     g_struct_reach = 0;
@@ -37070,8 +37127,14 @@ incr_node_matches_keys(const ns_node *n, GHashTable *keyset)
 static gboolean
 incr_attr_pred_matches(const ns_node *n, const ns_css_attr_pred *wanted)
 {
-    const char *value = ns_element_get_attr(n,
-        css_attr_pred_uses_case(n, wanted) ? wanted->name_cased : wanted->name);
+    return incr_attr_pred_matches_value(n, wanted, ns_element_get_attr(n,
+        css_attr_pred_uses_case(n, wanted) ? wanted->name_cased : wanted->name));
+}
+
+static gboolean
+incr_attr_pred_matches_value(const ns_node *n, const ns_css_attr_pred *wanted,
+                             const char *value)
+{
     if (wanted->op == NS_CSS_ATTR_PRESENT) return value != NULL;
     if (!value || !wanted->value) return FALSE;
     gsize value_len = strlen(value);
@@ -37742,10 +37805,15 @@ incr_queue_attr_change(GPtrArray *queue, const ns_node *target,
         return FALSE;
     if (g_ascii_strcasecmp(name, "style") == 0) return TRUE;
     if (is_presentational_attr_name(name)) return FALSE;
+    if (g_ascii_strcasecmp(name, "class") == 0) {
+        const char *value = ns_element_get_attr(target, "class");
+        if ((g_class_keys_loose ||
+             incr_class_value_preds_tell_apart(target, old_value, value)) &&
+            !incr_queue_attr_key(queue, name))
+            return FALSE;
+        return incr_queue_class_change(queue, old_value, value);
+    }
     if (!incr_queue_attr_key(queue, name)) return FALSE;
-    if (g_ascii_strcasecmp(name, "class") == 0)
-        return incr_queue_class_change(queue, old_value,
-                                       ns_element_get_attr(target, "class"));
     if (g_ascii_strcasecmp(name, "id") == 0)
         return incr_queue_id_change(queue, old_value,
                                     ns_element_id_attr(target));
