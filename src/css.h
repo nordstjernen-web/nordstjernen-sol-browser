@@ -782,6 +782,9 @@ int                 ns_css_font_stretch_rank(const ns_css_value *v);
 const ns_css_value *ns_css_value_layer(const ns_css_value *head, int index);
 int                 ns_css_value_layer_count(const ns_css_value *head);
 
+#define NS_CSS_LENGTH_LIMIT 33554400.0
+
+double   ns_css_length_saturate(double px);
 double   ns_css_length_or(const ns_css_value *v, double fallback);
 gboolean ns_css_calc_is_math_fn(const ns_css_value *v);
 double   ns_css_calc_math_fn_px(const ns_css_value *v, double basis);

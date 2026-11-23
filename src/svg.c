@@ -2491,7 +2491,7 @@ svg_text_flow_fit_length(svg_text_flow *flow, const ns_node *el,
         }
         NsPangoAttrList *attrs = ns_pango_attr_list_new();
         ns_pango_attr_list_insert(attrs, ns_pango_attr_letter_spacing_new(
-            (int)lround(spacing * NS_PANGO_SCALE)));
+            ns_paint_int_saturate(round(spacing * NS_PANGO_SCALE))));
         ns_pango_layout_set_attributes(run->layout, attrs);
         ns_pango_attr_list_unref(attrs);
         svg_text_run_measure(run);

@@ -5939,6 +5939,12 @@ ns_unwrap_element(JSValueConst val)
     return JS_GetOpaque(val, ns_element_class_id);
 }
 
+static JSValue
+ns_js_layout_int(JSContext *ctx, double px)
+{
+    return JS_NewInt32(ctx, (int)floor(ns_css_length_saturate(px) + 0.5));
+}
+
 static ns_node *ns_window_document_for(JSContext *ctx, JSValueConst window);
 static ns_node *ns_window_current_document_for(JSContext *ctx, JSValueConst window);
 static JSValue ns_window_child_frame_window(JSContext *ctx, ns_node *doc,
@@ -7264,7 +7270,7 @@ ns_element_dimension_getter(JSContext *ctx, JSValueConst this_val, int magic)
             ns_box_border_box(b, &x, &y, &w, &h);
             w -= b->border.left + b->border.right + b->padding.left + b->padding.right;
             h -= b->border.top + b->border.bottom + b->padding.top + b->padding.bottom;
-            return JS_NewInt32(ctx, (int)(MAX(magic == 8 ? w : h, 0) + 0.5));
+            return ns_js_layout_int(ctx, MAX(magic == 8 ? w : h, 0));
         }
         const char *attr = ns_element_get_attr(n, magic == 8 ? "width"
                                                              : "height");
@@ -44561,12 +44567,12 @@ ns_element_get_offsetWidth(JSContext *ctx, JSValueConst this_val)
     if (!b) {
         if (!ns_node_is_tag(ns_unwrap_element(this_val), NS_TAG_BR) &&
             ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
-            return JS_NewInt32(ctx, (int)(w + 0.5));
+            return ns_js_layout_int(ctx, w);
         return JS_NewInt32(ctx, 0);
     }
     if (!ns_block_in_inline_rect(b, FALSE, &x, &y, &w, &h))
         ns_box_border_box(b, &x, &y, &w, &h);
-    return JS_NewInt32(ctx, (int)(w + 0.5));
+    return ns_js_layout_int(ctx, w);
 }
 
 static JSValue
@@ -44577,12 +44583,12 @@ ns_element_get_offsetHeight(JSContext *ctx, JSValueConst this_val)
     if (!b) {
         if (!ns_node_is_tag(ns_unwrap_element(this_val), NS_TAG_BR) &&
             ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
-            return JS_NewInt32(ctx, (int)(h + 0.5));
+            return ns_js_layout_int(ctx, h);
         return JS_NewInt32(ctx, 0);
     }
     if (!ns_block_in_inline_rect(b, FALSE, &x, &y, &w, &h))
         ns_box_border_box(b, &x, &y, &w, &h);
-    return JS_NewInt32(ctx, (int)(h + 0.5));
+    return ns_js_layout_int(ctx, h);
 }
 
 static JSValue
@@ -44594,12 +44600,12 @@ ns_element_get_clientWidth(JSContext *ctx, JSValueConst this_val)
     double vw = 0, vh = 0;
     if (is_root) ns_js_node_viewport_size(js_from_ctx(ctx), n, &vw, &vh);
     const ns_box *b = ns_block_box_for_this(ctx, this_val);
-    if (!b) return JS_NewInt32(ctx, is_root ? (int)(vw + 0.5) : 0);
+    if (!b) return ns_js_layout_int(ctx, is_root ? vw : 0);
     if (n && ns_node_is_tag(n, NS_TAG_HTML))
-        return JS_NewInt32(ctx, (int)(vw + 0.5));
+        return ns_js_layout_int(ctx, vw);
     double w = b->content_width + b->padding.left + b->padding.right;
     if (w < 0) w = 0;
-    return JS_NewInt32(ctx, (int)(w + 0.5));
+    return ns_js_layout_int(ctx, w);
 }
 
 static JSValue
@@ -44611,12 +44617,12 @@ ns_element_get_clientHeight(JSContext *ctx, JSValueConst this_val)
     double vw = 0, vh = 0;
     if (is_root) ns_js_node_viewport_size(js_from_ctx(ctx), n, &vw, &vh);
     const ns_box *b = ns_block_box_for_this(ctx, this_val);
-    if (!b) return JS_NewInt32(ctx, is_root ? (int)(vh + 0.5) : 0);
+    if (!b) return ns_js_layout_int(ctx, is_root ? vh : 0);
     if (n && ns_node_is_tag(n, NS_TAG_HTML))
-        return JS_NewInt32(ctx, (int)(vh + 0.5));
+        return ns_js_layout_int(ctx, vh);
     double h = b->content_height + b->padding.top + b->padding.bottom;
     if (h < 0) h = 0;
-    return JS_NewInt32(ctx, (int)(h + 0.5));
+    return ns_js_layout_int(ctx, h);
 }
 
 static void ns_offset_parent_origin(JSContext *ctx, JSValueConst this_val,
@@ -44631,13 +44637,13 @@ ns_element_get_offsetTop(JSContext *ctx, JSValueConst this_val)
     if (!b) {
         double x, y, w, h;
         if (ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
-            return JS_NewInt32(ctx, (int)floor(y - origin_y + 0.5));
+            return ns_js_layout_int(ctx, y - origin_y);
         return JS_NewInt32(ctx, 0);
     }
     double x, y, w, h;
     if (!ns_block_in_inline_rect(b, FALSE, &x, &y, &w, &h))
         ns_box_border_box(b, &x, &y, &w, &h);
-    return JS_NewInt32(ctx, (int)floor(y - origin_y + 0.5));
+    return ns_js_layout_int(ctx, y - origin_y);
 }
 
 static JSValue
@@ -44649,27 +44655,27 @@ ns_element_get_offsetLeft(JSContext *ctx, JSValueConst this_val)
     if (!b) {
         double x, y, w, h;
         if (ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
-            return JS_NewInt32(ctx, (int)floor(x - origin_x + 0.5));
+            return ns_js_layout_int(ctx, x - origin_x);
         return JS_NewInt32(ctx, 0);
     }
     double x, y, w, h;
     if (!ns_block_in_inline_rect(b, FALSE, &x, &y, &w, &h))
         ns_box_border_box(b, &x, &y, &w, &h);
-    return JS_NewInt32(ctx, (int)floor(x - origin_x + 0.5));
+    return ns_js_layout_int(ctx, x - origin_x);
 }
 
 static JSValue
 ns_element_get_clientTop(JSContext *ctx, JSValueConst this_val)
 {
     const ns_box *b = ns_block_box_for_this(ctx, this_val);
-    return JS_NewInt32(ctx, b ? (int)(b->border.top + 0.5) : 0);
+    return ns_js_layout_int(ctx, b ? b->border.top : 0);
 }
 
 static JSValue
 ns_element_get_clientLeft(JSContext *ctx, JSValueConst this_val)
 {
     const ns_box *b = ns_block_box_for_this(ctx, this_val);
-    return JS_NewInt32(ctx, b ? (int)(b->border.left + 0.5) : 0);
+    return ns_js_layout_int(ctx, b ? b->border.left : 0);
 }
 
 static gboolean
@@ -47202,7 +47208,7 @@ ns_element_get_scrollHeight(JSContext *ctx, JSValueConst this_val)
     double vw = 0, vh = 0;
     if (is_root) ns_js_node_viewport_size(js, n, &vw, &vh);
     const ns_box *b = ns_block_box_for_this(ctx, this_val);
-    if (!b) return JS_NewInt32(ctx, is_root ? (int)(vh + 0.5) : 0);
+    if (!b) return ns_js_layout_int(ctx, is_root ? vh : 0);
     double w = 0, h = 0;
     ns_scrollable_overflow_size(b, &w, &h);
     if (is_root) {
@@ -47211,7 +47217,7 @@ ns_element_get_scrollHeight(JSContext *ctx, JSValueConst this_val)
         if (h < vh) h = vh;
     }
     if (h < 0) h = 0;
-    return JS_NewInt32(ctx, (int)(h + 0.5));
+    return ns_js_layout_int(ctx, h);
 }
 
 static JSValue
@@ -47222,7 +47228,7 @@ ns_element_get_scrollWidth(JSContext *ctx, JSValueConst this_val)
     double w = 0, h = 0;
     ns_scrollable_overflow_size(b, &w, &h);
     if (w < 0) w = 0;
-    return JS_NewInt32(ctx, (int)(w + 0.5));
+    return ns_js_layout_int(ctx, w);
 }
 
 static void
