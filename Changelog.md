@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `<br>` has a box for scripts: `getBoundingClientRect()` returns a
+  rectangle of zero width at the end of its line, as tall as the line's
+  text, and `getClientRects()` returns that one rectangle. Both were
+  empty, at 0, 0, so code that reads the position of a line break
+  (caret and selection helpers, editors) saw it at the top left corner of
+  the page. `offsetWidth` and `offsetHeight` stay 0, as in Chrome.
 * Security: resolving a link, `src`, `action` or `data` URL with
   non-ASCII query text in a legacy-encoded page read the document's
   encoding through page-visible properties (`document.characterSet`,

@@ -4083,7 +4083,12 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         return;
     }
     if (ns_node_is_tag(n, NS_TAG_BR)) {
+        ns_inline_attr line_break = {
+            .kind = NS_INLINE_ELEMENT, .start = ctx->out->len, .len = 3,
+            .rise_px = ctx->rise, .dom = n, .style = s,
+        };
         g_string_append(ctx->out, "\xe2\x80\xa8");
+        g_array_append_val(ctx->attrs, line_break);
         return;
     }
     if (ns_node_is_tag(n, NS_TAG_WBR)) {
