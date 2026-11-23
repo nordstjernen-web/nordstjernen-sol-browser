@@ -9,6 +9,22 @@ Changelog:
   empty, at 0, 0, so code that reads the position of a line break
   (caret and selection helpers, editors) saw it at the top left corner of
   the page. `offsetWidth` and `offsetHeight` stay 0, as in Chrome.
+* Security: resolving a link, `src`, `action` or `data` URL with
+  non-ASCII query text in a legacy-encoded page read the document's
+  encoding through page-visible properties (`document.characterSet`,
+  `ownerDocument`). A page that redefined one of them as a getter could
+  change the attribute being resolved from inside that getter and free
+  the string the resolver was still reading. The encoding now comes
+  from the document's own data property or the charset the page was
+  decoded with, and no page script runs during URL resolution.
+* An inline flex or grid container whose first item is a childless box
+  (an icon: an `<svg>`, an `<img>`, a `<canvas>`, an empty element) sits
+  on the baseline that item gives it, the item's bottom edge. The
+  container had no baseline of its own and was placed by its bottom
+  margin edge, which made its line up to 6 px taller. Icon buttons of the
+  form `display: inline-grid; align-items: center` around an `<svg>` no
+  longer stretch the row they are in; 63 more elements on anthropic.com
+  match Chrome.
 * `getComputedStyle()`: `word-spacing` is a length, so `normal` reads as
   `0px` (it was `normal`, which `parseFloat()` turns into `NaN`). An
   absolutely positioned child of a flex or grid container reports

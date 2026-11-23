@@ -48769,6 +48769,33 @@ ns_js_doc_base_url(ns_js *js)
     return ns_js_document_base_url(js, js->current_doc, js->current_url);
 }
 
+static const char *
+ns_document_own_charset(JSContext *ctx, const ns_node *doc)
+{
+    JSValue dv = ns_make_element(ctx, doc);
+    JSAtom atom = JS_NewAtom(ctx, "characterSet");
+    JSPropertyDescriptor desc;
+    int has = JS_IsObject(dv) ? JS_GetOwnProperty(ctx, &desc, dv, atom) : 0;
+    JS_FreeAtom(ctx, atom);
+    JS_FreeValue(ctx, dv);
+    if (has <= 0) {
+        if (has < 0) JS_FreeValue(ctx, JS_GetException(ctx));
+        return NULL;
+    }
+    const char *picked = NULL;
+    if (!(desc.flags & JS_PROP_GETSET) && JS_IsString(desc.value)) {
+        const char *label = JS_ToCString(ctx, desc.value);
+        if (label) {
+            picked = ns_html_encoding_for_label(label);
+            JS_FreeCString(ctx, label);
+        }
+    }
+    JS_FreeValue(ctx, desc.value);
+    JS_FreeValue(ctx, desc.getter);
+    JS_FreeValue(ctx, desc.setter);
+    return picked;
+}
+
 static char *
 ns_node_document_encoding(JSContext *ctx, const ns_node *n)
 {
@@ -48776,29 +48803,11 @@ ns_node_document_encoding(JSContext *ctx, const ns_node *n)
     const ns_node *doc = n ? ns_node_root(n) : NULL;
     gboolean attached = doc && doc->kind == NS_NODE_DOCUMENT &&
                         !(doc->flags & NS_NODE_FRAGMENT);
-    if (ctx) {
-        JSValue dv = JS_UNDEFINED;
-        if (attached) {
-            dv = ns_make_element(ctx, doc);
-        } else if (n) {
-            JSValue nv = ns_make_element(ctx, n);
-            dv = JS_GetPropertyStr(ctx, nv, "ownerDocument");
-            JS_FreeValue(ctx, nv);
-        }
-        if (!JS_IsObject(dv)) {
-            JS_FreeValue(ctx, dv);
-            JSValue global = JS_GetGlobalObject(ctx);
-            dv = JS_GetPropertyStr(ctx, global, "document");
-            JS_FreeValue(ctx, global);
-        }
-        JSValue cs = JS_GetPropertyStr(ctx, dv, "characterSet");
-        const char *label = JS_IsString(cs) ? JS_ToCString(ctx, cs) : NULL;
-        if (label) {
-            picked = ns_html_encoding_for_label(label);
-            JS_FreeCString(ctx, label);
-        }
-        JS_FreeValue(ctx, cs);
-        JS_FreeValue(ctx, dv);
+    if (ctx && attached) picked = ns_document_own_charset(ctx, doc);
+    if (!picked && ctx) {
+        ns_js *js = js_from_ctx(ctx);
+        if (js && js->doc_charset)
+            picked = ns_html_encoding_for_label(js->doc_charset);
     }
     if (!picked || g_ascii_strcasecmp(picked, "replacement") == 0 ||
         g_ascii_strncasecmp(picked, "UTF-16", 6) == 0)
