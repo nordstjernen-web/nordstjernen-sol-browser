@@ -40,7 +40,8 @@ Changelog:
   gets its 3 px side borders back; 14 more elements there match Chrome.
 * Border shorthands accept a math function as the width: `border-left:
   max(1px, .0625rem) solid red`, `border: calc(1px + 1px) solid`, and the
-  same in `border-inline` and `border-block`. The width token was only
+  same in `border-inline`, `border-block`, `outline` and `column-rule`.
+  The width token was only
   recognised when it was a plain length, so a `max()`, `min()`, `clamp()`
   or `calc()` width was dropped: the side shorthands then drew the
   default 3 px border, and `border-inline` / `border-block` drew none.
