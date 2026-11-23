@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Security: resolving a link, `src`, `action` or `data` URL with
+  non-ASCII query text in a legacy-encoded page read the document's
+  encoding through page-visible properties (`document.characterSet`,
+  `ownerDocument`). A page that redefined one of them as a getter could
+  change the attribute being resolved from inside that getter and free
+  the string the resolver was still reading. The encoding now comes
+  from the document's own data property or the charset the page was
+  decoded with, and no page script runs during URL resolution.
 * An inline flex or grid container whose first item is a childless box
   (an icon: an `<svg>`, an `<img>`, a `<canvas>`, an empty element) sits
   on the baseline that item gives it, the item's bottom edge. The
