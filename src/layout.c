@@ -13471,6 +13471,12 @@ layout_flex_row(ns_box *box, double cw,
                     box->style->values[NS_CSS_BOTTOM])))
         explicit_cross = box->content_height;
     explicit_cross = flex_row_definite_cross(box, explicit_cross);
+    if (explicit_cross <= 0 && !hv_box) {
+        double ratio_cross = box_aspect_ratio_height(box, cw);
+        if (max_cross_limit > 0 && ratio_cross > max_cross_limit)
+            ratio_cross = max_cross_limit;
+        if (ratio_cross > min_cross) min_cross = ratio_cross;
+    }
     if (min_cross > explicit_cross) explicit_cross = min_cross;
     if (!definite_cross && explicit_cross > 0 && box->definite_height > 0)
         definite_cross = TRUE;
