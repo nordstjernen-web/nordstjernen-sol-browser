@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Security: a class change on an element with a long class list took
+  time quadratic in its length. Style invalidation looked up every added
+  or removed class name by scanning the whole other list, before asking
+  whether any rule uses the name, so one script-driven change to a
+  270 KB list of 40,000 names held the renderer for 46 seconds. The
+  lookups now ask the rule index first and scan the other list only when
+  it is at most 1 KB; a longer list counts the name as changed, which at
+  worst restyles what did not need it. The same change takes 16 ms.
 * Performance: a class change no longer restyles the whole subtree just
   because the page has an attribute selector on `class` somewhere
   (`[class*="col-"]`, `[class^="icon"]`). One such selector switched off
@@ -38,9 +46,12 @@ Changelog:
   counted as 0, and `getComputedStyle()` reported `0px`. A side whose
   style is `none` or `hidden` stays at 0. The story list on mozilla.org
   gets its 3 px side borders back; 14 more elements there match Chrome.
+  A table's `frame` attribute without a `border` attribute draws `thin`
+  (1 px) borders, as in Chrome, rather than taking that 3 px default.
 * Border shorthands accept a math function as the width: `border-left:
   max(1px, .0625rem) solid red`, `border: calc(1px + 1px) solid`, and the
-  same in `border-inline` and `border-block`. The width token was only
+  same in `border-inline`, `border-block`, `outline` and `column-rule`.
+  The width token was only
   recognised when it was a plain length, so a `max()`, `min()`, `clamp()`
   or `calc()` width was dropped: the side shorthands then drew the
   default 3 px border, and `border-inline` / `border-block` drew none.

@@ -35064,8 +35064,10 @@ presentational_hints_css(const ns_node *el)
         }
         const char *frame_style = table_frame_border_style(
             ns_element_get_attr(el, "frame"));
-        if (frame_style)
+        if (frame_style) {
             g_string_append_printf(out, "border-style: %s;", frame_style);
+            if (!border) g_string_append(out, "border-width: thin;");
+        }
         const char *bordercolor = ns_element_get_attr(el, "bordercolor");
         if (bordercolor && *bordercolor) {
             guint8 r, g, b, a;
@@ -36868,29 +36870,48 @@ incr_name_in_keys(const char *name, gsize len, GHashTable *keys)
     return hit;
 }
 
-static gboolean
-incr_class_list_has_token(const char *list, const char *tok, gsize len)
+static const char *
+class_token_next(const char *p, const char **tok, gsize *len)
 {
-    for (const char *p = list; p && *p; ) {
-        while (*p && g_ascii_isspace((guchar)*p)) p++;
-        const char *start = p;
-        while (*p && !g_ascii_isspace((guchar)*p)) p++;
-        if ((gsize)(p - start) == len && strncmp(start, tok, len) == 0)
-            return TRUE;
+    while (*p && g_ascii_isspace((guchar)*p)) p++;
+    *tok = p;
+    while (*p && !g_ascii_isspace((guchar)*p)) p++;
+    *len = (gsize)(p - *tok);
+    return p;
+}
+
+static gboolean
+class_list_has_token(const char *list, const char *tok, gsize len)
+{
+    for (const char *q = list; q && *q; ) {
+        const char *other_tok;
+        gsize other_len;
+        q = class_token_next(q, &other_tok, &other_len);
+        if (other_len == len && memcmp(other_tok, tok, len) == 0) return TRUE;
     }
     return FALSE;
+}
+
+#define NS_CLASS_LIST_SCAN_MAX_BYTES 1024
+
+static gboolean
+class_list_may_lack_token(const char *list, gsize list_len, const char *tok,
+                          gsize len)
+{
+    return list_len > NS_CLASS_LIST_SCAN_MAX_BYTES ||
+           !class_list_has_token(list, tok, len);
 }
 
 static gboolean
 incr_class_tokens_only_in_first_hit_keys(const char *first, const char *second)
 {
+    gsize second_len = second ? strlen(second) : 0;
     for (const char *p = first; p && *p; ) {
-        while (*p && g_ascii_isspace((guchar)*p)) p++;
-        const char *tok = p;
-        while (*p && !g_ascii_isspace((guchar)*p)) p++;
-        gsize len = (gsize)(p - tok);
-        if (len > 0 && !incr_class_list_has_token(second, tok, len) &&
-            incr_name_in_keys(tok, len, g_class_keys))
+        const char *tok;
+        gsize len;
+        p = class_token_next(p, &tok, &len);
+        if (len && incr_name_in_keys(tok, len, g_class_keys) &&
+            class_list_may_lack_token(second, second_len, tok, len))
             return TRUE;
     }
     return FALSE;
@@ -37377,16 +37398,6 @@ incr_has_apply_key(ns_node *n, char prefix, const char *name, gsize len,
     return list && incr_has_apply_list(n, list);
 }
 
-static const char *
-class_token_next(const char *p, const char **tok, gsize *len)
-{
-    while (*p && g_ascii_isspace((guchar)*p)) p++;
-    *tok = p;
-    while (*p && !g_ascii_isspace((guchar)*p)) p++;
-    *len = (gsize)(p - *tok);
-    return p;
-}
-
 static gboolean
 incr_has_apply_name_and_id(ns_node *n)
 {
@@ -37663,27 +37674,16 @@ incr_mark_following_siblings(ns_node *from)
 }
 
 static gboolean
-class_list_has_token(const char *list, const char *tok, gsize len)
-{
-    for (const char *q = list; q && *q; ) {
-        const char *other_tok;
-        gsize other_len;
-        q = class_token_next(q, &other_tok, &other_len);
-        if (other_len == len && memcmp(other_tok, tok, len) == 0) return TRUE;
-    }
-    return FALSE;
-}
-
-static gboolean
 incr_class_tokens_added_hit(const char *list, const char *other,
                             GHashTable *keys)
 {
+    gsize other_len = other ? strlen(other) : 0;
     for (const char *p = list; p && *p; ) {
         const char *tok;
         gsize len;
         p = class_token_next(p, &tok, &len);
-        if (len && !class_list_has_token(other, tok, len) &&
-            incr_keyset_contains(keys, '.', tok, len, FALSE))
+        if (len && incr_keyset_contains(keys, '.', tok, len, FALSE) &&
+            class_list_may_lack_token(other, other_len, tok, len))
             return TRUE;
     }
     return FALSE;
@@ -37726,12 +37726,13 @@ incr_queue_inv(GPtrArray *queue, char prefix, const char *name, gsize len)
 static gboolean
 incr_queue_class_tokens(GPtrArray *queue, const char *list, const char *other)
 {
+    gsize other_len = other ? strlen(other) : 0;
     for (const char *p = list; p && *p; ) {
         const char *tok;
         gsize len;
         p = class_token_next(p, &tok, &len);
-        if (!len || class_list_has_token(other, tok, len) ||
-            !incr_name_in_keys(tok, len, g_desc_class_keys))
+        if (!len || !incr_name_in_keys(tok, len, g_desc_class_keys) ||
+            !class_list_may_lack_token(other, other_len, tok, len))
             continue;
         if (!incr_queue_inv(queue, '.', tok, len)) return FALSE;
     }
