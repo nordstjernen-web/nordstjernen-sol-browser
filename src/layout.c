@@ -19719,10 +19719,8 @@ static_abs_y_visit(ns_box *b, const static_abs_target *t, double *out)
     box_order_load(b);
     if (!static_abs_target_inside(b, t))
         return static_abs_y_visit_other(b, t, out);
-    if (!box_is_absolute_or_fixed(b)) {
-        double edge = b->y + b->margin.top + b->border.top + b->padding.top;
-        if (edge > *out) *out = edge;
-    }
+    if (!box_is_absolute_or_fixed(b))
+        *out = b->y + b->margin.top + b->border.top + b->padding.top;
     return TRUE;
 }
 
@@ -19824,11 +19822,8 @@ static_abs_y_batch_walk(const ns_box *b, GArray *calcs, guint *next,
             }
         }
     }
-    if (b->dom && !style_is_absolute_or_fixed(b->style)) {
-        double content_top = b->y + b->margin.top + b->border.top +
-                             b->padding.top;
-        if (content_top > *cur_max) *cur_max = content_top;
-    }
+    if (b->dom && !style_is_absolute_or_fixed(b->style))
+        *cur_max = b->y + b->margin.top + b->border.top + b->padding.top;
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         static_abs_y_batch_walk(c, calcs, next, cur_max);
     while (b->dom && *next < calcs->len) {
