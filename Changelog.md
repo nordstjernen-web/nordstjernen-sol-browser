@@ -3,6 +3,16 @@ Changelog:
 
 1.0.51-dev:
 ======
+* CSS validation is stricter where it was too lenient: a `calc()` that
+  resolves to a plain number is no longer a valid length (`width: calc(0)`),
+  border, outline and column-rule widths, `outline-offset` and
+  `column-width` reject percentages, and `background-image`,
+  `list-style-image` and `mask-image` reject values that are not images
+  (`0`, `3.14%`, `calc(2 + 3)`). `CSS.supports()` agrees. CSS Typed OM
+  builds on this: `styleMap.set()` throws for values of the wrong type,
+  named colors reify as `CSSStyleValue`, and dashed identifiers as
+  `CSSKeywordValue`; it now passes 11,400 of the 12,336
+  `css/css-typed-om` subtests.
 * CSS Typed OM: `CSSStyleValue` and its numeric, math, keyword, unparsed,
   image, transform and color subclasses, the `CSS.px()`-style unit
   factories, `element.attributeStyleMap`, `CSSStyleRule.styleMap` and
