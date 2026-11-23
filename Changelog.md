@@ -3,6 +3,56 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Performance: a class change no longer restyles the whole subtree just
+  because the page has an attribute selector on `class` somewhere
+  (`[class*="col-"]`, `[class^="icon"]`). One such selector switched off
+  the check that skips class names no rule uses, and queued the
+  invalidation set for the `class` attribute on every change. Both now
+  test the attribute selectors against the old and the new value, and
+  only count when one of them gives a different answer. Only the tokens
+  that were added or removed are looked up, not every class of the
+  element. Toggling a class that no rule uses on `<html>` of the frozen
+  CNN front page takes 1.2 ms where it took 132 ms (Chrome: 2.7 ms).
+* Grid: a `1fr` row in a grid with a definite height no longer grows to
+  the content of an item that has `min-height: 0`, an explicit
+  `min-height`, or a scrollable overflow. Such an item has no automatic
+  minimum size, so the row keeps its share of the grid and the item
+  scrolls or overflows inside it. The row took the full content height,
+  which pushed the rows below it out of the grid. The app shell of
+  open.spotify.com (`auto auto 1fr auto` rows around a scrolling
+  sidebar) fits the window again; 45 more elements there match Chrome.
+* Grid: an `auto` column keeps the min-content width of its items when
+  the grid is too narrow for all its columns. The column was shrunk to
+  0 px, so its text was laid out in no width at all and hung out of an
+  empty box. With `120px auto` in a 100 px wide grid the second column is
+  as wide as its longest word, as in Chrome. An item with `min-width: 0`
+  or a scrollable overflow still lets the column shrink to nothing.
+* Flex: the items of a row flex container whose height comes from
+  `aspect-ratio` stretch to that height. The container got its height
+  from the ratio after layout, but the line was sized by its content, so
+  empty items were 0 px tall and `align-items: center` centred in a line
+  of content height. `min-height` and `max-height` limit the ratio height
+  as they do for the box.
+* A border with a style but no declared width is `medium`, 3 px.
+  `border-style: solid` alone drew nothing, because a missing width
+  counted as 0, and `getComputedStyle()` reported `0px`. A side whose
+  style is `none` or `hidden` stays at 0. The story list on mozilla.org
+  gets its 3 px side borders back; 14 more elements there match Chrome.
+* Border shorthands accept a math function as the width: `border-left:
+  max(1px, .0625rem) solid red`, `border: calc(1px + 1px) solid`, and the
+  same in `border-inline` and `border-block`. The width token was only
+  recognised when it was a plain length, so a `max()`, `min()`, `clamp()`
+  or `calc()` width was dropped: the side shorthands then drew the
+  default 3 px border, and `border-inline` / `border-block` drew none.
+  `border-inline` and `border-block` also take `thin`, `medium` and
+  `thick` now. github.com writes its 1 px grid lines this way; 178 more
+  elements there match Chrome.
+* `<br>` has a box for scripts: `getBoundingClientRect()` returns a
+  rectangle of zero width at the end of its line, as tall as the line's
+  text, and `getClientRects()` returns that one rectangle. Both were
+  empty, at 0, 0, so code that reads the position of a line break
+  (caret and selection helpers, editors) saw it at the top left corner of
+  the page. `offsetWidth` and `offsetHeight` stay 0, as in Chrome.
 * Security: resolving a link, `src`, `action` or `data` URL with
   non-ASCII query text in a legacy-encoded page read the document's
   encoding through page-visible properties (`document.characterSet`,

@@ -4083,7 +4083,12 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         return;
     }
     if (ns_node_is_tag(n, NS_TAG_BR)) {
+        ns_inline_attr line_break = {
+            .kind = NS_INLINE_ELEMENT, .start = ctx->out->len, .len = 3,
+            .rise_px = ctx->rise, .dom = n, .style = s,
+        };
         g_string_append(ctx->out, "\xe2\x80\xa8");
+        g_array_append_val(ctx->attrs, line_break);
         return;
     }
     if (ns_node_is_tag(n, NS_TAG_WBR)) {
@@ -13471,6 +13476,12 @@ layout_flex_row(ns_box *box, double cw,
                     box->style->values[NS_CSS_BOTTOM])))
         explicit_cross = box->content_height;
     explicit_cross = flex_row_definite_cross(box, explicit_cross);
+    if (explicit_cross <= 0 && !hv_box) {
+        double ratio_cross = box_aspect_ratio_height(box, cw);
+        if (max_cross_limit > 0 && ratio_cross > max_cross_limit)
+            ratio_cross = max_cross_limit;
+        if (ratio_cross > min_cross) min_cross = ratio_cross;
+    }
     if (min_cross > explicit_cross) explicit_cross = min_cross;
     if (!definite_cross && explicit_cross > 0 && box->definite_height > 0)
         definite_cross = TRUE;
@@ -16872,6 +16883,7 @@ layout_grid(ns_box *box, double cw,
             mw += ci->extra;
             nw += ci->extra;
             double rigid = grid_item_rigid_outer_width(c, ci->extra);
+            if (grid_item_has_auto_minimum(c)) rigid = MAX(rigid, mw);
             if (rigid > col_rigid[t]) col_rigid[t] = rigid;
             if (nw > avail) nw = avail;
             if (nw > col_content[t]) col_content[t] = nw;
@@ -17188,6 +17200,9 @@ layout_grid(ns_box *box, double cw,
             item_outer = MAX(item_outer * row_flex_factor[row],
                              grid_item_min_block_contribution(
                                  items->pdata[i], item_outer, row_basis));
+        if (rs == 1 && row_flex[row] && grid_item_height_is_auto(items->pdata[i]))
+            item_outer = grid_item_min_block_contribution(
+                items->pdata[i], item_outer, row_basis);
         double used = row_gap * (rs - 1);
         int growable = 0;
         gboolean crosses_flex = FALSE;
