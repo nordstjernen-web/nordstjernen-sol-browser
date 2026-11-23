@@ -16872,6 +16872,7 @@ layout_grid(ns_box *box, double cw,
             mw += ci->extra;
             nw += ci->extra;
             double rigid = grid_item_rigid_outer_width(c, ci->extra);
+            if (grid_item_has_auto_minimum(c)) rigid = MAX(rigid, mw);
             if (rigid > col_rigid[t]) col_rigid[t] = rigid;
             if (nw > avail) nw = avail;
             if (nw > col_content[t]) col_content[t] = nw;

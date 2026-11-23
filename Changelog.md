@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: an `auto` column keeps the min-content width of its items when
+  the grid is too narrow for all its columns. The column was shrunk to
+  0 px, so its text was laid out in no width at all and hung out of an
+  empty box. With `120px auto` in a 100 px wide grid the second column is
+  as wide as its longest word, as in Chrome. An item with `min-width: 0`
+  or a scrollable overflow still lets the column shrink to nothing.
 * Security: resolving a link, `src`, `action` or `data` URL with
   non-ASCII query text in a legacy-encoded page read the document's
   encoding through page-visible properties (`document.characterSet`,
