@@ -3,6 +3,11 @@ Changelog:
 
 1.0.51:
 ======
+* An absolutely positioned box with `top: auto` inside a flex or grid
+  item sits at the top of its parent, not below the items beside it. Its
+  static position took the bottom of every earlier box in the document,
+  including sibling items laid out next to it, so on Bing the "matprat.no"
+  line of a sponsored result fell onto the result's title.
 * CSS validation is stricter where it was too lenient: a `calc()` that
   resolves to a plain number is no longer a valid length (`width: calc(0)`),
   border, outline and column-rule widths, `outline-offset` and
