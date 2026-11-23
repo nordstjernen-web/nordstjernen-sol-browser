@@ -3,6 +3,21 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `::first-letter` now lays out like Chrome. A large first letter only
+  changed the font of the glyph: the line kept the height of the
+  paragraph text, so a 36 px drop letter overlapped the line above, and
+  `line-height`, `float` and backgrounds on it were ignored. The letter
+  also skipped the punctuation around it, so in `"(T)est"` only the `T`
+  grew. The first letter is now its own inline box that grows the line,
+  takes its `line-height` and paints its background; `float: left` turns
+  it into a real drop cap that the text wraps beside; it includes the
+  punctuation and spaces before the letter and the closing punctuation
+  after it, as CSS Pseudo-Elements 4 defines; a whole emoji, flag or
+  Devanagari conjunct counts as one letter; the marker of an inside list
+  item stays outside the letter; `letter-spacing` and `vertical-align`
+  on the letter apply; and inside a link, a coloured span or a
+  `position: relative` span it keeps that element's colour and moves
+  with it. 353 more first-letter tests of the CSS 2 suite pass.
 * Huge sizes saturate at 33,554,400 px, the largest size Chrome lays
   out, instead of breaking layout. An extreme `aspect-ratio`
   (`1e-160 / 1e160`), a length such as `height: 1e30px`, a grid track of
