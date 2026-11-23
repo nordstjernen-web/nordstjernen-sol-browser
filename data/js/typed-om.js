@@ -1466,6 +1466,13 @@
         return new CSSTransformValue(components);
     }
 
+    var DASHED_IDENT_RE = /^--[\w\u0080-￿-]+$/;
+    var OPAQUE_PROPERTIES = { 'font-family': 1, 'transition-property': 1, 'will-change': 1 };
+
+    function isColorProperty(property) {
+        return /(^|-)color$/.test(property) || property === 'fill' || property === 'stroke';
+    }
+
     function reifyComponent(property, text, context) {
         var t = text.trim();
         var lower = t.toLowerCase();
@@ -1476,9 +1483,15 @@
         if (property === 'transform' && lower !== 'none') {
             try { return parseTransformList(t, context); } catch (e) { return makeOpaque(t, property); }
         }
+        if (OPAQUE_PROPERTIES[property]) return makeOpaque(t, property);
         var tokens = splitTopLevel(t, ' ');
         if (tokens.length === 1) {
-            if (IDENT_RE.test(t) && IDENT_RE.exec(t)[0] === t) return new CSSKeywordValue(t);
+            if (DASHED_IDENT_RE.test(t)) return new CSSKeywordValue(t);
+            if (IDENT_RE.test(t) && IDENT_RE.exec(t)[0] === t) {
+                if (lower !== 'currentcolor' && isColorProperty(property) && supports('color', t))
+                    return makeOpaque(t, property);
+                return new CSSKeywordValue(t);
+            }
             var numeric = null;
             try { numeric = parseNumeric(t); } catch (e) { numeric = null; }
             if (numeric) {
@@ -1540,6 +1553,13 @@
         var css = value.toString();
         if (value instanceof CSSKeywordValue && CSS_WIDE[value.value.toLowerCase()] && !single)
             throw new TypeError('A CSS-wide keyword must be the only value');
+        if (value instanceof CSSUnitValue && value.unit === 'number') {
+            var calcText = 'calc(' + css + ')';
+            var calcOk = supports(property, calcText);
+            if (supports(property, css) && (value.value !== 0 || calcOk || !supports(property, '1px'))) return css;
+            if (calcOk) return calcText;
+            throw new TypeError('Invalid value for ' + property);
+        }
         if (supports(property, css)) return css;
         if (value instanceof CSSNumericValue) {
             var wrapped = value instanceof CSSUnitValue ? 'calc(' + css + ')' : css;

@@ -13416,14 +13416,44 @@ prop_accepts_bare_number(ns_css_prop prop)
 }
 
 static gboolean
+text_is_image_function(const char *t)
+{
+    static const char *const math[] = {
+        "calc", "min", "max", "clamp", "round", "mod", "rem", "sin", "cos",
+        "tan", "asin", "acos", "atan", "atan2", "pow", "sqrt", "hypot", "log",
+        "exp", "abs", "sign", "env",
+    };
+    const char *p = t;
+    while (g_ascii_isalnum((guchar)*p) || *p == '-' || *p == '_') p++;
+    if (p == t || *p != '(' || g_ascii_isdigit((guchar)*t)) return FALSE;
+    gsize n = (gsize)(p - t);
+    for (gsize i = 0; i < G_N_ELEMENTS(math); i++)
+        if (strlen(math[i]) == n && g_ascii_strncasecmp(t, math[i], n) == 0)
+            return FALSE;
+    return t[strlen(t) - 1] == ')';
+}
+
+static gboolean
+prop_rejects_percent(ns_css_prop prop)
+{
+    switch (prop) {
+    case NS_CSS_SCROLL_MARGIN_TOP: case NS_CSS_SCROLL_MARGIN_RIGHT:
+    case NS_CSS_SCROLL_MARGIN_BOTTOM: case NS_CSS_SCROLL_MARGIN_LEFT:
+    case NS_CSS_BORDER_TOP_WIDTH: case NS_CSS_BORDER_RIGHT_WIDTH:
+    case NS_CSS_BORDER_BOTTOM_WIDTH: case NS_CSS_BORDER_LEFT_WIDTH:
+    case NS_CSS_OUTLINE_WIDTH: case NS_CSS_OUTLINE_OFFSET:
+    case NS_CSS_COLUMN_RULE_WIDTH: case NS_CSS_COLUMN_WIDTH:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static gboolean
 numeric_value_valid_for_prop(ns_css_prop prop, const ns_css_value *v)
 {
     if (!v) return FALSE;
-    gboolean scroll_margin = prop == NS_CSS_SCROLL_MARGIN_TOP ||
-                             prop == NS_CSS_SCROLL_MARGIN_RIGHT ||
-                             prop == NS_CSS_SCROLL_MARGIN_BOTTOM ||
-                             prop == NS_CSS_SCROLL_MARGIN_LEFT;
-    if (scroll_margin && ((v->kind == NS_CSS_V_LENGTH &&
+    if (prop_rejects_percent(prop) && ((v->kind == NS_CSS_V_LENGTH &&
                            v->u.length.unit == NS_CSS_UNIT_PERCENT) ||
                           (v->kind == NS_CSS_V_CALC && v->u.calc.pct != 0)))
         return FALSE;
@@ -15676,6 +15706,12 @@ parse_value_for(ns_css_prop prop, const char *text)
             v = ns_css_value_new(NS_CSS_V_KEYWORD);
             v->u.keyword = ascii_lower(t, strlen(t));
         } else if ((v = parse_calc(t))) {
+            if (g_ascii_isalpha((guchar)*t) && v->kind == NS_CSS_V_LENGTH &&
+                v->u.length.unit == NS_CSS_UNIT_NUMBER &&
+                !prop_accepts_bare_number(prop)) {
+                ns_css_value_free(v);
+                v = NULL;
+            }
         } else {
             double num;
             ns_css_unit u;
@@ -15976,8 +16012,8 @@ parse_value_for(ns_css_prop prop, const char *text)
                 iset_computed = NULL;
             }
         }
-        if (!v && !iset_computed && text_is_ident(t) &&
-            g_ascii_strcasecmp(t, "none") != 0)
+        if (!v && !iset_computed && g_ascii_strcasecmp(t, "none") != 0 &&
+            !text_is_image_function(t))
             break;
         if (!v) {
             char *kw = iset_computed ? g_strdup(iset_computed)
