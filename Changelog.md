@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51:
 ======
+* Security: private browsing no longer writes anything to disk. Each
+  private-mode process made a `nordstjernen-private-XXXXXX` directory in
+  the temporary directory holding a copy of the HSTS list (hosts from the
+  normal profile) and removed it only on a clean exit, so killed renderers
+  left one behind every time; on Windows, a process without `TEMP`/`TMP`
+  put them in the root of the drive, where other users can read them.
+  Private mode now reads the HSTS list read-only and keeps what it learns
+  in memory.
 * An absolutely positioned box with `top: auto` inside a flex or grid
   item sits at the top of its parent, not below the items beside it. Its
   static position took the bottom of every earlier box in the document,
