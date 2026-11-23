@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: an `auto` column keeps the min-content width of its items when
+  the grid is too narrow for all its columns. The column was shrunk to
+  0 px, so its text was laid out in no width at all and hung out of an
+  empty box. With `120px auto` in a 100 px wide grid the second column is
+  as wide as its longest word, as in Chrome. An item with `min-width: 0`
+  or a scrollable overflow still lets the column shrink to nothing.
 * Flex: the items of a row flex container whose height comes from
   `aspect-ratio` stretch to that height. The container got its height
   from the ratio after layout, but the line was sized by its content, so
