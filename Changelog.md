@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51:
 ======
+* Security: clicking a box that is the root of a 3D-transformed subtree
+  with its own background or border no longer overflows the renderer's
+  stack. The 3D hit test picked the box's own quad, hit-tested the box,
+  and that re-entered the 3D pick for the same box without end; the
+  renderer crashed and the tab reloaded. On Google Maps this made the
+  Layers button reload the page instead of switching to satellite view.
 * WebGL: `getContext("webgl")` on a canvas that already has a WebGL 2
   context returns `null`, as does `getContext("webgl2")` on a WebGL 1
   canvas. Both returned the existing context of the other version, so
