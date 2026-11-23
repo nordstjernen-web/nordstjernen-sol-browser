@@ -38,6 +38,8 @@ Changelog:
   counted as 0, and `getComputedStyle()` reported `0px`. A side whose
   style is `none` or `hidden` stays at 0. The story list on mozilla.org
   gets its 3 px side borders back; 14 more elements there match Chrome.
+  A table's `frame` attribute without a `border` attribute draws `thin`
+  (1 px) borders, as in Chrome, rather than taking that 3 px default.
 * Border shorthands accept a math function as the width: `border-left:
   max(1px, .0625rem) solid red`, `border: calc(1px + 1px) solid`, and the
   same in `border-inline`, `border-block`, `outline` and `column-rule`.

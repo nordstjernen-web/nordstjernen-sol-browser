@@ -35064,8 +35064,10 @@ presentational_hints_css(const ns_node *el)
         }
         const char *frame_style = table_frame_border_style(
             ns_element_get_attr(el, "frame"));
-        if (frame_style)
+        if (frame_style) {
             g_string_append_printf(out, "border-style: %s;", frame_style);
+            if (!border) g_string_append(out, "border-width: thin;");
+        }
         const char *bordercolor = ns_element_get_attr(el, "bordercolor");
         if (bordercolor && *bordercolor) {
             guint8 r, g, b, a;
