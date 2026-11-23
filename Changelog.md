@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Security: a class change on an element with a long class list took
+  time quadratic in its length. Style invalidation looked up every added
+  or removed class name by scanning the whole other list, before asking
+  whether any rule uses the name, so one script-driven change to a
+  270 KB list of 40,000 names held the renderer for 46 seconds. The
+  lookups now ask the rule index first and scan the other list only when
+  it is at most 1 KB; a longer list counts the name as changed, which at
+  worst restyles what did not need it. The same change takes 16 ms.
 * Performance: a class change no longer restyles the whole subtree just
   because the page has an attribute selector on `class` somewhere
   (`[class*="col-"]`, `[class^="icon"]`). One such selector switched off
