@@ -15,9 +15,10 @@ Changelog:
   after it, as CSS Pseudo-Elements 4 defines; a whole emoji, flag or
   Devanagari conjunct counts as one letter; the marker of an inside list
   item stays outside the letter; `letter-spacing` and `vertical-align`
-  on the letter apply; and inside a link, a coloured span or a
-  `position: relative` span it keeps that element's colour and moves
-  with it. 353 more first-letter tests of the CSS 2 suite pass.
+  on the letter apply; and a letter that is not floated keeps the
+  colour of an enclosing link or coloured span and moves with a
+  `position: relative` span. 353 more first-letter tests of the CSS 2
+  suite pass.
 * Huge sizes saturate at 33,554,400 px, the largest size Chrome lays
   out, instead of breaking layout. An extreme `aspect-ratio`
   (`1e-160 / 1e160`), a length such as `height: 1e30px`, a grid track of
