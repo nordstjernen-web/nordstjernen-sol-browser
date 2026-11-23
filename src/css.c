@@ -19787,6 +19787,8 @@ parse_declaration_block(const char **pp, const char *end,
                             quad, 4, important);
                     }
                 } else if (parse_length(tokens[i], &num, &u) ||
+                           css_starts_math_fn(tokens[i],
+                                              tokens[i] + strlen(tokens[i])) ||
                            g_ascii_strcasecmp(tokens[i], "thin") == 0 ||
                            g_ascii_strcasecmp(tokens[i], "medium") == 0 ||
                            g_ascii_strcasecmp(tokens[i], "thick") == 0) {
@@ -19882,7 +19884,12 @@ parse_declaration_block(const char **pp, const char *end,
                 if (parse_color(tokens[i], &r, &g, &b, &a) ||
                     is_color_keyword(tokens[i])) {
                     p1 = c1; p2 = c2;
-                } else if (parse_length(tokens[i], &num, &u)) {
+                } else if (parse_length(tokens[i], &num, &u) ||
+                           css_starts_math_fn(tokens[i],
+                                              tokens[i] + strlen(tokens[i])) ||
+                           g_ascii_strcasecmp(tokens[i], "thin") == 0 ||
+                           g_ascii_strcasecmp(tokens[i], "medium") == 0 ||
+                           g_ascii_strcasecmp(tokens[i], "thick") == 0) {
                     p1 = w1; p2 = w2;
                 } else {
                     p1 = s1; p2 = s2;
@@ -20377,6 +20384,8 @@ parse_declaration_block(const char **pp, const char *end,
                         saw_c = TRUE;
                     }
                 } else if (parse_length(tokens[i], &num, &u) ||
+                           css_starts_math_fn(tokens[i],
+                                              tokens[i] + strlen(tokens[i])) ||
                            g_ascii_strcasecmp(tokens[i], "thin") == 0 ||
                            g_ascii_strcasecmp(tokens[i], "medium") == 0 ||
                            g_ascii_strcasecmp(tokens[i], "thick") == 0) {
