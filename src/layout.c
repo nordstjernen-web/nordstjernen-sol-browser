@@ -8408,6 +8408,20 @@ box_last_baseline(const ns_box *b, double *out)
 }
 
 static gboolean
+first_childless_item_bottom_edge(const ns_box *container, double *out)
+{
+    for (const ns_box *c = container->first_child; c; c = c->next_sibling) {
+        if (style_is_absolute_or_fixed(c->style)) continue;
+        if (c->first_child || c->kind == NS_BOX_INLINE) return FALSE;
+        *out = (c->y - container->y) + c->margin.top + c->border.top +
+               c->padding.top + c->content_height + c->padding.bottom +
+               c->border.bottom;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
 inline_atomic_baseline(const ns_box *ab, double *out)
 {
     if (box_clips_children(ab)) return FALSE;
@@ -8417,7 +8431,10 @@ inline_atomic_baseline(const ns_box *ab, double *out)
         !box_is_flex_container(ab) && !box_is_grid_container(ab) &&
         (!node_is_form_hit_target(ab->dom) ||
          ns_node_is_tag(ab->dom, NS_TAG_BUTTON));
-    return block_flow ? box_last_baseline(ab, out) : box_first_baseline(ab, out);
+    if (block_flow) return box_last_baseline(ab, out);
+    if (box_first_baseline(ab, out)) return TRUE;
+    return (box_is_flex_container(ab) || box_is_grid_container(ab)) &&
+           first_childless_item_bottom_edge(ab, out);
 }
 
 static const char *
