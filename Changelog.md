@@ -3,6 +3,12 @@ Changelog:
 
 1.0.51-dev:
 ======
+* `<br>` has a box for scripts: `getBoundingClientRect()` returns a
+  rectangle of zero width at the end of its line, as tall as the line's
+  text, and `getClientRects()` returns that one rectangle. Both were
+  empty, at 0, 0, so code that reads the position of a line break
+  (caret and selection helpers, editors) saw it at the top left corner of
+  the page. `offsetWidth` and `offsetHeight` stay 0, as in Chrome.
 * `getComputedStyle()`: `word-spacing` is a length, so `normal` reads as
   `0px` (it was `normal`, which `parseFloat()` turns into `NaN`). An
   absolutely positioned child of a flex or grid container reports

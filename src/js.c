@@ -44559,7 +44559,8 @@ ns_element_get_offsetWidth(JSContext *ctx, JSValueConst this_val)
     double x, y, w, h;
     const ns_box *b = ns_box_for_this(ctx, this_val);
     if (!b) {
-        if (ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
+        if (!ns_node_is_tag(ns_unwrap_element(this_val), NS_TAG_BR) &&
+            ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
             return JS_NewInt32(ctx, (int)(w + 0.5));
         return JS_NewInt32(ctx, 0);
     }
@@ -44574,7 +44575,8 @@ ns_element_get_offsetHeight(JSContext *ctx, JSValueConst this_val)
     double x, y, w, h;
     const ns_box *b = ns_box_for_this(ctx, this_val);
     if (!b) {
-        if (ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
+        if (!ns_node_is_tag(ns_unwrap_element(this_val), NS_TAG_BR) &&
+            ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
             return JS_NewInt32(ctx, (int)(h + 0.5));
         return JS_NewInt32(ctx, 0);
     }
