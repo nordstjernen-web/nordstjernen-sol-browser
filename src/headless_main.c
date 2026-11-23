@@ -21,6 +21,7 @@
 #include "cache.h"
 #include "config.h"
 #include "cookies.h"
+#include "css.h"
 #include "debuglog.h"
 #include "engine.h"
 #include "font.h"
@@ -311,6 +312,8 @@ headless_parse(int argc, char **argv, ns_headless_opts *hopts)
             }
             hopts->viewport_width = (int)w;
             if (h > 0) hopts->viewport_height = (int)h;
+        } else if (g_str_has_prefix(a, "--device-scale=")) {
+            ns_css_set_device_pixel_ratio(g_ascii_strtod(a + 15, NULL));
         } else if (g_str_has_prefix(a, "--viewport-height=")) {
             headless_parse_int(a + 18, 1, 100000, &hopts->viewport_height);
         } else if (g_str_has_prefix(a, "--settle-ms=")) {

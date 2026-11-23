@@ -3,6 +3,13 @@ Changelog:
 
 1.0.51:
 ======
+* WebGL: `getContext("webgl")` on a canvas that already has a WebGL 2
+  context returns `null`, as does `getContext("webgl2")` on a WebGL 1
+  canvas. Both returned the existing context of the other version, so
+  script probing for one version got the other.
+* Headless: `--device-scale=N` sets the device pixel ratio the page sees
+  (`devicePixelRatio`, resolution media queries), for reproducing HiDPI
+  layouts without a HiDPI screen.
 * Security: private browsing no longer writes anything to disk. Each
   private-mode process made a `nordstjernen-private-XXXXXX` directory in
   the temporary directory holding a copy of the HSTS list (hosts from the
