@@ -3,6 +3,14 @@ Changelog:
 
 1.0.51-dev:
 ======
+* Grid: a `1fr` row in a grid with a definite height no longer grows to
+  the content of an item that has `min-height: 0`, an explicit
+  `min-height`, or a scrollable overflow. Such an item has no automatic
+  minimum size, so the row keeps its share of the grid and the item
+  scrolls or overflows inside it. The row took the full content height,
+  which pushed the rows below it out of the grid. The app shell of
+  open.spotify.com (`auto auto 1fr auto` rows around a scrolling
+  sidebar) fits the window again; 45 more elements there match Chrome.
 * Grid: an `auto` column keeps the min-content width of its items when
   the grid is too narrow for all its columns. The column was shrunk to
   0 px, so its text was laid out in no width at all and hung out of an

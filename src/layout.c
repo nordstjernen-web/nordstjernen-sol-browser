@@ -17200,6 +17200,9 @@ layout_grid(ns_box *box, double cw,
             item_outer = MAX(item_outer * row_flex_factor[row],
                              grid_item_min_block_contribution(
                                  items->pdata[i], item_outer, row_basis));
+        if (rs == 1 && row_flex[row] && grid_item_height_is_auto(items->pdata[i]))
+            item_outer = grid_item_min_block_contribution(
+                items->pdata[i], item_outer, row_basis);
         double used = row_gap * (rs - 1);
         int growable = 0;
         gboolean crosses_flex = FALSE;
