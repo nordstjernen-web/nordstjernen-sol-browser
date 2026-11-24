@@ -607,6 +607,20 @@ static JSValue ns_make_realm_document(JSContext *ctx, ns_node *doc_node,
                                       gboolean is_xml, gboolean inert);
 static void ns_realm_document_install_api(JSContext *ctx, JSValueConst doc);
 static gboolean ns_dom_hidden_child(const ns_node *c);
+static ns_node *ns_js_frame_of_realm(ns_js *js, JSContext *realm);
+static ns_node *ns_js_node_frame(const ns_node *node);
+static gboolean ns_js_is_frame_document_edge(const ns_node *child,
+                                             const ns_node *parent);
+static uint32_t ns_count_child_frames(const ns_node *n, int depth);
+static JSValue ns_location_set_href(JSContext *ctx, JSValueConst this_val,
+                                    JSValueConst val);
+static JSValue ns_location_replace(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv);
+static JSValue ns_cross_window_op(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv);
+static const char *ns_js_realm_url(ns_js *js, JSContext *realm);
+typedef struct ns_realm_identity ns_realm_identity;
+static ns_realm_identity *ns_js_realm_identity(ns_js *js, JSContext *realm);
 static gboolean ns_node_hidden_from_script(const ns_node *n);
 
 #define NS_SANDBOX_ACTIVE              (1u << 0)
@@ -1009,16 +1023,15 @@ static const char *
 ns_js_realm_document_url(ns_js *js, JSContext *realm)
 {
     if (!js) return NULL;
-    if (realm && realm != js->main_realm_ctx && js->frame_contexts &&
-        js->frame_urls) {
-        GHashTableIter it;
-        gpointer frame, fctx;
-        g_hash_table_iter_init(&it, js->frame_contexts);
-        while (g_hash_table_iter_next(&it, &frame, &fctx))
-            if (fctx == realm) {
-                const char *url = g_hash_table_lookup(js->frame_urls, frame);
-                if (url) return url;
-            }
+    if (realm && realm != js->main_realm_ctx) {
+        ns_node *frame = ns_js_frame_of_realm(js, realm);
+        const char *url = frame && js->frame_urls
+            ? g_hash_table_lookup(js->frame_urls, frame) : NULL;
+        if (url) return url;
+        if (!frame && ns_js_realm_identity(js, realm)) {
+            url = ns_js_realm_url(js, realm);
+            return url ? url : "about:blank";
+        }
     }
     return js->current_url;
 }
@@ -2020,22 +2033,128 @@ ns_js_frame_scope_enter(ns_js *js, JSContext *realm, ns_node *frame,
 static ns_node *
 ns_js_frame_of_realm(ns_js *js, JSContext *realm)
 {
-    if (!js || !realm || !js->frame_contexts) return NULL;
-    GHashTableIter it;
-    gpointer key, value;
-    g_hash_table_iter_init(&it, js->frame_contexts);
-    while (g_hash_table_iter_next(&it, &key, &value))
-        if (value == realm) return key;
-    return NULL;
+    if (!js || !realm || !js->realm_frames) return NULL;
+    return g_hash_table_lookup(js->realm_frames, realm);
+}
+
+struct ns_realm_identity {
+    char     *url;
+    unsigned  sandbox;
+    gboolean  retired;
+};
+
+static void
+ns_realm_identity_free(gpointer p)
+{
+    ns_realm_identity *identity = p;
+    g_free(identity->url);
+    g_free(identity);
+}
+
+static ns_realm_identity *
+ns_js_realm_identity(ns_js *js, JSContext *realm)
+{
+    return js && realm && js->realm_identities
+        ? g_hash_table_lookup(js->realm_identities, realm) : NULL;
+}
+
+static gboolean
+ns_js_realm_is_retired(ns_js *js, JSContext *realm)
+{
+    ns_realm_identity *identity = ns_js_realm_identity(js, realm);
+    return identity && identity->retired;
+}
+
+static gboolean
+ns_js_realm_is_main(ns_js *js, JSContext *realm)
+{
+    return js && realm &&
+           realm == (js->main_realm_ctx ? js->main_realm_ctx : js->ctx);
+}
+
+static void
+ns_js_frame_origins_changed(ns_js *js)
+{
+    if (!js) return;
+    if (++js->frame_origin_gen == 0) js->frame_origin_gen = 1;
+}
+
+static ns_node *
+ns_js_context_document(JSContext *ctx)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || ns_js_realm_is_retired(js, ctx)) return NULL;
+    if (ns_js_realm_is_main(js, ctx))
+        return js->ce_main_doc ? (ns_node *)js->ce_main_doc
+                               : ns_js_top_document(js->current_doc);
+    ns_node *frame = ns_js_frame_of_realm(js, ctx);
+    return frame ? ns_iframe_document_node(frame) : NULL;
+}
+
+static ns_node *
+ns_node_home_root(ns_node *node)
+{
+    ns_node *n = node;
+    while (n && n->parent && n->kind != NS_NODE_DOCUMENT &&
+           !ns_node_is_shadow_root(n))
+        n = n->parent;
+    return n;
+}
+
+static void
+ns_js_map_frame_realm(ns_js *js, ns_node *frame, JSContext *realm)
+{
+    if (!js->realm_frames)
+        js->realm_frames = g_hash_table_new(g_direct_hash, g_direct_equal);
+    JSContext *previous = g_hash_table_lookup(js->frame_contexts, frame);
+    if (previous && g_hash_table_lookup(js->realm_frames, previous) == frame)
+        g_hash_table_remove(js->realm_frames, previous);
+    g_hash_table_replace(js->frame_contexts, frame, realm);
+    g_hash_table_replace(js->realm_frames, realm, frame);
+    ns_js_frame_origins_changed(js);
+}
+
+static void
+ns_js_record_realm_identity(ns_js *js, JSContext *realm, const ns_node *frame,
+                            const char *url, unsigned sandbox)
+{
+    if (!js || !realm) return;
+    if (!js->realm_identities)
+        js->realm_identities = g_hash_table_new_full(g_direct_hash,
+            g_direct_equal, NULL, ns_realm_identity_free);
+    ns_realm_identity *identity = g_new0(ns_realm_identity, 1);
+    identity->url = url && *url ? g_strdup(url) : NULL;
+    identity->sandbox = frame ? ns_iframe_effective_sandbox(frame) : sandbox;
+    g_hash_table_replace(js->realm_identities, realm, identity);
+}
+
+static void
+ns_js_retire_realm_identity(ns_js *js, JSContext *realm)
+{
+    ns_realm_identity *identity = ns_js_realm_identity(js, realm);
+    if (!identity) {
+        ns_js_record_realm_identity(js, realm, NULL, NULL,
+                                    NS_SANDBOX_ACTIVE);
+        identity = ns_js_realm_identity(js, realm);
+    }
+    if (identity) identity->retired = TRUE;
+    ns_js_frame_origins_changed(js);
 }
 
 static gboolean
 ns_js_realm_origin_is_opaque(ns_js *js, JSContext *realm)
 {
     if (js && js->worker_host) return js->worker_host->opaque_origin;
+    if (!js) return FALSE;
+    unsigned sandbox = js->document_sandbox;
     ns_node *frame = ns_js_frame_of_realm(js, realm);
-    unsigned sandbox = frame ? ns_iframe_effective_sandbox(frame)
-                             : (js ? js->document_sandbox : 0);
+    if (frame) {
+        sandbox = ns_iframe_effective_sandbox(frame);
+    } else if (realm && !ns_js_realm_is_main(js, realm)) {
+        ns_realm_identity *identity = ns_js_realm_identity(js, realm);
+        if (identity && identity->retired) return TRUE;
+        if (identity) sandbox = identity->sandbox;
+    }
     return (sandbox & NS_SANDBOX_ACTIVE) &&
            !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN);
 }
@@ -2064,23 +2183,45 @@ ns_origin_matches(gboolean opaque, const char *doc_url, const char *url)
 static gboolean
 ns_js_realm_may_navigate_top(ns_js *js, JSContext *realm)
 {
+    if (ns_js_realm_is_retired(js, realm)) return FALSE;
     ns_node *frame = ns_js_frame_of_realm(js, realm);
     return !frame || ns_js_sandbox_allows_top_navigation(js, frame, FALSE);
+}
+
+static const char *
+ns_js_frame_effective_url(ns_js *js, const ns_node *frame)
+{
+    for (int depth = 0; frame && depth < 64; depth++) {
+        const char *url = ns_element_get_attr(frame, "data-nd-frame-url");
+        if (url && *url) return url;
+        frame = ns_js_node_frame(frame->parent);
+    }
+    return ns_js_top_url(js);
 }
 
 static const char *
 ns_js_realm_url(ns_js *js, JSContext *realm)
 {
     if (!js || !realm) return NULL;
-    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
-    if (realm == main_ctx) return ns_js_top_url(js);
+    if (ns_js_realm_is_main(js, realm)) return ns_js_top_url(js);
     ns_node *frame = ns_js_frame_of_realm(js, realm);
     const char *url = frame ? ns_element_get_attr(frame, "data-nd-frame-url")
                             : NULL;
-    return url && *url ? url : NULL;
+    if (url && *url) return url;
+    ns_realm_identity *identity = ns_js_realm_identity(js, realm);
+    if (identity && identity->url) return identity->url;
+    return frame ? ns_js_frame_effective_url(js, ns_js_node_frame(frame->parent))
+                 : NULL;
 }
 
-static ns_node *ns_js_node_frame(const ns_node *node);
+static const char *
+ns_js_realm_url_fallback(ns_js *js, JSContext *realm)
+{
+    if (!realm || realm == js->ctx || !ns_js_realm_identity(js, realm))
+        return js->current_url;
+    return "about:blank";
+}
+
 static void ns_js_node_viewport_size(ns_js *js, const ns_node *n, double *vw, double *vh);
 
 static const ns_csp *
@@ -2190,6 +2331,7 @@ gboolean
 ns_js_feature_allowed(ns_js *js, JSContext *realm, const char *feature)
 {
     if (!js || js->worker_host || !feature) return TRUE;
+    if (ns_js_realm_is_retired(js, realm)) return FALSE;
     return ns_js_frame_feature_allowed(js, ns_js_frame_of_realm(js, realm),
                                        feature);
 }
@@ -2347,14 +2489,14 @@ ns_js_calling_document_url(ns_js *js, JSContext *realm)
     if (!js) return NULL;
     const char *url = realm && realm != js->ctx ? ns_js_realm_url(js, realm)
                                                 : NULL;
-    return url ? url : js->current_url;
+    return url ? url : ns_js_realm_url_fallback(js, realm);
 }
 
 static const char *
 ns_js_realm_url_or_current(ns_js *js, JSContext *realm)
 {
     const char *url = ns_js_realm_url(js, realm);
-    return url ? url : js->current_url;
+    return url ? url : ns_js_realm_url_fallback(js, realm);
 }
 
 static char *
@@ -4808,6 +4950,13 @@ ns_throw_selector_syntax_error(JSContext *ctx, const char *sel)
     return ret;
 }
 
+static GHashTable *
+ns_storage_area(JSContext *ctx, JSValueConst obj)
+{
+    if (ns_js_realm_is_retired(js_from_ctx(ctx), ctx)) return NULL;
+    return JS_GetOpaque(obj, ns_storage_class_id);
+}
+
 static gboolean
 ns_storage_prop_shadowed_by_proto(JSContext *ctx, JSValueConst obj,
                                   JSAtom prop)
@@ -4823,7 +4972,7 @@ static int
 ns_storage_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
                    JSValueConst obj, JSAtom prop)
 {
-    GHashTable *store = JS_GetOpaque(obj, ns_storage_class_id);
+    GHashTable *store = ns_storage_area(ctx, obj);
     if (!store) return 0;
     const char *name = JS_AtomToCString(ctx, prop);
     if (!name) return 0;
@@ -4853,7 +5002,7 @@ ns_storage_set_prop(JSContext *ctx, JSValueConst obj, JSAtom prop,
                     JSValueConst val, JSValueConst receiver, int flags)
 {
     (void)receiver; (void)flags;
-    GHashTable *store = JS_GetOpaque(obj, ns_storage_class_id);
+    GHashTable *store = ns_storage_area(ctx, obj);
     if (!store) return FALSE;
     const char *name = JS_AtomToCString(ctx, prop);
     if (!name) return FALSE;
@@ -4885,7 +5034,7 @@ ns_storage_set_prop(JSContext *ctx, JSValueConst obj, JSAtom prop,
 static int
 ns_storage_delete(JSContext *ctx, JSValueConst obj, JSAtom prop)
 {
-    GHashTable *store = JS_GetOpaque(obj, ns_storage_class_id);
+    GHashTable *store = ns_storage_area(ctx, obj);
     if (!store) return FALSE;
     const char *name = JS_AtomToCString(ctx, prop);
     if (!name) return FALSE;
@@ -4938,7 +5087,7 @@ static int
 ns_storage_get_own_names(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen,
                          JSValueConst obj)
 {
-    GHashTable *store = JS_GetOpaque(obj, ns_storage_class_id);
+    GHashTable *store = ns_storage_area(ctx, obj);
     if (!store) { *ptab = NULL; *plen = 0; return 0; }
     guint count = g_hash_table_size(store);
     JSPropertyEnum *tab = NULL;
@@ -4981,7 +5130,7 @@ ns_storage_getItem(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
         return JS_ThrowTypeError(ctx,
             "Failed to execute 'getItem' on 'Storage': 1 argument required, "
             "but only 0 present.");
-    GHashTable *store = JS_GetOpaque(this_val, ns_storage_class_id);
+    GHashTable *store = ns_storage_area(ctx, this_val);
     if (!store) return JS_NULL;
     const char *k = JS_ToCString(ctx, argv[0]);
     if (!k) return JS_NULL;
@@ -5180,7 +5329,7 @@ ns_storage_fire_event(JSContext *ctx, JSValueConst storage_obj,
 static JSValue
 ns_storage_setItem(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    GHashTable *store = JS_GetOpaque(this_val, ns_storage_class_id);
+    GHashTable *store = ns_storage_area(ctx, this_val);
     if (argc < 2)
         return JS_ThrowTypeError(ctx,
             "Failed to execute 'setItem' on 'Storage': 2 arguments required, "
@@ -5235,7 +5384,7 @@ ns_storage_removeItem(JSContext *ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowTypeError(ctx,
             "Failed to execute 'removeItem' on 'Storage': 1 argument "
             "required, but only 0 present.");
-    GHashTable *store = JS_GetOpaque(this_val, ns_storage_class_id);
+    GHashTable *store = ns_storage_area(ctx, this_val);
     if (!store) return JS_UNDEFINED;
     const char *k = JS_ToCString(ctx, argv[0]);
     char *oldv = k ? g_strdup(g_hash_table_lookup(store, k)) : NULL;
@@ -5252,7 +5401,7 @@ static JSValue
 ns_storage_clear(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)ctx; (void)argc; (void)argv;
-    GHashTable *store = JS_GetOpaque(this_val, ns_storage_class_id);
+    GHashTable *store = ns_storage_area(ctx, this_val);
     if (store && g_hash_table_size(store) > 0) {
         g_hash_table_remove_all(store);
         ns_storage_maybe_dirty(ctx, store);
@@ -5268,7 +5417,7 @@ ns_storage_key(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return JS_ThrowTypeError(ctx,
             "Failed to execute 'key' on 'Storage': 1 argument required, "
             "but only 0 present.");
-    GHashTable *store = JS_GetOpaque(this_val, ns_storage_class_id);
+    GHashTable *store = ns_storage_area(ctx, this_val);
     if (!store) return JS_NULL;
     int32_t idx = 0;
     JS_ToInt32(ctx, &idx, argv[0]);
@@ -5284,7 +5433,7 @@ ns_storage_key(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 static JSValue
 ns_storage_get_length(JSContext *ctx, JSValueConst this_val)
 {
-    GHashTable *store = JS_GetOpaque(this_val, ns_storage_class_id);
+    GHashTable *store = ns_storage_area(ctx, this_val);
     return JS_NewInt32(ctx, store ? (int)g_hash_table_size(store) : 0);
 }
 
@@ -5875,8 +6024,146 @@ ns_page_document_object(ns_js *js)
     return doc;
 }
 
+static const ns_node *
+ns_js_node_owning_frame(ns_js *js, const ns_node *node, gboolean *owned)
+{
+    const ns_node *child = node;
+    for (const ns_node *p = node->parent; p; child = p, p = p->parent)
+        if (ns_js_is_frame_document_edge(child, p)) {
+            *owned = TRUE;
+            return p;
+        }
+    const ns_node *page = js->ce_main_doc ? js->ce_main_doc
+                                          : ns_js_top_document(js->current_doc);
+    *owned = child == page;
+    return NULL;
+}
+
+static gboolean
+ns_sandbox_is_opaque(unsigned sandbox)
+{
+    return (sandbox & NS_SANDBOX_ACTIVE) &&
+           !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN);
+}
+
+static void
+ns_js_prepare_origin_memo(ns_js *js)
+{
+    if (js->url_origin_memo && g_hash_table_size(js->url_origin_memo) < 512)
+        return;
+    g_clear_pointer(&js->url_origin_memo, g_hash_table_destroy);
+    js->url_origin_memo = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                g_free, g_free);
+}
+
+static const char *
+ns_js_memo_origin(ns_js *js, const char *url)
+{
+    const char *origin = g_hash_table_lookup(js->url_origin_memo, url);
+    if (origin) return origin;
+    char *parsed = ns_url_origin_from(url);
+    if (!parsed || !*parsed || strcmp(parsed, "null") == 0) {
+        g_free(parsed);
+        parsed = g_strdup("");
+    }
+    g_hash_table_insert(js->url_origin_memo, g_strdup(url), parsed);
+    return parsed;
+}
+
+typedef struct {
+    gconstpointer opaque;
+    const char   *origin;
+} ns_origin_identity;
+
+static gboolean
+ns_js_frame_origin_identity(ns_js *js, const ns_node *frame,
+                            ns_origin_identity *out)
+{
+    const ns_node *opaque_at = NULL;
+    out->opaque = NULL;
+    out->origin = NULL;
+    for (int depth = 0; frame; depth++) {
+        if (depth >= 64) return FALSE;
+        if (ns_sandbox_is_opaque(ns_iframe_effective_sandbox(frame)))
+            opaque_at = frame;
+        const char *shown = ns_element_get_attr(frame, "data-nd-frame-doc-url");
+        const char *url = js->frame_urls
+            ? g_hash_table_lookup(js->frame_urls, frame) : NULL;
+        if (url && *url && !(shown && *shown)) {
+            const char *origin = opaque_at ? NULL : ns_js_memo_origin(js, url);
+            if (origin && *origin) out->origin = origin;
+            else out->opaque = opaque_at ? opaque_at : frame;
+            return TRUE;
+        }
+        frame = ns_js_node_frame(frame->parent);
+    }
+    if (opaque_at) {
+        out->opaque = opaque_at;
+    } else if (ns_js_document_origin_is_opaque(js) || !js->document_origin ||
+               !*js->document_origin ||
+               strcmp(js->document_origin, "null") == 0) {
+        out->opaque = js;
+    } else {
+        out->origin = js->document_origin;
+    }
+    return TRUE;
+}
+
+static gboolean
+ns_js_realm_may_see_node(ns_js *js, JSContext *realm, const ns_node *node)
+{
+    if ((!js->frame_urls || g_hash_table_size(js->frame_urls) == 0) &&
+        !ns_js_realm_is_retired(js, realm))
+        return TRUE;
+    gboolean owned = FALSE;
+    const ns_node *node_frame = ns_js_node_owning_frame(js, node, &owned);
+    if (!owned) return TRUE;
+    const ns_node *caller_frame = NULL;
+    if (!ns_js_realm_is_main(js, realm)) {
+        if (ns_js_realm_is_retired(js, realm)) return FALSE;
+        caller_frame = ns_js_frame_of_realm(js, realm);
+        if (!caller_frame) return TRUE;
+    }
+    if (caller_frame == node_frame) return TRUE;
+    if (js->frame_origin_gen && js->sight_memo_gen == js->frame_origin_gen &&
+        js->sight_memo_caller == caller_frame &&
+        js->sight_memo_node == node_frame)
+        return js->sight_memo_result;
+    ns_origin_identity caller_id, node_id;
+    gboolean same = FALSE;
+    ns_js_prepare_origin_memo(js);
+    if (ns_js_frame_origin_identity(js, caller_frame, &caller_id) &&
+        ns_js_frame_origin_identity(js, node_frame, &node_id))
+        same = caller_id.opaque || node_id.opaque
+             ? caller_id.opaque == node_id.opaque
+             : strcmp(caller_id.origin, node_id.origin) == 0;
+    if (!js->frame_origin_gen) js->frame_origin_gen = 1;
+    js->sight_memo_gen = js->frame_origin_gen;
+    js->sight_memo_caller = caller_frame;
+    js->sight_memo_node = node_frame;
+    js->sight_memo_result = same;
+    return same;
+}
+
+static gboolean
+ns_js_may_wrap_node(JSContext *ctx, const ns_node *node)
+{
+    ns_js *js = js_from_ctx(ctx);
+    return !js || js->worker_host || ns_js_realm_may_see_node(js, ctx, node) ||
+           !JS_IsPageCodeOnStack(ctx);
+}
+
+static JSValue ns_make_node_wrapper(JSContext *ctx, const ns_node *cnode);
+
 static JSValue
 ns_make_element(JSContext *ctx, const ns_node *cnode)
+{
+    if (!cnode || !ns_js_may_wrap_node(ctx, cnode)) return JS_NULL;
+    return ns_make_node_wrapper(ctx, cnode);
+}
+
+static JSValue
+ns_make_node_wrapper(JSContext *ctx, const ns_node *cnode)
 {
     if (!cnode) return JS_NULL;
     ns_js *js = js_from_ctx(ctx);
@@ -6087,7 +6374,7 @@ ns_window_document_for(JSContext *ctx, JSValueConst window)
         target = ns_unwrap_element_mut(js->iframe_doc);
         if (target && target->kind == NS_NODE_DOCUMENT) return target;
     }
-    return js ? js->current_doc : NULL;
+    return ns_js_context_document(ctx);
 }
 
 enum {
@@ -9192,8 +9479,7 @@ ns_element_get_properties(JSContext *ctx, JSValueConst this_val)
 {
     JSValue arr = JS_NewArray(ctx);
     ns_node *n = ns_unwrap_element_mut(this_val);
-    ns_js *js = js_from_ctx(ctx);
-    ns_node *doc = js ? js->current_doc : NULL;
+    ns_node *doc = ns_node_home_root(n);
     GPtrArray *nodes = g_ptr_array_new();
     if (n && microdata_has_itemscope(n)) {
         GHashTable *propset = g_hash_table_new(NULL, NULL);
@@ -9277,7 +9563,7 @@ static void
 microdata_collect_top_items(ns_node *n, GHashTable *wanted, JSContext *ctx,
                             JSValue arr, uint32_t *idx, int depth)
 {
-    if (!n || depth >= 512) return;
+    if (!n || depth >= 512 || (depth > 0 && ns_dom_hidden_child(n))) return;
     if (n->kind == NS_NODE_ELEMENT && microdata_has_itemscope(n) &&
         !microdata_has_itemprop(n) &&
         microdata_item_matches_types(n, wanted))
@@ -9286,15 +9572,19 @@ microdata_collect_top_items(ns_node *n, GHashTable *wanted, JSContext *ctx,
         microdata_collect_top_items(c, wanted, ctx, arr, idx, depth + 1);
 }
 
+static ns_node *ns_document_root_for(JSContext *ctx, JSValueConst this_val);
+static JSValue ns_document_unrooted(JSContext *ctx, JSValueConst this_val,
+                                    JSValue fallback);
+
 static JSValue
 ns_document_getItems(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
-    (void)this_val;
+    ns_node *doc = ns_document_root_for(ctx, this_val);
+    if (!doc)
+        return ns_document_unrooted(ctx, this_val,
+            ns_nodelist_from_array(ctx, JS_NewArray(ctx)));
     JSValue arr = JS_NewArray(ctx);
-    ns_js *js = js_from_ctx(ctx);
-    ns_node *doc = js ? js->current_doc : NULL;
-    if (!doc) return ns_nodelist_from_array(ctx, arr);
     GHashTable *wanted = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                g_free, NULL);
     if (argc >= 1 && !JS_IsUndefined(argv[0]) && !JS_IsNull(argv[0])) {
@@ -11475,10 +11765,30 @@ ns_js_fetch_base_url(JSContext *ctx)
 }
 
 static JSValue
+ns_js_reject_retired_realm(JSContext *ctx, const char *api)
+{
+    JSValue resolving[2];
+    JSValue promise = JS_NewPromiseCapability(ctx, resolving);
+    if (JS_IsException(promise)) return promise;
+    JS_ThrowTypeError(ctx, "%s: the document that made this call is gone", api);
+    JSValue ex = JS_GetException(ctx);
+    JSValueConst rargs[1] = { ex };
+    JSValue r = JS_Call(ctx, resolving[1], JS_UNDEFINED, 1, rargs);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, ex);
+    JS_FreeValue(ctx, resolving[0]);
+    JS_FreeValue(ctx, resolving[1]);
+    return promise;
+}
+
+static JSValue
 ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (!js_from_ctx(ctx) || argc < 1)
         return JS_ThrowTypeError(ctx, "fetch requires a URL");
+    if (ns_js_realm_is_retired(js_from_ctx(ctx), ctx))
+        return ns_js_reject_retired_realm(ctx, "fetch");
     {
         JSValue stream_body = JS_UNDEFINED;
         JSValueConst carrier = JS_UNDEFINED;
@@ -16433,6 +16743,9 @@ ns_window_frame_node(ns_js *js, JSValueConst win)
     return NULL;
 }
 
+static JSContext *ns_window_owning_realm(ns_js *js, JSValueConst win);
+static const char *ns_realm_recorded_origin(ns_js *js, JSContext *realm);
+
 static char *
 ns_window_origin_of(JSContext *ctx, JSValueConst win)
 {
@@ -16465,6 +16778,13 @@ ns_window_origin_of(JSContext *ctx, JSValueConst win)
         char *origin = ns_url_origin_from(frame_url);
         JS_FreeValue(ctx, forwarded);
         return origin ? origin : g_strdup("null");
+    }
+    JSContext *owner = js && !frame ? ns_window_owning_realm(js, win) : NULL;
+    if (owner && !ns_js_realm_is_main(js, owner)) {
+        const char *recorded = ns_js_realm_is_retired(js, owner) ? "null"
+                             : ns_realm_recorded_origin(js, owner);
+        JS_FreeValue(ctx, forwarded);
+        return g_strdup(recorded ? recorded : "null");
     }
     JSValue loc = JS_GetPropertyStr(ctx, win, "location");
     if (JS_IsException(loc)) JS_FreeValue(ctx, JS_GetException(ctx));
@@ -24104,6 +24424,9 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     if (ready_state != 1 || send_flag)
         return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
                                       "XMLHttpRequest is not open");
+    if (ns_js_realm_is_retired(js_from_ctx(ctx), ctx))
+        return ns_throw_dom_exception(ctx, "NetworkError", 19,
+            "XMLHttpRequest: the document that made this call is gone");
     JSValue sync_v = JS_GetPropertyStr(ctx, this_val, "_sync");
     gboolean sync_request = JS_ToBool(ctx, sync_v) > 0;
     JS_FreeValue(ctx, sync_v);
@@ -27577,12 +27900,16 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     if (argc < 1)
         return JS_ThrowTypeError(ctx, "WebSocket requires a URL");
+    ns_js *js = js_from_ctx(ctx);
+    if (ns_js_realm_is_retired(js, ctx))
+        return ns_throw_dom_exception(ctx, "SecurityError", 18,
+            "WebSocket: the document that made this call is gone");
     const char *url_raw = JS_ToCString(ctx, argv[0]);
     if (!url_raw) return JS_EXCEPTION;
-    ns_js *js = js_from_ctx(ctx);
     char *resolved = NULL;
-    if (js && js->current_url)
-        resolved = ns_url_resolve(js->current_url, url_raw);
+    const char *ws_base = js ? ns_js_calling_document_url(js, ctx) : NULL;
+    if (ws_base)
+        resolved = ns_url_resolve(ws_base, url_raw);
     char *target = g_strdup(resolved ? resolved : url_raw);
     JS_FreeCString(ctx, url_raw);
     g_free(resolved);
@@ -27866,11 +28193,15 @@ ns_window_eventsource_ctor(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowTypeError(ctx, "EventSource requires a URL");
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_ThrowTypeError(ctx, "EventSource is unavailable");
+    if (ns_js_realm_is_retired(js, ctx))
+        return ns_throw_dom_exception(ctx, "SecurityError", 18,
+            "EventSource: the document that made this call is gone");
     const char *url_raw = JS_ToCString(ctx, argv[0]);
     if (!url_raw) return JS_EXCEPTION;
     char *resolved = NULL;
-    if (js->current_url)
-        resolved = ns_url_resolve(js->current_url, url_raw);
+    const char *es_base = ns_js_calling_document_url(js, ctx);
+    if (es_base)
+        resolved = ns_url_resolve(es_base, url_raw);
     char *target = g_strdup(resolved ? resolved : url_raw);
     JS_FreeCString(ctx, url_raw);
     g_free(resolved);
@@ -32488,6 +32819,9 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     ns_js *js = js_from_ctx(ctx);
     if (!js)
         return JS_ThrowTypeError(ctx, "Worker is unavailable");
+    if (ns_js_realm_is_retired(js, ctx))
+        return ns_throw_dom_exception(ctx, "SecurityError", 18,
+            "Worker: the document that made this call is gone");
     const char *raw = JS_ToCString(ctx, argv[0]);
     if (!raw) return JS_EXCEPTION;
     char *abs_url = NULL;
@@ -32716,6 +33050,9 @@ ns_shared_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc,
     ns_js *js = js_from_ctx(ctx);
     if (!js || js->worker_host)
         return JS_ThrowTypeError(ctx, "SharedWorker is unavailable");
+    if (ns_js_realm_is_retired(js, ctx))
+        return ns_throw_dom_exception(ctx, "SecurityError", 18,
+            "SharedWorker: the document that made this call is gone");
     const char *raw = JS_ToCString(ctx, argv[0]);
     if (!raw) return JS_EXCEPTION;
     g_autofree char *base = ctx == js->ctx
@@ -32879,6 +33216,11 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return ns_sw_reject(ctx, "TypeError", "register requires a script URL");
     const char *raw = JS_ToCString(ctx, argv[0]);
     if (!raw) return JS_EXCEPTION;
+    if (ns_js_realm_is_retired(js, ctx)) {
+        JS_FreeCString(ctx, raw);
+        return ns_sw_reject(ctx, "SecurityError",
+                            "the document that made this call is gone");
+    }
     if (ns_js_realm_origin_is_opaque(js, ctx)) {
         JS_FreeCString(ctx, raw);
         return ns_sw_reject(ctx, "SecurityError",
@@ -48166,7 +48508,7 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
     case NS_LIVE_DOC_TAG_NS:
     case NS_LIVE_DOC_CLASS:
         root = ns_unwrap_element(b->owner);
-        if (!root) root = js ? js->current_doc : NULL;
+        if (!root) root = ns_js_context_document(ctx);
         break;
     default:
         root = ns_unwrap_element(b->owner);
@@ -49076,9 +49418,7 @@ ns_element_get_list_ref(JSContext *ctx, JSValueConst this_val)
     if (ns_node_is_custom_element(el)) return JS_UNDEFINED;
     const char *id = ns_element_get_attr(el, "list");
     if (!id || !*id) return JS_NULL;
-    ns_js *_j = js_from_ctx(ctx);
-    if (!_j || !_j->current_doc) return JS_NULL;
-    ns_node *found = ns_node_find_by_id(_j->current_doc, id);
+    ns_node *found = ns_node_find_by_id(ns_node_home_root((ns_node *)el), id);
     if (!found || !found->name ||
         g_ascii_strcasecmp(found->name, "datalist") != 0)
         return JS_NULL;
@@ -56516,12 +56856,12 @@ ns_iframe_ensure_content_root(ns_node *iframe)
     "    var E = crossErrors[name];" \
     "    return typeof E === 'function' ? new E(message) : new crossError(message); }" \
     "  function crossCall(fn){ try { return fn(); } catch (e) { throw crossOwnError(e); } }" \
-    "  function crossLocation(target, denied, guard){" \
+    "  function crossLocation(target, denied, guard, windowOp){" \
     "    var fallback = crossFallback;" \
     "    var replace = function replace(v){ if (guard) guard(); v = '' + v;" \
-    "      crossCall(function(){ target.location.replace(v); }); };" \
+    "      crossCall(function(){ crossApply(windowOp, undefined, [6, target, v]); }); };" \
     "    var setHref = function(v){ if (guard) guard(); v = '' + v;" \
-    "      crossCall(function(){ target.location.href = v; }); };" \
+    "      crossCall(function(){ crossApply(windowOp, undefined, [5, target, v]); }); };" \
     "    return new Proxy({}, {" \
     "      get: function(t, p){" \
     "        if (p === 'replace') return replace;" \
@@ -56698,7 +57038,7 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents, nativeFetch, frameStorage, nativeRealm, frameNavigate, sameOriginWindow){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage, docURL, realmClone, windowEvents, nativeFetch, frameStorage, nativeRealm, frameNavigate, sameOriginWindow, windowOp, postFrom){"
     "  var url = initialURL || 'about:blank';"
     "  var shown = docURL || '';"
     "  function vis(){ return shown || url; }"
@@ -56733,21 +57073,21 @@ static const char ns_iframe_global_bootstrap[] =
     "      if (!active) throw new DOMException("
     "        'Blocked top navigation: sandboxed iframe without allow-top-navigation', 'SecurityError'); }"
     "    var navGuard = up ? undefined : ancestorGuard;"
-    "    loc = crossLocation(target, denied, navGuard);"
+    "    loc = crossLocation(target, denied, navGuard, windowOp);"
     "    proxy = new Proxy({}, {"
     "      get:function(t,p){"
     "        if(p==='window'||p==='self'||p==='frames') return proxy;"
     "        if(p==='parent') return up || proxy;"
     "        if(p==='top') return up ? up.top : proxy;"
     "        if(p==='postMessage') return function(){ var a = arguments, n = a.length;"
-    "          return crossCall(function(){ return reflectApply(realWin.__nsPostMessageFrom, realWin,"
+    "          return crossCall(function(){ return reflectApply(postFrom, G,"
     "            n >= 3 ? [target, G, a[0], a[1], a[2]] : n === 2 ? [target, G, a[0], a[1]]"
     "                   : n === 1 ? [target, G, a[0]] : [target, G]); }); };"
     "        if(p==='location') return loc;"
-    "        if(p==='closed') return crossCall(function(){ return !!target.closed; });"
-    "        if(p==='length') return crossCall(function(){ return target.length >>> 0; });"
+    "        if(p==='closed') return crossCall(function(){ return reflectApply(windowOp, undefined, [0, target]); });"
+    "        if(p==='length') return crossCall(function(){ return reflectApply(windowOp, undefined, [1, target]); });"
     "        if(p==='close'||p==='focus'||p==='blur') return function(){"
-    "          crossCall(function(){ target[p](); }); };"
+    "          crossCall(function(){ reflectApply(windowOp, undefined, [p==='close' ? 2 : p==='focus' ? 3 : 4, target]); }); };"
     "        var child = childFrame(p); if(child) return child;"
     "        if(crossFallback(p)) return undefined;"
     "        return denied(); },"
@@ -58168,14 +58508,16 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
                 if (!js->replaced_realms)
                     js->replaced_realms = g_ptr_array_new();
                 g_ptr_array_add(js->replaced_realms, replaced);
+                ns_js_retire_realm_identity(js, replaced);
             }
-            g_hash_table_replace(js->frame_contexts, iframe, fctx);
+            ns_js_map_frame_realm(js, iframe, fctx);
             ns_perf_move_timeline(js, iframe, fctx);
         }
 
     }
 
     ns_realm_record_origin(js, fctx, iframe);
+    ns_js_record_realm_identity(js, fctx, iframe, initial_url, sandbox);
     ns_js_adopt_frame_clock(js, iframe, fctx);
     ns_realm_scope native_scope;
     native_scope.active = FALSE;
@@ -58209,7 +58551,7 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         JSValue urlv = JS_NewString(fctx, initial_url ? initial_url : "about:blank");
         JSValue sbv = JS_NewInt32(fctx, (int32_t)sandbox);
         JSValue platform = native ? JS_NULL : ns_iframe_platform_names(fctx, js);
-        JSValue frame_el = iframe ? ns_make_element(js->ctx, iframe) : JS_NULL;
+        JSValue frame_el = iframe ? ns_make_node_wrapper(js->ctx, iframe) : JS_NULL;
         const char *frame_name = iframe ? ns_element_get_attr(iframe, "name") : NULL;
         JSValue frame_name_v = JS_NewString(fctx, frame_name ? frame_name : "");
         JSValue child_frame_of = JS_NewCFunction(fctx, ns_iframe_child_frame_of,
@@ -58239,13 +58581,20 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
             : JS_UNDEFINED;
         JSValue same_origin_window = JS_NewCFunction(fctx,
             ns_iframe_same_origin_window, "sameOriginWindow", 1);
-        JSValueConst args[18] = { fg, parent_global, iframe_doc, urlv, sbv,
+        JSValue window_op = JS_NewCFunction(fctx, ns_cross_window_op,
+                                            "__nsCrossWindowOp", 3);
+        JSValue post_from = JS_NewCFunction(fctx, ns_window_post_message_from,
+                                            "__nsPostMessageFrom", 5);
+        JSValueConst args[20] = { fg, parent_global, iframe_doc, urlv, sbv,
                                   platform, frame_el, frame_name_v,
                                   child_frame_of, post_message, docv,
                                   realm_clone, window_events, native_fetch,
                                   frame_storage, JS_NewBool(fctx, native),
-                                  frame_navigate, same_origin_window };
-        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 18, args);
+                                  frame_navigate, same_origin_window,
+                                  window_op, post_from };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 20, args);
+        JS_FreeValue(fctx, post_from);
+        JS_FreeValue(fctx, window_op);
         JS_FreeValue(fctx, same_origin_window);
         JS_FreeValue(fctx, frame_navigate);
         JS_FreeValue(fctx, frame_storage);
@@ -58421,7 +58770,7 @@ ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
     if (!ns_iframe_ensure_content_root(iframe)) return JS_NULL;
     ns_node *doc = ns_iframe_document_node(iframe);
     if (!doc) return JS_NULL;
-    if (doc->js_wrapper) return ns_make_element(ctx, doc);
+    if (doc->js_wrapper) return ns_make_node_wrapper(ctx, doc);
     const char *cs = iframe
         ? ns_element_get_attr(iframe, "data-nd-frame-charset") : NULL;
     const char *url = iframe
@@ -58467,7 +58816,7 @@ ns_iframe_content_document(JSContext *ctx, JSValueConst this_val, ns_node *n)
     if (JS_IsObject(realm)) return realm;
     JS_FreeValue(ctx, realm);
     ns_node *doc = ns_iframe_document_node(n);
-    if (doc && doc->js_wrapper) return ns_make_element(ctx, doc);
+    if (doc && doc->js_wrapper) return ns_make_node_wrapper(ctx, doc);
     if (!ns_node_is_navigable_frame(n)) return JS_NULL;
     return ns_iframe_build_content_document(ctx, n);
 }
@@ -58499,8 +58848,109 @@ ns_element_get_contentDocument(JSContext *ctx, JSValueConst this_val)
     return ns_iframe_content_document(ctx, this_val, n);
 }
 
+static ns_node *
+ns_window_stored_frame(ns_js *js, JSValueConst win)
+{
+    if (!js->frame_windows || !JS_IsObject(win)) return NULL;
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, js->frame_windows);
+    while (g_hash_table_iter_next(&it, &key, &value))
+        if (value == JS_VALUE_GET_PTR(win)) return key;
+    return NULL;
+}
+
+enum {
+    NS_CROSS_WINDOW_CLOSED,
+    NS_CROSS_WINDOW_LENGTH,
+    NS_CROSS_WINDOW_CLOSE,
+    NS_CROSS_WINDOW_FOCUS,
+    NS_CROSS_WINDOW_BLUR,
+    NS_CROSS_WINDOW_NAVIGATE,
+    NS_CROSS_WINDOW_REPLACE,
+};
+
+static JSValue
+ns_cross_window_navigate_frame(JSContext *ctx, ns_js *js, ns_node *frame,
+                               JSValueConst url_v)
+{
+    const char *raw = JS_ToCString(ctx, url_v);
+    if (!raw) return JS_EXCEPTION;
+    g_autofree char *abs_url =
+        ns_url_resolve(ns_js_realm_url_or_current(js, ctx), raw);
+    JS_FreeCString(ctx, raw);
+    if (!abs_url)
+        return ns_throw_dom_exception(ctx, "SyntaxError", 12,
+                                      "location: invalid URL");
+    if (!ns_location_target_allowed(abs_url)) return JS_UNDEFINED;
+    if (js->iframe_load_depth > 0 && js->raf_frame_ctx == frame)
+        ns_element_set_attr(frame, "data-nd-frame-nav-pending", "1");
+    gboolean is_object = ns_node_is_tag(frame, NS_TAG_OBJECT) ||
+                         ns_node_is_pdf_embed(frame);
+    ns_js_set_attr_recorded(js, frame, is_object ? "data" : "src", abs_url);
+    ns_js_schedule_iframe_load_full(js, frame, TRUE);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_cross_window_op(JSContext *ctx, JSValueConst this_val, int argc,
+                   JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    int32_t op = -1;
+    if (argc >= 1 && JS_IsNumber(argv[0])) JS_ToInt32(ctx, &op, argv[0]);
+    if (!js || argc < 2 || !JS_IsObject(argv[1]) ||
+        ns_js_realm_is_retired(js, ctx))
+        return op == NS_CROSS_WINDOW_CLOSED ? JS_TRUE
+             : op == NS_CROSS_WINDOW_LENGTH ? JS_NewUint32(ctx, 0)
+             : JS_UNDEFINED;
+    JSValue forwarded = ns_window_forward_of(js, argv[1]);
+    JSValueConst win = JS_IsObject(forwarded) ? forwarded : argv[1];
+    JSContext *realm = ns_window_owning_realm(js, win);
+    gboolean is_main = realm && ns_js_realm_is_main(js, realm);
+    ns_node *frame = realm && !is_main ? ns_js_frame_of_realm(js, realm) : NULL;
+    if (!frame && !is_main) frame = ns_window_stored_frame(js, argv[1]);
+    if (!realm || ns_js_realm_is_retired(js, realm)) realm = ctx;
+    gboolean live = is_main ||
+                    (frame && ns_frame_owner_has_browsing_context(js, frame));
+    JSValue ret = JS_UNDEFINED;
+    switch (op) {
+    case NS_CROSS_WINDOW_CLOSED:
+        ret = JS_NewBool(ctx, !live);
+        break;
+    case NS_CROSS_WINDOW_LENGTH: {
+        ns_node *doc = !live ? NULL
+                     : is_main ? ns_js_context_document(realm)
+                     : ns_iframe_document_node(frame);
+        ret = JS_NewUint32(ctx, doc ? ns_count_child_frames(doc, 0) : 0);
+        break;
+    }
+    case NS_CROSS_WINDOW_CLOSE:
+        if (is_main) ret = ns_popup_close_self(realm, win, 0, NULL);
+        break;
+    case NS_CROSS_WINDOW_FOCUS:
+        if (live) ret = ns_window_focus(realm, win, 0, NULL);
+        break;
+    case NS_CROSS_WINDOW_NAVIGATE:
+    case NS_CROSS_WINDOW_REPLACE:
+        if (argc < 3 || !live) break;
+        if (is_main)
+            ret = op == NS_CROSS_WINDOW_NAVIGATE
+                ? ns_location_set_href(realm, JS_UNDEFINED, argv[2])
+                : ns_location_replace(realm, JS_UNDEFINED, 1, &argv[2]);
+        else
+            ret = ns_cross_window_navigate_frame(ctx, js, frame, argv[2]);
+        break;
+    default:
+        break;
+    }
+    JS_FreeValue(ctx, forwarded);
+    return ret;
+}
+
 static const char ns_cross_window_bootstrap[] =
-    "(function(G, postFrom){"
+    "(function(G, postFrom, windowOp){"
     "  var WM = WeakMap, wmGet = WM.prototype.get, wmSet = WM.prototype.set,"
     "      wmHas = WM.prototype.has, apply = Reflect.apply, arrayOf = Array.of;"
     "  var cache = new WM();"
@@ -58515,7 +58965,7 @@ static const char ns_cross_window_bootstrap[] =
     "  if (apply(wmHas, cache, arrayOf(target))) return apply(wmGet, cache, arrayOf(target));"
     "  var proxy;"
     "  function denied(){ throw new DOMException('Blocked cross-origin frame access', 'SecurityError'); }"
-    "  var loc = crossLocation(target, denied);"
+    "  var loc = crossLocation(target, denied, undefined, windowOp);"
     "  var allowed = ['window','self','frames','parent','top','opener','postMessage',"
     "    'location','closed','length','close','focus','blur'];"
     "  proxy = new Proxy({}, {"
@@ -58527,10 +58977,10 @@ static const char ns_cross_window_bootstrap[] =
     "      if(p==='postMessage') return function(){ var a = postArgs(target, arguments);"
     "        return crossCall(function(){ return apply(postFrom, G, a); }); };"
     "      if(p==='location') return loc;"
-    "      if(p==='closed') return crossCall(function(){ return !!target.closed; });"
-    "      if(p==='length') return crossCall(function(){ return target.length >>> 0; });"
+    "      if(p==='closed') return crossCall(function(){ return apply(windowOp, undefined, arrayOf(0, target)); });"
+    "      if(p==='length') return crossCall(function(){ return apply(windowOp, undefined, arrayOf(1, target)); });"
     "      if(p==='close'||p==='focus'||p==='blur') return function(){"
-    "        crossCall(function(){ target[p](); }); };"
+    "        crossCall(function(){ apply(windowOp, undefined, arrayOf(p==='close' ? 2 : p==='focus' ? 3 : 4, target)); }); };"
     "      if(crossFallback(p)) return undefined;"
     "      return denied(); },"
     "    set:function(t,p,v){ if(p==='location'){ loc.href=v; return true; } return denied(); },"
@@ -58564,8 +59014,11 @@ ns_install_cross_window_maker(JSContext *ctx, JSValueConst global)
     if (!JS_IsException(outer) && JS_IsFunction(ctx, outer)) {
         JSValue post_from = JS_NewCFunction(ctx, ns_window_post_message_from,
                                             "__nsPostMessageFrom", 5);
-        JSValueConst args[2] = { global, post_from };
-        maker = JS_Call(ctx, outer, JS_UNDEFINED, 2, args);
+        JSValue window_op = JS_NewCFunction(ctx, ns_cross_window_op,
+                                            "__nsCrossWindowOp", 3);
+        JSValueConst args[3] = { global, post_from, window_op };
+        maker = JS_Call(ctx, outer, JS_UNDEFINED, 3, args);
+        JS_FreeValue(ctx, window_op);
         JS_FreeValue(ctx, post_from);
     }
     if (JS_IsException(outer) || JS_IsException(maker)) {
@@ -59481,17 +59934,28 @@ static const JSCFunctionListEntry ns_href_proto_funcs[] = {
 static ns_node *
 ns_document_root_for(JSContext *ctx, JSValueConst this_val)
 {
-    ns_node *root = ns_unwrap_element_mut(this_val);
-    if (root && root->kind == NS_NODE_DOCUMENT) return root;
-    ns_js *js = js_from_ctx(ctx);
-    return js ? js->current_doc : NULL;
+    ns_node *node = ns_unwrap_element_mut(this_val);
+    if (!node) {
+        JS_ThrowTypeError(ctx, "Illegal invocation");
+        return NULL;
+    }
+    return node->kind == NS_NODE_DOCUMENT ? node : ns_js_context_document(ctx);
+}
+
+static JSValue
+ns_document_unrooted(JSContext *ctx, JSValueConst this_val, JSValue fallback)
+{
+    if (ns_unwrap_element(this_val)) return fallback;
+    JS_FreeValue(ctx, fallback);
+    return JS_EXCEPTION;
 }
 
 static JSValue
 ns_document_getElementById(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     ns_node *root = ns_document_root_for(ctx, this_val);
-    if (!root || argc < 1) return JS_NULL;
+    if (!root) return ns_document_unrooted(ctx, this_val, JS_NULL);
+    if (argc < 1) return JS_NULL;
     size_t len = 0;
     const char *id = JS_ToCStringLen(ctx, &len, argv[0]);
     if (!id) return JS_NULL;
@@ -59639,7 +60103,7 @@ static JSValue
 ns_document_get_scrollingElement(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *doc = ns_document_root_for(ctx, this_val);
-    if (!doc) return JS_NULL;
+    if (!doc) return ns_document_unrooted(ctx, this_val, JS_NULL);
     if (doc->flags & NS_NODE_QUIRKS)
         return ns_document_get_body(ctx, this_val);
     return ns_document_get_documentElement(ctx, this_val);
@@ -59649,7 +60113,7 @@ static JSValue
 ns_document_get_head(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *doc = ns_document_root_for(ctx, this_val);
-    if (!doc) return JS_NULL;
+    if (!doc) return ns_document_unrooted(ctx, this_val, JS_NULL);
     ns_node *head = ns_node_find_first_element(doc, "head");
     return ns_make_element(ctx, head);
 }
@@ -59679,7 +60143,8 @@ ns_document_get_activeElement(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *doc = ns_document_root_for(ctx, this_val);
     ns_js *js = js_from_ctx(ctx);
-    if (!js || !doc) return JS_NULL;
+    if (!doc) return ns_document_unrooted(ctx, this_val, JS_NULL);
+    if (!js) return JS_NULL;
     if (js->focused_node &&
         !ns_node_ancestor_or_self(js->focused_node,
                                   ns_js_top_document(js->current_doc)))
@@ -59740,8 +60205,9 @@ ns_document_get_images(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_document_get_scripts(JSContext *ctx, JSValueConst this_val)
 {
-    return ns_document_collect_by_tag(ctx,
-        ns_document_root_for(ctx, this_val), "script");
+    ns_node *doc = ns_document_root_for(ctx, this_val);
+    if (!doc) return ns_document_unrooted(ctx, this_val, JS_NewArray(ctx));
+    return ns_document_collect_by_tag(ctx, doc, "script");
 }
 
 static JSValue
@@ -59793,9 +60259,9 @@ ns_document_get_all(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_document_get_anchors(JSContext *ctx, JSValueConst this_val)
 {
-    JSValue arr = JS_NewArray(ctx);
     ns_node *doc = ns_document_root_for(ctx, this_val);
-    if (!doc) return arr;
+    if (!doc) return ns_document_unrooted(ctx, this_val, JS_NewArray(ctx));
+    JSValue arr = JS_NewArray(ctx);
     uint32_t idx = 0;
     GQueue q = G_QUEUE_INIT;
     g_queue_push_tail(&q, doc);
@@ -59991,9 +60457,10 @@ static JSValue
 ns_document_get_fonts(JSContext *ctx, JSValueConst this_val)
 {
     ns_js *js = js_from_ctx(ctx);
+    const ns_node *fonts_doc = ns_unwrap_element(this_val);
     gboolean main_doc = js && js->ctx == ctx &&
                         ctx == ns_js_main_realm(js) && js->current_doc &&
-                        ns_document_root_for(ctx, this_val) == js->current_doc;
+                        fonts_doc == js->current_doc;
     if (main_doc) {
         js->fonts_loadingdone_armed = TRUE;
         ns_js_watch_fonts_idle(js);
@@ -60017,7 +60484,8 @@ ns_document_has_focus(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     ns_js *js = js_from_ctx(ctx);
     ns_node *doc = ns_document_root_for(ctx, this_val);
-    if (!js || !doc) return JS_FALSE;
+    if (!doc) return ns_document_unrooted(ctx, this_val, JS_FALSE);
+    if (!js) return JS_FALSE;
     return JS_NewBool(ctx, ns_node_ancestor_or_self(ns_js_focused_document(js),
                                                     doc) != NULL);
 }
@@ -62889,11 +63357,13 @@ ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     if (argc < 1 || !JS_IsString(argv[0])) return JS_FALSE;
+    ns_js *js = js_from_ctx(ctx);
+    if (ns_js_realm_is_retired(js, ctx)) return JS_FALSE;
     const char *raw_url = JS_ToCString(ctx, argv[0]);
     if (!raw_url) return JS_FALSE;
-    ns_js *js = js_from_ctx(ctx);
-    char *abs_url = (js && js->current_url)
-        ? ns_url_resolve(js->current_url, raw_url)
+    const char *beacon_base = js ? ns_js_calling_document_url(js, ctx) : NULL;
+    char *abs_url = beacon_base
+        ? ns_url_resolve(beacon_base, raw_url)
         : g_strdup(raw_url);
     JS_FreeCString(ctx, raw_url);
     if (!abs_url)
@@ -63243,6 +63713,9 @@ ns_window_fetch_later(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     if (!js || argc < 1)
         return JS_ThrowTypeError(ctx, "fetchLater: 1 argument required");
+    if (ns_js_realm_is_retired(js, ctx))
+        return JS_ThrowTypeError(ctx,
+            "fetchLater: the document that made this call is gone");
     const char *document_url = ns_js_calling_document_url(js, ctx);
     if (!ns_url_is_potentially_trustworthy(document_url))
         return JS_ThrowTypeError(ctx, "fetchLater: requires a secure context");
@@ -66864,7 +67337,10 @@ static JSValue
 ns_document_getElementsByTagName(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv)
 {
-    if (!ns_document_root_for(ctx, this_val) || argc < 1)
+    if (!ns_document_root_for(ctx, this_val))
+        return ns_document_unrooted(ctx, this_val,
+            ns_nodelist_finalize(ctx, ns_nodelist_new(ctx), 0));
+    if (argc < 1)
         return ns_nodelist_finalize(ctx, ns_nodelist_new(ctx), 0);
     const char *tag = JS_ToCString(ctx, argv[0]);
     if (!tag) return ns_nodelist_finalize(ctx, ns_nodelist_new(ctx), 0);
@@ -66950,7 +67426,10 @@ static JSValue
 ns_document_getElementsByClassName(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv)
 {
-    if (!ns_document_root_for(ctx, this_val) || argc < 1)
+    if (!ns_document_root_for(ctx, this_val))
+        return ns_document_unrooted(ctx, this_val,
+            ns_nodelist_from_array(ctx, JS_NewArray(ctx)));
+    if (argc < 1)
         return ns_nodelist_from_array(ctx, JS_NewArray(ctx));
     const char *cls = JS_ToCString(ctx, argv[0]);
     if (!cls) return ns_nodelist_from_array(ctx, JS_NewArray(ctx));
@@ -68085,7 +68564,7 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
                        gboolean is_xml, gboolean inert)
 {
     if (!doc_node) return JS_NULL;
-    JSValue w = ns_make_element(ctx, doc_node);
+    JSValue w = ns_make_node_wrapper(ctx, doc_node);
     if (!JS_IsObject(w)) return w;
     if (is_xml) {
         doc_node->flags |= NS_NODE_XML_DOC;
@@ -68352,24 +68831,29 @@ static JSValue
 ns_document_querySelector(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
-    return ns_query_selector_impl(ctx, ns_document_root_for(ctx, this_val),
-                                  argc, argv, FALSE, TRUE);
+    ns_node *root = ns_document_root_for(ctx, this_val);
+    if (!root) return ns_document_unrooted(ctx, this_val, JS_NULL);
+    return ns_query_selector_impl(ctx, root, argc, argv, FALSE, TRUE);
 }
 
 static JSValue
 ns_document_querySelectorAll(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
-    return ns_query_selector_impl(ctx, ns_document_root_for(ctx, this_val),
-                                  argc, argv, TRUE, TRUE);
+    ns_node *root = ns_document_root_for(ctx, this_val);
+    if (!root)
+        return ns_document_unrooted(ctx, this_val,
+            ns_nodelist_from_array(ctx, JS_NewArray(ctx)));
+    return ns_query_selector_impl(ctx, root, argc, argv, TRUE, TRUE);
 }
 
 static JSValue
 ns_document_addEventListener(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
-    return ns_add_node_listener(ctx, ns_document_root_for(ctx, this_val),
-                                argc, argv, FALSE, FALSE);
+    ns_node *doc = ns_document_root_for(ctx, this_val);
+    if (!doc) return ns_document_unrooted(ctx, this_val, JS_UNDEFINED);
+    return ns_add_node_listener(ctx, doc, argc, argv, FALSE, FALSE);
 }
 
 static JSValue
@@ -68384,8 +68868,9 @@ static JSValue
 ns_document_removeEventListener(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv)
 {
-    return ns_remove_node_listener(ctx, ns_document_root_for(ctx, this_val),
-                                   argc, argv, FALSE, FALSE);
+    ns_node *doc = ns_document_root_for(ctx, this_val);
+    if (!doc) return ns_document_unrooted(ctx, this_val, JS_UNDEFINED);
+    return ns_remove_node_listener(ctx, doc, argc, argv, FALSE, FALSE);
 }
 
 static JSValue
@@ -68445,7 +68930,8 @@ ns_document_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     if (JS_IsException(guard)) return guard;
     ns_js *js = js_from_ctx(ctx);
     ns_node *target = ns_document_root_for(ctx, this_val);
-    if (!js || !target) return JS_FALSE;
+    if (!target) return ns_document_unrooted(ctx, this_val, JS_FALSE);
+    if (!js) return JS_FALSE;
     JSValue type_v = JS_GetPropertyStr(ctx, argv[0], "type");
     const char *type = JS_ToCString(ctx, type_v);
     JS_FreeValue(ctx, type_v);
@@ -68482,8 +68968,11 @@ static JSValue
 ns_document_getElementsByName(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
+    if (!ns_document_root_for(ctx, this_val))
+        return ns_document_unrooted(ctx, this_val,
+            ns_nodelist_from_array(ctx, JS_NewArray(ctx)));
     JSValue arr = JS_NewArray(ctx);
-    if (!ns_document_root_for(ctx, this_val) || argc < 1)
+    if (argc < 1)
         return ns_nodelist_from_array(ctx, arr);
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return ns_nodelist_from_array(ctx, arr);
@@ -68497,7 +68986,8 @@ static JSValue
 ns_document_get_title(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *doc = ns_document_root_for(ctx, this_val);
-    ns_node *t = doc ? ns_node_find_first_element(doc, "title") : NULL;
+    if (!doc) return ns_document_unrooted(ctx, this_val, JS_NewString(ctx, ""));
+    ns_node *t = ns_node_find_first_element(doc, "title");
     if (!t) return JS_NewString(ctx, "");
     char *text = ns_node_collect_text(t);
     JSValue v = JS_NewString(ctx, text ? text : "");
@@ -68509,11 +68999,12 @@ static JSValue
 ns_document_set_title(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
     size_t len = 0;
+    ns_node *doc = ns_document_root_for(ctx, this_val);
+    if (!doc) return ns_document_unrooted(ctx, this_val, JS_UNDEFINED);
     const char *s = JS_ToCStringLen(ctx, &len, val);
     if (!s) return JS_EXCEPTION;
     ns_js *_j = js_from_ctx(ctx);
-    ns_node *doc = ns_document_root_for(ctx, this_val);
-    ns_node *t = doc ? ns_node_find_first_element(doc, "title") : NULL;
+    ns_node *t = ns_node_find_first_element(doc, "title");
     if (!t && doc) {
         ns_node *head = ns_node_find_first_element(doc, "head");
         if (head) {
@@ -68609,7 +69100,7 @@ ns_window_cookie_list(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     ns_js *js = js_from_ctx(ctx);
-    if (!js) return JS_NewString(ctx, "[]");
+    if (!js || ns_js_realm_is_retired(js, ctx)) return JS_NewString(ctx, "[]");
     ns_node *frame = ns_js_frame_of_realm(js, ctx);
     if (frame && ns_iframe_sandbox_denies_cookies(frame))
         return JS_NewString(ctx, "[]");
@@ -68634,7 +69125,8 @@ ns_document_get_referrer(JSContext *ctx, JSValueConst this_val)
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_NewString(ctx, "");
     ns_node *doc = ns_document_root_for(ctx, this_val);
-    if (doc && doc->parent) {
+    if (!doc) return ns_document_unrooted(ctx, this_val, JS_NewString(ctx, ""));
+    if (doc->parent) {
         const char *r = js->frame_referrers
             ? g_hash_table_lookup(js->frame_referrers, doc->parent) : NULL;
         return JS_NewString(ctx, r ? r : "");
@@ -68765,7 +69257,7 @@ static void
 ns_document_expose_legacy_named_in(JSContext *ctx, JSValueConst document,
                                    const ns_node *n, int depth)
 {
-    if (!n || depth >= 512) return;
+    if (!n || depth >= 512 || (depth > 0 && ns_dom_hidden_child(n))) return;
     if (ns_node_is_tag(n, NS_TAG_FORM)) {
         JSValue element = ns_make_element(ctx, n);
         ns_define_missing_named_value(ctx, document,
@@ -70081,6 +70573,12 @@ ns_js_reset_runtime_state(ns_js *js)
     ns_js_clear_frame_clocks(js, FALSE);
     if (js->frame_contexts)
         g_hash_table_remove_all(js->frame_contexts);
+    if (js->realm_frames)
+        g_hash_table_remove_all(js->realm_frames);
+    if (js->realm_identities)
+        g_hash_table_remove_all(js->realm_identities);
+    g_clear_pointer(&js->url_origin_memo, g_hash_table_destroy);
+    ns_js_frame_origins_changed(js);
     g_clear_pointer(&js->import_map, g_ptr_array_unref);
     if (js->frame_csps)
         g_hash_table_remove_all(js->frame_csps);
@@ -71147,6 +71645,9 @@ ns_js_free(ns_js *js)
         g_hash_table_destroy(js->frame_contexts);
         js->frame_contexts = NULL;
     }
+    g_clear_pointer(&js->realm_frames, g_hash_table_destroy);
+    g_clear_pointer(&js->realm_identities, g_hash_table_destroy);
+    g_clear_pointer(&js->url_origin_memo, g_hash_table_destroy);
     if (js->frame_csps) {
         g_hash_table_destroy(js->frame_csps);
         js->frame_csps = NULL;
@@ -73085,6 +73586,11 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
     ns_js *js = opaque;
     ns_module_kind kind = ns_js_module_kind_of(ctx, attributes);
     if (!module_name) return NULL;
+    if (ns_js_realm_is_retired(js, ctx)) {
+        JS_ThrowTypeError(ctx, "import: the document that made this call is gone: %s",
+                          module_name);
+        return NULL;
+    }
     if (kind == NS_MODULE_CSS && js && js->worker_host) {
         JS_ThrowTypeError(ctx, "CSS modules are not available in workers: %s",
                           module_name);
@@ -74971,6 +75477,7 @@ ns_js_mark_iframe_source(ns_js *js, ns_node *iframe, const char *origin,
     const char *srcdoc = ns_element_get_attr(iframe, "srcdoc");
     const char *frame_url = srcdoc && *srcdoc ? origin
                           : abs_url && *abs_url ? abs_url : origin;
+    ns_js_frame_origins_changed(js);
     if (js && js->frame_urls)
         g_hash_table_replace(js->frame_urls, iframe,
                              g_strdup(frame_url ? frame_url : ""));
@@ -75568,6 +76075,9 @@ ns_js_realm_forget(ns_js *js, JSContext *realm, ns_node *frame)
     g_hash_table_iter_init(&it, js->frame_contexts);
     while (g_hash_table_iter_next(&it, NULL, &value))
         if (value == realm) g_hash_table_iter_remove(&it);
+    if (js->realm_frames) g_hash_table_remove(js->realm_frames, realm);
+    if (js->realm_identities) g_hash_table_remove(js->realm_identities, realm);
+    ns_js_frame_origins_changed(js);
     if (js->replaced_realms) g_ptr_array_remove(js->replaced_realms, realm);
     g_hash_table_remove(js->realm_doc_origins, realm);
     ns_perf_forget_realm(js, realm);
@@ -75714,6 +76224,26 @@ ns_js_iframe_stop_activity(ns_js *js, ns_node *iframe)
     ns_js_purge_frame_rafs(js, iframe);
     ns_js_purge_frame_timers(js, iframe);
     ns_js_scrub_iframe_globals(js, iframe);
+}
+
+static void
+ns_js_retire_frame_realm(ns_js *js, ns_node *iframe, gboolean keep_initial_blank)
+{
+    JSContext *mapped = js->frame_contexts
+        ? g_hash_table_lookup(js->frame_contexts, iframe) : NULL;
+    if (!mapped) return;
+    JSContext *initial_blank = js->initial_blank_realms
+        ? g_hash_table_lookup(js->initial_blank_realms, iframe) : NULL;
+    if (keep_initial_blank && mapped == initial_blank) return;
+    g_hash_table_remove(js->frame_contexts, iframe);
+    if (js->realm_frames &&
+        g_hash_table_lookup(js->realm_frames, mapped) == iframe)
+        g_hash_table_remove(js->realm_frames, mapped);
+    ns_js_frame_origins_changed(js);
+    if (!js->replaced_realms) js->replaced_realms = g_ptr_array_new();
+    if (!g_ptr_array_find(js->replaced_realms, mapped, NULL))
+        g_ptr_array_add(js->replaced_realms, mapped);
+    ns_js_retire_realm_identity(js, mapped);
 }
 
 static void
@@ -76882,6 +77412,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
                 resp = ns_js_fetch_resource(js, abs_url, origin, dest_headers, &err);
             if (post) g_hash_table_remove(js->frame_posts, iframe);
             sandbox = ns_iframe_adopt_csp_sandbox(iframe, resp);
+            ns_js_frame_origins_changed(js);
             scripts_ok = !(sandbox & NS_SANDBOX_ACTIVE) ||
                          (sandbox & NS_SANDBOX_ALLOW_SCRIPTS);
             if (!ns_frame_response_is_download(resp)) {
@@ -76930,6 +77461,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
                         resp->final_url ? resp->final_url : abs_url,
                         &resp->csp_header);
                     sandbox = ns_iframe_adopt_csp_sandbox(iframe, resp);
+                    ns_js_frame_origins_changed(js);
                     scripts_ok = !(sandbox & NS_SANDBOX_ACTIVE) ||
                                  (sandbox & NS_SANDBOX_ALLOW_SCRIPTS);
                     ns_element_set_attr(iframe, "data-nd-frame-charset", "UTF-8");
@@ -77121,6 +77653,9 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         if (iorigin && ns_iframe_parent_is_top_window(js, iframe) &&
             !ns_url_same_origin(iorigin, ns_js_top_url(js)))
             sandbox |= NS_FRAME_CROSS_ORIGIN;
+        if (!adopt_written)
+            ns_js_retire_frame_realm(js, iframe,
+                                     !(sandbox & NS_FRAME_CROSS_ORIGIN));
         const char *cs = ns_element_get_attr(iframe, "data-nd-frame-charset");
         if (!cs || !*cs) cs = "UTF-8";
         JSValue realm_doc = ns_make_realm_document(
@@ -77148,7 +77683,7 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
             JS_FreeValue(js->ctx, win);
         }
         if (JS_IsObject(realm_doc)) {
-            JSValue iw = ns_make_element(js->ctx, iframe);
+            JSValue iw = ns_make_node_wrapper(js->ctx, iframe);
             JS_SetPropertyStr(js->ctx, iw, "__ndRealmDoc",
                               JS_DupValue(js->ctx, realm_doc));
             if (JS_IsObject(realm_scope)) {
@@ -77252,6 +77787,8 @@ ns_js_load_iframe_in_embedder(ns_js *js, ns_node *iframe)
         ns_frame_url_leave(js, &fu);
         JS_FreeValue(js->ctx, realm_scope);
         JS_FreeValue(js->ctx, realm_doc);
+    } else if (!adopt_written) {
+        ns_js_retire_frame_realm(js, iframe, FALSE);
     }
 
     js->mutated = TRUE;
@@ -77806,6 +78343,7 @@ ns_media_by_src_collect(JSContext *ctx, const ns_node *n, const char *url,
 {
     if (depth > 1024) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (ns_dom_hidden_child(c)) continue;
         if (c->kind == NS_NODE_ELEMENT && c->name &&
             (ns_node_is_tag(c, NS_TAG_VIDEO) || ns_node_is_tag(c, NS_TAG_AUDIO))) {
             const char *src = ns_element_get_attr(c, "src");
@@ -78156,6 +78694,7 @@ ns_js_set_document_sandbox(ns_js *js, ns_node *doc, const char *csp_header,
 {
     if (!js) return;
     g_autofree char *tokens = ns_csp_header_sandbox_tokens(csp_header);
+    ns_js_frame_origins_changed(js);
     js->document_sandbox = tokens ? ns_sandbox_from_policy_lines(tokens) : 0;
     if (untrusted_transport) {
         unsigned granted = tokens ? js->document_sandbox : ~0u;

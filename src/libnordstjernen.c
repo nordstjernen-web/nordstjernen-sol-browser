@@ -1259,16 +1259,24 @@ ns_browser_init(void)
     return 0;
 }
 
+static gboolean
+browser_gpu_apis_enabled(void)
+{
+    const ns_config *cfg = ns_config_get();
+    const char *webgpu_forced = g_getenv("NS_WEBGPU_ALLOW");
+    return cfg->webgl_enabled || cfg->webgpu_enabled ||
+           (webgpu_forced && webgpu_forced[0] == '1');
+}
+
 void
 ns_browser_sandbox(const char *self_exe)
 {
-    gboolean gpu_apis = ns_config_get()->webgl_enabled ||
-                        ns_config_get()->webgpu_enabled;
+    gboolean gpu_apis = browser_gpu_apis_enabled();
     if (!gpu_apis)
         g_setenv("ORC_CODE", "backup", TRUE);
     ns_os_media_preinit();
     ns_security_win32_mitigations_init(FALSE);
-    if (ns_config_get()->webgl_enabled || ns_config_get()->webgpu_enabled)
+    if (gpu_apis)
         ns_security_allow_gpu_devices();
     ns_security_runtime_dir_read_only();
     ns_security_deny_process_exec();

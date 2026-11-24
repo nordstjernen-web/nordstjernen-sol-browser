@@ -71,6 +71,18 @@ ruleset also makes the renderer's directory executable and leaves
 the shell would have to allow `execve` and `clone`, and the shell parses no
 page bytes.
 
+Headless runs (`--headless`, `--dump`, `--eval`, `--export`, `--act`,
+`--wpt`, and the npm and pip launchers) execute in the renderer executable
+and get the same two-layer sandbox as a tab renderer, through the same
+`ns_browser_sandbox()` (`src/headless_main.c`, `src/libnordstjernen.c`):
+the config file is read-only and setting changes are not saved, browsing
+history, the state directory and Downloads are out of reach,
+`$XDG_RUNTIME_DIR` is read-only, and no camera or sound device is granted.
+The one addition is the directory of each output file named on the
+command line (`--dump=png:`, `pdf:` or `print:`, `--export=pdf:`), which
+stays writable. Renderers started by `--webdriver` read the config
+read-only as a tab's do.
+
 - **Landlock.** Read-only: system library directories, `/etc`, fonts,
   `/proc`, `/sys`, the display sockets and `$XAUTHORITY`, and of the XDG
   directories only the subdirectories libraries need (fontconfig, Vulkan,
@@ -94,7 +106,8 @@ page bytes.
   returns `ENOSYS`, `socket` creates only `AF_INET`, `AF_INET6` and
   `AF_NETLINK` (the routing protocol only), signals and `prlimit64` may
   target only the process itself, `fcntl` cannot set signal ownership, and the `TIOCSTI` /
-  `TIOCLINUX` ioctls are refused. With WebGL and WebGPU both off,
+  `TIOCLINUX` ioctls are refused. With WebGL and WebGPU both off (and
+  WebGPU not forced on by `--enable-webgpu` or `NS_WEBGPU_ALLOW=1`),
   `PROT_EXEC` `mprotect`, anonymous executable `mmap` and `memfd_create`
   are refused too (the audio output process keeps `memfd_create`, which
   the sound server's client library needs); with either on they must be allowed, because GPU

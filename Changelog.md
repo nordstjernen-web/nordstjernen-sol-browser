@@ -16,6 +16,92 @@ Changelog:
   colour of its own, and a line-through or overline drawn across the
   generated text keeps the colour of the element that carries it.
   Across the frozen sitebench snapshots 52 more elements match Chrome.
+* Security: a page could read the DOM of a cross-origin iframe.
+  `document.getItems()` walked into embedded frame documents and ignored
+  its `this`, so the embedder got wrappers for the frame's microdata items
+  and, through them, the whole frame document; the legacy named-element
+  exposure and the internal media lookup walked into frames the same way.
+  All three now stop at frame boundaries, and `getItems()` searches only
+  the document it is called on. As a backstop, the engine now refuses to
+  hand script a wrapper for a node whose document is not same-origin with
+  the calling realm (sandboxed documents count as their own opaque origin).
+  The engine's own work, such as dispatching input into a frame, is not
+  affected.
+* Security: a frame's old JavaScript realm kept running after the frame
+  navigated, to finish pending fetches and promise jobs, but lost its
+  identity: its URL, origin and sandbox flags then came from the top-level
+  document or from whatever document happened to be current. Nothing
+  cancelled that pending work. A cross-origin or sandboxed frame could so
+  send `fetch`, XHR or beacon requests as the embedding page, with its
+  cookies and referrer, and read the responses; a `fetch` saved from an
+  iframe's initial `about:blank` window could likewise act as a
+  cross-origin document loaded into it later. Each realm now records its
+  URL and sandbox flags when it is created, a realm is retired as soon as
+  its frame's document is replaced (or when a navigation loads a document
+  that runs no script), and a retired realm is refused `fetch`, XHR,
+  WebSocket, EventSource, `sendBeacon`, `fetchLater`, workers, service
+  worker registration, dynamic `import()`, cookies, `localStorage` /
+  `sessionStorage`, top-level navigation and permission-gated features. A
+  realm that is not the main one never falls back to the top document's
+  URL or origin any more. The initial `about:blank` window of a frame is
+  still reused for its first same-origin document, as HTML requires.
+* Security: the cross-origin window proxies read `closed` and `length`,
+  called `close()`, `focus()` and `blur()`, set `location` and posted
+  messages through properties of the other window that its page can
+  redefine, while the caller's document was still the current one. A frame
+  that overrode `window.focus` (or the embedder, for `parent.focus()` from
+  the frame) thus ran code with the other side's document current and could
+  read its DOM. The proxies now call engine functions captured when the
+  realm is created, which resolve the target window to its frame natively;
+  as a side effect `length` reports the target's own frame count (it
+  reported the embedder's) and `closed` turns true once the frame is
+  removed. Document methods such as `getElementById`, `querySelector`,
+  `getItems`, `title` and `head` now throw `TypeError: Illegal invocation`
+  when called on something that is not a node, and otherwise derive the
+  document from the calling realm instead of the engine's current
+  document; `input.list` and microdata `itemref` look in the element's own
+  tree.
+* Security: headless runs (`--headless`, `--dump`, `--eval`, `--export`,
+  `--wpt`, and the npm and pip launchers) now apply the same Linux sandbox
+  as a tab renderer, by calling the same function. Before, a compromised
+  headless engine could read the whole `~/.config`, `~/.local/share`,
+  `~/.cache` and `/run`, write to `$XDG_RUNTIME_DIR`, the state directory
+  that holds the remote-control token, `~/Downloads` and the config file,
+  and open UNIX sockets such as the session D-Bus. It now reads only the
+  profile directories a tab renderer reads, writes only the cookie, data
+  and cache directories plus the output files named on the command line,
+  cannot create UNIX sockets or SysV IPC, and loses executable memory and
+  `memfd_create` when WebGL and WebGPU are off. Headless no longer opens
+  the browsing history. Renderers started by `--webdriver` now read the
+  config read-only like a tab's. `--enable-webgpu` now also takes effect
+  for headless and WebDriver runs, and a renderer whose WebGPU is forced on
+  that way keeps the GPU access WebGPU needs even when WebGL and WebGPU
+  are off in Settings. Because headless may no longer start programs, the
+  undocumented `NS_HEADLESS_RENDERER` mode, where headless drives a
+  separate renderer process, now fails on macOS as it already did on Linux
+  and Windows; the macOS CI smoke test drives the bundled renderer through
+  `--webdriver` instead.
+* WebDriver: `--webdriver` started from the macOS app bundle or a Windows
+  install now points its renderers at the bundled fontconfig and CA
+  certificates, as the windowed and headless browser already did. Without
+  Homebrew, a macOS WebDriver renderer failed with "Fontconfig error:
+  Cannot load default config file" and fell back to the system's CA store
+  or none.
+* Layout: table cells placed directly in a table or a row group next to
+  real rows are now wrapped in an anonymous row and laid out, as CSS 2.1
+  asks. They were dropped and collapsed to 0x0 whenever the table also had
+  a row or row group, so a `display: table` with two loose
+  `display: table-cell` children followed by a `display: table-row-group`
+  showed only the group's row; both rows now show, like in Chrome. Rows,
+  row groups and cells placed directly inside a table cell now get their
+  own anonymous table inside that cell instead of vanishing or being
+  moved out of it.
+* Packaging: the Arch Linux package builds release 1.0.51. It was still on
+  1.0.36 and lacked `rust` in `makedepends`, so a clean chroot could not
+  build it once the HTML and URL parsers moved to Rust. `packaging/arch/update.sh
+  <tag>` now points the recipe at a release, and the new `arch` CI workflow
+  builds, namcap-checks, installs and smoke-tests the package in an Arch
+  container on recipe changes, weekly and on every tag.
 
 1.0.51:
 ======

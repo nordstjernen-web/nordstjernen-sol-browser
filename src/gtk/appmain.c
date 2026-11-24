@@ -467,6 +467,7 @@ ns_run_webdriver_if_wanted(int argc, char **argv)
         }
     }
     if (opts.port < 0) return -1;
+    g_setenv("NS_CONFIG_VIA_PARENT", "1", TRUE);
     return ns_webdriver_run(&opts);
 }
 
@@ -589,28 +590,6 @@ main(int argc, char **argv)
             return rc;
         }
     }
-    int webdriver_rc = ns_run_webdriver_if_wanted(argc, argv);
-    if (webdriver_rc >= 0) {
-        g_free(g_self_exe);
-        g_self_exe = NULL;
-        ns_config_shutdown();
-        return webdriver_rc;
-    }
-#ifdef G_OS_WIN32
-    ns_win32_anchor_gtk_data();
-#endif
-#ifdef __APPLE__
-    ns_macos_anchor_gtk_data();
-#endif
-    gboolean proc_mode = ns_proc_mode_wanted(argc, argv);
-    if (!proc_mode && !ns_print_config_wanted(argc, argv)) {
-        int rc = ns_run_headless_host(argc, argv);
-        g_free(g_self_exe);
-        g_self_exe = NULL;
-        ns_config_shutdown();
-        return rc;
-    }
-
     for (int i = 1; i < argc; i++) {
         if (g_strcmp0(argv[i], "--enable-webgpu") == 0) {
 #ifdef ND_HAVE_WEBGPU
@@ -620,6 +599,28 @@ main(int argc, char **argv)
                        "(built without WebGPU support)\n");
 #endif
         }
+    }
+
+#ifdef G_OS_WIN32
+    ns_win32_anchor_gtk_data();
+#endif
+#ifdef __APPLE__
+    ns_macos_anchor_gtk_data();
+#endif
+    int webdriver_rc = ns_run_webdriver_if_wanted(argc, argv);
+    if (webdriver_rc >= 0) {
+        g_free(g_self_exe);
+        g_self_exe = NULL;
+        ns_config_shutdown();
+        return webdriver_rc;
+    }
+    gboolean proc_mode = ns_proc_mode_wanted(argc, argv);
+    if (!proc_mode && !ns_print_config_wanted(argc, argv)) {
+        int rc = ns_run_headless_host(argc, argv);
+        g_free(g_self_exe);
+        g_self_exe = NULL;
+        ns_config_shutdown();
+        return rc;
     }
 
     if (proc_mode) {

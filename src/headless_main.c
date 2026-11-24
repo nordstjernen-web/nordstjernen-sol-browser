@@ -26,9 +26,8 @@
 #include "engine.h"
 #include "font.h"
 #include "headless.h"
-#include "history.h"
 #include "i18n.h"
-#include "media_os.h"
+#include "libnordstjernen.h"
 #include "net.h"
 #include "security.h"
 #include "spellcheck.h"
@@ -220,7 +219,6 @@ headless_run(ns_headless_opts *hopts)
         ns_net_set_log_fetches(TRUE);
     ns_cache_init();
     ns_bytecode_cache_init();
-    ns_history_init();
     ns_font_init();
     ns_spell_init();
     char *file_url = NULL;
@@ -239,7 +237,6 @@ headless_run(ns_headless_opts *hopts)
         headless_report_perf();
     g_free(file_url);
     ns_bytecode_cache_shutdown();
-    ns_history_shutdown();
     ns_cache_shutdown();
     ns_net_shutdown();
     ns_config_shutdown();
@@ -375,12 +372,11 @@ ns_headless_main(int argc, char **argv)
         g_setenv("NS_PRIVATE", "1", TRUE);
     ns_i18n_init(self_exe);
     ns_config_init();
-    ns_security_win32_mitigations_init(FALSE);
+    ns_config_defer_saves(TRUE);
+    ns_security_config_dir_read_only();
+    ns_security_deny_capture_devices();
     headless_add_output_dirs(argc, argv);
-    ns_os_media_preinit();
-    ns_security_landlock_scope_abstract_sockets();
-    ns_security_sandbox_init(self_exe);
-    ns_security_seccomp_init();
+    ns_browser_sandbox(self_exe);
     ns_thread_dump_install_signal("nordstjernen");
     ns_debug_log_init();
     g_log_set_writer_func(headless_log_writer, NULL, NULL);

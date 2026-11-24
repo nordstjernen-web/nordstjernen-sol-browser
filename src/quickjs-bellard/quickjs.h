@@ -1312,6 +1312,7 @@ int JS_SetDefaultLocale(JSRuntime *rt, const char *tag);
 const char *JS_GetDefaultLocale(JSRuntime *rt);
 bool JS_IsHostAccess(JSContext *ctx);
 bool JS_IsHostCaller(JSContext *ctx);
+bool JS_IsPageCodeOnStack(JSContext *ctx);
 bool JS_IsEngineFunction(JSValueConst fn);
 int JS_AddEnginePrivateName(JSContext *ctx, const char *name);
 JSAtom JS_GetEnginePrivateAtom(JSContext *ctx, const char *name);
