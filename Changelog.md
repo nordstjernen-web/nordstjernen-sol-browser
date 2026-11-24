@@ -3,6 +3,12 @@ Changelog:
 
 1.0.52-dev:
 ======
+* Packaging: the Arch Linux package builds release 1.0.51. It was still on
+  1.0.36 and lacked `rust` in `makedepends`, so a clean chroot could not
+  build it once the HTML and URL parsers moved to Rust. `packaging/arch/update.sh
+  <tag>` now points the recipe at a release, and the new `arch` CI workflow
+  builds, namcap-checks, installs and smoke-tests the package in an Arch
+  container on recipe changes, weekly and on every tag.
 
 1.0.51:
 ======

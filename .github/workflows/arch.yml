@@ -1,0 +1,100 @@
+name: arch
+
+# Builds the Arch Linux package (packaging/arch/PKGBUILD) the way Arch users
+# get it: from the release tarball, in an up-to-date Arch container, as a
+# normal user. Pull requests that touch the recipe build the release it names;
+# a pushed version tag first points the recipe at that tag (update.sh) and
+# uploads the updated PKGBUILD and .SRCINFO for the AUR. The weekly run catches
+# Arch's rolling updates breaking the current recipe.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packaging/arch/**'
+      - '.github/workflows/arch.yml'
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to point the recipe at (empty builds it as committed)
+        required: false
+
+concurrency:
+  group: arch-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    container: archlinux:base-devel
+
+    steps:
+      - name: Update the system and install the packaging tools
+        run: |
+          pacman -Syu --noconfirm --needed git namcap pacman-contrib
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/builder
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Point the recipe at the release tag
+        if: github.ref_type == 'tag' || inputs.tag != ''
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          chown -R builder "$GITHUB_WORKSPACE"
+          sudo -u builder git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          sudo -u builder packaging/arch/update.sh "$TAG"
+          git diff -- packaging/arch
+
+      - name: Check that .SRCINFO matches the PKGBUILD
+        run: |
+          install -d -o builder /home/builder/pkg
+          install -o builder -m644 packaging/arch/PKGBUILD /home/builder/pkg/
+          cd /home/builder/pkg
+          sudo -u builder makepkg --printsrcinfo > /tmp/srcinfo
+          diff -u "$GITHUB_WORKSPACE/packaging/arch/.SRCINFO" /tmp/srcinfo
+
+      - name: Build the package
+        working-directory: /home/builder/pkg
+        run: sudo -u builder makepkg --syncdeps --noconfirm
+
+      - name: namcap
+        working-directory: /home/builder/pkg
+        run: |
+          namcap PKGBUILD | tee namcap.txt
+          namcap nordstjernen-browser-*.pkg.tar.zst | tee -a namcap.txt
+          if grep -q ' E: ' namcap.txt; then
+            echo "namcap reported errors" >&2
+            exit 1
+          fi
+
+      - name: Install it and run a headless smoke test
+        working-directory: /home/builder/pkg
+        run: |
+          set -o pipefail
+          pacman -U --noconfirm nordstjernen-browser-*.pkg.tar.zst
+          sudo -u builder nordstjernen --headless --dump=text about:start > about.txt
+          head -3 about.txt
+          grep -q Nordstjernen about.txt
+
+      - name: Upload the recipe and package
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: |
+            packaging/arch/PKGBUILD
+            packaging/arch/.SRCINFO
+            /home/builder/pkg/*.pkg.tar.zst
+            /home/builder/pkg/namcap.txt
