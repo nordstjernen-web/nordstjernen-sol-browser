@@ -3456,6 +3456,8 @@ typedef struct {
     char *name;
     const ns_node *scope;
     gint value;
+    gboolean fresh;
+    gboolean shadowed;
 } counter_entry;
 
 static void
@@ -3487,7 +3489,7 @@ counter_instantiate(GArray *list, const char *name, const ns_node *scope)
 {
     counter_entry *e = counter_innermost(list, name);
     if (e && e->scope == scope) return e;
-    counter_entry fresh = { g_strdup(name), scope, 0 };
+    counter_entry fresh = { g_strdup(name), scope, 0, TRUE, e != NULL };
     g_array_append_val(list, fresh);
     return &g_array_index(list, counter_entry, list->len - 1);
 }
@@ -3591,23 +3593,14 @@ counter_apply_prop(GArray *list, const ns_style *s, ns_css_prop prop,
         counter_apply_decl(list, v->u.keyword, op, scope);
 }
 
-static gboolean
-counter_inherited(const GArray *list, const char *name, const ns_node *scope)
-{
-    for (guint i = 0; i < list->len; i++) {
-        const counter_entry *e = &g_array_index(list, counter_entry, i);
-        if (e->scope != scope && strcmp(e->name, name) == 0) return TRUE;
-    }
-    return FALSE;
-}
-
 static void
 counter_drop_shadowed(GArray *list, const ns_node *scope)
 {
     for (guint i = list->len; i > 0; i--) {
-        const counter_entry *e = &g_array_index(list, counter_entry, i - 1);
-        if (e->scope == scope && counter_inherited(list, e->name, scope))
-            g_array_remove_index(list, i - 1);
+        counter_entry *e = &g_array_index(list, counter_entry, i - 1);
+        if (e->scope != scope || !e->fresh) return;
+        if (e->shadowed) g_array_remove_index(list, i - 1);
+        else e->fresh = FALSE;
     }
 }
 
