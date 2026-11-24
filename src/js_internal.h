@@ -74,7 +74,15 @@ struct ns_js {
     GPtrArray    *frame_ctxs;
     GHashTable   *pinned_realms;
     GPtrArray    *replaced_realms;
+    GHashTable   *realm_identities;
     GHashTable   *frame_contexts;
+    GHashTable   *realm_frames;
+    GHashTable   *url_origin_memo;
+    guint         frame_origin_gen;
+    guint         sight_memo_gen;
+    gconstpointer sight_memo_caller;
+    gconstpointer sight_memo_node;
+    gboolean      sight_memo_result;
     GHashTable   *frame_csps;
     GHashTable   *frame_posts;
     GHashTable   *frame_windows;
