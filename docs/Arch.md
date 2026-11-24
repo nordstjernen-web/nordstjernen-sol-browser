@@ -59,15 +59,28 @@ git clone ssh://aur@aur.archlinux.org/nordstjernen-browser.git aur-nordstjernen-
 cp packaging/arch/PKGBUILD packaging/arch/.SRCINFO aur-nordstjernen-browser/
 cd aur-nordstjernen-browser
 git add PKGBUILD .SRCINFO
-git commit -m "Initial upload: nordstjernen-browser 1.0.36"
+git commit -m "Initial upload: nordstjernen-browser 1.0.51"
 git push
 ```
 
-For each release, set `pkgver`, reset `pkgrel=1`, set `_pdfjs`, `_wuffs`
-and `_wamr` (and their URLs) to the versions the release's
-`subprojects/*.wrap` files pin, run `updpkgsums`, then
-`makepkg --printsrcinfo > .SRCINFO`, and commit both files here and in the
-AUR repository.
+For each release, run `packaging/arch/update.sh <tag>` on Arch (it needs
+`git`, `makepkg` and `pacman-contrib`). It sets `pkgver`, resets `pkgrel=1`,
+sets the PDF.js, Wuffs and WAMR versions to what the tag pins in
+`subprojects/*.wrap`, runs `updpkgsums`, checks that those three tarballs hash
+as the wraps say, and regenerates `.SRCINFO`. Commit both files here and in
+the AUR repository.
+
+## CI
+
+`.github/workflows/arch.yml` builds the package in an up-to-date
+`archlinux:base-devel` container as a normal user, runs `namcap` (any error
+fails the job), installs it and runs a headless smoke test. It runs on pull
+requests that touch `packaging/arch/`, weekly (Arch is rolling, so a
+dependency update can break an unchanged recipe), and on every pushed
+version tag, where it first runs `update.sh` for that tag. Every run uploads
+the `PKGBUILD`, `.SRCINFO`, package and `namcap` output it used as the
+`arch-package` artifact; after a tag run that recipe is the one to commit
+here and push to the AUR.
 
 ## Test VM
 
