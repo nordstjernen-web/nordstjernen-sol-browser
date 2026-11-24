@@ -467,6 +467,7 @@ ns_run_webdriver_if_wanted(int argc, char **argv)
         }
     }
     if (opts.port < 0) return -1;
+    g_setenv("NS_CONFIG_VIA_PARENT", "1", TRUE);
     return ns_webdriver_run(&opts);
 }
 
@@ -589,6 +590,17 @@ main(int argc, char **argv)
             return rc;
         }
     }
+    for (int i = 1; i < argc; i++) {
+        if (g_strcmp0(argv[i], "--enable-webgpu") == 0) {
+#ifdef ND_HAVE_WEBGPU
+            g_setenv("NS_WEBGPU_ALLOW", "1", TRUE);
+#else
+            g_printerr("nordstjernen: --enable-webgpu ignored "
+                       "(built without WebGPU support)\n");
+#endif
+        }
+    }
+
     int webdriver_rc = ns_run_webdriver_if_wanted(argc, argv);
     if (webdriver_rc >= 0) {
         g_free(g_self_exe);
@@ -609,17 +621,6 @@ main(int argc, char **argv)
         g_self_exe = NULL;
         ns_config_shutdown();
         return rc;
-    }
-
-    for (int i = 1; i < argc; i++) {
-        if (g_strcmp0(argv[i], "--enable-webgpu") == 0) {
-#ifdef ND_HAVE_WEBGPU
-            g_setenv("NS_WEBGPU_ALLOW", "1", TRUE);
-#else
-            g_printerr("nordstjernen: --enable-webgpu ignored "
-                       "(built without WebGPU support)\n");
-#endif
-        }
     }
 
     if (proc_mode) {

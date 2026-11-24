@@ -3,6 +3,22 @@ Changelog:
 
 1.0.52-dev:
 ======
+* Security: headless runs (`--headless`, `--dump`, `--eval`, `--export`,
+  `--wpt`, and the npm and pip launchers) now apply the same Linux sandbox
+  as a tab renderer, by calling the same function. Before, a compromised
+  headless engine could read the whole `~/.config`, `~/.local/share`,
+  `~/.cache` and `/run`, write to `$XDG_RUNTIME_DIR`, the state directory
+  that holds the remote-control token, `~/Downloads` and the config file,
+  and open UNIX sockets such as the session D-Bus. It now reads only the
+  profile directories a tab renderer reads, writes only the cookie, data
+  and cache directories plus the output files named on the command line,
+  cannot create UNIX sockets or SysV IPC, and loses executable memory and
+  `memfd_create` when WebGL and WebGPU are off. Headless no longer opens
+  the browsing history. Renderers started by `--webdriver` now read the
+  config read-only like a tab's. `--enable-webgpu` now also takes effect
+  for headless and WebDriver runs, and a renderer whose WebGPU is forced on
+  that way keeps the GPU access WebGPU needs even when WebGL and WebGPU
+  are off in Settings.
 * Layout: table cells placed directly in a table or a row group next to
   real rows are now wrapped in an anonymous row and laid out, as CSS 2.1
   asks. They were dropped and collapsed to 0x0 whenever the table also had
