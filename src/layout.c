@@ -2672,6 +2672,16 @@ atomic_vertical_align_rise(const ns_node *n, const ns_style *s,
 }
 
 static double
+vertical_align_keyword_rise(const ns_style *s, const ns_style *ps)
+{
+    const ns_css_value *va = s->values[NS_CSS_VERTICAL_ALIGN];
+    if (keyword_is(va, "text-top")) return inline_text_edge_rise(s, ps, TRUE);
+    if (keyword_is(va, "text-bottom"))
+        return inline_text_edge_rise(s, ps, FALSE);
+    return vertical_align_script_rise(s, ps);
+}
+
+static double
 inline_vertical_align_rise(const ns_node *n, const ns_style *s,
                            GHashTable *styles)
 {
@@ -2679,11 +2689,17 @@ inline_vertical_align_rise(const ns_node *n, const ns_style *s,
     if (!va || style_is_contents(s)) return 0;
     if (va->kind == NS_CSS_V_LENGTH || va->kind == NS_CSS_V_CALC)
         return inline_vertical_align_length(va, s);
-    const ns_style *ps = inline_parent_box_style(n, styles);
-    if (keyword_is(va, "text-top")) return inline_text_edge_rise(s, ps, TRUE);
-    if (keyword_is(va, "text-bottom"))
-        return inline_text_edge_rise(s, ps, FALSE);
-    return vertical_align_script_rise(s, ps);
+    return vertical_align_keyword_rise(s, inline_parent_box_style(n, styles));
+}
+
+static double
+pseudo_vertical_align_rise(const ns_style *ps, const ns_style *host_style)
+{
+    const ns_css_value *va = ps->values[NS_CSS_VERTICAL_ALIGN];
+    if (!va) return 0;
+    if (va->kind == NS_CSS_V_LENGTH || va->kind == NS_CSS_V_CALC)
+        return inline_vertical_align_length(va, ps);
+    return vertical_align_keyword_rise(ps, host_style);
 }
 
 static void
@@ -3291,6 +3307,82 @@ emit_generated_attr(GArray *attrs, gsize start, gsize end, const ns_style *ps)
     g_array_append_val(attrs, a);
 }
 
+static gboolean
+pseudo_color_inherited(const ns_css_value *c, const ns_style *host)
+{
+    const ns_css_value *hc = host ? ns_style_text_fill_color(host) : NULL;
+    return c && hc && c->kind == NS_CSS_V_COLOR && hc->kind == NS_CSS_V_COLOR &&
+           memcmp(&hc->u.color, &c->u.color, sizeof c->u.color) == 0;
+}
+
+static void
+emit_pseudo_color_attr(GArray *attrs, const ns_style *ps,
+                       const ns_style *host, gsize start, gsize end)
+{
+    const char *vis = ns_style_keyword(ps, NS_CSS_VISIBILITY);
+    gboolean invisible = vis && (strcmp(vis, "hidden") == 0 ||
+                                 strcmp(vis, "collapse") == 0);
+    const ns_css_value *c = ns_style_text_fill_color(ps);
+    gboolean have = c && c->kind == NS_CSS_V_COLOR;
+    if (!invisible && (!have || pseudo_color_inherited(c, host))) return;
+    emit_color_attr(attrs, start, end, have ? c->u.color.r : 0,
+                    have ? c->u.color.g : 0, have ? c->u.color.b : 0,
+                    invisible ? 0 : c->u.color.a);
+}
+
+static void
+emit_pseudo_font_features(GArray *attrs, const ns_style *ps, gsize start,
+                          gsize end)
+{
+    emit_font_features_attr(attrs, start, end, font_kerning_int_from_style(ps),
+                            font_ligatures_from_style(ps),
+                            font_numeric_from_style(ps),
+                            font_feature_settings_from_style(ps));
+    emit_font_variations_attr(attrs, start, end,
+                              font_variation_settings_from_style(ps));
+}
+
+static gboolean
+pseudo_font_matches_host(const ns_style *ps, const ns_style *host)
+{
+    if (!host) return FALSE;
+    static const int props[] = {
+        NS_CSS_FONT_SIZE, NS_CSS_FONT_WEIGHT, NS_CSS_FONT_STRETCH,
+        NS_CSS_FONT_STYLE,
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(props); i++)
+        if (!ns_css_value_equal(ps->values[props[i]], host->values[props[i]]))
+            return FALSE;
+    return font_kerning_int_from_style(ps) == font_kerning_int_from_style(host) &&
+        g_strcmp0(font_ligatures_from_style(ps), font_ligatures_from_style(host)) == 0 &&
+        g_strcmp0(font_numeric_from_style(ps), font_numeric_from_style(host)) == 0 &&
+        g_strcmp0(font_feature_settings_from_style(ps),
+                  font_feature_settings_from_style(host)) == 0 &&
+        g_strcmp0(font_variation_settings_from_style(ps),
+                  font_variation_settings_from_style(host)) == 0;
+}
+
+static void
+emit_pseudo_text_attrs(GArray *attrs, const ns_style *ps,
+                       const ns_style *host, gsize start, gsize end)
+{
+    if (end <= start) return;
+    emit_pseudo_color_attr(attrs, ps, host, start, end);
+    if (pseudo_font_matches_host(ps, host)) return;
+    const ns_css_value *fs = ps->values[NS_CSS_FONT_SIZE];
+    if (fs && fs->kind == NS_CSS_V_LENGTH && fs->u.length.unit == NS_CSS_UNIT_PX)
+        emit_font_size_attr(attrs, start, end, fs->u.length.v);
+    emit_font_weight_attr(attrs, start, end,
+        ns_css_font_weight_number(ps->values[NS_CSS_FONT_WEIGHT], -1));
+    if (ps->values[NS_CSS_FONT_STRETCH])
+        emit_font_stretch_attr(attrs, start, end,
+            ns_css_font_stretch_rank(ps->values[NS_CSS_FONT_STRETCH]));
+    emit_pseudo_font_features(attrs, ps, start, end);
+    if (keyword_is(ps->values[NS_CSS_FONT_STYLE], "italic") ||
+        keyword_is(ps->values[NS_CSS_FONT_STYLE], "oblique"))
+        emit_attr(attrs, NS_INLINE_ITALIC, start, end);
+}
+
 static void
 emit_font_family_attr(GArray *attrs, gsize start, gsize end, const char *family)
 {
@@ -3796,6 +3888,35 @@ append_abs_placeholder(collector_ctx *ctx, gconstpointer key)
 }
 
 static void
+append_pseudo_inline_box(collector_ctx *ctx, const ns_style *ps,
+                         const ns_node *host)
+{
+    double outer_rise = ctx->rise;
+    const ns_style *host_style = g_hash_table_lookup(ctx->styles, host);
+    double own_rise = pseudo_vertical_align_rise(ps, host_style);
+    gsize box_start = ctx->out->len;
+    append_inline_spacer(ctx, inline_box_side_px(ps, NS_CSS_PADDING_LEFT,
+        NS_CSS_BORDER_LEFT_WIDTH, NS_CSS_BORDER_LEFT_STYLE));
+    ctx->rise += own_rise;
+    gsize start = ctx->out->len;
+    append_pseudo_content(ctx->out, ps->values[NS_CSS_CONTENT], host, ps);
+    emit_generated_attr(ctx->attrs, start, ctx->out->len, ps);
+    emit_pseudo_text_attrs(ctx->attrs, ps, host_style, start,
+                           ctx->out->len);
+    emit_rise_attr(ctx, start, own_rise);
+    append_inline_spacer(ctx, inline_box_side_px(ps, NS_CSS_PADDING_RIGHT,
+        NS_CSS_BORDER_RIGHT_WIDTH, NS_CSS_BORDER_RIGHT_STYLE));
+    ns_inline_attr box = {
+        .kind = ctx->out->len > box_start ? NS_INLINE_ELEMENT
+                                          : NS_INLINE_EMPTY_ELEMENT,
+        .start = box_start, .len = ctx->out->len - box_start,
+        .rise_px = ctx->rise, .style = ps,
+    };
+    g_array_append_val(ctx->attrs, box);
+    ctx->rise = outer_rise;
+}
+
+static void
 append_pseudo_inline(collector_ctx *ctx, const ns_style *ps,
                      const ns_node *host)
 {
@@ -3821,11 +3942,7 @@ append_pseudo_inline(collector_ctx *ctx, const ns_style *ps,
         return;
     }
     append_inline_spacer(ctx, length_or(ps->values[NS_CSS_MARGIN_LEFT], 0));
-    append_inline_spacer(ctx, length_or(ps->values[NS_CSS_PADDING_LEFT], 0));
-    gsize start = ctx->out->len;
-    append_pseudo_content(ctx->out, ps->values[NS_CSS_CONTENT], host, ps);
-    emit_generated_attr(ctx->attrs, start, ctx->out->len, ps);
-    append_inline_spacer(ctx, length_or(ps->values[NS_CSS_PADDING_RIGHT], 0));
+    append_pseudo_inline_box(ctx, ps, host);
     append_inline_spacer(ctx, length_or(ps->values[NS_CSS_MARGIN_RIGHT], 0));
 }
 
@@ -6182,23 +6299,7 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host,
 
     gsize tlen = strlen(box->text);
     emit_generated_attr(box->attrs, 0, tlen, ps);
-    const char *vis = ns_style_keyword(ps, NS_CSS_VISIBILITY);
-    gboolean invisible = vis && (strcmp(vis, "hidden") == 0 ||
-                                 strcmp(vis, "collapse") == 0);
-    const ns_css_value *pseudo_color = ns_style_text_fill_color(ps);
-    if (invisible || (pseudo_color && pseudo_color->kind == NS_CSS_V_COLOR)) {
-        const ns_css_value *color = pseudo_color;
-        gboolean have = color && color->kind == NS_CSS_V_COLOR;
-        ns_inline_attr a = {
-            .kind = NS_INLINE_COLOR,
-            .start = 0, .len = tlen,
-            .r = have ? color->u.color.r : 0,
-            .g = have ? color->u.color.g : 0,
-            .b = have ? color->u.color.b : 0,
-            .a = invisible ? 0 : color->u.color.a,
-        };
-        g_array_append_val(box->attrs, a);
-    }
+    emit_pseudo_text_attrs(box->attrs, ps, NULL, 0, tlen);
     if (ps->values[NS_CSS_BACKGROUND_COLOR] &&
         ps->values[NS_CSS_BACKGROUND_COLOR]->kind == NS_CSS_V_COLOR) {
         ns_inline_attr a = {
@@ -6209,64 +6310,6 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host,
             .b = ps->values[NS_CSS_BACKGROUND_COLOR]->u.color.b,
             .a = ps->values[NS_CSS_BACKGROUND_COLOR]->u.color.a,
         };
-        g_array_append_val(box->attrs, a);
-    }
-    if (ps->values[NS_CSS_FONT_SIZE] &&
-        ps->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH &&
-        ps->values[NS_CSS_FONT_SIZE]->u.length.unit == NS_CSS_UNIT_PX) {
-        ns_inline_attr a = {
-            .kind = NS_INLINE_FONT_SIZE,
-            .start = 0, .len = tlen,
-            .font_size_px = ps->values[NS_CSS_FONT_SIZE]->u.length.v,
-        };
-        g_array_append_val(box->attrs, a);
-    }
-    const ns_css_value *fw = ps->values[NS_CSS_FONT_WEIGHT];
-    int font_weight = ns_css_font_weight_number(fw, -1);
-    if (font_weight > 0) {
-        ns_inline_attr a = {
-            .kind = NS_INLINE_FONT_WEIGHT,
-            .start = 0, .len = tlen,
-            .font_weight = font_weight,
-        };
-        g_array_append_val(box->attrs, a);
-    }
-    if (ps->values[NS_CSS_FONT_STRETCH]) {
-        ns_inline_attr a = {
-            .kind = NS_INLINE_FONT_STRETCH,
-            .start = 0, .len = tlen,
-            .font_stretch =
-                ns_css_font_stretch_rank(ps->values[NS_CSS_FONT_STRETCH]),
-        };
-        g_array_append_val(box->attrs, a);
-    }
-    int fk = font_kerning_int_from_style(ps);
-    const char *flig = font_ligatures_from_style(ps);
-    const char *fnum = font_numeric_from_style(ps);
-    const char *ffea = font_feature_settings_from_style(ps);
-    if (fk >= 0 || flig || fnum || ffea) {
-        ns_inline_attr a = {
-            .kind = NS_INLINE_FONT_FEATURES,
-            .start = 0, .len = tlen,
-            .font_kerning = fk,
-            .font_ligatures = flig,
-            .font_numeric = fnum,
-            .font_features = ffea,
-        };
-        g_array_append_val(box->attrs, a);
-    }
-    const char *fvar = font_variation_settings_from_style(ps);
-    if (fvar) {
-        ns_inline_attr a = {
-            .kind = NS_INLINE_FONT_VARIATIONS,
-            .start = 0, .len = tlen,
-            .font_variations = fvar,
-        };
-        g_array_append_val(box->attrs, a);
-    }
-    if (keyword_is(ps->values[NS_CSS_FONT_STYLE], "italic") ||
-        keyword_is(ps->values[NS_CSS_FONT_STYLE], "oblique")) {
-        ns_inline_attr a = { .kind = NS_INLINE_ITALIC, .start = 0, .len = tlen };
         g_array_append_val(box->attrs, a);
     }
     pseudo_box_add_edge_spacers(box, ps);
