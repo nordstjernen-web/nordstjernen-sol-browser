@@ -1597,6 +1597,8 @@ static ns_box *build_block(const ns_node *n, GHashTable *styles);
 static void layout_box(ns_box *box, double parent_content_width,
                        const ns_style *inherited_style);
 static ns_box *build_inline_run(const ns_node *first, const ns_node *last_excl, GHashTable *styles);
+static void append_first_letter_float(ns_box *parent, ns_box *run,
+                                      const ns_node *start, GHashTable *styles);
 static void translate_subtree(ns_box *box, double dx, double dy);
 static ns_box *build_inline_run_no_abs_placeholders(const ns_node *first, const ns_node *last_excl, GHashTable *styles);
 static gboolean inline_atomic_needs_layout(const ns_box *ab);
@@ -2033,6 +2035,7 @@ cell_append_run(ns_box *cell, const ns_node *start, const ns_node *end,
     ns_box *run = inline_merge_prefix(*pending_before,
                                       build_inline_run(start, end, styles));
     *pending_before = NULL;
+    append_first_letter_float(cell, run, start, styles);
     if (run->text && run->text[0] != '\0')
         box_append_child(cell, run);
     else
@@ -5002,6 +5005,369 @@ inside_marker_text(char *marker)
     return marker;
 }
 
+static const char *
+run_inside_marker(const ns_node *first, GHashTable *styles, char *marker,
+                  gsize size)
+{
+    if (!first || !first->parent || first->parent->kind != NS_NODE_ELEMENT)
+        return NULL;
+    const ns_style *li_style = g_hash_table_lookup(styles, first->parent);
+    if (!ns_paint_li_is_inside(li_style) ||
+        !inline_run_opens_parent(first, styles) ||
+        !ns_paint_li_marker_text(first->parent, li_style, marker, size))
+        return NULL;
+    return inside_marker_text(marker);
+}
+
+static gsize
+text_prefix_len(const char *text, const char *prefix)
+{
+    gsize n = strlen(prefix);
+    return strncmp(text, prefix, n) == 0 ? n : 0;
+}
+
+static gsize
+run_marker_skip(const ns_box *run, const ns_node *first, GHashTable *styles)
+{
+    char marker[64];
+    if (!run_inside_marker(first, styles, marker, sizeof marker)) return 0;
+    return text_prefix_len(run->text, marker);
+}
+
+static gboolean
+first_letter_is_punct(gunichar c)
+{
+    switch (g_unichar_type(c)) {
+    case G_UNICODE_CONNECT_PUNCTUATION:
+    case G_UNICODE_DASH_PUNCTUATION:
+    case G_UNICODE_OPEN_PUNCTUATION:
+    case G_UNICODE_CLOSE_PUNCTUATION:
+    case G_UNICODE_INITIAL_PUNCTUATION:
+    case G_UNICODE_FINAL_PUNCTUATION:
+    case G_UNICODE_OTHER_PUNCTUATION:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static gboolean
+first_letter_trails(gunichar c)
+{
+    GUnicodeType t = g_unichar_type(c);
+    return first_letter_is_punct(c) && t != G_UNICODE_OPEN_PUNCTUATION &&
+           t != G_UNICODE_DASH_PUNCTUATION;
+}
+
+static gboolean
+first_letter_is_space(gunichar c)
+{
+    return g_unichar_type(c) == G_UNICODE_SPACE_SEPARATOR || c == '\t' ||
+           c == '\n' || c == 0x2028 || c == 0x200B || c == 0xFFFC;
+}
+
+static gboolean
+first_letter_leads(gunichar c, gboolean punct_seen)
+{
+    if (first_letter_is_punct(c)) return TRUE;
+    return g_unichar_type(c) == G_UNICODE_SPACE_SEPARATOR &&
+           !(punct_seen && c == 0x3000);
+}
+
+static gsize
+first_letter_cluster_end(const char *t, gsize len, gsize i)
+{
+    NsPangoLogAttr la[33] = { 0 };
+    const char *s = t + i, *lim = s;
+    int chars = 0;
+    while (lim < t + len && chars < 32) {
+        lim = g_utf8_next_char(lim);
+        chars++;
+    }
+    lim = MIN(lim, t + len);
+    ns_pango_default_break(s, (int)(lim - s), NULL, la, chars + 1);
+    const char *p = g_utf8_next_char(s);
+    for (int k = 1; k < chars && !la[k].is_cursor_position; k++)
+        p = g_utf8_next_char(p);
+    return MIN((gsize)(p - t), len);
+}
+
+static gboolean
+run_byte_is_spacer(const ns_box *run, gsize i)
+{
+    for (guint k = 0; run->attrs && k < run->attrs->len; k++) {
+        const ns_inline_attr *a = &g_array_index(run->attrs, ns_inline_attr, k);
+        if (a->kind == NS_INLINE_SPACER && a->start == i) return TRUE;
+    }
+    return FALSE;
+}
+
+static gsize
+first_letter_lead_end(const ns_box *run, gsize len, gsize from)
+{
+    const char *t = run->text;
+    gsize i = from;
+    while (i < len) {
+        gsize bc = bidi_control_len(t + i, len - i);
+        gunichar c = g_utf8_get_char(t + i);
+        if (bc) i += bc;
+        else if (c == ' ' || c == '\t' || c == '\n' ||
+                 (c == 0xFFFC && run_byte_is_spacer(run, i)))
+            i = (gsize)(g_utf8_next_char(t + i) - t);
+        else break;
+    }
+    return i;
+}
+
+static gsize
+first_letter_skip_lead(const char *t, gsize len, gsize i)
+{
+    gboolean punct_seen = FALSE;
+    while (i < len) {
+        gunichar c = g_utf8_get_char(t + i);
+        if (!first_letter_leads(c, punct_seen)) break;
+        punct_seen = punct_seen || first_letter_is_punct(c);
+        i = first_letter_cluster_end(t, len, i);
+    }
+    return i;
+}
+
+static gsize
+first_letter_skip_trail(const char *t, gsize len, gsize i)
+{
+    while (i < len && first_letter_trails(g_utf8_get_char(t + i)))
+        i = first_letter_cluster_end(t, len, i);
+    return i;
+}
+
+typedef struct first_letter_span {
+    gsize start, end;
+} first_letter_span;
+
+static gboolean
+first_letter_range(const ns_box *run, gsize from, first_letter_span *span)
+{
+    const char *t = run->text;
+    gsize len = t ? strlen(t) : 0;
+    gsize start = first_letter_lead_end(run, len, from);
+    gsize i = first_letter_skip_lead(t, len, start);
+    if (i >= len || first_letter_is_space(g_utf8_get_char(t + i)))
+        return FALSE;
+    span->start = start;
+    span->end = first_letter_skip_trail(t, len,
+                                        first_letter_cluster_end(t, len, i));
+    return TRUE;
+}
+
+static const ns_style *
+first_letter_style_for(const ns_node *first, GHashTable *styles,
+                       gboolean floated)
+{
+    if (!first || !first->parent || first != first->parent->first_child)
+        return NULL;
+    const ns_style *ps = g_hash_table_lookup(styles, first->parent);
+    const ns_style *fl = ps ? ps->first_letter : NULL;
+    if (!fl || (float_side_of(fl) >= 0) != floated) return NULL;
+    return fl;
+}
+
+static double
+run_rise_at(const ns_box *run, gsize byte)
+{
+    const ns_inline_attr *inner = NULL;
+    for (guint i = 0; i < run->attrs->len; i++) {
+        const ns_inline_attr *a = &g_array_index(run->attrs, ns_inline_attr, i);
+        if (a->kind != NS_INLINE_ELEMENT || byte < a->start ||
+            byte >= a->start + a->len)
+            continue;
+        if (!inner || a->len < inner->len) inner = a;
+    }
+    return inner ? inner->rise_px : 0;
+}
+
+static double
+style_px_font_size(const ns_style *st)
+{
+    const ns_css_value *v = st ? st->values[NS_CSS_FONT_SIZE] : NULL;
+    return v && v->kind == NS_CSS_V_LENGTH && v->u.length.unit == NS_CSS_UNIT_PX
+        ? v->u.length.v : -1;
+}
+
+static gboolean
+style_is_italic(const ns_style *st)
+{
+    return st && (keyword_is(st->values[NS_CSS_FONT_STYLE], "italic") ||
+                  keyword_is(st->values[NS_CSS_FONT_STYLE], "oblique"));
+}
+
+static const char *
+style_family_keyword(const ns_style *st)
+{
+    const ns_css_value *v = st ? st->values[NS_CSS_FONT_FAMILY] : NULL;
+    return v && v->kind == NS_CSS_V_KEYWORD ? v->u.keyword : NULL;
+}
+
+static void
+first_letter_color_attr(GArray *attrs, const ns_style *fl,
+                        const ns_style *host, gsize s, gsize e)
+{
+    const ns_css_value *c = ns_style_text_fill_color(fl);
+    if (!c || c->kind != NS_CSS_V_COLOR) return;
+    const ns_css_value *hc = ns_style_text_fill_color(host);
+    if (hc && hc->kind == NS_CSS_V_COLOR &&
+        memcmp(&hc->u.color, &c->u.color, sizeof c->u.color) == 0)
+        return;
+    emit_color_attr(attrs, s, e, c->u.color.r, c->u.color.g,
+                    c->u.color.b, c->u.color.a);
+}
+
+static void
+first_letter_font_attrs(GArray *attrs, const ns_style *fl,
+                        const ns_style *host, gsize s, gsize e)
+{
+    double size = style_px_font_size(fl);
+    if (size >= 0 && size != style_px_font_size(host))
+        emit_font_size_attr(attrs, s, e, size);
+    first_letter_color_attr(attrs, fl, host, s, e);
+    int weight = ns_css_font_weight_number(fl->values[NS_CSS_FONT_WEIGHT], -1);
+    if (weight > 0 &&
+        weight != ns_css_font_weight_number(host->values[NS_CSS_FONT_WEIGHT], -1))
+        emit_font_weight_attr(attrs, s, e, weight);
+    if (style_is_italic(fl) && !style_is_italic(host))
+        emit_attr(attrs, NS_INLINE_ITALIC, s, e);
+    const char *family = style_family_keyword(fl);
+    if (family && g_strcmp0(family, style_family_keyword(host)) != 0)
+        emit_font_family_attr(attrs, s, e, family);
+}
+
+static void
+first_letter_feature_attrs(GArray *attrs, const ns_style *fl, gsize s, gsize e)
+{
+    int fk = font_kerning_int_from_style(fl);
+    const char *flig = font_ligatures_from_style(fl);
+    const char *fnum = font_numeric_from_style(fl);
+    const char *ffea = font_feature_settings_from_style(fl);
+    if (fk >= 0 || flig || fnum || ffea)
+        emit_font_features_attr(attrs, s, e, fk, flig, fnum, ffea);
+    const char *fvar = font_variation_settings_from_style(fl);
+    if (fvar) emit_font_variations_attr(attrs, s, e, fvar);
+}
+
+static void
+first_letter_box_attrs(GArray *attrs, const ns_style *fl, const ns_style *host,
+                       gsize s, gsize e)
+{
+    double ls = style_letter_spacing_px(fl);
+    if (fabs(ls - style_letter_spacing_px(host)) <= 0.001) return;
+    ns_inline_attr a = { .kind = NS_INLINE_LETTER_SPACING, .start = s,
+                         .len = e - s, .letter_spacing_px = ls };
+    g_array_append_val(attrs, a);
+}
+
+static void
+first_letter_rise_attr(GArray *attrs, double own, double rise, gsize s, gsize e)
+{
+    if (own == 0) return;
+    ns_inline_attr a = { .kind = NS_INLINE_RISE, .start = s, .len = e - s,
+                         .rise_px = rise };
+    g_array_append_val(attrs, a);
+}
+
+static void
+run_style_first_letter(ns_box *run, const ns_node *first, GHashTable *styles,
+                       gsize from)
+{
+    const ns_style *host = g_hash_table_lookup(styles, first->parent);
+    const ns_style *fl = host->first_letter;
+    first_letter_span sp;
+    if (!run->text || !first_letter_range(run, from, &sp)) return;
+    gsize s = sp.start, e = sp.end;
+    double own = inline_vertical_align_rise(first, fl, styles);
+    ns_inline_attr elem = {
+        .kind = NS_INLINE_ELEMENT, .start = s, .len = e - s,
+        .rise_px = run_rise_at(run, s) + own, .style = fl,
+    };
+    GArray *own_attrs = g_array_new(FALSE, FALSE, sizeof(ns_inline_attr));
+    first_letter_font_attrs(own_attrs, fl, host, s, e);
+    first_letter_feature_attrs(own_attrs, fl, s, e);
+    first_letter_box_attrs(own_attrs, fl, host, s, e);
+    first_letter_rise_attr(own_attrs, own, elem.rise_px, s, e);
+    g_array_append_val(own_attrs, elem);
+    g_array_prepend_vals(run->attrs, own_attrs->data, own_attrs->len);
+    g_array_free(own_attrs, TRUE);
+}
+
+static gsize
+erase_shift(gsize x, gsize s, gsize e)
+{
+    return x <= s ? x : x >= e ? x - (e - s) : s;
+}
+
+static void
+run_erase_attrs(GArray *attrs, gsize s, gsize e)
+{
+    for (guint i = attrs->len; i-- > 0;) {
+        ns_inline_attr *a = &g_array_index(attrs, ns_inline_attr, i);
+        gsize a0 = erase_shift(a->start, s, e);
+        gsize a1 = erase_shift(a->start + a->len, s, e);
+        if (a1 == a0 && a->len > 0 && a->kind != NS_INLINE_ELEMENT) {
+            g_array_remove_index(attrs, i);
+            continue;
+        }
+        if (a1 == a0 && a->kind == NS_INLINE_ELEMENT)
+            a->kind = NS_INLINE_EMPTY_ELEMENT;
+        a->start = a0;
+        a->len = a1 - a0;
+    }
+}
+
+static void
+run_erase_links(GArray *links, gsize s, gsize e)
+{
+    for (guint i = links->len; i-- > 0;) {
+        ns_link_range *l = &g_array_index(links, ns_link_range, i);
+        gsize l0 = erase_shift(l->start, s, e);
+        gsize l1 = erase_shift(l->start + l->len, s, e);
+        if (l1 == l0) {
+            g_free(l->href);
+            g_free(l->target);
+            g_array_remove_index(links, i);
+            continue;
+        }
+        l->start = l0;
+        l->len = l1 - l0;
+    }
+}
+
+static void
+run_erase_bytes(ns_box *run, gsize s, gsize e)
+{
+    gsize len = strlen(run->text);
+    memmove(run->text + s, run->text + e, len - e + 1);
+    if (run->attrs) run_erase_attrs(run->attrs, s, e);
+    if (run->links) run_erase_links(run->links, s, e);
+    for (guint i = 0; run->inline_atomics && i < run->inline_atomics->len; i++) {
+        ns_inline_atomic *ia =
+            &g_array_index(run->inline_atomics, ns_inline_atomic, i);
+        ia->byte_off = erase_shift(ia->byte_off, s, e);
+    }
+}
+
+static void
+append_first_letter_float(ns_box *parent, ns_box *run, const ns_node *start,
+                          GHashTable *styles)
+{
+    const ns_style *fl = first_letter_style_for(start, styles, TRUE);
+    first_letter_span sp;
+    if (!fl || !run || !run->text ||
+        !first_letter_range(run, run_marker_skip(run, start, styles), &sp))
+        return;
+    char *letter = g_strndup(run->text + sp.start, sp.end - sp.start);
+    box_append_child(parent, pseudo_block_with_text(fl, letter));
+    g_free(letter);
+    run_erase_bytes(run, sp.start, sp.end);
+}
+
 static ns_box *
 build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
                       GHashTable *styles, gboolean abs_placeholders)
@@ -5026,17 +5392,10 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
         }
     }
     gsize marker_end = 0;
-    if (first && first->parent && first->parent->kind == NS_NODE_ELEMENT) {
-        const ns_style *li_style = g_hash_table_lookup(styles, first->parent);
-        if (ns_paint_li_is_inside(li_style) &&
-            inline_run_opens_parent(first, styles)) {
-            char marker[64];
-            if (ns_paint_li_marker_text(first->parent, li_style,
-                                        marker, sizeof marker)) {
-                g_string_append(buf, inside_marker_text(marker));
-                marker_end = buf->len;
-            }
-        }
+    char marker[64];
+    if (run_inside_marker(first, styles, marker, sizeof marker)) {
+        g_string_append(buf, marker);
+        marker_end = buf->len;
     }
     for (const ns_node *n = first; n && n != last_excl; n = n->next_sibling)
         collect_walk(n, &ctx, g_inline_collect_depth);
@@ -5175,115 +5534,6 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
         }
     }
 
-    if (first && first->parent && collapsed->len > 0 &&
-        first == first->parent->first_child) {
-        const ns_style *ps = g_hash_table_lookup(styles, first->parent);
-        if (ps && ps->first_letter) {
-            const ns_style *fl = ps->first_letter;
-            const char *txt = collapsed->str;
-            gsize i = 0;
-            while (i < collapsed->len &&
-                   (txt[i] == ' ' || txt[i] == '\t' || txt[i] == '\n'))
-                i++;
-            while (i < collapsed->len) {
-                gunichar ch = g_utf8_get_char(txt + i);
-                if (g_unichar_isalnum(ch)) break;
-                i = (gsize)(g_utf8_next_char(txt + i) - txt);
-            }
-            if (i < collapsed->len) {
-                gsize fl_start = i;
-                gsize fl_end = (gsize)(g_utf8_next_char(txt + i) - txt);
-                if (fl_end > collapsed->len) fl_end = collapsed->len;
-                gsize fl_len = fl_end - fl_start;
-                if (fl->values[NS_CSS_FONT_SIZE] &&
-                    fl->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH &&
-                    fl->values[NS_CSS_FONT_SIZE]->u.length.unit == NS_CSS_UNIT_PX) {
-                    ns_inline_attr a = {
-                        .kind = NS_INLINE_FONT_SIZE,
-                        .start = fl_start, .len = fl_len,
-                        .font_size_px = fl->values[NS_CSS_FONT_SIZE]->u.length.v,
-                    };
-                    g_array_append_val(box->attrs, a);
-                }
-                const ns_css_value *fl_color = ns_style_text_fill_color(fl);
-                if (fl_color && fl_color->kind == NS_CSS_V_COLOR) {
-                    ns_inline_attr a = {
-                        .kind = NS_INLINE_COLOR,
-                        .start = fl_start, .len = fl_len,
-                        .r = fl_color->u.color.r,
-                        .g = fl_color->u.color.g,
-                        .b = fl_color->u.color.b,
-                        .a = fl_color->u.color.a,
-                    };
-                    g_array_append_val(box->attrs, a);
-                }
-                if (fl->values[NS_CSS_BACKGROUND_COLOR] &&
-                    fl->values[NS_CSS_BACKGROUND_COLOR]->kind == NS_CSS_V_COLOR) {
-                    ns_inline_attr a = {
-                        .kind = NS_INLINE_BG_COLOR,
-                        .start = fl_start, .len = fl_len,
-                        .r = fl->values[NS_CSS_BACKGROUND_COLOR]->u.color.r,
-                        .g = fl->values[NS_CSS_BACKGROUND_COLOR]->u.color.g,
-                        .b = fl->values[NS_CSS_BACKGROUND_COLOR]->u.color.b,
-                        .a = fl->values[NS_CSS_BACKGROUND_COLOR]->u.color.a,
-                    };
-                    g_array_append_val(box->attrs, a);
-                }
-                const ns_css_value *fw = fl->values[NS_CSS_FONT_WEIGHT];
-                int font_weight = ns_css_font_weight_number(fw, -1);
-                if (font_weight > 0) {
-                    ns_inline_attr a = {
-                        .kind = NS_INLINE_FONT_WEIGHT,
-                        .start = fl_start, .len = fl_len,
-                        .font_weight = font_weight,
-                    };
-                    g_array_append_val(box->attrs, a);
-                }
-                if (keyword_is(fl->values[NS_CSS_FONT_STYLE], "italic") ||
-                    keyword_is(fl->values[NS_CSS_FONT_STYLE], "oblique")) {
-                    ns_inline_attr a = {
-                        .kind = NS_INLINE_ITALIC,
-                        .start = fl_start, .len = fl_len,
-                    };
-                    g_array_append_val(box->attrs, a);
-                }
-                if (fl->values[NS_CSS_FONT_FAMILY] &&
-                    fl->values[NS_CSS_FONT_FAMILY]->kind == NS_CSS_V_KEYWORD) {
-                    ns_inline_attr a = {
-                        .kind = NS_INLINE_FONT_FAMILY,
-                        .start = fl_start, .len = fl_len,
-                        .family = fl->values[NS_CSS_FONT_FAMILY]->u.keyword,
-                    };
-                    g_array_append_val(box->attrs, a);
-                }
-                int fk = font_kerning_int_from_style(fl);
-                const char *flig = font_ligatures_from_style(fl);
-                const char *fnum = font_numeric_from_style(fl);
-                const char *ffea = font_feature_settings_from_style(fl);
-                if (fk >= 0 || flig || fnum || ffea) {
-                    ns_inline_attr a = {
-                        .kind = NS_INLINE_FONT_FEATURES,
-                        .start = fl_start, .len = fl_len,
-                        .font_kerning = fk,
-                        .font_ligatures = flig,
-                        .font_numeric = fnum,
-                        .font_features = ffea,
-                    };
-                    g_array_append_val(box->attrs, a);
-                }
-                const char *fvar = font_variation_settings_from_style(fl);
-                if (fvar) {
-                    ns_inline_attr a = {
-                        .kind = NS_INLINE_FONT_VARIATIONS,
-                        .start = fl_start, .len = fl_len,
-                        .font_variations = fvar,
-                    };
-                    g_array_append_val(box->attrs, a);
-                }
-            }
-        }
-    }
-
     for (guint i = 0; i < raw_atomics->len; i++) {
         ns_atomic_raw *rr = &g_array_index(raw_atomics, ns_atomic_raw, i);
         gsize start = rr->start;
@@ -5307,6 +5557,10 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
     g_string_free(buf, TRUE);
 
     box->text = g_string_free(collapsed, FALSE);
+    if (first_letter_style_for(first, styles, FALSE))
+        run_style_first_letter(box, first, styles,
+                               marker_end ? text_prefix_len(box->text, marker)
+                                          : 0);
     return box;
 }
 
@@ -7014,6 +7268,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
             ns_box *run = inline_merge_prefix(
                 pending_before, build_inline_run(start, c, styles));
             pending_before = NULL;
+            append_first_letter_float(block, run, start, styles);
             if (inline_run_worth_keeping(run))
                 box_append_child(block, run);
             else
@@ -19536,13 +19791,29 @@ inline_rel_resolve(const inline_rel_set *set)
     g_array_free(order, TRUE);
 }
 
+static const ns_node *
+inline_attr_rel_node(const ns_box *box, const ns_inline_attr *r)
+{
+    if (r->dom) return r->dom;
+    const ns_inline_attr *inner = NULL;
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *a = &g_array_index(box->attrs, ns_inline_attr, i);
+        if (a->kind != NS_INLINE_ELEMENT || !a->dom || a->start > r->start ||
+            a->start + a->len < r->start + r->len)
+            continue;
+        if (!inner || a->len < inner->len) inner = a;
+    }
+    return inner ? inner->dom : NULL;
+}
+
 static void
 inline_rel_assign(ns_box *box, const inline_rel_set *set)
 {
     for (guint i = 0; i < box->attrs->len; i++) {
         ns_inline_attr *r = &g_array_index(box->attrs, ns_inline_attr, i);
         if (r->kind != NS_INLINE_ELEMENT) continue;
-        const inline_rel_offset *o = inline_rel_nearest(set, r->dom);
+        const inline_rel_offset *o =
+            inline_rel_nearest(set, inline_attr_rel_node(box, r));
         if (!o) continue;
         r->rel_dx = o->acc_dx;
         r->rel_dy = o->acc_dy;

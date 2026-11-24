@@ -15,6 +15,22 @@ Changelog:
 
 1.0.51:
 ======
+* `::first-letter` now lays out like Chrome. A large first letter only
+  changed the font of the glyph: the line kept the height of the
+  paragraph text, so a 36 px drop letter overlapped the line above, and
+  `line-height`, `float` and backgrounds on it were ignored. The letter
+  also skipped the punctuation around it, so in `"(T)est"` only the `T`
+  grew. The first letter is now its own inline box that grows the line,
+  takes its `line-height` and paints its background; `float: left` turns
+  it into a real drop cap that the text wraps beside; it includes the
+  punctuation and spaces before the letter and the closing punctuation
+  after it, as CSS Pseudo-Elements 4 defines; a whole emoji, flag or
+  Devanagari conjunct counts as one letter; the marker of an inside list
+  item stays outside the letter; `letter-spacing` and `vertical-align`
+  on the letter apply; and a letter that is not floated keeps the
+  colour of an enclosing link or coloured span and moves with a
+  `position: relative` span. 353 more first-letter tests of the CSS 2
+  suite pass.
 * Security: clicking a box that is the root of a 3D-transformed subtree
   with its own background or border no longer overflows the renderer's
   stack. The 3D hit test picked the box's own quad, hit-tested the box,
