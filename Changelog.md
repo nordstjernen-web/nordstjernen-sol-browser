@@ -18,7 +18,11 @@ Changelog:
   config read-only like a tab's. `--enable-webgpu` now also takes effect
   for headless and WebDriver runs, and a renderer whose WebGPU is forced on
   that way keeps the GPU access WebGPU needs even when WebGL and WebGPU
-  are off in Settings.
+  are off in Settings. Because headless may no longer start programs, the
+  undocumented `NS_HEADLESS_RENDERER` mode, where headless drives a
+  separate renderer process, now fails on macOS as it already did on Linux
+  and Windows; the macOS CI smoke test drives the bundled renderer through
+  `--webdriver` instead.
 * Layout: table cells placed directly in a table or a row group next to
   real rows are now wrapped in an anonymous row and laid out, as CSS 2.1
   asks. They were dropped and collapsed to 0x0 whenever the table also had
