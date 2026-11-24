@@ -67,6 +67,7 @@
 #define ns_pango_context_get_serial                       pango_context_get_serial
 #define ns_pango_context_set_base_dir                     pango_context_set_base_dir
 #define ns_pango_context_set_round_glyph_positions        pango_context_set_round_glyph_positions
+#define ns_pango_default_break                            pango_default_break
 #define NS_PANGO_DIRECTION_LTR                            PANGO_DIRECTION_LTR
 #define NS_PANGO_DIRECTION_NEUTRAL                        PANGO_DIRECTION_NEUTRAL
 #define NS_PANGO_DIRECTION_RTL                            PANGO_DIRECTION_RTL
