@@ -67246,6 +67246,23 @@ bool JS_IsHostCaller(JSContext *ctx)
     return js_frames_are_host(sf ? sf->prev_frame : NULL);
 }
 
+/* Whether a page script runs anywhere on the stack, however deep under the
+   embedder's own code. */
+bool JS_IsPageCodeOnStack(JSContext *ctx)
+{
+    JSStackFrame *sf;
+    for (sf = ctx->rt->current_stack_frame; sf; sf = sf->prev_frame) {
+        JSObject *f;
+        if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
+            continue;
+        f = JS_VALUE_GET_OBJ(sf->cur_func);
+        if (js_class_has_bytecode(f->class_id) &&
+            !js_cload(struct JSFunctionBytecode *, f->u.func.function_bytecode)->is_engine_code)
+            return true;
+    }
+    return false;
+}
+
 /* Whether fn is the embedder's: one of its C functions or a function
    compiled from hidden-source engine code. */
 bool JS_IsEngineFunction(JSValueConst fn)
