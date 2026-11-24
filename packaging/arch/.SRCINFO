@@ -39,6 +39,7 @@ pkgbase = nordstjernen-browser
 	depends = sqlite
 	depends = uchardet
 	depends = zlib
+	depends = zstd
 	optdepends = gst-libav: H.264 and AAC playback
 	optdepends = gst-plugins-good: H.264 and AAC playback
 	optdepends = gst-plugins-bad: H.264 and AAC playback

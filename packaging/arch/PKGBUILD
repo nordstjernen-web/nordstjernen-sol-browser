@@ -38,6 +38,7 @@ depends=(
   sqlite
   uchardet
   zlib
+  zstd
 )
 makedepends=(meson rust simde)
 optdepends=(
