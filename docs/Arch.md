@@ -77,8 +77,10 @@ the AUR repository.
 fails the job), installs it and runs a headless smoke test. It runs on pull
 requests that touch `packaging/arch/`, weekly (Arch is rolling, so a
 dependency update can break an unchanged recipe), and on every pushed
-version tag, where it first runs `update.sh` for that tag and uploads the
-updated `PKGBUILD` and `.SRCINFO` as the `arch-package` artifact.
+version tag, where it first runs `update.sh` for that tag. Every run uploads
+the `PKGBUILD`, `.SRCINFO`, package and `namcap` output it used as the
+`arch-package` artifact; after a tag run that recipe is the one to commit
+here and push to the AUR.
 
 ## Test VM
 

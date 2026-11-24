@@ -47,7 +47,6 @@ optdepends=(
   'hunspell: spell checking'
   'hunspell-en_us: English dictionary for spell checking'
 )
-# The versions the release pins in subprojects/*.wrap; update.sh sets them.
 _pdfjsver=6.5.438
 _wuffsver=0.4.0-alpha.12
 _wamrver=2.4.6
