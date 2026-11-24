@@ -4647,6 +4647,36 @@ decoration_color_of(const ns_inline_attr *r, const ns_style *s)
     return cv && cv->kind == NS_CSS_V_COLOR ? cv : NULL;
 }
 
+static NsPangoAttribute *
+decoration_color_attr_new(ns_inline_attr_kind kind, const ns_css_value *c)
+{
+    guint16 red = (guint16)(c->u.color.r * 0x101);
+    guint16 green = (guint16)(c->u.color.g * 0x101);
+    guint16 blue = (guint16)(c->u.color.b * 0x101);
+    if (kind == NS_INLINE_UNDERLINE)
+        return ns_pango_attr_underline_color_new(red, green, blue);
+    if (kind == NS_INLINE_OVERLINE)
+        return ns_pango_attr_overline_color_new(red, green, blue);
+    return ns_pango_attr_strikethrough_color_new(red, green, blue);
+}
+
+static void
+decoration_color_over_generated(NsPangoAttrList *attrs, const ns_box *b,
+                                const ns_inline_attr *r)
+{
+    const ns_css_value *c = r->style ? r->style->values[NS_CSS_COLOR] : NULL;
+    if (!c || c->kind != NS_CSS_V_COLOR) return;
+    gsize r_end = r->start + r->len;
+    for (guint i = 0; i < b->attrs->len; i++) {
+        const ns_inline_attr *g = &g_array_index(b->attrs, ns_inline_attr, i);
+        if (g->kind != NS_INLINE_GENERATED) continue;
+        gsize lo = MAX(g->start, r->start), hi = MIN(g->start + g->len, r_end);
+        if (lo < hi)
+            attr_insert_range(attrs, decoration_color_attr_new(r->kind, c),
+                              lo, hi - lo);
+    }
+}
+
 static const char *
 decoration_style_of(const ns_inline_attr *r, const ns_style *s)
 {
@@ -5075,7 +5105,9 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                     else if (strcmp(kw, "wavy") == 0) ul = NS_PANGO_UNDERLINE_ERROR;
                 }
                 a = ns_pango_attr_underline_new(ul);
-                if (cv)
+                if (!cv)
+                    decoration_color_over_generated(attrs, b, r);
+                else
                     attr_insert_range(attrs, ns_pango_attr_underline_color_new(
                         (guint16)(cv->u.color.r * 0x101),
                         (guint16)(cv->u.color.g * 0x101),
@@ -5089,7 +5121,9 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                 if (cv && cv->u.color.a == 0)
                     break;
                 a = ns_pango_attr_overline_new(NS_PANGO_OVERLINE_SINGLE);
-                if (cv)
+                if (!cv)
+                    decoration_color_over_generated(attrs, b, r);
+                else
                     attr_insert_range(attrs, ns_pango_attr_overline_color_new(
                         (guint16)(cv->u.color.r * 0x101),
                         (guint16)(cv->u.color.g * 0x101),
@@ -5103,7 +5137,9 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                 if (cv && cv->u.color.a == 0)
                     break;
                 a = ns_pango_attr_strikethrough_new(TRUE);
-                if (cv)
+                if (!cv)
+                    decoration_color_over_generated(attrs, b, r);
+                else
                     attr_insert_range(attrs, ns_pango_attr_strikethrough_color_new(
                         (guint16)(cv->u.color.r * 0x101),
                         (guint16)(cv->u.color.g * 0x101),
