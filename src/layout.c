@@ -1484,6 +1484,41 @@ row_group_child_needs_anonymous_row(const ns_node *c, GHashTable *styles)
     return !node_is_table_internal(c, styles);
 }
 
+static gboolean
+starts_loose_cell_run(const ns_node *c, GHashTable *styles)
+{
+    if (!is_cell_element(c, styles)) return FALSE;
+    for (const ns_node *p = c->prev_sibling; p; p = p->prev_sibling) {
+        if (is_cell_element(p, styles)) return FALSE;
+        if (is_table_row(p, styles) || node_is_row_group(p, styles))
+            return TRUE;
+    }
+    return TRUE;
+}
+
+static const ns_node *
+loose_cell_run_end(const ns_node *c, GHashTable *styles)
+{
+    while (c && !is_table_row(c, styles) && !node_is_row_group(c, styles))
+        c = c->next_sibling;
+    return c;
+}
+
+static void collect_rows_recurse(const ns_node *n, GHashTable *styles,
+                                 GPtrArray *out, int depth);
+
+static void
+collect_row_entry(const ns_node *c, GHashTable *styles, GPtrArray *out,
+                  int depth)
+{
+    if (!is_cell_element(c, styles)) {
+        collect_rows_recurse(c, styles, out, depth);
+        return;
+    }
+    if (starts_loose_cell_run(c, styles))
+        g_ptr_array_add(out, (gpointer)c);
+}
+
 static void
 collect_rows_recurse(const ns_node *n, GHashTable *styles, GPtrArray *out, int depth)
 {
@@ -1508,7 +1543,7 @@ collect_rows_recurse(const ns_node *n, GHashTable *styles, GPtrArray *out, int d
                 if (row_group_child_needs_anonymous_row(c, styles))
                     g_ptr_array_add(out, (gpointer)c);
                 else
-                    collect_rows_recurse(c, styles, out, depth + 1);
+                    collect_row_entry(c, styles, out, depth + 1);
             }
             return;
         }
@@ -1545,7 +1580,7 @@ collect_rows(const ns_node *table, GHashTable *styles, GPtrArray *out)
         GPtrArray *dst = g == ROW_GROUP_HEADER ? header
                        : g == ROW_GROUP_FOOTER ? footer
                                                : body;
-        collect_rows_recurse(c, styles, dst, 0);
+        collect_row_entry(c, styles, dst, 0);
     }
     for (guint i = 0; i < header->len; i++)
         g_ptr_array_add(out, g_ptr_array_index(header, i));
@@ -2013,6 +2048,20 @@ flush_pending_before(ns_box *parent, ns_box **pending_before,
     *pending_before = NULL;
 }
 
+static ns_box *build_anonymous_table(const ns_node *start, const ns_node *end,
+                                     GHashTable *styles);
+
+static const ns_node *
+cell_append_anonymous_table(ns_box *cell, const ns_node *start,
+                            GHashTable *styles, ns_box **pending_before)
+{
+    const ns_node *end = table_internal_run_end(start, styles);
+    flush_pending_before(cell, pending_before, start, styles);
+    ns_box *anon = build_anonymous_table(start, end, styles);
+    if (anon) box_append_child(cell, anon);
+    return end;
+}
+
 static ns_box *
 build_cell(const ns_node *n, GHashTable *styles)
 {
@@ -2032,7 +2081,9 @@ build_cell(const ns_node *n, GHashTable *styles)
     ns_box *pending_before = cell_pseudo_before(cell, n, s);
     const ns_node *c = n->first_child;
     while (c) {
-        if (continues_inline_run(c, styles)) {
+        if (node_is_table_internal(c, styles)) {
+            c = cell_append_anonymous_table(cell, c, styles, &pending_before);
+        } else if (continues_inline_run(c, styles)) {
             const ns_node *start = c;
             while (c && continues_inline_run(c, styles)) c = c->next_sibling;
             cell_append_run(cell, start, c, styles, &pending_before);
@@ -2202,9 +2253,17 @@ row_children_need_anonymous_cell(const ns_node *first, const ns_node *end,
     return FALSE;
 }
 
+static ns_box *build_row_from_cell_run(const ns_node *start,
+                                       const ns_node *end,
+                                       const ns_node *dom,
+                                       GHashTable *styles);
+
 static ns_box *
 build_table_row(const ns_node *tr, GHashTable *styles)
 {
+    if (is_cell_element(tr, styles))
+        return build_row_from_cell_run(tr, loose_cell_run_end(tr, styles),
+                                       NULL, styles);
     ns_box *row = box_new(NS_BOX_TABLE_ROW);
     if (!is_table_row(tr, styles)) {
         ns_box *child = build_block(tr, styles);
@@ -2253,6 +2312,12 @@ build_row_from_cell_run(const ns_node *start, const ns_node *end,
     return NULL;
 }
 
+static void
+append_table_row(ns_box *table, ns_box *row)
+{
+    if (row) box_append_child(table, row);
+}
+
 static ns_box *
 build_table(const ns_node *n, GHashTable *styles)
 {
@@ -2267,14 +2332,7 @@ build_table(const ns_node *n, GHashTable *styles)
     }
     GPtrArray *rows = g_ptr_array_new();
     collect_rows(n, styles, rows);
-    gboolean has_direct_cells = FALSE;
-    if (rows->len == 0)
-        for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-            if (is_cell_element(c, styles)) { has_direct_cells = TRUE; break; }
-    if (rows->len == 0 && has_direct_cells) {
-        ns_box *row = build_row_from_cell_run(n->first_child, NULL, n, styles);
-        if (row) box_append_child(table, row);
-    } else if (rows->len == 0) {
+    if (rows->len == 0) {
         ns_box *cell = build_anonymous_table_cell(n, styles);
         if (cell) {
             ns_box *row = box_new(NS_BOX_TABLE_ROW);
@@ -2284,7 +2342,7 @@ build_table(const ns_node *n, GHashTable *styles)
         }
     } else {
         for (guint i = 0; i < rows->len; i++)
-            box_append_child(table,
+            append_table_row(table,
                              build_table_row(g_ptr_array_index(rows, i),
                                              styles));
     }
@@ -2312,9 +2370,9 @@ append_anonymous_table_rows(ns_box *table, const ns_node *c,
     }
     if (!node_is_row_group(c, styles)) return;
     for (const ns_node *r = c->first_child; r; r = r->next_sibling)
-        if (is_table_row(r, styles) ||
+        if (is_table_row(r, styles) || starts_loose_cell_run(r, styles) ||
             row_group_child_needs_anonymous_row(r, styles))
-            box_append_child(table, build_table_row(r, styles));
+            append_table_row(table, build_table_row(r, styles));
 }
 
 static ns_box *

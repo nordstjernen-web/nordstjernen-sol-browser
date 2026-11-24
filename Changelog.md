@@ -3,6 +3,15 @@ Changelog:
 
 1.0.52-dev:
 ======
+* Layout: table cells placed directly in a table or a row group next to
+  real rows are now wrapped in an anonymous row and laid out, as CSS 2.1
+  asks. They were dropped and collapsed to 0x0 whenever the table also had
+  a row or row group, so a `display: table` with two loose
+  `display: table-cell` children followed by a `display: table-row-group`
+  showed only the group's row; both rows now show, like in Chrome. Rows,
+  row groups and cells placed directly inside a table cell now get their
+  own anonymous table inside that cell instead of vanishing or being
+  moved out of it.
 
 1.0.51:
 ======
