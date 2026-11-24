@@ -23,6 +23,12 @@ Changelog:
   separate renderer process, now fails on macOS as it already did on Linux
   and Windows; the macOS CI smoke test drives the bundled renderer through
   `--webdriver` instead.
+* WebDriver: `--webdriver` started from the macOS app bundle or a Windows
+  install now points its renderers at the bundled fontconfig and CA
+  certificates, as the windowed and headless browser already did. Without
+  Homebrew, a macOS WebDriver renderer failed with "Fontconfig error:
+  Cannot load default config file" and fell back to the system's CA store
+  or none.
 * Layout: table cells placed directly in a table or a row group next to
   real rows are now wrapped in an anonymous row and laid out, as CSS 2.1
   asks. They were dropped and collapsed to 0x0 whenever the table also had

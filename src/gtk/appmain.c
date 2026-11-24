@@ -601,6 +601,12 @@ main(int argc, char **argv)
         }
     }
 
+#ifdef G_OS_WIN32
+    ns_win32_anchor_gtk_data();
+#endif
+#ifdef __APPLE__
+    ns_macos_anchor_gtk_data();
+#endif
     int webdriver_rc = ns_run_webdriver_if_wanted(argc, argv);
     if (webdriver_rc >= 0) {
         g_free(g_self_exe);
@@ -608,12 +614,6 @@ main(int argc, char **argv)
         ns_config_shutdown();
         return webdriver_rc;
     }
-#ifdef G_OS_WIN32
-    ns_win32_anchor_gtk_data();
-#endif
-#ifdef __APPLE__
-    ns_macos_anchor_gtk_data();
-#endif
     gboolean proc_mode = ns_proc_mode_wanted(argc, argv);
     if (!proc_mode && !ns_print_config_wanted(argc, argv)) {
         int rc = ns_run_headless_host(argc, argv);
