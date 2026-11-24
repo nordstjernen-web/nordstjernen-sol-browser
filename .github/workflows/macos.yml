@@ -280,24 +280,40 @@ jobs:
 
       # --headless renders in-process, so nothing above runs shm_open, the
       # fork/execv of nordstjernen-renderer, or the renderer's own dylibs and
-      # fontconfig. Drive the bundled renderer process with Homebrew hidden.
+      # fontconfig. The WebDriver server spawns the bundled renderer the way
+      # the windowed browser does (shared-memory framebuffer, sandboxed
+      # child); drive it with Homebrew hidden. Headless itself cannot be the
+      # driver: it runs under the renderer sandbox, which denies exec.
       - name: Smoke test the bundled renderer process without Homebrew
         if: hashFiles('dist/Nordstjernen.app/Contents/MacOS/nordstjernen-renderer') != ''
         run: |
           set -o pipefail
           APP="$PWD/dist/Nordstjernen.app/Contents/MacOS"
           sudo mv /opt/homebrew /opt/homebrew.hidden
-          trap 'sudo mv /opt/homebrew.hidden /opt/homebrew' EXIT
+          "$APP/Nordstjernen" --webdriver=0 >webdriver.out 2>smoke.err &
+          WD=$!
+          trap 'kill $WD 2>/dev/null; wait $WD 2>/dev/null; cat smoke.err; sudo mv /opt/homebrew.hidden /opt/homebrew' EXIT
+          for i in $(seq 100); do
+            grep -q "listening on" webdriver.out && break
+            kill -0 $WD 2>/dev/null || break
+            sleep 0.2
+          done
+          BASE=$(sed -n 's|.*listening on \(http://[^ ]*\).*|\1|p' webdriver.out)
+          [ -n "$BASE" ] || { echo "::error::the WebDriver server did not start"; cat webdriver.out; exit 1; }
+          wd() { curl -sS --noproxy '*' -H 'Content-Type: application/json' "$@"; }
+          SID=$(wd -X POST -d '{"capabilities":{}}' "$BASE/session" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+          [ -n "$SID" ] || { echo "::error::the WebDriver server could not start a renderer"; exit 1; }
           smoke() {
             for attempt in 1 2 3; do
-              status=0
-              NS_HEADLESS_RENDERER="$APP/nordstjernen-renderer" \
-                "$APP/Nordstjernen" --headless --dump=text "$1" 2>smoke.err | tee smoke.txt || status=$?
-              cat smoke.err
-              if grep -qiE "Library not loaded|Fontconfig error|cannot execute|renderer framebuffer" smoke.err; then
+              wd -X POST -d "{\"url\":\"$1\"}" "$BASE/session/$SID/url" > smoke.txt || true
+              echo >> smoke.txt
+              wd -X POST -d '{"script":"return document.body ? document.body.innerText : \"\"","args":[]}' \
+                "$BASE/session/$SID/execute/sync" | tee -a smoke.txt
+              echo
+              if grep -qiE "Library not loaded|Fontconfig error|cannot execute|renderer framebuffer|protocol handshake" smoke.err; then
                 exit 1
               fi
-              if [ "$status" -eq 0 ] && grep -qiE "$2" smoke.txt; then
+              if grep -qiE "$2" smoke.txt; then
                 return 0
               fi
               grep -q "Could not resolve host" smoke.txt || exit 1
@@ -308,6 +324,7 @@ jobs:
           }
           smoke about:start Nordstjernen
           smoke https://example.com "Example Domain|documentation examples"
+          wd -X DELETE "$BASE/session/$SID" > /dev/null
 
       - name: Publish pack-macos log on failure
         if: always() && hashFiles('pack-macos.log') != ''
