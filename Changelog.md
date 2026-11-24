@@ -3,6 +3,20 @@ Changelog:
 
 1.0.52-dev:
 ======
+* CSS: generated content that shows a counter now numbers and styles it
+  like Chrome. A counter created by `counter-reset` or `counter-increment`
+  on an element or its `::before` is now scoped to that element's children
+  and following siblings, nested counters of the same name stack for
+  `counters()`, which now joins them with its separator, and a sibling's
+  counter no longer replaces one inherited from the parent. `counter-set`
+  now applies too. Before, every counter of a name was one flat number for
+  the whole page: `counters(item, ".")` in a nested list showed "2"
+  instead of "1.1", and `div::before { counter-increment: n }` on three
+  sibling divs counted 1, 2, 3 instead of 1, 1, 1. `counter()` and
+  `counters()` also now know the predefined `disc`, `circle`, `square`,
+  `disclosure-open`, `disclosure-closed`, `armenian`, `upper-armenian`,
+  `lower-armenian` and `georgian` styles, so `counter(c, disc)` shows a
+  bullet and `counter(c, armenian)` shows "Ա" instead of a digit.
 * Security: a page could read the DOM of a cross-origin iframe.
   `document.getItems()` walked into embedded frame documents and ignored
   its `this`, so the embedder got wrappers for the frame's microdata items

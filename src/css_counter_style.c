@@ -414,11 +414,131 @@ ns_css_counter_style_register(const char *name, const char *body,
     g_mutex_unlock(&g_counter_styles_lock);
 }
 
+static char *
+unichar_dup(gunichar c)
+{
+    char buf[8];
+    buf[g_unichar_to_utf8(c, buf)] = '\0';
+    return g_strdup(buf);
+}
+
+static counter_style *
+predefined_cyclic(gunichar symbol)
+{
+    counter_style *cs = g_new0(counter_style, 1);
+    cs->system = COUNTER_SYSTEM_CYCLIC;
+    cs->first = 1;
+    cs->symbols = g_ptr_array_new_with_free_func(g_free);
+    g_ptr_array_add(cs->symbols, unichar_dup(symbol));
+    cs->suffix = g_strdup(" ");
+    return cs;
+}
+
+static gint64
+additive_weight(guint i)
+{
+    gint64 weight = i % 9 + 1;
+    for (guint k = 0; k < i / 9; k++) weight *= 10;
+    return weight;
+}
+
+static counter_style *
+predefined_additive(const gunichar *ascending, guint n, gint64 high)
+{
+    counter_style *cs = g_new0(counter_style, 1);
+    cs->system = COUNTER_SYSTEM_ADDITIVE;
+    cs->first = 1;
+    cs->symbols = g_ptr_array_new_with_free_func(g_free);
+    cs->weights = g_array_new(FALSE, FALSE, sizeof(gint64));
+    for (guint i = n; i > 0; i--) {
+        gint64 weight = additive_weight(i - 1);
+        g_ptr_array_add(cs->symbols, unichar_dup(ascending[i - 1]));
+        g_array_append_val(cs->weights, weight);
+    }
+    counter_range range = { 1, high };
+    cs->ranges = g_array_new(FALSE, FALSE, sizeof(counter_range));
+    g_array_append_val(cs->ranges, range);
+    return cs;
+}
+
+static counter_style *
+predefined_armenian(gunichar one)
+{
+    gunichar symbols[36];
+    for (guint i = 0; i < G_N_ELEMENTS(symbols); i++) symbols[i] = one + i;
+    return predefined_additive(symbols, G_N_ELEMENTS(symbols), 9999);
+}
+
+static counter_style *
+predefined_georgian(void)
+{
+    static const gunichar symbols[] = {
+        0x10D0, 0x10D1, 0x10D2, 0x10D3, 0x10D4, 0x10D5, 0x10D6, 0x10F1,
+        0x10D7, 0x10D8, 0x10D9, 0x10DA, 0x10DB, 0x10DC, 0x10F2, 0x10DD,
+        0x10DE, 0x10DF, 0x10E0, 0x10E1, 0x10E2, 0x10F3, 0x10E4, 0x10E5,
+        0x10E6, 0x10E7, 0x10E8, 0x10E9, 0x10EA, 0x10EB, 0x10EC, 0x10ED,
+        0x10EE, 0x10F4, 0x10EF, 0x10F0, 0x10F5,
+    };
+    return predefined_additive(symbols, G_N_ELEMENTS(symbols), 19999);
+}
+
+static counter_style *
+predefined_upper_armenian(void)
+{
+    return predefined_armenian(0x531);
+}
+
+static counter_style *
+predefined_lower_armenian(void)
+{
+    return predefined_armenian(0x561);
+}
+
+static GHashTable *
+predefined_counter_styles(void)
+{
+    static const struct { const char *name; gunichar symbol; } cyclic[] = {
+        { "disc", 0x2022 }, { "circle", 0x25E6 }, { "square", 0x25AA },
+        { "disclosure-open", 0x25BE }, { "disclosure-closed", 0x25B8 },
+    };
+    static const struct {
+        const char *name;
+        counter_style *(*build)(void);
+    } additive[] = {
+        { "armenian", predefined_upper_armenian },
+        { "upper-armenian", predefined_upper_armenian },
+        { "lower-armenian", predefined_lower_armenian },
+        { "georgian", predefined_georgian },
+    };
+    static gsize once;
+    static GHashTable *table;
+    if (g_once_init_enter(&once)) {
+        table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                      counter_style_free);
+        for (gsize i = 0; i < G_N_ELEMENTS(cyclic); i++)
+            g_hash_table_insert(table, g_strdup(cyclic[i].name),
+                                predefined_cyclic(cyclic[i].symbol));
+        for (gsize i = 0; i < G_N_ELEMENTS(additive); i++)
+            g_hash_table_insert(table, g_strdup(additive[i].name),
+                                additive[i].build());
+        g_once_init_leave(&once, 1);
+    }
+    return table;
+}
+
 static const counter_style *
-counter_style_lookup(const char *name)
+author_counter_style_lookup(const char *name)
 {
     return name && g_counter_styles
         ? g_hash_table_lookup(g_counter_styles, name) : NULL;
+}
+
+static const counter_style *
+counter_style_lookup(const char *name)
+{
+    const counter_style *cs = author_counter_style_lookup(name);
+    if (cs || !name) return cs;
+    return g_hash_table_lookup(predefined_counter_styles(), name);
 }
 
 static const counter_style *
@@ -631,7 +751,7 @@ char *
 ns_css_counter_style_marker(const char *name, int value)
 {
     g_mutex_lock(&g_counter_styles_lock);
-    const counter_style *cs = counter_style_lookup(name);
+    const counter_style *cs = author_counter_style_lookup(name);
     char *marker = NULL;
     if (cs) {
         char *text = counter_style_representation(name, value, 0);

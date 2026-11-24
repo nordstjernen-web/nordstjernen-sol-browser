@@ -154,8 +154,7 @@ render_collect_pseudo_font_usage(const ns_node *host, const ns_style *pseudo,
                                  GHashTable *families)
 {
     if (!pseudo) return;
-    char *text = ns_layout_pseudo_content_text(pseudo->values[NS_CSS_CONTENT],
-                                               host);
+    char *text = ns_layout_pseudo_content_text(pseudo, host);
     if (text && *text) render_font_usage_add_styled(pseudo, text, families);
     g_free(text);
 }
