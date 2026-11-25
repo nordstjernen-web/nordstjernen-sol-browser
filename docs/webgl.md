@@ -325,6 +325,38 @@ when they are allocated, rather than lazily on first use as ANGLE does.
 Users who do not want pages to reach the native GL stack can disable WebGL
 globally in Settings.
 
+## Planned GPU process
+
+WebGL runs GL in the renderer today, so the renderer's sandbox has to allow
+the GPU device while WebGL or WebGPU is on. The plan is to move GL into a
+separate GPU process: the renderer records its WebGL calls as commands in
+shared memory, and the GPU process checks and replays them. The renderer's
+seccomp and Landlock policy can then drop GPU access altogether.
+
+`src/gpu_wire.c` is the command format for that, with no GL or JS
+dependency:
+
+- A **record** starts at a multiple of 16 bytes with a 16-byte header: the
+  command type (`uint16_t`), two reserved bytes, the payload size
+  (`uint32_t`, at most 64 MiB) and eight more reserved bytes. Every
+  reserved byte must be zero.
+- The **payload** is the command's fixed-size struct, followed, at the next
+  multiple of 16 bytes, by its inline data. A struct refers to its data
+  through `ns_gpu_wire_span` fields (`offset`, `size`, from the start of
+  the payload). The writer zero-fills the header and all padding, so no
+  stale memory of one process reaches the other.
+- The **reader** treats every byte as hostile. A short header, a reserved
+  byte that is not zero, an empty or oversized payload, or a record that
+  runs past the end stops the reader for good. Structs are copied out of
+  the payload, never read in place. A span is used only if it lies inside
+  its payload, with overflow-safe arithmetic; an element span must hold
+  exactly `count` elements at their natural alignment, a string span must
+  end in a NUL, and a boolean byte must be 0 or 1.
+
+The GPU process has to copy the records out of shared memory before it
+decodes them, so that the renderer cannot change a struct or a span
+between its check and its use.
+
 ## Limitations
 
 - `texImage2D` from a DOM source decodes through the same surface path the
