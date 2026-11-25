@@ -248,6 +248,12 @@ the parts a hostile page can actually reach.
   undersized buffer is skipped (no write past the view); `texImage2D` /
   `texImage3D` / `texSubImage*` from an undersized array are skipped (no read
   past it).
+- **One place for the arithmetic.** The byte counts above, the vertex
+  attribute and index range checks of draw calls and the uniform buffer
+  ranges are computed in `src/webgl_validate.c`, which takes every input as
+  a parameter and calls neither GL nor QuickJS; `src/webgl.c` reads the GL
+  state and passes it in, so the checks can be audited apart from the
+  bridge to the driver.
 - **No uninitialized GPU memory disclosure.** Every allocation a page can
   read back starts as zeros, so it cannot see stale VRAM: `bufferData(size)`
   and `texImage2D/3D(…, null)` upload zero-filled storage; `texStorage2D/3D`

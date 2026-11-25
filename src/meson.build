@@ -146,6 +146,10 @@ nordstjernen_engine_sources += files(
   'ns_quickjs.c',
 )
 
+if not is_mobile and have_glslang
+  nordstjernen_engine_sources += files('webgl_validate.c')
+endif
+
 # GTK-free helpers used by the desktop executable but not the engine UI:
 # the crash watchdog. Kept in src/ as common
 # code; the GTK frontend itself lives in src/gtk/.

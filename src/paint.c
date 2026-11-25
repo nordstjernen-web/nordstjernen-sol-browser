@@ -11498,6 +11498,30 @@ box_overflow_clip_axes(const ns_box *b, gboolean *clip_x, gboolean *clip_y)
 }
 
 static gboolean
+css_value_is_explicit_extent(const ns_css_value *v)
+{
+    return v && (v->kind == NS_CSS_V_LENGTH || v->kind == NS_CSS_V_CALC);
+}
+
+static gboolean
+style_extent_is_explicit(const ns_style *s, int prop, int max_prop)
+{
+    return css_value_is_explicit_extent(s->values[max_prop]) ||
+           css_value_is_explicit_extent(s->values[prop]);
+}
+
+static gboolean
+box_zero_width_from_explicit_ancestor(const ns_box *b)
+{
+    for (const ns_box *p = b->parent; p && p->content_width <= 0;
+         p = p->parent)
+        if (p->style && style_extent_is_explicit(p->style, NS_CSS_WIDTH,
+                                                 NS_CSS_MAX_WIDTH))
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
 box_overflow_clip_rect(const ns_box *b, double *px, double *py,
                        double *pw, double *ph)
 {
@@ -11523,20 +11547,11 @@ box_overflow_clip_rect(const ns_box *b, double *px, double *py,
         *px = *py = 0;
         *pw = *ph = 0;
     }
-    gboolean explicit_h =
-        (bs->values[NS_CSS_MAX_HEIGHT] &&
-         (bs->values[NS_CSS_MAX_HEIGHT]->kind == NS_CSS_V_LENGTH ||
-          bs->values[NS_CSS_MAX_HEIGHT]->kind == NS_CSS_V_CALC)) ||
-        (bs->values[NS_CSS_HEIGHT] &&
-         (bs->values[NS_CSS_HEIGHT]->kind == NS_CSS_V_LENGTH ||
-          bs->values[NS_CSS_HEIGHT]->kind == NS_CSS_V_CALC));
-    gboolean explicit_w =
-        (bs->values[NS_CSS_MAX_WIDTH] &&
-         (bs->values[NS_CSS_MAX_WIDTH]->kind == NS_CSS_V_LENGTH ||
-          bs->values[NS_CSS_MAX_WIDTH]->kind == NS_CSS_V_CALC)) ||
-        (bs->values[NS_CSS_WIDTH] &&
-         (bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_LENGTH ||
-          bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_CALC));
+    gboolean explicit_h = style_extent_is_explicit(bs, NS_CSS_HEIGHT,
+                                                   NS_CSS_MAX_HEIGHT);
+    gboolean explicit_w = style_extent_is_explicit(bs, NS_CSS_WIDTH,
+                                                   NS_CSS_MAX_WIDTH) ||
+                          box_zero_width_from_explicit_ancestor(b);
     gboolean sized_by_container = ns_box_is_flex_or_grid_item(b);
     return (!clip_x || *pw > 0 || explicit_w || sized_by_container) &&
            (!clip_y || *ph > 0 || explicit_h || sized_by_container);

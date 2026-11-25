@@ -34167,6 +34167,19 @@ ns_js_record_character_data(ns_js *js, ns_node *target, const char *old_value)
 }
 
 static gboolean
+ns_js_node_fully_transparent(const ns_js *js, const ns_node *n)
+{
+    for (; n && n->kind == NS_NODE_ELEMENT; n = n->parent) {
+        const ns_style *st = g_hash_table_lookup(js->style_table, n);
+        const ns_css_value *opacity = st ? st->values[NS_CSS_OPACITY] : NULL;
+        if (opacity && opacity->kind == NS_CSS_V_LENGTH &&
+            opacity->u.length.v <= 0.0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
 ns_js_patch_inline_transform(ns_js *js, ns_node *n, const char *name,
                              const char *old_value, const char *new_value)
 {
@@ -34184,7 +34197,8 @@ ns_js_patch_inline_transform(ns_js *js, ns_node *n, const char *name,
         !ns_css_style_apply_inline_transform(st, old_value, new_value))
         return FALSE;
     js->transform_patched = TRUE;
-    if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+    if (js->repaint_cb && !ns_js_node_fully_transparent(js, n))
+        js->repaint_cb(js->repaint_user_data);
     return TRUE;
 }
 

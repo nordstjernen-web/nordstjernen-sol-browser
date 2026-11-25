@@ -11,6 +11,64 @@ Changelog:
   and the next line overlapped the number. The generated text now uses
   its own `line-height`, computed from its own font size.
   On 52 saved real-site pages, 9 more elements match Chrome.
+* `overflow: hidden` on a box that is zero pixels wide because an ancestor
+  has an explicit zero width now clips its contents. The painter skips the
+  clip of a zero-sized box unless that size was asked for, and it only
+  looked at the box's own `width`, so an auto-width `overflow: hidden`
+  box inside a `width: 0` parent let its absolutely positioned children
+  show. On YouTube the collapsed volume slider was drawn across the time
+  display.
+* A script that changes the inline `transform` of an element nobody can see
+  no longer repaints the page. Such a write was already applied without a
+  relayout, but it still asked for a repaint of the whole visible page each
+  time. A video player keeps moving its progress bar while its controls
+  are faded out to `opacity: 0`, about ten times a second, so watching a
+  video repainted the page continuously. A transform write on an element
+  whose own or an ancestor's computed opacity is 0 now skips the repaint:
+  on a page writing a transform 60 times a second to such an element, tile
+  repaints fell from 344 to 7 in six seconds.
+* WebGL: the size and bounds arithmetic that keeps pages from reading or
+  writing past their buffers (pixel transfer sizes under the pack and
+  unpack state, image flips, vertex attribute coverage, index ranges and
+  the largest index drawn, uniform buffer ranges) now lives in its own
+  file, `src/webgl_validate.c`, which calls neither GL nor the JS engine.
+  `src/webgl.c` reads the GL state and passes it in, so every check can be
+  read, and audited, apart from the GL bridge. Behaviour is unchanged,
+  except that rounding a row up to the unpack alignment is now
+  overflow-checked too.
+* Linux: AAC audio (YouTube and other MP4/MSE sources) no longer plays in
+  short bursts with silence between them. The GStreamer decoder runs on
+  its own thread, and the audio helper pushed a whole batch of packets
+  without waiting for the decoded sound, so most of it stayed inside the
+  decoder until the page appended more data: a video started silent for
+  up to 20 seconds, played a few seconds at a time, and went quiet for a
+  minute or more once the site had buffered enough and stopped appending.
+  The helper now waits for the output of what it has queued.
+* A playing video, and its sound, now keep going while the browser window
+  is minimised or covered. The page was ticked only from the GTK frame
+  clock, which a Wayland compositor stops while a window is not shown, so
+  the page froze and the audio ran out. A hidden window is now ticked
+  from a timer ten times a second.
+* Linux sandbox: the renderer's seccomp filter now lets `setpriority`,
+  `sched_setaffinity`, `sched_setscheduler`, `sched_setparam` and
+  `sched_setattr` act only on the calling thread or the renderer itself.
+  They were allowed for any process id, so a compromised renderer could
+  lower the priority of, or pin to one CPU, every other process of the
+  user, including the browser shell.
+* External stylesheets now pick their character encoding from the byte
+  order mark, the `charset` in the `Content-Type` header, `@charset`, the
+  `charset` attribute of the `<link>` or, for `@import`, the encoding of
+  the sheet that imports it, in that order. A stylesheet loaded through
+  `<link>` or `@import` was always read as UTF-8: a UTF-8 byte order mark
+  stayed in front of the first selector and broke the first rule, UTF-16
+  sheets came out as garbage, and `@charset "iso-8859-1";`,
+  `@charset "shift-jis";` or a header charset was ignored, so a rule such
+  as `.tést { color: green }` saved in a Latin-1 sheet never matched
+  `class="tést"`. A U+0000 in such a sheet now becomes U+FFFD as in
+  UTF-8 sheets, and Subresource Integrity is checked against the bytes as
+  they arrived. A sheet with none of these hints, including one imported
+  from a `<style>` element, is still read as UTF-8 rather than in the
+  encoding of the page that refers to it; that fallback is not done yet.
 * CSS: generated content that shows a counter now numbers and styles it
   like Chrome. A counter created by `counter-reset` or `counter-increment`
   on an element or its `::before` is now scoped to that element's children

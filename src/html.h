@@ -56,6 +56,10 @@ void ns_html_escape_append(GString *out, const char *s, gboolean escape_quotes);
 char *ns_html_escape_text(const char *s);
 
 const char *ns_html_encoding_for_label(const char *label);
+const char *ns_html_encoding_for_label_utf16(const char *label);
+const char *ns_html_content_type_encoding(const char *content_type);
+char *ns_html_decode_with_encoding(const char *body, gsize len,
+                                   const char *encoding, gsize *len_out);
 char *ns_html_declared_charset(const char *body, gsize len,
                                const char *content_type);
 

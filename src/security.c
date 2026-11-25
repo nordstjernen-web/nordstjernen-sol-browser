@@ -31,6 +31,7 @@
 #include <sched.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <linux/netlink.h>
 #endif
 #endif
@@ -984,10 +985,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "sched_get_priority_min",
     "sched_getscheduler",
     "sched_rr_get_interval",
-    "sched_setaffinity",
-    "sched_setattr",
-    "sched_setparam",
-    "sched_setscheduler",
     "sched_yield",
     "select",
     "semctl",
@@ -1002,7 +999,6 @@ static const char *const ns_seccomp_allowed_names[] = {
     "sendto",
     "setitimer",
     "setpgid",
-    "setpriority",
     "setrlimit",
     "set_robust_list",
     "setsid",
@@ -1114,6 +1110,27 @@ ns_seccomp_add_memory_rules(scmp_filter_ctx ctx)
 }
 
 static void
+ns_seccomp_add_own_scheduling_rules(scmp_filter_ctx ctx, scmp_datum_t self_pid)
+{
+    static const char *const by_pid[] = {
+        "sched_setaffinity", "sched_setattr", "sched_setparam",
+        "sched_setscheduler",
+    };
+    const scmp_datum_t own_ids[] = { 0, self_pid };
+    for (gsize i = 0; i < G_N_ELEMENTS(by_pid); i++) {
+        int nr = seccomp_syscall_resolve_name(by_pid[i]);
+        if (nr == __NR_SCMP_ERROR) continue;
+        for (gsize k = 0; k < G_N_ELEMENTS(own_ids); k++)
+            (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 1,
+                                   SCMP_A0(SCMP_CMP_EQ, own_ids[k], 0));
+    }
+    for (gsize k = 0; k < G_N_ELEMENTS(own_ids); k++)
+        (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(setpriority), 2,
+                               SCMP_A0(SCMP_CMP_EQ, PRIO_PROCESS, 0),
+                               SCMP_A1(SCMP_CMP_EQ, own_ids[k], 0));
+}
+
+static void
 ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
 {
 #ifdef NS_SECCOMP_CLONE_FLAGS_ARG0
@@ -1157,6 +1174,7 @@ ns_seccomp_add_process_rules(scmp_filter_ctx ctx)
     }
     (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(prlimit64), 1,
                            SCMP_A0(SCMP_CMP_EQ, 0, 0));
+    ns_seccomp_add_own_scheduling_rules(ctx, self_pid);
 }
 
 static int
