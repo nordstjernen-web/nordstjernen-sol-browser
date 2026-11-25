@@ -13,6 +13,7 @@
 #include <string.h>
 
 #define NS_GST_INFLIGHT 32
+#define NS_GST_ADEC_BACKLOG_WAIT (20 * GST_MSECOND)
 
 struct ns_os_vdec {
     char       *desc;
@@ -492,7 +493,11 @@ ns_os_adec_decode(ns_os_adec *d, const uint8_t *data, size_t len,
     size_t frames = 0, cap = 0;
     int rate = 0, ch = 0;
     GstSample *sample;
-    while ((sample = gst_app_sink_try_pull_sample(d->sink, wait)) != NULL) {
+    for (;;) {
+        if (!wait && gst_app_src_get_current_level_bytes(d->src) > 0)
+            wait = NS_GST_ADEC_BACKLOG_WAIT;
+        sample = gst_app_sink_try_pull_sample(d->sink, wait);
+        if (!sample) break;
         adec_append(sample, &pcm, &frames, &cap, &rate, &ch);
         gst_sample_unref(sample);
         wait = 0;

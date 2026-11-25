@@ -28,6 +28,7 @@
 
 #define NS_PROC_CARET_BLINK_US (530 * 1000)
 #define NS_PROC_FRAME_WAKE_MS  16
+#define NS_PROC_UNPRESENTED_TICK_MS 100
 #define NS_PROC_AUDIO_POLL_MS  250
 #define NS_PROC_ANIM_FRAME_US  (G_USEC_PER_SEC / 60)
 #define NS_PROC_ANIM_FRAME_SLACK_US (NS_PROC_ANIM_FRAME_US / 4)
@@ -2425,6 +2426,8 @@ schedule_anim(NsProcView *v)
     if (v->page_animating && v->page_wake_ms <= NS_PROC_FRAME_WAKE_MS) {
         cancel_anim_timeout(v);
         arm_anim(v);
+        v->anim_timeout_id = g_timeout_add(NS_PROC_UNPRESENTED_TICK_MS,
+                                           anim_timeout, v);
         return;
     }
     disarm_anim(v);

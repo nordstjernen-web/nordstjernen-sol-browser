@@ -3,6 +3,19 @@ Changelog:
 
 1.0.52-dev:
 ======
+* Linux: AAC audio (YouTube and other MP4/MSE sources) no longer plays in
+  short bursts with silence between them. The GStreamer decoder runs on
+  its own thread, and the audio helper pushed a whole batch of packets
+  without waiting for the decoded sound, so most of it stayed inside the
+  decoder until the page appended more data: a video started silent for
+  up to 20 seconds, played a few seconds at a time, and went quiet for a
+  minute or more once the site had buffered enough and stopped appending.
+  The helper now waits for the output of what it has queued.
+* A playing video, and its sound, now keep going while the browser window
+  is minimised or covered. The page was ticked only from the GTK frame
+  clock, which a Wayland compositor stops while a window is not shown, so
+  the page froze and the audio ran out. A hidden window is now ticked
+  from a timer ten times a second.
 * Linux sandbox: the renderer's seccomp filter now lets `setpriority`,
   `sched_setaffinity`, `sched_setscheduler`, `sched_setparam` and
   `sched_setattr` act only on the calling thread or the renderer itself.
