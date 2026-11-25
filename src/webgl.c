@@ -17,6 +17,7 @@
 #include "config.h"
 #include "glctx.h"
 #include "glsl_validate.h"
+#include "webgl_validate.h"
 #include "js.h"
 #include "net.h"
 
@@ -824,27 +825,6 @@ wgl_elem_shadow_patch(ns_webgl *g, GLuint name, size_t off,
 }
 
 static int
-wgl_attr_elem_bytes(GLenum type, GLint size)
-{
-    switch (type) {
-    case GL_INT_2_10_10_10_REV:
-    case GL_UNSIGNED_INT_2_10_10_10_REV:
-        return 4;
-    default:
-        break;
-    }
-    int comp;
-    switch (type) {
-    case GL_BYTE: case GL_UNSIGNED_BYTE:                     comp = 1; break;
-    case GL_SHORT: case GL_UNSIGNED_SHORT: case GL_HALF_FLOAT: comp = 2; break;
-    case GL_FLOAT: case GL_INT: case GL_UNSIGNED_INT: case GL_FIXED: comp = 4; break;
-    default: return 0;
-    }
-    if (size < 1 || size > 4) return 0;
-    return comp * size;
-}
-
-static int
 wgl_attr_type_cols(GLenum t)
 {
     switch (t) {
@@ -924,40 +904,6 @@ wgl_check_all_attribs_for(ns_webgl *g, GLuint prog)
     g_hash_table_insert(g->attrib_masks, GUINT_TO_POINTER(prog), mask);
 }
 
-static gboolean
-wgl_elem_max_index(const uint8_t *data, size_t len, GLintptr offset,
-                   GLsizei count, int isz, int version, uint64_t *out_max)
-{
-    if (!data || count <= 0 || isz <= 0) return FALSE;
-    uint64_t span;
-    if (__builtin_mul_overflow((uint64_t)count, (uint64_t)isz, &span) ||
-        __builtin_add_overflow(span, (uint64_t)offset, &span) || span > len)
-        return FALSE;
-    uint64_t restart = isz == 1 ? 0xFFu : isz == 2 ? 0xFFFFu : 0xFFFFFFFFu;
-    gboolean skip_restart = version >= 2;
-    const uint8_t *p = data + offset;
-    uint64_t mx = 0;
-    gboolean any = FALSE;
-    for (GLsizei i = 0; i < count; i++) {
-        uint64_t v;
-        if (isz == 1) {
-            v = p[i];
-        } else if (isz == 2) {
-            uint16_t t;
-            memcpy(&t, p + (size_t)i * 2, 2);
-            v = t;
-        } else {
-            uint32_t t;
-            memcpy(&t, p + (size_t)i * 4, 4);
-            v = t;
-        }
-        if (skip_restart && v == restart) continue;
-        if (!any || v > mx) { mx = v; any = TRUE; }
-    }
-    *out_max = any ? mx : 0;
-    return TRUE;
-}
-
 /* WebGL 2: every uniform block of the program must have a buffer bound
  * whose range covers the block's data size, or the draw is an
  * INVALID_OPERATION.  This is what keeps a shader from reading past the end
@@ -980,10 +926,8 @@ wgl_uniform_blocks_covered(ns_webgl *g, GLuint prog)
         glGetInteger64i_v(GL_UNIFORM_BUFFER_START, (GLuint)binding, &start);
         glGetInteger64i_v(GL_UNIFORM_BUFFER_SIZE, (GLuint)binding, &size);
         if (buffer <= 0 || start < 0 || size < 0) return FALSE;
-        uint64_t total = wgl_buffer_size(g, (GLuint)buffer);
-        uint64_t avail = (uint64_t)start >= total ? 0 : total - (uint64_t)start;
-        /* A range bound with bindBufferBase has size 0: the whole buffer. */
-        if (size > 0 && (uint64_t)size < avail) avail = (uint64_t)size;
+        uint64_t avail = ns_wgl_uniform_range_available(
+            wgl_buffer_size(g, (GLuint)buffer), start, size);
         if (data_size < 0 || (uint64_t)data_size > avail) return FALSE;
     }
     return TRUE;
@@ -1021,18 +965,11 @@ wgl_attribs_cover(ns_webgl *g, int64_t vertex_last, int64_t instances)
         glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_DIVISOR, &divisor);
         void *pointer = NULL;
         glGetVertexAttribPointerv(index, GL_VERTEX_ATTRIB_ARRAY_POINTER, &pointer);
-        int ebytes = wgl_attr_elem_bytes((GLenum)type, size);
-        if (ebytes <= 0 || stride < 0) goto out_of_range;
-        int64_t last = divisor == 0 ? vertex_last
-                                    : (instances - 1) / (int64_t)(GLuint)divisor;
-        if (last < 0) continue;
-        uint64_t eff = stride ? (uint64_t)stride : (uint64_t)ebytes;
-        uint64_t need;
-        if (__builtin_mul_overflow(eff, (uint64_t)last, &need) ||
-            __builtin_add_overflow(need, (uint64_t)(uintptr_t)pointer, &need) ||
-            __builtin_add_overflow(need, (uint64_t)ebytes, &need))
+        if (!ns_wgl_attrib_covers(stride, ns_wgl_attr_elem_bytes((GLenum)type, size),
+                                  (uint64_t)(uintptr_t)pointer, vertex_last,
+                                  instances, (GLuint)divisor,
+                                  wgl_buffer_size(g, (GLuint)buffer)))
             goto out_of_range;
-        if (need > wgl_buffer_size(g, (GLuint)buffer)) goto out_of_range;
     }
     return TRUE;
 
@@ -1106,67 +1043,8 @@ wgl_ints(JSContext *ctx, JSValueConst v, GLint *out, int max)
     return cnt;
 }
 
-#define NS_WEBGL_MAX_ALLOC    (1024u * 1024u * 1024u)
 #define NS_WEBGL_MAX_CONTEXTS 32
 #define NS_WEBGL_MAX_SHADER   (4u * 1024u * 1024u)
-
-static int
-wgl_components(int format)
-{
-    switch (format) {
-    case GL_RED:  case GL_RED_INTEGER:
-    case GL_ALPHA: case GL_LUMINANCE:
-    case GL_DEPTH_COMPONENT:                       return 1;
-    case GL_RG:   case GL_RG_INTEGER:
-    case GL_LUMINANCE_ALPHA: case GL_DEPTH_STENCIL: return 2;
-    case GL_RGB:  case GL_RGB_INTEGER:
-    case GL_SRGB_EXT:                              return 3;
-    default:                                       return 4;
-    }
-}
-
-static int
-wgl_type_bytes(int type)
-{
-    switch (type) {
-    case GL_BYTE: case GL_UNSIGNED_BYTE:                return 1;
-    case GL_SHORT: case GL_UNSIGNED_SHORT:
-    case GL_HALF_FLOAT: case GL_HALF_FLOAT_OES:         return 2;
-    case GL_INT: case GL_UNSIGNED_INT: case GL_FLOAT:
-    default:                                            return 4;
-    }
-}
-
-static size_t
-wgl_pixel_bytes(int format, int type)
-{
-    switch (type) {
-    case GL_UNSIGNED_SHORT_5_6_5:
-    case GL_UNSIGNED_SHORT_4_4_4_4:
-    case GL_UNSIGNED_SHORT_5_5_5_1:
-        return 2;
-    case GL_UNSIGNED_INT_2_10_10_10_REV:
-    case GL_UNSIGNED_INT_10F_11F_11F_REV:
-    case GL_UNSIGNED_INT_5_9_9_9_REV:
-    case GL_UNSIGNED_INT_24_8:
-        return 4;
-    case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
-        return 8;
-    default:
-        return (size_t)wgl_components(format) * (size_t)wgl_type_bytes(type);
-    }
-}
-
-static size_t
-wgl_tight_bytes(int w, int h, int format, int type)
-{
-    if (w <= 0 || h <= 0) return 0;
-    size_t total;
-    if (__builtin_mul_overflow((size_t)w, (size_t)h, &total) ||
-        __builtin_mul_overflow(total, wgl_pixel_bytes(format, type), &total))
-        return SIZE_MAX;
-    return total;
-}
 
 static size_t
 wgl_transfer_bytes(ns_webgl *g, int w, int h, int depth,
@@ -1174,54 +1052,18 @@ wgl_transfer_bytes(ns_webgl *g, int w, int h, int depth,
 {
     if (w <= 0 || h <= 0 || depth <= 0) return 0;
     wgl_reassert(g);
-    size_t pix = wgl_pixel_bytes(format, type);
-    GLint align = 4, rowlen = 0, skiprows = 0, skippix = 0;
-    GLint imgh = 0, skipimg = 0;
-    glGetIntegerv(pack ? GL_PACK_ALIGNMENT : GL_UNPACK_ALIGNMENT, &align);
+    ns_wgl_pixel_store store = { .alignment = 4 };
+    glGetIntegerv(pack ? GL_PACK_ALIGNMENT : GL_UNPACK_ALIGNMENT, &store.alignment);
     if (g->version >= 2) {
-        glGetIntegerv(pack ? GL_PACK_ROW_LENGTH : GL_UNPACK_ROW_LENGTH, &rowlen);
-        glGetIntegerv(pack ? GL_PACK_SKIP_ROWS : GL_UNPACK_SKIP_ROWS, &skiprows);
-        glGetIntegerv(pack ? GL_PACK_SKIP_PIXELS : GL_UNPACK_SKIP_PIXELS, &skippix);
+        glGetIntegerv(pack ? GL_PACK_ROW_LENGTH : GL_UNPACK_ROW_LENGTH, &store.row_length);
+        glGetIntegerv(pack ? GL_PACK_SKIP_ROWS : GL_UNPACK_SKIP_ROWS, &store.skip_rows);
+        glGetIntegerv(pack ? GL_PACK_SKIP_PIXELS : GL_UNPACK_SKIP_PIXELS, &store.skip_pixels);
         if (!pack) {
-            glGetIntegerv(GL_UNPACK_IMAGE_HEIGHT, &imgh);
-            glGetIntegerv(GL_UNPACK_SKIP_IMAGES, &skipimg);
+            glGetIntegerv(GL_UNPACK_IMAGE_HEIGHT, &store.image_height);
+            glGetIntegerv(GL_UNPACK_SKIP_IMAGES, &store.skip_images);
         }
     }
-    if (align < 1) align = 1;
-    if (rowlen < 0) rowlen = 0;
-    if (skiprows < 0) skiprows = 0;
-    if (skippix < 0) skippix = 0;
-    if (imgh < 0) imgh = 0;
-    if (skipimg < 0) skipimg = 0;
-
-    size_t row, ih, full_rows, last, total;
-    if (__builtin_mul_overflow(pix, (size_t)(rowlen > 0 ? rowlen : w), &row))
-        return SIZE_MAX;
-    size_t rem = row % (size_t)align;
-    if (rem) row += (size_t)align - rem;
-    ih = (size_t)(imgh > 0 ? imgh : h);
-    if (__builtin_add_overflow((size_t)skipimg, (size_t)(depth - 1), &full_rows) ||
-        __builtin_mul_overflow(ih, full_rows, &full_rows) ||
-        __builtin_add_overflow(full_rows, (size_t)skiprows, &full_rows) ||
-        __builtin_add_overflow(full_rows, (size_t)(h - 1), &full_rows))
-        return SIZE_MAX;
-    if (__builtin_add_overflow((size_t)skippix, (size_t)w, &last) ||
-        __builtin_mul_overflow(last, pix, &last) ||
-        __builtin_mul_overflow(row, full_rows, &total) ||
-        __builtin_add_overflow(total, last, &total))
-        return SIZE_MAX;
-    return total;
-}
-
-static gboolean
-wgl_flip_fits(int w, int h, int bpp, size_t len)
-{
-    size_t row, total;
-    if (w <= 0 || h <= 0 || bpp <= 0) return FALSE;
-    if (__builtin_mul_overflow((size_t)w, (size_t)bpp, &row) ||
-        __builtin_mul_overflow(row, (size_t)h, &total))
-        return FALSE;
-    return total <= len;
+    return ns_wgl_transfer_bytes(&store, w, h, depth, format, type);
 }
 
 static uint8_t *
@@ -1240,14 +1082,7 @@ static gboolean
 wgl_flip_safe(ns_webgl *g, int w, int h, int format, int type,
               size_t need, size_t len)
 {
-    if (!g->unpack_flip_y || type != GL_UNSIGNED_BYTE) return FALSE;
-    int bpp = wgl_components(format);
-    size_t tight;
-    if (__builtin_mul_overflow((size_t)w, (size_t)h, &tight) ||
-        __builtin_mul_overflow(tight, (size_t)bpp, &tight))
-        return FALSE;
-    if (need != tight) return FALSE;
-    return wgl_flip_fits(w, h, bpp, len);
+    return ns_wgl_flip_safe(g->unpack_flip_y, w, h, format, type, need, len);
 }
 
 #define WGL_GET(name) \
@@ -1887,7 +1722,6 @@ wgl_draw_id_location(void)
 
 static gboolean wgl_elements_in_range(ns_webgl *g, GLsizei count, GLenum type,
                                       GLintptr offset);
-static int wgl_index_bytes(GLenum type);
 static GByteArray *wgl_elem_shadow_load(ns_webgl *g, GLuint name);
 static gboolean wgl_transform_feedback_active(ns_webgl *g);
 
@@ -1935,9 +1769,9 @@ wgl_multi_draw(JSContext *ctx, JSValueConst gl_obj, int argc, JSValueConst *argv
             if (!wgl_elements_in_range(g, a[i], type, b[i])) { ok = FALSE; break; }
             if (a[i] == 0 || inst == 0) continue;
             uint64_t mx = 0;
-            if (!shadow || !wgl_elem_max_index(shadow->data, shadow->len, b[i],
-                                               a[i], wgl_index_bytes(type),
-                                               g->version, &mx)) {
+            if (!shadow || !ns_wgl_elem_max_index(shadow->data, shadow->len, b[i],
+                                               a[i], ns_wgl_index_bytes(type),
+                                               g->version >= 2, &mx)) {
                 ok = FALSE;
                 break;
             }
@@ -3190,30 +3024,11 @@ static JSValue wgl_uniformMatrix3fv(JSContext *c, JSValueConst t, int a, JSValue
 static JSValue wgl_uniformMatrix4fv(JSContext *c, JSValueConst t, int a, JSValueConst *v)
 { return wgl_uniformMatrix_fv(c, t, a, v, 4); }
 
-static int
-wgl_index_bytes(GLenum type)
-{
-    switch (type) {
-    case GL_UNSIGNED_BYTE:  return 1;
-    case GL_UNSIGNED_SHORT: return 2;
-    case GL_UNSIGNED_INT:   return 4;
-    default:                return 0;
-    }
-}
-
 static gboolean
 wgl_elements_in_range(ns_webgl *g, GLsizei count, GLenum type, GLintptr offset)
 {
-    if (count < 0 || offset < 0) return FALSE;
-    int isz = wgl_index_bytes(type);
-    if (!isz) return FALSE;
-    size_t size = wgl_buffer_size(g, wgl_bound_buffer(g, GL_ELEMENT_ARRAY_BUFFER));
-    if (size == 0) return FALSE;
-    uint64_t span;
-    if (__builtin_mul_overflow((uint64_t)count, (uint64_t)isz, &span) ||
-        __builtin_add_overflow(span, (uint64_t)offset, &span))
-        return FALSE;
-    return span <= size;
+    return ns_wgl_index_span_fits(count, ns_wgl_index_bytes(type), offset,
+                                  wgl_buffer_size(g, wgl_bound_buffer(g, GL_ELEMENT_ARRAY_BUFFER)));
 }
 
 static gboolean
@@ -3251,8 +3066,8 @@ wgl_draw_elements_ok(ns_webgl *g, GLsizei count, GLenum type, GLintptr offset,
         sh = wgl_elem_shadow_load(g, ebuf);
     if (!sh) return FALSE;
     uint64_t mx;
-    if (!wgl_elem_max_index(sh->data, sh->len, offset, count,
-                            wgl_index_bytes(type), g->version, &mx))
+    if (!ns_wgl_elem_max_index(sh->data, sh->len, offset, count,
+                               ns_wgl_index_bytes(type), g->version >= 2, &mx))
         return FALSE;
     return wgl_attribs_cover(g, (int64_t)mx, instances);
 }
@@ -3366,7 +3181,7 @@ wgl_source_rgba(JSContext *ctx, JSValueConst src, int format,
         cairo_surface_destroy(s);
         return NULL;
     }
-    int comps = wgl_components(format);
+    int comps = ns_wgl_components(format);
     guint64 total = (guint64)w * (guint64)h * (guint64)comps;
     if (total == 0 || total > NS_WEBGL_MAX_ALLOC) {
         cairo_surface_destroy(s);
@@ -3476,7 +3291,7 @@ wgl_tex_source_pixels(JSContext *ctx, ns_webgl *g, JSValueConst src,
 {
     *threw = FALSE;
     if (type != GL_UNSIGNED_BYTE || want_w <= 0 || want_h <= 0) return NULL;
-    int comps = wgl_components(format);
+    int comps = ns_wgl_components(format);
     int sw = 0, sh = 0;
     uint8_t *px = NULL;
     size_t len = 0;
@@ -3579,7 +3394,7 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
             zero = need ? g_try_malloc0(need) : NULL;
             px = zero;
         } else if (wgl_flip_safe(g, w, h, format, type, need, len)) {
-            flipped = wgl_flip_rows(px, w, h, wgl_components(format));
+            flipped = wgl_flip_rows(px, w, h, ns_wgl_components(format));
             if (flipped) px = flipped;
         }
         glTexImage2D(target, level, internalformat, w, h, border, format, type, px);
@@ -3596,13 +3411,13 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         size_t len = 0;
         JSValue hold;
         const uint8_t *px = wgl_imagedata_bytes(ctx, argv[5], &w, &h, &len, &hold);
-        size_t need = px ? wgl_tight_bytes(w, h, format, type) : 0;
+        size_t need = px ? ns_wgl_tight_bytes(w, h, format, type) : 0;
         if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
             wgl_webgl1_sized_format(g, &internalformat, format, &type);
             uint8_t *flipped = NULL;
             if (wgl_flip_safe(g, w, h, format, type, need, len)) {
-                flipped = wgl_flip_rows(px, w, h, wgl_components(format));
+                flipped = wgl_flip_rows(px, w, h, ns_wgl_components(format));
                 if (flipped) px = flipped;
             }
             wgl_unpack_state saved;
@@ -3681,7 +3496,7 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
         }
         uint8_t *flipped = NULL;
         if (px && wgl_flip_safe(g, w, h, format, type, need, len)) {
-            flipped = wgl_flip_rows(px, w, h, wgl_components(format));
+            flipped = wgl_flip_rows(px, w, h, ns_wgl_components(format));
             if (flipped) px = flipped;
         }
         if (px)
@@ -3699,12 +3514,12 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
         size_t len = 0;
         JSValue hold;
         const uint8_t *px = wgl_imagedata_bytes(ctx, argv[6], &w, &h, &len, &hold);
-        size_t need = px ? wgl_tight_bytes(w, h, format, type) : 0;
+        size_t need = px ? ns_wgl_tight_bytes(w, h, format, type) : 0;
         if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
             uint8_t *flipped = NULL;
             if (wgl_flip_safe(g, w, h, format, type, need, len)) {
-                flipped = wgl_flip_rows(px, w, h, wgl_components(format));
+                flipped = wgl_flip_rows(px, w, h, ns_wgl_components(format));
                 if (flipped) px = flipped;
             }
             wgl_unpack_state saved;
