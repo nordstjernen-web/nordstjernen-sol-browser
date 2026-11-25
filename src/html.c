@@ -701,6 +701,37 @@ ns_html_encoding_for_label(const char *label)
     return ns_encoding_label_to_name(label);
 }
 
+const char *
+ns_html_encoding_for_label_utf16(const char *label)
+{
+    static const struct { const char *label; const char *name; } utf16[] = {
+        { "unicodefffe", "UTF-16BE" },
+        { "utf-16be", "UTF-16BE" },
+        { "csunicode", "UTF-16LE" },
+        { "iso-10646-ucs-2", "UTF-16LE" },
+        { "ucs-2", "UTF-16LE" },
+        { "unicode", "UTF-16LE" },
+        { "unicodefeff", "UTF-16LE" },
+        { "utf-16", "UTF-16LE" },
+        { "utf-16le", "UTF-16LE" },
+    };
+    if (!label) return NULL;
+    g_autofree char *trimmed = g_strstrip(g_strdup(label));
+    for (gsize i = 0; i < G_N_ELEMENTS(utf16); i++)
+        if (g_ascii_strcasecmp(trimmed, utf16[i].label) == 0)
+            return utf16[i].name;
+    return ns_encoding_label_to_name(trimmed);
+}
+
+const char *
+ns_html_content_type_encoding(const char *content_type)
+{
+    if (!content_type) return NULL;
+    g_autofree char *label = charset_value_in(content_type,
+                                              strlen(content_type));
+    return ns_html_encoding_for_label_utf16(label);
+}
+
 char *
 ns_html_declared_charset(const char *body, gsize len, const char *content_type)
 {
@@ -802,10 +833,8 @@ charset_is_seven_bit(const char *declared)
 }
 
 static char *
-charset_decode_declared(const char *body, gsize len, const char *declared,
-                        gsize *len_out)
+charset_decode_with(GIConv cd, const char *body, gsize len, gsize *len_out)
 {
-    GIConv cd = charset_open_decoder(declared);
     if (cd == (GIConv)-1) return NULL;
     GString *out = g_string_sized_new(len + len / 2 + 16);
     char *in = (char *)body;
@@ -830,6 +859,14 @@ charset_decode_declared(const char *body, gsize len, const char *declared,
     g_iconv_close(cd);
     *len_out = out->len;
     return g_string_free(out, FALSE);
+}
+
+static char *
+charset_decode_declared(const char *body, gsize len, const char *declared,
+                        gsize *len_out)
+{
+    return charset_decode_with(charset_open_decoder(declared), body, len,
+                               len_out);
 }
 
 char *
@@ -948,6 +985,23 @@ ns_html_decode_body_full(const char *body, gsize len,
                          const char *content_type, char **charset_out)
 {
     return ns_html_decode_body_len(body, len, content_type, charset_out, NULL);
+}
+
+char *
+ns_html_decode_with_encoding(const char *body, gsize len,
+                             const char *encoding, gsize *len_out)
+{
+    if (g_ascii_strcasecmp(encoding, "replacement") == 0)
+        return utf8_make_valid_keeping_nul("\xef\xbf\xbd", len ? 3 : 0,
+                                           len_out);
+    char *out = NULL;
+    if (g_ascii_strncasecmp(encoding, "UTF-16", 6) == 0)
+        out = charset_decode_with(g_iconv_open("UTF-8", encoding), body, len,
+                                  len_out);
+    else if (g_ascii_strcasecmp(encoding, "UTF-8") != 0 &&
+             !charset_is_dangerous(encoding))
+        out = charset_decode_declared(body, len, encoding, len_out);
+    return out ? out : utf8_make_valid_keeping_nul(body, len, len_out);
 }
 
 static gboolean

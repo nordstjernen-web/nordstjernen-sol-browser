@@ -330,11 +330,129 @@ css_bytes_as_utf8(const guint8 *data, gsize len)
     return g_bytes_new_take(valid, strlen(valid));
 }
 
+static gsize
+css_bom_length(GBytes *raw)
+{
+    gsize len = 0;
+    const guint8 *data = g_bytes_get_data(raw, &len);
+    if (len >= 3 && memcmp(data, "\xef\xbb\xbf", 3) == 0) return 3;
+    if (len >= 2 && ((data[0] == 0xfe && data[1] == 0xff) ||
+                     (data[0] == 0xff && data[1] == 0xfe)))
+        return 2;
+    return 0;
+}
+
+static const char *
+css_bom_encoding(const guint8 *data, gsize bom_len)
+{
+    if (bom_len == 3) return "UTF-8";
+    if (bom_len == 2) return data[0] == 0xfe ? "UTF-16BE" : "UTF-16LE";
+    return NULL;
+}
+
+static const char *
+css_charset_rule_encoding(const guint8 *data, gsize len)
+{
+    static const char prefix[] = "@charset \"";
+    const gsize plen = sizeof prefix - 1;
+    gsize lim = MIN(len, 1024);
+    if (lim < plen || memcmp(data, prefix, plen) != 0) return NULL;
+    gsize end = plen;
+    while (end < lim && data[end] != '"' && data[end] != ';') end++;
+    if (end + 1 >= lim || data[end] != '"' || data[end + 1] != ';')
+        return NULL;
+    g_autofree char *label = g_strndup((const char *)data + plen, end - plen);
+    const char *enc = ns_html_encoding_for_label_utf16(label);
+    if (enc && g_ascii_strncasecmp(enc, "UTF-16", 6) == 0) return "UTF-8";
+    return enc;
+}
+
+static const char *
+css_sheet_encoding(GBytes *raw, const char *header, const char *env,
+                   gsize bom_len)
+{
+    gsize len = 0;
+    const guint8 *data = g_bytes_get_data(raw, &len);
+    const char *enc = css_bom_encoding(data, bom_len);
+    if (!enc) enc = header;
+    if (!enc) enc = css_charset_rule_encoding(data, len);
+    if (!enc) enc = env;
+    return enc ? enc : "UTF-8";
+}
+
+static GBytes *
+css_bytes_decode(GBytes *raw, const char *enc, gsize bom_len)
+{
+    gsize len = 0;
+    const guint8 *data = g_bytes_get_data(raw, &len);
+    if (g_ascii_strcasecmp(enc, "UTF-8") == 0) {
+        if (bom_len == 0 && g_utf8_validate((const char *)data, (gssize)len,
+                                            NULL))
+            return g_bytes_ref(raw);
+        return css_bytes_as_utf8(data + bom_len, len - bom_len);
+    }
+    gsize out_len = 0;
+    char *out = ns_html_decode_with_encoding((const char *)data + bom_len,
+                                             len - bom_len, enc, &out_len);
+    GBytes *text = css_bytes_as_utf8((const guint8 *)out, out_len);
+    g_free(out);
+    return text;
+}
+
+static GBytes *
+css_sheet_text(const char *url, GBytes *raw, GHashTable *cache,
+               const char *header, const char *env, const char **enc_out)
+{
+    gsize bom_len = css_bom_length(raw);
+    const char *enc = css_sheet_encoding(raw, header, env, bom_len);
+    if (enc_out) *enc_out = enc;
+    if (!cache || !url) return css_bytes_decode(raw, enc, bom_len);
+    char *key = g_strdup_printf("%s\x1f%s", url, enc);
+    GBytes *hit = g_hash_table_lookup(cache, key);
+    if (hit) {
+        g_free(key);
+        return g_bytes_ref(hit);
+    }
+    GBytes *text = css_bytes_decode(raw, enc, bom_len);
+    g_hash_table_insert(cache, key, g_bytes_ref(text));
+    return text;
+}
+
+static char *
+css_header_encoding_key(const char *url)
+{
+    return g_strconcat(url, "\x1e", NULL);
+}
+
+static void
+css_cache_header_encoding(GHashTable *cache, const char *url, const char *enc)
+{
+    if (!cache) return;
+    char *key = css_header_encoding_key(url);
+    if (!enc) {
+        g_hash_table_remove(cache, key);
+        g_free(key);
+        return;
+    }
+    g_hash_table_insert(cache, key, g_bytes_new_static(enc, strlen(enc) + 1));
+}
+
+static const char *
+css_cached_header_encoding(GHashTable *cache, const char *url)
+{
+    char *key = css_header_encoding_key(url);
+    GBytes *hit = g_hash_table_lookup(cache, key);
+    g_free(key);
+    return hit ? g_bytes_get_data(hit, NULL) : NULL;
+}
+
 static GBytes *
 fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
                 gboolean strict_mime, const char *initiator,
-                gboolean render_blocking, gboolean in_frame)
+                gboolean render_blocking, gboolean in_frame,
+                const char **header_enc)
 {
+    if (header_enc) *header_enc = NULL;
     if (!url || !*url) return NULL;
     guint8 attempts = 0;
     if (cache) {
@@ -344,7 +462,11 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
             const guint8 *hdata = g_bytes_get_data(hit, &hsize);
             gboolean fail_marker = hsize == 0 ||
                 (hsize == 1 && hdata && hdata[0] <= 8);
-            if (!fail_marker) return g_bytes_ref(hit);
+            if (!fail_marker) {
+                const char *cached = css_cached_header_encoding(cache, url);
+                if (header_enc) *header_enc = cached;
+                return g_bytes_ref(hit);
+            }
             attempts = hsize == 1 ? hdata[0] : 1;
             if (attempts >= 3) return NULL;
         }
@@ -363,7 +485,10 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
                        content_type_is_css(resp->content_type);
     if (resp && !resp->error && resp->status < 400 && mime_ok &&
         resp->body && resp->body->len > 0) {
-        bytes = css_bytes_as_utf8(resp->body->data, resp->body->len);
+        bytes = g_bytes_new(resp->body->data, resp->body->len);
+        const char *header = ns_html_content_type_encoding(resp->content_type);
+        if (header_enc) *header_enc = header;
+        css_cache_header_encoding(cache, url, header);
         if (cache)
             g_hash_table_insert(cache, g_strdup(url), g_bytes_ref(bytes));
     } else if (cache) {
@@ -787,17 +912,24 @@ append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
                 continue;
             }
             if (seen) g_hash_table_add(seen, g_strdup(abs));
-            GBytes *bytes = fetch_css_bytes(abs, top_url, cache, TRUE, "css",
-                                            render_blocking, in_frame);
-            if (bytes) {
+            const char *header = NULL;
+            GBytes *raw = fetch_css_bytes(abs, top_url, cache, TRUE, "css",
+                                          render_blocking, in_frame, &header);
+            if (raw) {
+                const char *enc = NULL;
+                GBytes *bytes = css_sheet_text(abs, raw, cache, header,
+                                               sh->encoding, &enc);
                 ns_css_stylesheet *child =
                     ns_css_stylesheet_parse_import_cached(abs, im->layer_name,
                                                           bytes);
-                if (child)
+                if (child) {
+                    child->encoding = enc;
                     append_stylesheet_expanded(out, child, abs, top_url, csp_url,
                                                seen, cache, depth + 1,
                                                render_blocking, in_frame);
+                }
                 g_bytes_unref(bytes);
+                g_bytes_unref(raw);
             }
             g_free(abs);
         }
@@ -1157,6 +1289,14 @@ style_sheet_enabled(const ns_node *style)
 {
     return !(style->flags & NS_NODE_SHEET_DISABLED) &&
            sheet_type_is_css(ns_element_get_attr(style, "type"));
+}
+
+static const char *
+link_environment_encoding(const ns_node *link)
+{
+    const char *charset = ns_element_get_attr(link, "charset");
+    return charset && *charset ? ns_html_encoding_for_label_utf16(charset)
+                               : NULL;
 }
 
 static gboolean
@@ -1670,18 +1810,25 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                                           TRUE))
                 g_clear_pointer(&abs, g_free);
             gboolean blocking = engine_node_in_head(n);
-            GBytes *bytes = fetch_css_bytes(abs, cc->top_url, cache,
-                                            cc->strict_css_mime, "link",
-                                            blocking, cc->frame_depth > 0);
+            const char *header = NULL;
+            GBytes *raw = fetch_css_bytes(abs, cc->top_url, cache,
+                                          cc->strict_css_mime, "link",
+                                          blocking, cc->frame_depth > 0,
+                                          &header);
             const char *integrity = ns_element_get_attr(n, "integrity");
-            if (bytes && !ns_security_sri_check(integrity,
-                                                g_bytes_get_data(bytes, NULL),
-                                                g_bytes_get_size(bytes))) {
+            if (raw && !ns_security_sri_check(integrity,
+                                              g_bytes_get_data(raw, NULL),
+                                              g_bytes_get_size(raw))) {
                 ns_debug_log_emit(NS_DLOG_WARN, "sri",
                                   "SRI mismatch: stylesheet %s", abs);
-                g_clear_pointer(&bytes, g_bytes_unref);
+                g_clear_pointer(&raw, g_bytes_unref);
             }
-            if (bytes) {
+            if (raw) {
+                const char *enc = NULL;
+                GBytes *bytes = css_sheet_text(abs, raw, cache, header,
+                                               link_environment_encoding(n),
+                                               &enc);
+                g_bytes_unref(raw);
                 gsize len = 0;
                 const char *data = g_bytes_get_data(bytes, &len);
                 engine_remember_linked_css(abs, bytes);
@@ -1689,6 +1836,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                 ns_css_stylesheet *sh =
                     ns_css_stylesheet_parse_url_cached(abs, data, (gssize)len);
                 if (sh) {
+                    sh->encoding = enc;
                     GHashTable *seen =
                         g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
