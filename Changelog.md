@@ -3,6 +3,14 @@ Changelog:
 
 1.0.52-dev:
 ======
+* WebGL: a command format for running GL in a separate GPU process instead
+  of the renderer, `src/gpu_wire.c`. It frames commands as 16-byte-aligned
+  records of a fixed struct and its inline data, and decodes them as input
+  from an untrusted process: every reserved byte must be zero, structs are
+  copied out of the payload, and each data span is bounds-checked, with
+  element spans of an exact size and alignment and string spans ending in
+  a NUL. Nothing uses it yet; it is the first step of moving GL out of the
+  sandboxed renderer (see `docs/webgl.md`).
 * `overflow: hidden` on a box that is zero pixels wide because an ancestor
   has an explicit zero width now clips its contents. The painter skips the
   clip of a zero-sized box unless that size was asked for, and it only

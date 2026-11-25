@@ -99,6 +99,7 @@ nordstjernen_engine_sources = files(
   'font.c',
   'glctx.c',
   'glsl_validate.c',
+  'gpu_wire.c',
   'html.c',
   'image.c',
   'smil.c',
