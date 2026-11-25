@@ -3,6 +3,13 @@ Changelog:
 
 1.0.52-dev:
 ======
+* `overflow: hidden` on a box that is zero pixels wide because an ancestor
+  has an explicit zero width now clips its contents. The painter skips the
+  clip of a zero-sized box unless that size was asked for, and it only
+  looked at the box's own `width`, so an auto-width `overflow: hidden`
+  box inside a `width: 0` parent let its absolutely positioned children
+  show. On YouTube the collapsed volume slider was drawn across the time
+  display.
 * A script that changes the inline `transform` of an element nobody can see
   no longer repaints the page. Such a write was already applied without a
   relayout, but it still asked for a repaint of the whole visible page each
