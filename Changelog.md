@@ -3,6 +3,15 @@ Changelog:
 
 1.0.52-dev:
 ======
+* A script that changes the inline `transform` of an element nobody can see
+  no longer repaints the page. Such a write was already applied without a
+  relayout, but it still asked for a repaint of the whole visible page each
+  time. A video player keeps moving its progress bar while its controls
+  are faded out to `opacity: 0`, about ten times a second, so watching a
+  video repainted the page continuously. A transform write on an element
+  whose own or an ancestor's computed opacity is 0 now skips the repaint:
+  on a page writing a transform 60 times a second to such an element, tile
+  repaints fell from 344 to 7 in six seconds.
 * Linux: AAC audio (YouTube and other MP4/MSE sources) no longer plays in
   short bursts with silence between them. The GStreamer decoder runs on
   its own thread, and the audio helper pushed a whole batch of packets
