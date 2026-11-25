@@ -3450,8 +3450,64 @@ emit_font_family_attr(GArray *attrs, gsize start, gsize end, const char *family)
     g_array_append_val(attrs, a);
 }
 
+typedef enum { COUNTER_RESET, COUNTER_INCREMENT, COUNTER_SET } counter_op;
+
+typedef struct {
+    char *name;
+    const ns_node *scope;
+    gint value;
+    gboolean fresh;
+    gboolean shadowed;
+} counter_entry;
+
 static void
-counter_apply_decl(GHashTable *counters, const char *decl, gboolean increment)
+counter_entry_clear(gpointer p)
+{
+    g_free(((counter_entry *)p)->name);
+}
+
+static GArray *
+counter_list_new(void)
+{
+    GArray *list = g_array_new(FALSE, FALSE, sizeof(counter_entry));
+    g_array_set_clear_func(list, counter_entry_clear);
+    return list;
+}
+
+static counter_entry *
+counter_innermost(GArray *list, const char *name)
+{
+    for (guint i = list->len; i > 0; i--) {
+        counter_entry *e = &g_array_index(list, counter_entry, i - 1);
+        if (strcmp(e->name, name) == 0) return e;
+    }
+    return NULL;
+}
+
+static counter_entry *
+counter_instantiate(GArray *list, const char *name, const ns_node *scope)
+{
+    counter_entry *e = counter_innermost(list, name);
+    if (e && e->scope == scope) return e;
+    counter_entry fresh = { g_strdup(name), scope, 0, TRUE, e != NULL };
+    g_array_append_val(list, fresh);
+    return &g_array_index(list, counter_entry, list->len - 1);
+}
+
+static void
+counter_apply_one(GArray *list, const char *name, gint val, counter_op op,
+                  const ns_node *scope)
+{
+    counter_entry *e = op == COUNTER_RESET
+        ? counter_instantiate(list, name, scope)
+        : counter_innermost(list, name);
+    if (!e) e = counter_instantiate(list, name, scope);
+    e->value = op == COUNTER_INCREMENT ? e->value + val : val;
+}
+
+static void
+counter_apply_decl(GArray *list, const char *decl, counter_op op,
+                   const ns_node *scope)
 {
     if (!decl || !*decl) return;
     const char *p = decl;
@@ -3465,17 +3521,13 @@ counter_apply_decl(GHashTable *counters, const char *decl, gboolean increment)
         char *name = g_strndup(name_s, nlen);
         if (strcmp(name, "none") == 0) { g_free(name); break; }
         while (*p && g_ascii_isspace(*p)) p++;
-        int val = increment ? 1 : 0;
+        int val = op == COUNTER_INCREMENT ? 1 : 0;
         if (*p == '-' || g_ascii_isdigit(*p)) {
             char *end = NULL;
             long v = strtol(p, &end, 10);
             if (end != p) { val = (int)v; p = end; }
         }
-        gint cur = increment
-            ? GPOINTER_TO_INT(g_hash_table_lookup(counters, name))
-            : 0;
-        g_hash_table_insert(counters, g_strdup(name),
-                            GINT_TO_POINTER(cur + val));
+        counter_apply_one(list, name, val, op, scope);
         g_free(name);
     }
 }
@@ -3533,17 +3585,34 @@ counter_format(gint v, const char *style)
 }
 
 static void
-counter_apply_style(GHashTable *current, const ns_style *s)
+counter_apply_prop(GArray *list, const ns_style *s, ns_css_prop prop,
+                   counter_op op, const ns_node *scope)
 {
+    const ns_css_value *v = s->values[prop];
+    if (v && v->kind == NS_CSS_V_KEYWORD)
+        counter_apply_decl(list, v->u.keyword, op, scope);
+}
+
+static void
+counter_drop_shadowed(GArray *list, const ns_node *scope)
+{
+    for (guint i = list->len; i > 0; i--) {
+        counter_entry *e = &g_array_index(list, counter_entry, i - 1);
+        if (e->scope != scope || !e->fresh) return;
+        if (e->shadowed) g_array_remove_index(list, i - 1);
+        else e->fresh = FALSE;
+    }
+}
+
+static void
+counter_apply_style(GArray *list, const ns_style *s, const ns_node *scope)
+{
+    counter_drop_shadowed(list, scope);
     if (!s) return;
-    if (s->values[NS_CSS_COUNTER_RESET] &&
-        s->values[NS_CSS_COUNTER_RESET]->kind == NS_CSS_V_KEYWORD)
-        counter_apply_decl(current,
-            s->values[NS_CSS_COUNTER_RESET]->u.keyword, FALSE);
-    if (s->values[NS_CSS_COUNTER_INCREMENT] &&
-        s->values[NS_CSS_COUNTER_INCREMENT]->kind == NS_CSS_V_KEYWORD)
-        counter_apply_decl(current,
-            s->values[NS_CSS_COUNTER_INCREMENT]->u.keyword, TRUE);
+    counter_apply_prop(list, s, NS_CSS_COUNTER_RESET, COUNTER_RESET, scope);
+    counter_apply_prop(list, s, NS_CSS_COUNTER_INCREMENT, COUNTER_INCREMENT,
+                       scope);
+    counter_apply_prop(list, s, NS_CSS_COUNTER_SET, COUNTER_SET, scope);
 }
 
 static gboolean
@@ -3555,66 +3624,134 @@ pseudo_generates_box(const ns_style *ps)
            strcmp(cv->u.keyword, "normal") != 0;
 }
 
+typedef struct {
+    const ns_style *after;
+    GArray *before_counters;
+    GArray *after_counters;
+} counter_snapshot;
+
 static void
-counter_apply_pseudo(GHashTable *current, const ns_style *ps)
+counter_snapshot_destroy(gpointer p)
 {
-    if (pseudo_generates_box(ps)) counter_apply_style(current, ps);
+    counter_snapshot *snap = p;
+    if (snap->before_counters) g_array_unref(snap->before_counters);
+    if (snap->after_counters) g_array_unref(snap->after_counters);
+    g_free(snap);
+}
+
+static gboolean
+pseudo_uses_counters(const ns_style *ps)
+{
+    const ns_css_value *cv = ps ? ps->values[NS_CSS_CONTENT] : NULL;
+    return cv && cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword &&
+           strstr(cv->u.keyword, "counter");
+}
+
+static GArray *
+counter_list_copy(const GArray *list)
+{
+    GArray *copy = counter_list_new();
+    for (guint i = 0; i < list->len; i++) {
+        counter_entry e = g_array_index(list, counter_entry, i);
+        e.name = g_strdup(e.name);
+        g_array_append_val(copy, e);
+    }
+    return copy;
+}
+
+static void
+counter_visit_pseudo(GArray *list, const ns_node *host, const ns_style *ps,
+                     GHashTable *snapshots, gboolean after)
+{
+    if (!pseudo_generates_box(ps)) return;
+    counter_apply_style(list, ps, host);
+    if (!pseudo_uses_counters(ps)) return;
+    counter_snapshot *snap = g_hash_table_lookup(snapshots, host);
+    if (!snap) {
+        snap = g_new0(counter_snapshot, 1);
+        g_hash_table_insert(snapshots, (gpointer)host, snap);
+    }
+    if (after) {
+        snap->after = ps;
+        snap->after_counters = counter_list_copy(list);
+    } else {
+        snap->before_counters = counter_list_copy(list);
+    }
+}
+
+static void
+counter_scope_end(GArray *list, const ns_node *scope)
+{
+    while (list->len > 0 &&
+           g_array_index(list, counter_entry, list->len - 1).scope == scope)
+        g_array_remove_index(list, list->len - 1);
 }
 
 static void
 counter_walk(const ns_node *n, GHashTable *styles,
-             GHashTable *current, GHashTable *snapshots, int depth)
+             GArray *list, GHashTable *snapshots, int depth)
 {
     if (!n || depth >= NS_LAYOUT_MAX_DEPTH) return;
     const ns_style *s = NULL;
     if (n->kind == NS_NODE_ELEMENT && styles) {
         s = g_hash_table_lookup(styles, n);
-        counter_apply_style(current, s);
-        if (s) counter_apply_pseudo(current, s->before);
-        gboolean need = FALSE;
-        if (s && s->before && s->before->values[NS_CSS_CONTENT]) {
-            const ns_css_value *cv = s->before->values[NS_CSS_CONTENT];
-            if (cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword &&
-                strstr(cv->u.keyword, "counter")) need = TRUE;
-        }
-        if (s && s->after && s->after->values[NS_CSS_CONTENT]) {
-            const ns_css_value *cv = s->after->values[NS_CSS_CONTENT];
-            if (cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword &&
-                strstr(cv->u.keyword, "counter")) need = TRUE;
-        }
-        if (need) {
-            GHashTable *snap = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                                     g_free, NULL);
-            GHashTableIter it;
-            gpointer k, v;
-            g_hash_table_iter_init(&it, current);
-            while (g_hash_table_iter_next(&it, &k, &v))
-                g_hash_table_insert(snap, g_strdup((const char *)k), v);
-            g_hash_table_insert(snapshots, (gpointer)n, snap);
-        }
+        counter_apply_style(list, s, n->parent);
+        if (s) counter_visit_pseudo(list, n, s->before, snapshots, FALSE);
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        counter_walk(c, styles, current, snapshots, depth + 1);
-    if (s) counter_apply_pseudo(current, s->after);
+        counter_walk(c, styles, list, snapshots, depth + 1);
+    if (s) counter_visit_pseudo(list, n, s->after, snapshots, TRUE);
+    counter_scope_end(list, n);
 }
-
-static void
-counter_snapshot_destroy(gpointer p) { g_hash_table_destroy(p); }
 
 static GHashTable *
 build_counter_snapshots(const ns_node *root, GHashTable *styles)
 {
     GHashTable *snapshots = g_hash_table_new_full(
         g_direct_hash, g_direct_equal, NULL, counter_snapshot_destroy);
-    GHashTable *current = g_hash_table_new_full(
-        g_str_hash, g_str_equal, g_free, NULL);
-    counter_walk(root, styles, current, snapshots, 0);
-    g_hash_table_destroy(current);
+    GArray *list = counter_list_new();
+    counter_walk(root, styles, list, snapshots, 0);
+    g_array_unref(list);
     return snapshots;
 }
 
+static const GArray *
+counter_snapshot_for(const ns_node *host, const ns_style *ps)
+{
+    const counter_snapshot *snap = g_counters_for_layout
+        ? g_hash_table_lookup(g_counters_for_layout, host) : NULL;
+    if (!snap) return NULL;
+    if (ps && ps == snap->after) return snap->after_counters;
+    return snap->before_counters;
+}
+
 static char *
-substitute_one_counter(const char *body, const ns_node *host, gboolean is_counters)
+counter_values_text(const GArray *list, const char *name, const char *sep,
+                    const char *style)
+{
+    GString *out = g_string_new(NULL);
+    gboolean found = FALSE;
+    for (guint i = 0; list && i < list->len; i++) {
+        const counter_entry *e = &g_array_index(list, counter_entry, i);
+        if (strcmp(e->name, name) != 0) continue;
+        if (!sep) g_string_truncate(out, 0);
+        else if (found) g_string_append(out, sep);
+        char *text = counter_format(e->value, style);
+        g_string_append(out, text);
+        g_free(text);
+        found = TRUE;
+    }
+    if (!found) {
+        char *text = counter_format(0, style);
+        g_string_append(out, text);
+        g_free(text);
+    }
+    return g_string_free(out, FALSE);
+}
+
+static char *
+substitute_one_counter(const char *body, const ns_node *host,
+                       const ns_style *ps, gboolean is_counters)
 {
     const char *p = body;
     while (*p && g_ascii_isspace(*p)) p++;
@@ -3645,16 +3782,16 @@ substitute_one_counter(const char *body, const ns_node *host, gboolean is_counte
         }
     }
     if (is_counters && !sep) sep = g_strdup("");
-    GHashTable *snap = g_counters_for_layout
-        ? g_hash_table_lookup(g_counters_for_layout, host) : NULL;
-    int v = snap ? GPOINTER_TO_INT(g_hash_table_lookup(snap, name)) : 0;
-    char *formatted = counter_format(v, style);
+    if (!is_counters) g_clear_pointer(&sep, g_free);
+    char *formatted = counter_values_text(counter_snapshot_for(host, ps),
+                                          name, sep, style);
     g_free(name); g_free(sep); g_free(style);
     return formatted;
 }
 
 static char *
-resolve_pseudo_content(const char *raw, const ns_node *host)
+resolve_pseudo_content(const char *raw, const ns_node *host,
+                       const ns_style *ps)
 {
     if (!raw || !*raw) return NULL;
     if (strcmp(raw, "none") == 0 || strcmp(raw, "normal") == 0) return NULL;
@@ -3704,7 +3841,7 @@ resolve_pseudo_content(const char *raw, const ns_node *host)
             }
             char *body = g_strndup(body_s, p - body_s);
             if (*p == ')') p++;
-            char *sub = substitute_one_counter(body, host, is_counters);
+            char *sub = substitute_one_counter(body, host, ps, is_counters);
             if (sub) g_string_append(out, sub);
             g_free(sub);
             g_free(body);
@@ -3905,11 +4042,12 @@ quotes_string_for(const ns_style *s, int depth, gboolean closing)
 }
 
 char *
-ns_layout_pseudo_content_text(const ns_css_value *content, const ns_node *host)
+ns_layout_pseudo_content_text(const ns_style *pseudo, const ns_node *host)
 {
+    const ns_css_value *content = pseudo ? pseudo->values[NS_CSS_CONTENT] : NULL;
     if (!content || content->kind != NS_CSS_V_KEYWORD || !content->u.keyword)
         return NULL;
-    return resolve_pseudo_content(content->u.keyword, host);
+    return resolve_pseudo_content(content->u.keyword, host, pseudo);
 }
 
 static void
@@ -3917,7 +4055,7 @@ append_pseudo_content(GString *out, const ns_css_value *cv,
                       const ns_node *host, const ns_style *host_style)
 {
     if (!cv || cv->kind != NS_CSS_V_KEYWORD || !cv->u.keyword) return;
-    char *resolved = resolve_pseudo_content(cv->u.keyword, host);
+    char *resolved = resolve_pseudo_content(cv->u.keyword, host, host_style);
     if (!resolved) return;
     char *quote = NULL;
     const char *txt = resolved;
@@ -3987,7 +4125,7 @@ append_pseudo_inline(collector_ctx *ctx, const ns_style *ps,
     }
     if (ctx->atomics && ns_display_is_atomic_inline(ns_css_display_of(ps))) {
         char *txt = resolve_pseudo_content(
-            ps->values[NS_CSS_CONTENT]->u.keyword, host);
+            ps->values[NS_CSS_CONTENT]->u.keyword, host, ps);
         ns_atomic_raw rec = {
             .start = ctx->out->len,
             .box = pseudo_block_with_text(ps, txt),
@@ -6318,7 +6456,7 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host,
     if (!pseudo_generates_box(ps)) return NULL;
     const ns_css_value *cv = ps->values[NS_CSS_CONTENT];
     gboolean inline_atomic = ns_display_is_atomic_inline(ns_css_display_of(ps));
-    char *resolved = resolve_pseudo_content(cv->u.keyword, host);
+    char *resolved = resolve_pseudo_content(cv->u.keyword, host, ps);
     if (!resolved) {
         if (!inline_atomic) return NULL;
         resolved = g_strdup("");
@@ -6800,7 +6938,7 @@ build_pseudo_block_for(const ns_style *ps, const ns_node *host)
         d.outer == NS_DISPLAY_OUTER_INLINE)
         return NULL;
     char *resolved = *cv->u.keyword
-        ? resolve_pseudo_content(cv->u.keyword, host) : g_strdup("");
+        ? resolve_pseudo_content(cv->u.keyword, host, ps) : g_strdup("");
     if (!resolved) return NULL;
     char *quote = NULL;
     const char *txt = resolved;
