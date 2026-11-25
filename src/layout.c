@@ -8143,6 +8143,13 @@ inline_insert_spacer_line_heights(NsPangoAttrList *list, const ns_box *box)
 }
 
 static gboolean
+inline_attr_sets_line_height(const ns_inline_attr *r)
+{
+    return r->style && (r->kind == NS_INLINE_ELEMENT ||
+                        r->kind == NS_INLINE_GENERATED);
+}
+
+static gboolean
 inline_attr_within_override(const ns_box *box, const double *px, guint i,
                             double strut_px)
 {
@@ -8169,7 +8176,7 @@ inline_apply_line_heights(NsPangoAttrList *list, const ns_box *box,
     for (guint i = 0; i < n; i++) {
         const ns_inline_attr *r =
             &g_array_index(box->attrs, ns_inline_attr, i);
-        px[i] = r->kind == NS_INLINE_ELEMENT && r->style && r->len > 0
+        px[i] = inline_attr_sets_line_height(r) && r->len > 0
             ? ns_paint_css_line_height_px(r->style) : -1;
         if (px[i] >= 0 && fabs(px[i] - strut_px) >= 0.01) any_override = TRUE;
     }
@@ -8207,7 +8214,7 @@ inline_strut_kinds(const ns_box *box, gsize n, double strut_px)
     for (guint i = box->attrs->len; i-- > 0;) {
         const ns_inline_attr *r =
             &g_array_index(box->attrs, ns_inline_attr, i);
-        if (r->kind != NS_INLINE_ELEMENT || !r->style) continue;
+        if (!inline_attr_sets_line_height(r)) continue;
         double px = ns_paint_css_line_height_px(r->style);
         gboolean shorter = px >= 0 && px < strut_px - 0.01;
         strut_mark_range(kind, n, r, shorter ? STRUT_SHORTER : STRUT_ROOT);
@@ -8591,7 +8598,7 @@ inline_run_line_height(const ns_box *box, gsize offset, double line_height,
             r->kind == NS_INLINE_CHECKBOX_CHECKED || r->kind == NS_INLINE_RANGE ||
             r->kind == NS_INLINE_RADIO || r->kind == NS_INLINE_RADIO_CHECKED)
             return -1;
-        if (r->kind != NS_INLINE_ELEMENT || !r->style) continue;
+        if (!inline_attr_sets_line_height(r)) continue;
         if (!inner || r->start > inner->start ||
             (r->start == inner->start && r->len < inner->len))
             inner = r;
