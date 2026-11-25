@@ -3,6 +3,12 @@ Changelog:
 
 1.0.52-dev:
 ======
+* Linux sandbox: the renderer's seccomp filter now lets `setpriority`,
+  `sched_setaffinity`, `sched_setscheduler`, `sched_setparam` and
+  `sched_setattr` act only on the calling thread or the renderer itself.
+  They were allowed for any process id, so a compromised renderer could
+  lower the priority of, or pin to one CPU, every other process of the
+  user, including the browser shell.
 * External stylesheets now pick their character encoding from the byte
   order mark, the `charset` in the `Content-Type` header, `@charset`, the
   `charset` attribute of the `<link>` or, for `@import`, the encoding of
