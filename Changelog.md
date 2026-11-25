@@ -3,6 +3,20 @@ Changelog:
 
 1.0.52-dev:
 ======
+* External stylesheets now pick their character encoding from the byte
+  order mark, the `charset` in the `Content-Type` header, `@charset`, the
+  `charset` attribute of the `<link>` or, for `@import`, the encoding of
+  the sheet that imports it, in that order. A stylesheet loaded through
+  `<link>` or `@import` was always read as UTF-8: a UTF-8 byte order mark
+  stayed in front of the first selector and broke the first rule, UTF-16
+  sheets came out as garbage, and `@charset "iso-8859-1";`,
+  `@charset "shift-jis";` or a header charset was ignored, so a rule such
+  as `.tést { color: green }` saved in a Latin-1 sheet never matched
+  `class="tést"`. A U+0000 in such a sheet now becomes U+FFFD as in
+  UTF-8 sheets, and Subresource Integrity is checked against the bytes as
+  they arrived. A sheet with none of these hints, including one imported
+  from a `<style>` element, is still read as UTF-8 rather than in the
+  encoding of the page that refers to it; that fallback is not done yet.
 * CSS: generated content that shows a counter now numbers and styles it
   like Chrome. A counter created by `counter-reset` or `counter-increment`
   on an element or its `::before` is now scoped to that element's children

@@ -1089,6 +1089,7 @@ typedef struct ns_css_stylesheet {
     guint      pseudo_mask;
     guint64    serial;
     char      *resolved_base;
+    const char *encoding;
     struct ns_css_rule_index *index;
     struct ns_css_stylesheet *part_sheet;
 } ns_css_stylesheet;
