@@ -3,6 +3,15 @@ Changelog:
 
 1.0.52-dev:
 ======
+* WebGL: the size and bounds arithmetic that keeps pages from reading or
+  writing past their buffers (pixel transfer sizes under the pack and
+  unpack state, image flips, vertex attribute coverage, index ranges and
+  the largest index drawn, uniform buffer ranges) now lives in its own
+  file, `src/webgl_validate.c`, which calls neither GL nor the JS engine.
+  `src/webgl.c` reads the GL state and passes it in, so every check can be
+  read, and audited, apart from the GL bridge. Behaviour is unchanged,
+  except that rounding a row up to the unpack alignment is now
+  overflow-checked too.
 * Linux: AAC audio (YouTube and other MP4/MSE sources) no longer plays in
   short bursts with silence between them. The GStreamer decoder runs on
   its own thread, and the audio helper pushed a whole batch of packets
