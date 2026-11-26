@@ -19849,14 +19849,30 @@ relative_offset_y(const ns_style *s, double parent_h, const ns_box *pct_of)
     return cb_h < 0 ? 0 : sign * length_resolve(v, cb_h, 0);
 }
 
+static gboolean
+box_direction_is_rtl(const ns_box *b)
+{
+    return b && b->style &&
+           ns_css_keyword_is(b->style->values[NS_CSS_DIRECTION], "rtl");
+}
+
+static gboolean
+block_container_is_rtl(const ns_box *b)
+{
+    while (b && box_is_inline_flow(b)) b = b->parent;
+    return box_direction_is_rtl(b);
+}
+
 static double
-relative_offset_x(const ns_style *s, double parent_w)
+relative_offset_x(const ns_style *s, double parent_w, gboolean cb_rtl)
 {
     const ns_css_value *lv = s->values[NS_CSS_LEFT];
     const ns_css_value *rv = s->values[NS_CSS_RIGHT];
-    if (lv && !length_is_auto(lv))
+    gboolean has_left = lv && !length_is_auto(lv);
+    gboolean has_right = rv && !length_is_auto(rv);
+    if (has_left && !(has_right && cb_rtl))
         return length_resolve(lv, parent_w, 0);
-    if (rv && !length_is_auto(rv))
+    if (has_right)
         return -length_resolve(rv, parent_w, 0);
     return 0;
 }
@@ -19864,7 +19880,8 @@ relative_offset_x(const ns_style *s, double parent_w)
 static void
 apply_relative_offset(ns_box *box, double parent_w, double parent_h)
 {
-    translate_subtree(box, relative_offset_x(box->style, parent_w),
+    translate_subtree(box, relative_offset_x(box->style, parent_w,
+                                             block_container_is_rtl(box->parent)),
                       relative_offset_y(box->style, parent_h, box));
 }
 
@@ -19985,7 +20002,8 @@ inline_rel_set_add(inline_rel_set *set, const ns_inline_attr *r,
         set->elements = g_array_new(FALSE, FALSE, sizeof(inline_rel_offset));
         set->index = g_hash_table_new(NULL, NULL);
     }
-    inline_rel_offset o = { r->dom, relative_offset_x(r->style, cb_w),
+    inline_rel_offset o = { r->dom, relative_offset_x(r->style, cb_w,
+                                              block_container_is_rtl(box)),
                             relative_offset_y(r->style, cb_h, box),
                             0, 0, FALSE, inline_node_depth(r->dom) };
     g_array_append_val(set->elements, o);
@@ -20108,7 +20126,8 @@ apply_atomic_position_offsets(ns_box *box, double cb_w, double cb_h)
         if (moved)
             ns_inline_offset_at(box, atomic->byte_off, &ab->rel_dx,
                                 &ab->rel_dy);
-        ab->rel_dx += rel ? relative_offset_x(ab->style, cb_w) : 0;
+        ab->rel_dx += rel ? relative_offset_x(ab->style, cb_w,
+                                             block_container_is_rtl(box)) : 0;
         ab->rel_dy += rel ? relative_offset_y(ab->style, cb_h, box) : 0;
         translate_subtree(ab, ab->rel_dx, ab->rel_dy);
         for (ns_box *c = ab->first_child; c; c = c->next_sibling)
@@ -20895,7 +20914,7 @@ grid_abs_containing_block(const ns_box *cb, const ns_style *st,
 
 static void
 position_absolute_box_in(ns_box *abox, double cb_inner_x, double cb_inner_y,
-                         double cb_w, double cb_h);
+                         double cb_w, double cb_h, gboolean rtl);
 
 static void
 grid_append_line_names(GString *s, const ns_css_tracks *tk, int line)
@@ -20982,6 +21001,17 @@ grid_static_align_offset(const char *align, double free_space, gboolean flip)
     return flip ? free_space : 0;
 }
 
+static double
+abs_justify_offset(const ns_box *abox, double free_space, gboolean cb_rtl)
+{
+    const char *align = abs_self_alignment(abox, NS_CSS_JUSTIFY_SELF);
+    if (strcmp(align, "left") == 0 || strcmp(align, "right") == 0)
+        return grid_static_align_offset(align, free_space, FALSE);
+    gboolean own = strcmp(align, "self-start") == 0 || strcmp(align, "self-end") == 0;
+    return grid_static_align_offset(align, free_space,
+                                    own ? box_direction_is_rtl(abox) : cb_rtl);
+}
+
 static void
 grid_static_position(ns_box *abox, const ns_box *cb,
                      double area_x, double area_y, double area_w, double area_h,
@@ -21011,6 +21041,27 @@ grid_static_position(ns_box *abox, const ns_box *cb,
     }
 }
 
+static const ns_box *
+html_body_child(const ns_box *html)
+{
+    if (!ns_node_is_tag(html->dom, NS_TAG_HTML)) return NULL;
+    for (const ns_box *c = html->first_child; c; c = c->next_sibling)
+        if (c->dom && c->style && ns_node_is_tag(c->dom, NS_TAG_BODY))
+            return c;
+    return NULL;
+}
+
+static gboolean
+icb_is_rtl(const ns_box *root)
+{
+    for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
+        if (!c->dom || !c->style) continue;
+        const ns_box *body = html_body_child(c);
+        return box_direction_is_rtl(body ? body : c);
+    }
+    return box_direction_is_rtl(root);
+}
+
 static void
 position_absolute_box(ns_box *abox, ns_box *cb, gboolean cb_is_icb)
 {
@@ -21021,12 +21072,13 @@ position_absolute_box(ns_box *abox, ns_box *cb, gboolean cb_is_icb)
                             : cb->content_height + cb->padding.top + cb->padding.bottom;
     double cb_inner_x = cb->x + cb->margin.left + cb->border.left;
     double cb_inner_y = cb->y + cb->margin.top  + cb->border.top;
-    position_absolute_box_in(abox, cb_inner_x, cb_inner_y, cb_w, cb_h);
+    gboolean rtl = cb_is_icb ? icb_is_rtl(cb) : box_direction_is_rtl(cb);
+    position_absolute_box_in(abox, cb_inner_x, cb_inner_y, cb_w, cb_h, rtl);
 }
 
 static void
 position_absolute_box_in(ns_box *abox, double cb_inner_x, double cb_inner_y,
-                         double cb_w, double cb_h)
+                         double cb_w, double cb_h, gboolean rtl)
 {
     const ns_style *s = abox->style;
 
@@ -21064,7 +21116,7 @@ position_absolute_box_in(ns_box *abox, double cb_inner_x, double cb_inner_y,
         double remaining = cb_w - left - right - box_outer_w;
         double ml;
         if (ml_auto && mr_auto)
-            ml = remaining > 0 ? remaining / 2 : 0;
+            ml = remaining > 0 ? remaining / 2 : rtl ? remaining : 0;
         else if (ml_auto)
             ml = remaining;
         else
@@ -21073,8 +21125,7 @@ position_absolute_box_in(ns_box *abox, double cb_inner_x, double cb_inner_y,
     } else if (!l_auto && !r_auto) {
         double remaining = cb_w - left - right - box_outer_w;
         final_x = cb_inner_x + left +
-            grid_static_align_offset(abs_self_alignment(abox, NS_CSS_JUSTIFY_SELF),
-                                     remaining, FALSE);
+            abs_justify_offset(abox, remaining, rtl);
     } else if (!l_auto) {
         final_x = cb_inner_x + left;
     } else if (!r_auto) {
@@ -22281,7 +22332,8 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
                                  static_x, static_y);
         apply_position_offsets(abox, avail, cb_h);
         if (grid_cb)
-            position_absolute_box_in(abox, grid_x, grid_y, grid_w, grid_h);
+            position_absolute_box_in(abox, grid_x, grid_y, grid_w, grid_h,
+                                     box_direction_is_rtl(cb));
         else
             position_absolute_box(abox, cb, cb_is_icb);
         if (!try_settled && !abs_box_fits(abox, anchor_imcb)) {

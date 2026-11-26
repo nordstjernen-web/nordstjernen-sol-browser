@@ -3,6 +3,20 @@ Changelog:
 
 1.0.52-dev:
 ======
+* Layout: a positioned box with both `left` and `right` set now follows
+  `right` when its containing block is right-to-left, like Chrome. When
+  the two cannot both hold, CSS drops `right` in a left-to-right block and
+  `left` in a right-to-left one, but NS always kept `left`: a 50px wide
+  absolutely positioned box with `left: 10px; right: 10px` in a 200px
+  `direction: rtl` parent sat 10px from the left edge instead of 10px
+  from the right, and a `position: relative` box with `left: 1in;
+  right: 1in` there moved right instead of left. The same holds for
+  boxes positioned against the viewport of a page with `<body dir="rtl">`
+  (the viewport takes its direction from `<body>`, as in Chrome), for
+  centred boxes too wide for their space, for relatively positioned
+  inline text and for blocks inside an inline of the other direction.
+  `justify-self: self-start` and `self-end` on such a box now follow the
+  box's own direction instead of always the left edge.
 * Dependencies: the Android build moves to Gradle 9.9.3 and the Android
   Gradle Plugin 9.5.3, and the Windows CI to msys2/setup-msys2 v2.34.0.
   The meson wraps (PDF.js, Wuffs, wgpu-native, WAMR, SIMDe), the pinned
