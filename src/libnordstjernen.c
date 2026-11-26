@@ -4355,13 +4355,17 @@ ns_browser_contextmenu_full(ns_browser *browser, int x, int y, int *out_edit)
     return prevented ? 1 : 0;
 }
 
-void
+int
 ns_browser_audio_feedback(ns_browser *browser, const char *line)
 {
-    if (!browser || !browser->js) return;
+    if (!browser || !browser->js) return 0;
+    if (ns_video_cache_audio_feedback(browser->videos, line,
+                                      g_get_monotonic_time()))
+        return 0;
     ns_js_audio_feedback(browser->js, line);
     if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     browser->repaint_requested = TRUE;
+    return 1;
 }
 
 char *
