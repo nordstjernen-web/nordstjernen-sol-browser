@@ -1239,6 +1239,35 @@ style_uniform_solid_border(const ns_style *s, double *out_w, rgba *out_color)
     return bw > 0;
 }
 
+static gboolean
+box_border_sides_equal(const ns_box *b)
+{
+    return fabs(b->border.top - b->border.right) < 0.01 &&
+           fabs(b->border.top - b->border.bottom) < 0.01 &&
+           fabs(b->border.top - b->border.left) < 0.01;
+}
+
+static gboolean
+paint_uniform_square_border(cairo_t *cr, const ns_box *b, const ns_style *s,
+                            const double outer[4][2], const double inner[4][2])
+{
+    rgba c = {0};
+    if (!box_border_sides_equal(b) || !style_uniform_solid_border(s, NULL, &c))
+        return FALSE;
+    if (c.a <= 0) return TRUE;
+    set_source_rgba(cr, c);
+    cairo_save(cr);
+    cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+    cairo_new_path(cr);
+    cairo_rectangle(cr, outer[0][0], outer[0][1],
+                    outer[2][0] - outer[0][0], outer[2][1] - outer[0][1]);
+    cairo_rectangle(cr, inner[0][0], inner[0][1],
+                    inner[2][0] - inner[0][0], inner[2][1] - inner[0][1]);
+    cairo_fill(cr);
+    cairo_restore(cr);
+    return TRUE;
+}
+
 static double
 inline_control_css_min_width(const ns_inline_attr *r, const ns_box *b)
 {
@@ -2571,6 +2600,9 @@ paint_block(cairo_t *cr, const ns_box *b)
             { inner_x, inner_y }, { inner_r, inner_y },
             { inner_r, inner_b }, { inner_x, inner_b },
         };
+        if (!drew_uniform)
+            drew_uniform = paint_uniform_square_border(cr, b, s, outer_corner,
+                                                       inner_corner);
         for (int i = 0; !drew_uniform && i < 4; i++) {
             if (sides[i].w <= 0) continue;
             const ns_css_value *bs = sides[i].style;

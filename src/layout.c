@@ -107,6 +107,14 @@ length_is_auto(const ns_css_value *v)
            strcmp(v->u.keyword, "auto") == 0;
 }
 
+static gboolean
+box_is_iframe(const ns_box *box)
+{
+    return box && box->kind == NS_BOX_BLOCK && box->dom &&
+           box->dom->kind == NS_NODE_ELEMENT && box->dom->name &&
+           ns_node_is_tag(box->dom, NS_TAG_IFRAME);
+}
+
 static const char *
 abs_self_alignment(const ns_box *abox, ns_css_prop prop)
 {
@@ -116,7 +124,8 @@ abs_self_alignment(const ns_box *abox, ns_css_prop prop)
     else if (g_str_has_prefix(k, "unsafe ")) k += 7;
     if (strcmp(k, "normal") == 0) {
         gboolean replaced = abox->kind == NS_BOX_IMAGE ||
-                            abox->kind == NS_BOX_VIDEO || abox->kind == NS_BOX_SVG;
+                            abox->kind == NS_BOX_VIDEO || abox->kind == NS_BOX_SVG ||
+                            box_is_iframe(abox);
         k = replaced ? "start" : "stretch";
     }
     return k;
@@ -139,6 +148,21 @@ aspect_ratio_number(const ns_css_value *v, gboolean *with_auto)
     if (with_auto) *with_auto = v->u.size.w_auto;
     return v->u.size.w > 0 && v->u.size.h > 0
         ? ratio_within_layout_limit(v->u.size.w / v->u.size.h) : -1;
+}
+
+static gboolean
+box_has_aspect_ratio(const ns_box *box)
+{
+    return box->style &&
+           aspect_ratio_number(box->style->values[NS_CSS_ASPECT_RATIO], NULL) > 0;
+}
+
+static gboolean
+box_iframe_default_size(const ns_box *box, gboolean block_axis, double *out)
+{
+    gboolean iframe = box_is_iframe(box) && !box_has_aspect_ratio(box);
+    if (iframe) *out = block_axis ? 150 : 300;
+    return iframe;
 }
 
 static double
@@ -12060,6 +12084,7 @@ static gboolean
 box_content_independent_width(const ns_box *box, double *out)
 {
     if (style_inline_size_contained(box->style, out)) return TRUE;
+    if (box_iframe_default_size(box, FALSE, out)) return TRUE;
     *out = text_input_intrinsic_width(box);
     return *out > 0;
 }
@@ -18574,6 +18599,7 @@ static gboolean
 box_content_independent_height(const ns_box *box, double *out)
 {
     if (style_block_size_contained(box->style, out)) return TRUE;
+    if (box_iframe_default_size(box, TRUE, out)) return TRUE;
     if (!box_is_menulist_select(box)) return FALSE;
     *out = menulist_content_height(box->style);
     return TRUE;
@@ -18643,6 +18669,44 @@ box_edges_for_layout(const ns_box *b, double basis, ns_edges *margin,
         return;
     }
     edges_from_style(b->style, basis, margin, padding, border);
+}
+
+static gboolean
+box_iframe_ratio_fills_width(const ns_box *box)
+{
+    return box_is_iframe(box) && box_has_aspect_ratio(box) &&
+           ratio_transferred_width(box) < 0;
+}
+
+static gboolean
+abs_inset_is_set(const ns_style *s, ns_css_prop prop)
+{
+    const ns_css_value *v = s->values[prop];
+    return v && !length_is_auto(v) &&
+           (v->kind == NS_CSS_V_LENGTH || v->kind == NS_CSS_V_CALC);
+}
+
+static gboolean
+box_justify_stretch_requested(const ns_box *box)
+{
+    if (!box->style) return FALSE;
+    if (style_is_absolute_or_fixed(box->style))
+        return abs_inset_is_set(box->style, NS_CSS_LEFT) &&
+               abs_inset_is_set(box->style, NS_CSS_RIGHT) &&
+               strcmp(abs_self_alignment(box, NS_CSS_JUSTIFY_SELF), "stretch") == 0;
+    if (!box->parent || !box_is_grid_container(box->parent)) return FALSE;
+    const char *k = ns_style_keyword(box->style, NS_CSS_JUSTIFY_SELF);
+    if (!k || strcmp(k, "auto") == 0)
+        k = keyword_or(box->parent->style, NS_CSS_JUSTIFY_ITEMS, "normal");
+    return k && strcmp(k, "stretch") == 0;
+}
+
+static gboolean
+box_takes_iframe_default_width(const ns_box *box)
+{
+    double w;
+    return box_iframe_default_size(box, FALSE, &w) &&
+           !box_justify_stretch_requested(box);
 }
 
 static void
@@ -18764,6 +18828,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     } else if (!flex_col_item_stretch && ratio_transferred_width(box) >= 0) {
         cw = ratio_transferred_width(box);
         explicit_width = TRUE;
+    } else if (!flex_col_item_stretch && box_takes_iframe_default_width(box)) {
+        box_content_independent_width(box, &cw);
+        explicit_width = TRUE;
+        intrinsic_width = TRUE;
     } else {
         cw = parent_content_width - horiz_total;
         if (cw < 0) cw = 0;
@@ -22085,7 +22153,8 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         gboolean as_stretch = strcmp(abs_self_alignment(abox, NS_CSS_ALIGN_SELF),
                                      "stretch") == 0;
         gboolean stretch_w = !has_explicit_width &&
-            ((l_set && r_set && js_stretch) || height_keyword_stretches(awv));
+            ((l_set && r_set && js_stretch) || height_keyword_stretches(awv) ||
+             box_iframe_ratio_fills_width(abox));
         double layout_w = avail;
         double inset_w = avail;
         if (l_set) inset_w -= length_resolve(alv, avail, 0);
