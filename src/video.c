@@ -26,6 +26,9 @@ static gboolean ns_video_is_layered(const ns_video_cache *cache,
 #define NS_VIDEO_AHEAD_MIN_S      0.12
 #define NS_VIDEO_AHEAD_MAX_S      1.50
 #define NS_VIDEO_STALL_DECAY_S    8.0
+#define NS_VIDEO_AUDIO_DRIFT_S 0.25
+#define NS_VIDEO_AUDIO_RESYNC_GAP_US (2 * G_USEC_PER_SEC)
+#define NS_VIDEO_AUDIO_HOLD_AFTER_US (250 * 1000)
 #define NS_VIDEO_AHEAD_BYTES      (64u * 1024u * 1024u)
 #define NS_VIDEO_PREROLL_MAX_US   G_GINT64_CONSTANT(2000000)
 
@@ -689,6 +692,7 @@ ns_video_audio_pause(ns_video_cache *cache, ns_video *v)
 {
     if (!cache || !cache->audio_cb || !v || !v->audio_opened) return;
     ns_video_emit_audio(cache, "pause %s", v->token);
+    v->audio_held = FALSE;
 }
 
 static void
@@ -697,6 +701,71 @@ ns_video_audio_stop(ns_video_cache *cache, ns_video *v)
     if (!cache || !cache->audio_cb || !v || !v->audio_opened) return;
     ns_video_emit_audio(cache, "stop %s", v->token);
     v->audio_opened = FALSE;
+    v->audio_held = FALSE;
+}
+
+static void
+ns_video_audio_hold(ns_video_cache *cache, ns_video *v)
+{
+    if (!cache || !cache->audio_cb || !v->audio_opened || v->audio_held)
+        return;
+    ns_video_emit_audio(cache, "pause %s", v->token);
+    v->audio_held = TRUE;
+}
+
+static void
+ns_video_audio_release(ns_video_cache *cache, ns_video *v, gint64 now_us)
+{
+    if (!v->audio_held) return;
+    v->audio_held = FALSE;
+    if (!cache || !cache->audio_cb || !v->audio_opened) return;
+    ns_video_emit_audio(cache, "seek %s %.3f", v->token, v->cur_time);
+    if (v->playing && !v->muted)
+        ns_video_emit_audio(cache, "resume %s", v->token);
+    v->audio_resync_us = now_us;
+}
+
+static ns_video *
+ns_video_cache_by_token(ns_video_cache *cache, const char *token)
+{
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_video *v = val;
+        if (v->token && strcmp(v->token, token) == 0) return v;
+    }
+    return NULL;
+}
+
+static void
+ns_video_correct_audio_drift(ns_video_cache *cache, ns_video *v,
+                             double audio_pos, gint64 now_us)
+{
+    if (!v->playing || v->muted || !v->audio_opened || v->audio_held ||
+        v->stalled || v->base_us == 0 || !cache->audio_cb ||
+        now_us - v->audio_resync_us < NS_VIDEO_AUDIO_RESYNC_GAP_US)
+        return;
+    double video_pos = (double)(now_us - v->base_us) / 1e6;
+    if (fabs(audio_pos - video_pos) < NS_VIDEO_AUDIO_DRIFT_S) return;
+    ns_video_emit_audio(cache, "seek %s %.3f", v->token, video_pos);
+    v->audio_resync_us = now_us;
+}
+
+gboolean
+ns_video_cache_audio_feedback(ns_video_cache *cache, const char *line,
+                              gint64 now_us)
+{
+    if (!cache || !line) return FALSE;
+    char kind[16], token[16];
+    double value = 0.0;
+    int fields = sscanf(line, "%15s %15s %lf", kind, token, &value);
+    if (fields < 2) return FALSE;
+    ns_video *v = ns_video_cache_by_token(cache, token);
+    if (!v) return FALSE;
+    if (fields == 3 && strcmp(kind, "pos") == 0)
+        ns_video_correct_audio_drift(cache, v, value, now_us);
+    return TRUE;
 }
 
 static void
@@ -2608,6 +2677,7 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             t = fmod(elapsed, v->duration);
 
         if (v->mse_window_wanted) {
+            ns_video_audio_hold(cache, v);
             v->base_us = now_us - (gint64)(v->cur_time * 1e6);
             v->prev_tick_time = v->cur_time;
             if (!v->stalled) {
@@ -2616,6 +2686,7 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             }
             continue;
         }
+        gboolean held_at_edge = FALSE;
         if (ns_video_stream_growing(cache, v)) {
             double edge = (v->mse_id ? ns_video_mse_window_edge(v)
                                      : ns_video_buffered_end(cache, v)) - 0.35;
@@ -2627,6 +2698,9 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
                 t = edge;
                 if (!v->stall_since_us)
                     v->stall_since_us = now_us;
+                held_at_edge = TRUE;
+                if (now_us - v->stall_since_us > NS_VIDEO_AUDIO_HOLD_AFTER_US)
+                    ns_video_audio_hold(cache, v);
                 if (!v->stalled &&
                     now_us - v->stall_since_us > G_GINT64_CONSTANT(1500000)) {
                     v->stalled = TRUE;
@@ -2635,6 +2709,10 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             } else {
                 v->stall_since_us = 0;
             }
+        }
+        if (!held_at_edge) {
+            v->cur_time = t;
+            ns_video_audio_release(cache, v, now_us);
         }
 
         if (v->loop && t + 1e-3 < v->prev_tick_time)
