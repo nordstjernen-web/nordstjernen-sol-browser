@@ -3,6 +3,15 @@ Changelog:
 
 1.0.52-dev:
 ======
+* XHTML: an SVG or MathML element written with a namespace prefix, such
+  as `<svg:svg>` in an XHTML page, now renders like in Chrome. NS kept the
+  prefix in the element name, so `svg` selectors and the SVG and MathML
+  layout never saw an `<svg:svg>` or `<m:math>` and they drew as empty
+  inlines or plain text; the `<svg:rect>` children of an `<svg:svg>` now
+  paint and a prefixed formula lays out as MathML. `tagName`, `outerHTML`
+  and `XMLSerializer` still write `svg:svg`, and prefixed elements in other
+  namespaces stay unstyled and inert. 26 more CSS 2.1 positioning
+  reftests pass.
 * Video: sound and picture stay together. The picture's clock is held back
   while it waits for more of a stream, but the sound kept playing, and
   nothing brought the two back in line afterwards, so each wait left the

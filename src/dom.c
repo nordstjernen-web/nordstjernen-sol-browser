@@ -2970,6 +2970,17 @@ serialize_shadow_template(const ns_node *sr, GString *out, int depth,
 }
 
 static void
+serialize_qualified_name(const ns_node *n, GString *out)
+{
+    const char *prefix = ns_element_get_attr(n, "data-nd-ns-prefix");
+    if (prefix && *prefix) {
+        g_string_append(out, prefix);
+        g_string_append_c(out, ':');
+    }
+    g_string_append(out, n->name ? n->name : "");
+}
+
+static void
 serialize_node_opts(const ns_node *n, GString *out, gboolean include_self,
                     int depth, const ns_html_ser_opts *opts)
 {
@@ -3000,7 +3011,7 @@ serialize_node_opts(const ns_node *n, GString *out, gboolean include_self,
     gboolean raw_text = serialize_raw_text(n);
     if (n->kind == NS_NODE_ELEMENT && include_self) {
         g_string_append_c(out, '<');
-        g_string_append(out, n->name ? n->name : "");
+        serialize_qualified_name(n, out);
         for (const ns_attr *a = n->attrs; a; a = a->next) {
             if (ns_attr_name_is_internal(a->name)) continue;
             g_string_append_c(out, ' ');
@@ -3033,7 +3044,7 @@ serialize_node_opts(const ns_node *n, GString *out, gboolean include_self,
     }
     if (n->kind == NS_NODE_ELEMENT && include_self) {
         g_string_append(out, "</");
-        g_string_append(out, n->name ? n->name : "");
+        serialize_qualified_name(n, out);
         g_string_append_c(out, '>');
     }
 }

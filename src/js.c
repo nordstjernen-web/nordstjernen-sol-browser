@@ -6688,6 +6688,17 @@ ns_element_qualified_upper(JSContext *ctx, const ns_node *n)
     return v;
 }
 
+static JSValue
+ns_element_qualified_name(JSContext *ctx, const ns_node *n)
+{
+    const char *pfx = ns_element_get_attr(n, "data-nd-ns-prefix");
+    if (!pfx || !*pfx) return JS_NewString(ctx, n->name);
+    char *q = g_strdup_printf("%s:%s", pfx, n->name);
+    JSValue v = JS_NewString(ctx, q);
+    g_free(q);
+    return v;
+}
+
 static gboolean ns_doc_wrapper_is_xml(JSContext *ctx, JSValueConst doc_val);
 static JSValue ns_element_get_ownerDocument(JSContext *ctx, JSValueConst this_val);
 
@@ -6703,16 +6714,7 @@ ns_element_get_tagName(JSContext *ctx, JSValueConst this_val)
         doc_is_xml = ns_doc_wrapper_is_xml(ctx, owner_doc);
     JS_FreeValue(ctx, owner_doc);
     gboolean is_xml = foreign || doc_is_xml;
-    if (is_xml) {
-        const char *pfx = ns_element_get_attr(n, "data-nd-ns-prefix");
-        if (pfx && *pfx) {
-            char *q = g_strdup_printf("%s:%s", pfx, n->name);
-            JSValue v = JS_NewString(ctx, q);
-            g_free(q);
-            return v;
-        }
-        return JS_NewString(ctx, n->name);
-    }
+    if (is_xml) return ns_element_qualified_name(ctx, n);
     if (n->kind == NS_NODE_ELEMENT) {
         JSValue q = ns_element_qualified_upper(ctx, n);
         if (!JS_IsUndefined(q)) return q;
@@ -42511,15 +42513,15 @@ static gboolean
 ns_tag_query_matches(const ns_node *n, const char *tag, const char *tag_lower)
 {
     if (strcmp(tag, "*") == 0) return TRUE;
-    if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS))
-        return strcmp(tag, n->name) == 0;
+    const char *want = (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS))
+                       ? tag : tag_lower;
     const char *pfx = ns_element_get_attr(n, "data-nd-ns-prefix");
     if (pfx) {
         gsize pl = strlen(pfx);
-        return strncmp(tag_lower, pfx, pl) == 0 && tag_lower[pl] == ':'
-            && strcmp(tag_lower + pl + 1, n->name) == 0;
+        return strncmp(want, pfx, pl) == 0 && want[pl] == ':'
+            && strcmp(want + pl + 1, n->name) == 0;
     }
-    return strcmp(tag_lower, n->name) == 0;
+    return strcmp(want, n->name) == 0;
 }
 
 static void
@@ -43894,12 +43896,10 @@ ns_element_get_nodeName(JSContext *ctx, JSValueConst this_val)
             break;
     }
     if (!el->name) return JS_NewString(ctx, "");
+    if (ns_element_get_attr(el, "data-nd-ns-prefix"))
+        return ns_element_get_tagName(ctx, this_val);
     if (el->flags & NS_NODE_KEEP_CASE)
         return JS_NewString(ctx, el->name);
-    {
-        JSValue q = ns_element_qualified_upper(ctx, el);
-        if (!JS_IsUndefined(q)) return q;
-    }
     if (el->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS))
         return JS_NewString(ctx, el->name);
     for (const char *p = el->name; *p; p++)

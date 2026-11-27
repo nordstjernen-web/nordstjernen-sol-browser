@@ -637,20 +637,26 @@ xml_parse_attributes(xml_parser *xp, GPtrArray *names, GPtrArray *values)
     }
 }
 
+static gboolean
+xml_uri_uses_local_name(const char *uri)
+{
+    return uri && (strcmp(uri, XML_NS_XHTML) == 0 ||
+                   strcmp(uri, XML_NS_SVG) == 0 ||
+                   strcmp(uri, NS_MATHML_NAMESPACE) == 0);
+}
+
 static void
 xml_apply_namespace(ns_node *el, const char *qname, const char *uri)
 {
     const char *colon = strchr(qname, ':');
     gboolean has_prefix = colon != NULL;
     el->flags |= NS_NODE_KEEP_CASE;
-    if (uri && strcmp(uri, XML_NS_XHTML) == 0) {
-        if (has_prefix) {
-            char *prefix = g_strndup(qname, (gsize)(colon - qname));
-            ns_element_set_attr(el, "data-nd-ns-prefix", prefix);
-            g_free(prefix);
-        }
-        return;
+    if (has_prefix && xml_uri_uses_local_name(uri)) {
+        char *prefix = g_strndup(qname, (gsize)(colon - qname));
+        ns_element_set_attr(el, "data-nd-ns-prefix", prefix);
+        g_free(prefix);
     }
+    if (uri && strcmp(uri, XML_NS_XHTML) == 0) return;
     if (uri && strcmp(uri, XML_NS_SVG) == 0) {
         el->flags |= NS_NODE_SVG_NS;
     } else if (uri && strcmp(uri, NS_MATHML_NAMESPACE) == 0) {
@@ -731,9 +737,8 @@ xml_parse_start_tag(xml_parser *xp, ns_node *parent)
         if (prefix && !el_uri) xml_fail(xp);
     }
     if (xp->ok) {
-        gboolean is_xhtml = el_uri && strcmp(el_uri, XML_NS_XHTML) == 0;
-        el = ns_node_new_element((is_xhtml && colon) ? g_strdup(colon + 1)
-                                                     : g_strdup(qname));
+        gboolean local = colon && xml_uri_uses_local_name(el_uri);
+        el = ns_node_new_element(g_strdup(local ? colon + 1 : qname));
         el->flags |= NS_NODE_NOT_PARSER_INSERTED;
         xml_apply_namespace(el, qname, el_uri);
         ns_node_append_child(parent, el);
