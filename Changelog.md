@@ -3,6 +3,10 @@ Changelog:
 
 1.0.52-dev:
 ======
+* Performance: retiring the realm of a removed or replaced frame no longer
+  looks up the constructor of every detached node wrapper's prototype. The
+  owning realm is found once per prototype during the walk, which a
+  Speedometer run of many iterations performs after each one.
 * Performance: Speedometer 3.1 runs about 9% faster on its six slowest
   suites on Windows (`docs/Benchmarking.md` has the numbers).
   `document.elementFromPoint` no longer shapes the text of every inline box
