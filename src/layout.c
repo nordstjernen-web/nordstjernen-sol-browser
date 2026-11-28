@@ -9395,15 +9395,31 @@ inline_box_hit_layout(const ns_box *box, const ns_style *parent_style,
 
 static gboolean g_form_hit_dropdown_only;
 
+static gboolean
+inline_box_has_form_hit_candidate(const ns_box *box)
+{
+    if (box->inline_atomics && !g_form_hit_dropdown_only)
+        for (guint i = 0; i < box->inline_atomics->len; i++) {
+            const ns_inline_atomic *a =
+                &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+            if (a->box && node_is_form_hit_target(a->box->dom)) return TRUE;
+        }
+    if (box->attrs)
+        for (guint i = 0; i < box->attrs->len; i++) {
+            const ns_inline_attr *r =
+                &g_array_index(box->attrs, ns_inline_attr, i);
+            if (r->dom && inline_attr_is_form_hit(r->kind)) return TRUE;
+        }
+    return FALSE;
+}
+
 static const ns_node *
 inline_box_form_hit(const ns_box *box, double local_x, double local_y,
                     const ns_style *parent_style)
 {
     if (!box) return NULL;
-    if ((!box->attrs || box->attrs->len == 0) &&
-        (!box->inline_atomics || box->inline_atomics->len == 0))
-        return NULL;
     if (!box->text || !*box->text) return NULL;
+    if (!inline_box_has_form_hit_candidate(box)) return NULL;
     NsPangoLayout *layout = inline_box_hit_layout(box, parent_style,
                                                   &local_x, &local_y);
 
