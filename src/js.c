@@ -76154,6 +76154,16 @@ ns_js_unpin_detached_documents(ns_js *js)
     g_ptr_array_free(owned, TRUE);
 }
 
+#define NS_JS_FORCED_GC_MIN_INTERVAL_US 250000
+#define NS_JS_FORCED_GC_COST_FACTOR     20
+
+static gint64
+ns_js_forced_gc_interval_us(gint64 last_gc_us)
+{
+    return MAX((gint64)NS_JS_FORCED_GC_MIN_INTERVAL_US,
+               last_gc_us * NS_JS_FORCED_GC_COST_FACTOR);
+}
+
 static void
 ns_js_retire_realms(ns_js *js)
 {
@@ -76165,7 +76175,8 @@ ns_js_retire_realms(ns_js *js)
         return;
     gint64 now = g_get_monotonic_time();
     if (js->last_realm_retire_us != 0 &&
-        now - js->last_realm_retire_us < 250000)
+        now - js->last_realm_retire_us <
+            ns_js_forced_gc_interval_us(js->realm_retire_gc_us))
         return;
     js->last_realm_retire_us = now;
     GArray *trials = g_array_new(FALSE, FALSE, sizeof(ns_realm_trial));
@@ -76174,6 +76185,8 @@ ns_js_retire_realms(ns_js *js)
     if (trials->len > 0) {
         ns_js_unpin_detached_documents(js);
         JS_RunGC(js->rt);
+        js->realm_retire_gc_us = g_get_monotonic_time() - now;
+        js->last_realm_retire_us = g_get_monotonic_time();
     }
     ns_js_realm_trials_finish(js, trials);
 }
@@ -76186,11 +76199,14 @@ ns_js_sweep_orphans(ns_js *js)
         return;
     if (js->orphaned_since_layout) return;
     gint64 now = g_get_monotonic_time();
-    if (js->last_orphan_sweep_us != 0 && now - js->last_orphan_sweep_us < 250000)
+    if (js->last_orphan_sweep_us != 0 &&
+        now - js->last_orphan_sweep_us <
+            ns_js_forced_gc_interval_us(js->orphan_sweep_gc_us))
         return;
-    js->last_orphan_sweep_us = now;
 
     JS_RunGC(js->rt);
+    js->last_orphan_sweep_us = g_get_monotonic_time();
+    js->orphan_sweep_gc_us = js->last_orphan_sweep_us - now;
 
     GPtrArray *to_free = g_ptr_array_new();
     GHashTableIter it; gpointer key;

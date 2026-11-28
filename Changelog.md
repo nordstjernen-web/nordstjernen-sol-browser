@@ -3,6 +3,15 @@ Changelog:
 
 1.0.52-dev:
 ======
+* Performance: Speedometer 3.1 runs about 9% faster on its six slowest
+  suites on Windows (`docs/Benchmarking.md` has the numbers).
+  `document.elementFromPoint` no longer shapes the text of every inline box
+  on the page to look for form controls, only of the boxes that hold one.
+  `for-in` and `Object.keys` no longer search the list of realms for every
+  object they enumerate. The collections forced when a frame's realm is
+  retired or orphaned nodes are swept now wait 20 times as long as the last
+  one took, instead of running every 250 ms whatever they cost. On Windows
+  the renderer process uses the segment heap.
 * Security: an external SVG `<use href>` inside a framed document is now
   checked against that frame's own URL. It was checked against the page that
   embeds the frame, so a cross-origin frame could make the browser fetch an

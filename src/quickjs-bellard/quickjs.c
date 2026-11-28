@@ -9396,6 +9396,8 @@ static BOOL js_hide_engine_global_keys(JSContext *ctx, JSObject *p)
     JSStackFrame *sf;
     BOOL is_global = FALSE;
 
+    if (p->class_id != JS_CLASS_GLOBAL_OBJECT)
+        return FALSE;
     list_for_each(el, &rt->context_list) {
         JSContext *c = list_entry(el, JSContext, link);
         if (JS_VALUE_GET_TAG(c->global_obj) == JS_TAG_OBJECT &&

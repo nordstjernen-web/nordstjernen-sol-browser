@@ -209,11 +209,16 @@ libns_platform = static_library(
 )
 
 nordstjernen_win_resources = []
+nordstjernen_renderer_win_resources = []
 if host_machine.system() == 'windows'
   windows = import('windows')
   nordstjernen_win_resources = windows.compile_resources(
     'nordstjernen.rc',
     depend_files: files('../data/icons/nordstjernen.ico'),
+  )
+  nordstjernen_renderer_win_resources = windows.compile_resources(
+    'renderer.rc',
+    depend_files: files('renderer.manifest'),
   )
 endif
 
@@ -388,7 +393,8 @@ if not is_mobile
     'nordstjernen-renderer',
     files('renderer_http.c', 'renderer_serve.c', 'renderer_tiles.c',
           'ipc_http.c', 'threaddump.c', 'headless.c', 'headless_main.c',
-          'rproc_http.c', 'rproc_inproc.c') + [wpt_hook_h],
+          'rproc_http.c', 'rproc_inproc.c') + [wpt_hook_h] +
+      nordstjernen_renderer_win_resources,
     link_with: libnordstjernen_static,
     include_directories: include_directories('.'),
     dependencies: nordstjernen_deps + rproc_deps,

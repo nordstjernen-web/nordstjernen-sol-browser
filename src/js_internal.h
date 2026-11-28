@@ -338,6 +338,8 @@ struct ns_js {
     gboolean      storage_events_draining;
     gint64        last_orphan_sweep_us;
     gint64        last_realm_retire_us;
+    gint64        realm_retire_gc_us;
+    gint64        orphan_sweep_gc_us;
     int           dispatch_depth;
     int           listener_snapshots;
     guint         listener_tombstones;
