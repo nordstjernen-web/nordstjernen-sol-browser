@@ -109,6 +109,65 @@ Current fresh-process official-suite snapshot on Windows (2026-06-03):
 single-page aggregate score; it is the comparable per-suite score while the
 shared global limitation remains.
 
+## Snapshot (release build, Windows 11, 2026-11-28)
+
+Official Speedometer 3.1 harness, each of the 20 default suites in a fresh
+headless process with `iterationCount=1`: all 20 score, geomean **3.0**.
+The slowest are NewsSite-Next (0.74), NewsSite-Nuxt (0.81), Perf-Dashboard
+(1.27), Editor-TipTap (1.57) and TodoMVC-jQuery (1.87).
+
+JetStream (WebKit `main`), one test per fresh process: 64 of 83 tests
+score. The whole-suite page does not get past preloading (it stops at
+resource 508 of 677). The scores are those of an interpreter: richards 39,
+splay 44, Babylon 87, raytrace 17, typescript-octane 3.8.
+
+Page loads, headless, private mode: google.com paints in 0.3 to 0.4 s;
+youtube.com in 2.1 to 2.9 s, of which 1.5 to 2.2 s is script.
+
+A gdb sampling profile of the news-site and editor suites pointed at four
+costs, fixed in this pass:
+
+- **`elementFromPoint` shaped every inline box.** The form-control hit
+  walk built a text layout for each inline box with any attribute, then
+  asked it for the point. It now builds one only for a box that holds a
+  form control.
+- **`for-in` and `Object.keys` walked the realm list.** Hiding the engine's
+  own globals from enumeration looked the object up among all realms on
+  every call; a non-global object is now rejected by its class first.
+- **A full collection every 250 ms.** Retiring a frame's realm and sweeping
+  orphaned nodes each force a collection. The wait before the next forced
+  one is now 20 times what the last one took, 250 ms at least.
+- **The Windows heap.** A quarter or more of the samples were inside
+  `RtlAllocateHeap` and `RtlFreeHeap`, reached through `g_malloc`. The
+  renderer now carries a manifest that selects the segment heap.
+
+Serial runs, median of three, score (higher is faster):
+
+| Suite                       | before | fixes | + segment heap |
+|-----------------------------|-------:|------:|---------------:|
+| NewsSite-Next               |  0.752 | 0.815 |          0.845 |
+| NewsSite-Nuxt               |  0.782 | 0.866 |          0.912 |
+| Editor-TipTap               |  1.751 | 1.871 |          1.889 |
+| TodoMVC-Angular-Complex-DOM |  4.890 | 5.247 |          5.513 |
+| TodoMVC-jQuery              |  1.875 | 1.889 |          1.948 |
+| Perf-Dashboard              |  1.501 | 1.373 |          1.531 |
+| geomean                     |  1.556 | 1.619 |          1.698 |
+
+JetStream and the two page loads did not move outside run-to-run noise.
+
+What remains, largest first:
+
+- **Layout is rebuilt whole on every flush.** NewsSite-Next forces 163
+  layouts of about 8 ms each on a 1,000-node page where 13 nodes were
+  restyled; that is most of the suite's time. Reusing the box tree for
+  subtrees whose style and content did not change is the largest lever.
+- **Allocation churn in layout.** Each of those layouts allocates and frees
+  the whole box tree, its attribute lists and font descriptions.
+- **Script speed.** JetStream and youtube.com are bound by the interpreter.
+- **JetStream coverage.** 19 tests fail or time out, most of them the
+  large WebAssembly and start-up workloads, and the whole-suite preload
+  stalls.
+
 ## Snapshot (release build, Windows 11, GTK 4.22, 2026-06-05)
 
 Median total ms, lower is faster. The "prior" column is the 2026-06-03
