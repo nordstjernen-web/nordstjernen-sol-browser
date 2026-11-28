@@ -1141,6 +1141,24 @@ ns_css_value_set_kind(ns_css_value *v, ns_css_value_kind kind)
     if (payload) css_value_set_payload(v, g_malloc0(payload));
 }
 
+static void
+css_value_own_strings(ns_css_value *copy)
+{
+    if (copy->kind == NS_CSS_V_KEYWORD) {
+        copy->u.keyword = g_strdup(copy->u.keyword);
+    } else if (copy->kind == NS_CSS_V_URL) {
+        copy->u.url = g_strdup(copy->u.url);
+    } else if (copy->kind == NS_CSS_V_AREAS) {
+        for (int i = 0; i < copy->u.areas->n_rects; i++)
+            copy->u.areas->rects[i].name =
+                g_strdup(copy->u.areas->rects[i].name);
+    } else if (copy->kind == NS_CSS_V_ANIM) {
+        for (int i = 0; i < copy->u.anim->n; i++)
+            copy->u.anim->entries[i].name =
+                g_strdup(copy->u.anim->entries[i].name);
+    }
+}
+
 static ns_css_value *
 css_value_copy_shallow(const ns_css_value *v)
 {
@@ -1153,6 +1171,7 @@ css_value_copy_shallow(const ns_css_value *v)
         if (payload) memcpy(own, payload, payload_size);
         css_value_set_payload(copy, own);
     }
+    css_value_own_strings(copy);
     copy->ref = 0;
     copy->image_set_text = g_strdup(v->image_set_text);
     copy->specified = g_strdup(v->specified);

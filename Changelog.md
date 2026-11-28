@@ -3,6 +3,15 @@ Changelog:
 
 1.0.52-dev:
 ======
+* Security: a layered CSS value whose first layer is a keyword and whose
+  later layer uses a font-relative unit, such as
+  `background-size: contain, 2em 3em` or `mask-size: cover, 1em 1em`, no
+  longer corrupts the heap. Resolving the units copied the first layer
+  together with the pointer to its keyword text, so the computed style and
+  the style sheet both owned the same string: it was freed with the first
+  element's style, read again for the next element the rule matched and
+  freed a second time, which crashed the renderer. The copy now takes its
+  own keyword or URL text, and its own grid-area and animation names.
 * JavaScript: the QuickJS engine moves to upstream master `2519774`
   (2026-11-23), nineteen commits of fixes. Array allocations and
   reallocations throughout the engine now check their size for overflow
