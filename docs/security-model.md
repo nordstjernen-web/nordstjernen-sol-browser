@@ -281,7 +281,7 @@ Both bind loopback only.
 ## Known gaps
 
 Findings of the latest source review that are still open are listed in
-[security-review-report-2026-11-21.md](security-review-report-2026-11-21.md).
+[security-review-report-2026-11-28.md](security-review-report-2026-11-28.md).
 
 - Frames are a realm boundary, not a process boundary: a memory-safety
   bug in one frame is not contained from the rest of its tab.

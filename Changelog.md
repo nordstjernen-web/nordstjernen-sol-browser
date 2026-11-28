@@ -3,6 +3,11 @@ Changelog:
 
 1.0.52-dev:
 ======
+* docs: security review of 2026-11-28
+  (`docs/security-review-report-2026-11-28.md`). It replaces the report of
+  2026-11-21 and lists what is still open: an external SVG `<use>` in a
+  cross-origin frame is checked against the embedding page, and three
+  `@counter-style` findings.
 * Security: a layered CSS value whose first layer is a keyword and whose
   later layer uses a font-relative unit, such as
   `background-size: contain, 2em 3em` or `mask-size: cover, 1em 1em`, no
