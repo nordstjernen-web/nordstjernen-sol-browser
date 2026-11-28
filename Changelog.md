@@ -3,6 +3,11 @@ Changelog:
 
 1.0.52-dev:
 ======
+* Dependencies: the Android build moves to Gradle 9.9.3 and the Android
+  Gradle Plugin 9.5.3, and the Windows CI to msys2/setup-msys2 v2.34.0.
+  The meson wraps (PDF.js, Wuffs, wgpu-native, WAMR, SIMDe), the pinned
+  FFmpeg, the NDK and the Android dependency sysroot were already at
+  their latest releases.
 * XHTML: an SVG or MathML element written with a namespace prefix, such
   as `<svg:svg>` in an XHTML page, now renders like in Chrome. NS kept the
   prefix in the element name, so `svg` selectors and the SVG and MathML
