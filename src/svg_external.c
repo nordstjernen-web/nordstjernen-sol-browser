@@ -67,17 +67,29 @@ ns_svg_external_note_base(const ns_node *doc, const char *base_url,
     g_hash_table_insert(g_bases, (gpointer)doc, b);
 }
 
-static const svg_external_base *
-svg_external_base_for(const ns_node *n)
+static gboolean
+svg_external_urls_for(const ns_node *n, const char **base_url,
+                      const char **document_url)
 {
-    if (!g_bases) return NULL;
-    const svg_external_base *found = NULL;
-    for (; n; n = n->parent) {
-        if (n->kind != NS_NODE_DOCUMENT && n->parent) continue;
-        found = g_hash_table_lookup(g_bases, n);
-        if (found) break;
+    while (n && n->parent &&
+           (n->kind != NS_NODE_DOCUMENT || (n->flags & NS_NODE_FRAGMENT)))
+        n = n->parent;
+    if (!n) return FALSE;
+    if (n->parent) {
+        if (n->flags & NS_NODE_SANDBOX_OPAQUE) return FALSE;
+        const char *frame_url = ns_element_get_attr(n->parent,
+                                                    "data-nd-frame-url");
+        if (!frame_url || !*frame_url) return FALSE;
+        *base_url = frame_url;
+        *document_url = frame_url;
+        return TRUE;
     }
-    return found;
+    const svg_external_base *top = g_bases ? g_hash_table_lookup(g_bases, n)
+                                           : NULL;
+    if (!top) return FALSE;
+    *base_url = top->base_url;
+    *document_url = top->document_url;
+    return TRUE;
 }
 
 static void
@@ -124,14 +136,16 @@ ns_svg_external_target(const ns_node *referrer, const char *href)
 {
     const char *hash = href ? strchr(href, '#') : NULL;
     if (!hash || hash == href || !hash[1]) return NULL;
-    const svg_external_base *base = svg_external_base_for(referrer);
-    if (!base) return NULL;
-    g_autofree char *raw = g_strndup(href, (gsize)(hash - href));
-    g_autofree char *url = ns_url_resolve(base->base_url, raw);
-    if (!url || !ns_url_is_http_or_https(url) ||
-        !ns_url_same_origin(url, base->document_url))
+    const char *base_url = NULL;
+    const char *document_url = NULL;
+    if (!svg_external_urls_for(referrer, &base_url, &document_url))
         return NULL;
-    svg_external_doc *d = svg_external_doc_for(url, base->document_url);
+    g_autofree char *raw = g_strndup(href, (gsize)(hash - href));
+    g_autofree char *url = ns_url_resolve(base_url, raw);
+    if (!url || !ns_url_is_http_or_https(url) ||
+        !ns_url_same_origin(url, document_url))
+        return NULL;
+    svg_external_doc *d = svg_external_doc_for(url, document_url);
     if (!d || !d->doc) return NULL;
     return ns_node_find_by_id(d->doc, hash + 1);
 }
