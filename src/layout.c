@@ -11479,8 +11479,7 @@ static double
 replaced_measured_width(const ns_box *box)
 {
     if (box->content_width > 0) return box->content_width;
-    double w = replaced_auto_width(box);
-    return w > 0 ? w : 200;
+    return replaced_auto_width(box);
 }
 
 static gboolean
@@ -12756,6 +12755,15 @@ table_collapse_borders(ns_box *box, guint max_cols)
 }
 
 static double
+table_fit_columns(double *col_widths, const gboolean *col_fixed,
+                  guint max_cols, double fit_cw, double min_cw)
+{
+    if (min_cw <= fit_cw) return fit_cw;
+    table_grow_columns(col_widths, col_fixed, max_cols, min_cw - fit_cw);
+    return min_cw;
+}
+
+static double
 table_initial_content_width(ns_box *box, gboolean explicit_width,
                             double cb_basis, double available,
                             double sizing_extras)
@@ -12786,6 +12794,8 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
         ? box->padding.left + box->padding.right +
           box->border.left + box->border.right
         : 0;
+    gboolean fills = explicit_width || box->has_flex_main || box->inline_stretch;
+    box->inline_stretch = FALSE;
     double cw = table_initial_content_width(box, explicit_width, cb_basis,
                                             parent_content_width - horiz_total,
                                             sizing_extras);
@@ -12967,14 +12977,15 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                         (slack_sum > 0 ? slack * (avail_extra / slack_sum) : 0);
                 }
             }
-        } else if (natural_sum == 0) {
+        } else if (natural_sum == 0 && fills) {
             double evenly = col_avail / (double)max_cols;
             for (guint i = 0; i < max_cols; i++) col_widths[i] = evenly;
-        } else if (explicit_width) {
+        } else if (fills) {
             table_grow_columns(col_widths, col_fixed, max_cols,
                                col_avail - natural_sum);
         } else {
-            cw = natural_sum + total_hsp;
+            cw = table_fit_columns(col_widths, col_fixed, max_cols,
+                                   natural_sum + total_hsp, min_cw);
             box->content_width = cw;
         }
     }
@@ -14726,6 +14737,7 @@ flex_column_layout_item(ns_box *c, double cw, double line_w, gboolean fit,
     c->cb_width_set = TRUE;
     c->definite_height = 0;
     c->measured_content_height = -1;
+    c->inline_stretch = c->kind == NS_BOX_TABLE && !fit && !width_explicit;
     layout_box(c, parent_w, child_inherited);
     if (!fit && !width_explicit)
         flex_stretch_replaced_width(c, line_w);
@@ -17645,6 +17657,8 @@ layout_grid(ns_box *box, double cw,
                                    rows_tracks, rows_subgrid);
         c->block_size_indefinite = area_h <= 0 && c->style &&
             value_is_percent(c->style->values[NS_CSS_HEIGHT]);
+        c->inline_stretch = c->kind == NS_BOX_TABLE && j_stretch &&
+            !fits_for_auto_margins && !i_has_w && !size_keyword_is_intrinsic(iwv);
         layout_box(c, item_w + c->margin.left + c->margin.right, child_inherited);
         c->block_size_indefinite = FALSE;
         g_pending_subgrid_cols = NULL;

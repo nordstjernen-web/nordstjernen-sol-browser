@@ -51,6 +51,21 @@ Changelog:
   longer leak; `Iterator.from` wrappers return the inner result as-is.
   Three fixes NS carried (scope limit, `Math.sumPrecise` overflow, in-place
   concatenation of atoms) are now upstream's and were dropped from the fork.
+* Layout: an `<img>` without a source (no `src`, `srcset` or lazy-load
+  `data-src`) no longer widens a shrink-to-fit box around it.
+  It has no natural size and lays out 0px wide, but NS counted it as
+  200px when measuring the box's min- and max-content width, so a flex
+  item, float, inline-block or absolutely positioned box holding it grew
+  to 200px or to the image's `max-width`: a flex item with only
+  `<img style="display:block;max-width:60px">` in it was 60px wide where
+  Chrome makes it 0px. An image whose source failed to load measures
+  0px too, as in Chrome. A CSS table (`display: table`) with an auto width
+  whose cells have no content width also took the whole line instead of
+  shrinking to its spacing, borders and padding, like Chrome. An
+  auto-width table now also keeps the width its context gives it: its
+  `min-width`, its `flex: 1` size, or the width it stretches to in a grid
+  area or a column flex container. Before, `<table style="flex:1">` with
+  one short cell in a 600px flex row was only as wide as its text.
 * Layout: a positioned box with both `left` and `right` set now follows
   `right` when its containing block is right-to-left, like Chrome. When
   the two cannot both hold, CSS drops `right` in a left-to-right block and

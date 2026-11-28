@@ -177,6 +177,7 @@ typedef struct ns_box {
     gboolean cb_width_set;
     double flex_main_size;
     gboolean has_flex_main;
+    gboolean inline_stretch;
     gboolean is_rendered_legend;
     gboolean inline_split_tail;
     double line_continuation_x;
