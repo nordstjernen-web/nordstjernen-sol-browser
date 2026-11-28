@@ -110,7 +110,7 @@ HOST_INDEX_IDIOMS = (
 
 def already_converted(line, start, end):
     before = line[:start]
-    return before.endswith(("js_cstore(", "js_resize_cptr_array(ctx, ")) or re.search(r"js_cload\([^,]+, $", before) is not None
+    return before.endswith(("js_cstore(", "js_resize_cptr_array(ctx, ", "js_expand_cptr_array_min(ctx, ")) or re.search(r"js_cload\([^,]+, $", before) is not None
 
 
 COMMENT_RE = re.compile(r"/\*.*?\*/|(?<![:\"'\\])//[^\n]*", re.S)
@@ -157,7 +157,7 @@ def apply(text):
         sep = sep[0] if sep else r"->"
         write_re = re.compile(r"(?<![\w.>])(" + head + sep + field + r") = (?!\(JS_CPTR)([^;=][^;]*);")
         text = write_re.sub(lambda m: "js_cstore(%s, %s);" % (m.group(1), m.group(2)), text)
-        read_re = re.compile(r"(?<![\w.>])(?<!\(uintptr_t\))(?<!js_resize_cptr_array\(ctx, )(" + head + sep + field + r")\b(?! = [^=])")
+        read_re = re.compile(r"(?<![\w.>])(?<!\(uintptr_t\))(?<!js_resize_cptr_array\(ctx, )(?<!js_expand_cptr_array_min\(ctx, )(" + head + sep + field + r")\b(?! = [^=])")
         text = read_re.sub(lambda m: "js_cload(%s, %s)" % (type_name, m.group(1)), text)
         esc = re.escape(type_name)
         text = re.sub(r"js_cstore\(js_cload\(" + esc + r", ([^()]*(?:\([^()]*\))?[^()]*)\), ", r"js_cstore(\1, ", text)

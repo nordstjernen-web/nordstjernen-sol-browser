@@ -3,6 +3,19 @@ Changelog:
 
 1.0.52-dev:
 ======
+* JavaScript: the QuickJS engine moves to upstream master `2519774`
+  (2026-11-23), nineteen commits of fixes. Array allocations and
+  reallocations throughout the engine now check their size for overflow
+  (#535, #536); a function with more than 65533 block scopes raises an
+  InternalError; `instanceof` through a deep chain of bound functions and
+  the `JS_IteratorNext` fast path check for stack overflow; a `with`
+  branch polls for interrupts; `Function.prototype.toString` works on a
+  revoked callable proxy and reads no `name` through a proxy;
+  destructuring such as `({a 1} = x)` is a SyntaxError; failures in
+  `Promise.allSettled()`/`any()`, `for-in` setup and prototype changes no
+  longer leak; `Iterator.from` wrappers return the inner result as-is.
+  Three fixes NS carried (scope limit, `Math.sumPrecise` overflow, in-place
+  concatenation of atoms) are now upstream's and were dropped from the fork.
 * Layout: a positioned box with both `left` and `right` set now follows
   `right` when its containing block is right-to-left, like Chrome. When
   the two cannot both hold, CSS drops `right` in a left-to-right block and

@@ -5,7 +5,7 @@ in-tree fork of Fabrice Bellard's [QuickJS](https://github.com/bellard/quickjs).
 
 | | |
 |---|---|
-| Version | master `e585640` (2026-11-10) plus the local changes below |
+| Version | master `2519774` (2026-11-23) plus the local changes below |
 | About page | `QuickJS 2026-06-04` |
 | Heap hardening | cage, caged values, compressed fields, pointer tables |
 | `Intl`, `Temporal` | upstream's own (`intl/`, `temporal/`) |
@@ -54,14 +54,11 @@ Drop one when upstream fixes it.
 
 | Fix | Fault | Reported |
 |---|---|---|
-| parser stops at the scope limit | Scope indexes are 16-bit operands with no limit, so a function with more than 65535 block scopes resolved variables against the wrong scope. The parser raises a SyntaxError. | bellard/quickjs#610, point 10 |
 | zero-length copies | `memcpy`/`memcmp` with a NULL pointer and length 0 in typed-array `slice` after a species constructor shrinks the buffer and in empty `\q{}` alternatives. | #610, points 7 and 8 |
-| `Math.sumPrecise` renormalises before overflow | A 56-bit limb passed 2^63 between renormalisations and gave a wrong sum for 300 values near 2^53. | #610, point 9 |
 | async generator drains its queue | A completed async generator settled one queued request and left the rest pending forever. | #610, point 5 |
 | number parser clamps the exponent | `js_atod` overflowed an `int`, so `"1000000000e2147483639"` parsed as 0. | fork `12bc082` |
 | linear canonical ordering | `normalize()` on 200 000 combining marks took 27 s; long runs are counting-sorted. | fork `877dc65` |
 | allocator refuses oversized requests | Size rounding wrapped for requests near `SIZE_MAX` and returned a tiny block. | fork `55b3317` |
-| in-place concatenation skips atoms | Growing a string that is also an atom made property lookups by that atom miss. | fork `d766a7f` |
 | OOM leaks and NULL dereferences | A leak in `BigInt` `**`, and NULL dereferences on allocation failure in bound functions, class brands and destructuring. | fork `8d4fd06` |
 | BJSON resets the SAB mark | Refusing a SharedArrayBuffer left its cycle mark set. | fork `7b714f0` |
 | BJSON reader holds object references | A duplicate key could free an object the back-reference table still named. | fork `15a00d4` |
@@ -119,6 +116,7 @@ list; every other file is upstream's and can be copied.
 |---|---|---|
 | 2026-11-09 | `712e8c0` → `e5ac135` | Seventeen upstream commits, mostly memory-safety fixes (`ArrayBuffer` release callbacks run twice, #606; stale typed-array buffer length, #608; allocation failures in `JS_DefineProperty` and `add_fast_array_element`). The twelve carried fixes in the table above were added in the same change. |
 | 2026-11-10 | `e5ac135` → `e585640` | The engine moved from the wrap into `src/quickjs-bellard/`. Five upstream commits: the object-spread fix for strings (#611), stricter Temporal time zone validation and three Intl fixes for #610 points 3, 4 and 11. |
+| 2026-11-28 | `e585640` → `2519774` | Nineteen upstream commits: overflow-checked array allocation helpers (`js_malloc_array`, `js_realloc_array`, `js_expand_array*`; #535, #536), which `js_resize_cptr_array` and the new `js_expand_cptr_array_min` in `quickjs-cptr.h` now build on for compressed fields; stack checks for bound-function `instanceof` and `JS_IteratorNext`; interrupt polling on `OP_with_*`; leak fixes in `Promise.allSettled`/`any`, `for-in` and `JS_SetPrototype`; parser fixes. Upstream's scope limit (`JS_MAX_SCOPES`, #610 point 10), `Math.sumPrecise` fix and atom check in `JS_ConcatStringInPlace` replaced the carried fixes of the same name. |
 
 The refreshes of the removed quickjs-ng and Lexbor forks, from 2026-06 to
 2026-11, are in the git history only.
