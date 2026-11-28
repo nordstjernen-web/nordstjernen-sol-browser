@@ -318,8 +318,9 @@ What is **not** done: there is no full GL command-stream validator (the
 ANGLE model). Shaders are validated before compilation, and vertex, index
 and uniform buffer ranges are checked at every draw (see above). Two
 findings of the 2026-11-21 source review in that draw-call validation are
-open (M3 and M4 in
-[security-review-report-2026-11-28.md](security-review-report-2026-11-28.md)).
+open: WebGL 2 index validation uses a stale copy of the element buffer, and
+buffer sizes are tracked by GL name, so a deleted buffer still attached to a
+vertex array keeps its old size.
 Resources are initialised eagerly,
 when they are allocated, rather than lazily on first use as ANGLE does.
 Users who do not want pages to reach the native GL stack can disable WebGL

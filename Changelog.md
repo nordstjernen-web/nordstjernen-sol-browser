@@ -3,11 +3,14 @@ Changelog:
 
 1.0.52-dev:
 ======
-* docs: security review of 2026-11-28
-  (`docs/security-review-report-2026-11-28.md`). It replaces the report of
-  2026-11-21 and lists what is still open: an external SVG `<use>` in a
-  cross-origin frame is checked against the embedding page, and three
-  `@counter-style` findings.
+* Security: an external SVG `<use href>` inside a framed document is now
+  checked against that frame's own URL. It was checked against the page that
+  embeds the frame, so a cross-origin frame could make the browser fetch an
+  SVG file of the embedding site and read the size of any element in it,
+  including the width of its text. A frame can now reference SVG files of
+  its own origin, which it could not before; a sandboxed frame with an
+  opaque origin can reference none.
+* docs: the security review reports are removed from the tree.
 * Security: a layered CSS value whose first layer is a keyword and whose
   later layer uses a font-relative unit, such as
   `background-size: contain, 2em 3em` or `mask-size: cover, 1em 1em`, no

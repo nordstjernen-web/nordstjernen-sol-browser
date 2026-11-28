@@ -44,7 +44,6 @@ reporting in [SECURITY.md](../SECURITY.md), the threat model and defences in
 - [threading.md](threading.md) — the threading model.
 - [watchdog.md](watchdog.md) — the watchdog supervisor.
 - [heap-hardening.md](heap-hardening.md) — the JavaScript heap cage, compressed pointers and pointer tables: design, status, open items and benchmarks.
-- [security-review-report-2026-11-28.md](security-review-report-2026-11-28.md) — the security review of 2026-11-28 and the findings still open.
 
 ## Web platform & standards
 
