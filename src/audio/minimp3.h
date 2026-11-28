@@ -8,6 +8,10 @@
 */
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif /* __cplusplus */
+
 #define MINIMP3_MAX_SAMPLES_PER_FRAME (1152*2)
 
 typedef struct
@@ -21,10 +25,6 @@ typedef struct
     int reserv, free_format_bytes;
     unsigned char header[4], reserv_buf[511];
 } mp3dec_t;
-
-#ifdef __cplusplus
-extern "C" {
-#endif /* __cplusplus */
 
 void mp3dec_init(mp3dec_t *dec);
 #ifndef MINIMP3_FLOAT_OUTPUT
@@ -86,7 +86,7 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
 
 #if !defined(MINIMP3_NO_SIMD)
 
-#if !defined(MINIMP3_ONLY_SIMD) && (defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64))
+#if !defined(MINIMP3_ONLY_SIMD) && (defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC))
 /* x64 always have SSE2, arm64 always have neon, no need for generic code */
 #define MINIMP3_ONLY_SIMD
 #endif /* SIMD checks... */
@@ -161,7 +161,7 @@ end:
     return g_have_simd - 1;
 #endif /* MINIMP3_ONLY_SIMD */
 }
-#elif defined(__ARM_NEON) || defined(__aarch64__) || defined(_M_ARM64)
+#elif defined(__ARM_NEON) || defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
 #include <arm_neon.h>
 #define HAVE_SSE 0
 #define HAVE_SIMD 1
@@ -176,7 +176,7 @@ end:
 #define VMUL_S(x, s)  vmulq_f32(x, vmovq_n_f32(s))
 #define VREV(x) vcombine_f32(vget_high_f32(vrev64q_f32(x)), vget_low_f32(vrev64q_f32(x)))
 typedef float32x4_t f4;
-static int have_simd()
+static int have_simd(void)
 {   /* TODO: detect neon for !MINIMP3_ONLY_SIMD */
     return 1;
 }
@@ -191,7 +191,7 @@ static int have_simd()
 #define HAVE_SIMD 0
 #endif /* !defined(MINIMP3_NO_SIMD) */
 
-#if defined(__ARM_ARCH) && (__ARM_ARCH >= 6) && !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__ARM_ARCH_6M__)
+#if defined(__ARM_ARCH) && (__ARM_ARCH >= 6) && !defined(__aarch64__) && !defined(_M_ARM64) && !defined(_M_ARM64EC) && !defined(__ARM_ARCH_6M__)
 #define HAVE_ARMV6 1
 static __inline__ __attribute__((always_inline)) int32_t minimp3_clip_int16_arm(int32_t a)
 {
@@ -293,11 +293,26 @@ static unsigned hdr_sample_rate_hz(const uint8_t *h)
     return g_hz[HDR_GET_SAMPLE_RATE(h)] >> (int)!HDR_TEST_MPEG1(h) >> (int)!HDR_TEST_NOT_MPEG25(h);
 }
 
+/**
+ * Returns the number of PCM samples per channel stored in one frame.
+ * Layer I always has 384 samples; Layer II always has 1152. Layer III has
+ * 1152 samples for MPEG-1 and 576 for MPEG-2/MPEG-2.5.
+ * @param h pointer to a 4-byte frame header
+ * @return samples per channel
+ */
 static unsigned hdr_frame_samples(const uint8_t *h)
 {
     return HDR_IS_LAYER_1(h) ? 384 : (1152 >> (int)HDR_IS_FRAME_576(h));
 }
 
+/**
+ * Computes the frame length in bytes, including the 4-byte header but not the
+ * padding slot (see hdr_padding). Free-format frames (bitrate index 0) do not
+ * carry their length, so free_format_size is returned for them.
+ * @param h pointer to a 4-byte frame header
+ * @param free_format_size fallback frame length for free-format streams
+ * @return frame length in bytes
+ */
 static int hdr_frame_bytes(const uint8_t *h, int free_format_size)
 {
     int frame_bytes = hdr_frame_samples(h)*hdr_bitrate_kbps(h)*125/hdr_sample_rate_hz(h);
@@ -516,8 +531,8 @@ static int L3_read_side_info(bs_t *bs, L3_gr_info_t *gr, const uint8_t *hdr)
 
     unsigned tables, scfsi = 0;
     int main_data_begin, part_23_sum = 0;
-    int sr_idx = HDR_GET_MY_SAMPLE_RATE(hdr); sr_idx -= (sr_idx != 0);
     int gr_count = HDR_IS_MONO(hdr) ? 1 : 2;
+    int sr_idx = HDR_GET_MY_SAMPLE_RATE(hdr); sr_idx -= (sr_idx != 0);
 
     if (HDR_TEST_MPEG1(hdr))
     {
@@ -941,7 +956,8 @@ static void L3_stereo_top_band(const float *right, const uint8_t *sfb, int nband
 static void L3_stereo_process(float *left, const uint8_t *ist_pos, const uint8_t *sfb, const uint8_t *hdr, int max_band[3], int mpeg2_sh)
 {
     static const float g_pan[7*2] = { 0,1,0.21132487f,0.78867513f,0.36602540f,0.63397460f,0.5f,0.5f,0.63397460f,0.36602540f,0.78867513f,0.21132487f,1,0 };
-    unsigned i, max_pos = HDR_TEST_MPEG1(hdr) ? 7 : 64;
+    const uint8_t mpeg1 = HDR_TEST_MPEG1(hdr);
+    unsigned i, max_pos = mpeg1 ? 7 : 64;
 
     for (i = 0; sfb[i]; i++)
     {
@@ -949,7 +965,7 @@ static void L3_stereo_process(float *left, const uint8_t *ist_pos, const uint8_t
         if ((int)i > max_band[i % 3] && ipos < max_pos)
         {
             float kl, kr, s = HDR_TEST_MS_STEREO(hdr) ? 1.41421356f : 1;
-            if (HDR_TEST_MPEG1(hdr))
+            if (mpeg1)
             {
                 kl = g_pan[2*ipos];
                 kr = g_pan[2*ipos + 1];
@@ -1429,14 +1445,15 @@ static void mp3d_DCT_II(float *grbuf, int n)
 #ifndef MINIMP3_FLOAT_OUTPUT
 static int16_t mp3d_scale_pcm(float sample)
 {
+    int16_t s;
 #if HAVE_ARMV6
     int32_t s32 = (int32_t)(sample + .5f);
     s32 -= (s32 < 0);
-    int16_t s = (int16_t)minimp3_clip_int16_arm(s32);
+    s = (int16_t)minimp3_clip_int16_arm(s32);
 #else
     if (sample >=  32766.5) return (int16_t) 32767;
     if (sample <= -32767.5) return (int16_t)-32768;
-    int16_t s = (int16_t)(sample + .5f);
+    s = (int16_t)(sample + .5f);
     s -= (s < 0);   /* away from zero, to be compliant */
 #endif
     return s;
@@ -1566,7 +1583,7 @@ static void mp3d_synth(float *xl, mp3d_sample_t *dstl, int nch, float *lins)
 
 #else /* MINIMP3_FLOAT_OUTPUT */
 
-            static const f4 g_scale = { 1.0f/32768.0f, 1.0f/32768.0f, 1.0f/32768.0f, 1.0f/32768.0f };
+            const f4 g_scale = VSET(1.0f/32768.0f);
             a = VMUL(a, g_scale);
             b = VMUL(b, g_scale);
 #if HAVE_SSE
@@ -1635,6 +1652,7 @@ static void mp3d_synth_granule(float *qmf_state, float *grbuf, int nbands, int n
     }
 
     memcpy(lins, qmf_state, sizeof(float)*15*64);
+    memset(lins + 15*64, 0, sizeof(float)*64*nbands); /* zero workspace so no uninitialized floats reach qmf_state */
 
     for (i = 0; i < nbands; i += 2)
     {
@@ -1654,20 +1672,69 @@ static void mp3d_synth_granule(float *qmf_state, float *grbuf, int nbands, int n
     }
 }
 
+static int hdr_is_null(const uint8_t *hdr)
+{
+    return !hdr[0] && !hdr[1] && !hdr[2] && !hdr[3];
+}
+
+static int hdr_is_id3v1(const uint8_t *hdr, int bytes_left)
+{
+    /* same signature mp3dec_skip_id3v1() uses; pinning the size to a whole 128-byte tag
+       keeps a random "TAG" in audio data from being mistaken for end-of-stream */
+    return 128 == bytes_left && !memcmp(hdr, "TAG", 3);
+}
+
+static int hdr_is_null_or_tag(const uint8_t *hdr, int bytes_left)
+{
+    return hdr_is_null(hdr) || hdr_is_id3v1(hdr, bytes_left);
+}
+
+/**
+ * Verifies that a run of consecutive frame headers all match, so that a sync
+ * that only looks like a header can be rejected. The scan ends early (with
+ * success) once at least one header matched, either at the end of the buffer
+ * or at a trailing null/ID3v1 region.
+ * @param hdr pointer to the first 4-byte frame header
+ * @param mp3_bytes bytes remaining in the buffer starting at hdr
+ * @param frame_bytes free-format frame length to pass through to
+ *                    hdr_frame_bytes (see its free_format_size parameter); only
+ *                    consulted if a later frame has bitrate index 0
+ * @return 1 if the headers match, 0 if a following header differs
+ */
 static int mp3d_match_frame(const uint8_t *hdr, int mp3_bytes, int frame_bytes)
 {
     int i, nmatch;
     for (i = 0, nmatch = 0; nmatch < MAX_FRAME_SYNC_MATCHES; nmatch++)
     {
+        /* advance to the start of the next frame */
         i += hdr_frame_bytes(hdr + i, frame_bytes) + hdr_padding(hdr + i);
+        /* end of buffer, or trailing null/ID3v1 data: succeed if we already
+           matched at least one header */
         if (i + HDR_SIZE > mp3_bytes)
             return nmatch > 0;
+        if (hdr_is_null_or_tag(hdr + i, mp3_bytes - i))
+            return nmatch > 0;
+        /* a following header differs: the first header was not a real sync */
         if (!hdr_compare(hdr, hdr + i))
             return 0;
     }
     return 1;
 }
 
+/**
+ * Searches a buffer for the first valid MPEG frame and returns its offset. A
+ * candidate header is accepted when its computed length walks across up to
+ * MAX_FRAME_SYNC_MATCHES matching headers (or, at offset 0, exactly fills the
+ * buffer).
+ * @param mp3 pointer to the start of the buffer
+ * @param mp3_bytes number of bytes available from mp3
+ * @param free_format_bytes in/out free-format frame length used while scanning;
+ *                           reset to 0 when a candidate is rejected
+ * @param ptr_frame_bytes out: length in bytes (including the padding slot) of
+ *                           the found frame, or 0 if none was found
+ * @return byte offset of the found frame relative to mp3, or mp3_bytes if no
+ *         frame was found
+ */
 static int mp3d_find_frame(const uint8_t *mp3, int mp3_bytes, int *free_format_bytes, int *ptr_frame_bytes)
 {
     int i, k;
@@ -1678,6 +1745,8 @@ static int mp3d_find_frame(const uint8_t *mp3, int mp3_bytes, int *free_format_b
             int frame_bytes = hdr_frame_bytes(mp3, *free_format_bytes);
             int frame_and_padding = frame_bytes + hdr_padding(mp3);
 
+            /* free-format frame: the header carries no length, so look ahead
+               for two more matching headers to derive the frame size */
             for (k = HDR_SIZE; !frame_bytes && k < MAX_FREE_FORMAT_FRAME_SIZE && i + 2*k < mp3_bytes - HDR_SIZE; k++)
             {
                 if (hdr_compare(mp3, mp3 + k))
@@ -1710,12 +1779,24 @@ void mp3dec_init(mp3dec_t *dec)
     dec->header[0] = 0;
 }
 
+/**
+ * Decodes one MPEG frame, first locating the next frame and skipping any
+ * leading garbage or ID3v2 tag.
+ * @param dec decoder state, initialized with mp3dec_init
+ * @param mp3 buffer of compressed MPEG data
+ * @param mp3_bytes number of bytes available in mp3
+ * @param pcm output buffer for PCM samples, or NULL to only inspect the header
+ * @param info receives frame metadata; info->frame_bytes is always set to the
+ *             number of consumed (or skippable) bytes, even when 0 is returned
+ * @return number of PCM samples per channel, or 0 on error/EOF
+ */
 int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_sample_t *pcm, mp3dec_frame_info_t *info)
 {
     int i = 0, igr, frame_size = 0, success = 1;
     const uint8_t *hdr;
     bs_t bs_frame[1];
     mp3dec_scratch_t scratch;
+    memset(scratch.ist_pos, 0, sizeof(scratch.ist_pos)); /* avoid use-of-uninitialized-value (scfsi reuse) */
 
     if (mp3_bytes > 4 && dec->header[0] == 0xff && hdr_compare(dec->header, mp3))
     {
@@ -1769,7 +1850,7 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
         {
             for (igr = 0; igr < (HDR_TEST_MPEG1(hdr) ? 2 : 1); igr++, pcm += 576*info->channels)
             {
-                memset(scratch.grbuf[0], 0, 576*2*sizeof(float));
+                memset(scratch.grbuf, 0, sizeof(scratch.grbuf));
                 L3_decode(dec, &scratch, scratch.gr_info + igr*info->channels, info->channels);
                 mp3d_synth_granule(dec->qmf_state, scratch.grbuf[0], 18, info->channels, pcm, scratch.syn[0]);
             }
@@ -1783,7 +1864,7 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
         L12_scale_info sci[1];
         L12_read_scale_info(hdr, bs_frame, sci);
 
-        memset(scratch.grbuf[0], 0, 576*2*sizeof(float));
+        memset(scratch.grbuf, 0, sizeof(scratch.grbuf));
         for (i = 0, igr = 0; igr < 3; igr++)
         {
             if (12 == (i += L12_dequantize_granule(scratch.grbuf[0] + i, bs_frame, sci, info->layer | 1)))
@@ -1791,7 +1872,7 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
                 i = 0;
                 L12_apply_scf_384(sci, sci->scf + igr, scratch.grbuf[0]);
                 mp3d_synth_granule(dec->qmf_state, scratch.grbuf[0], 12, info->channels, pcm, scratch.syn[0]);
-                memset(scratch.grbuf[0], 0, 576*2*sizeof(float));
+                memset(scratch.grbuf, 0, sizeof(scratch.grbuf));
                 pcm += 384*info->channels;
             }
             if (bs_frame->pos > bs_frame->limit)
@@ -1813,7 +1894,7 @@ void mp3dec_f32_to_s16(const float *in, int16_t *out, int num_samples)
     int aligned_count = num_samples & ~7;
     for(; i < aligned_count; i += 8)
     {
-        static const f4 g_scale = { 32768.0f, 32768.0f, 32768.0f, 32768.0f };
+        const f4 g_scale = VSET(32768.0f);
         f4 a = VMUL(VLD(&in[i  ]), g_scale);
         f4 b = VMUL(VLD(&in[i+4]), g_scale);
 #if HAVE_SSE
@@ -1821,14 +1902,7 @@ void mp3dec_f32_to_s16(const float *in, int16_t *out, int num_samples)
         static const f4 g_min = { -32768.0f, -32768.0f, -32768.0f, -32768.0f };
         __m128i pcm8 = _mm_packs_epi32(_mm_cvtps_epi32(_mm_max_ps(_mm_min_ps(a, g_max), g_min)),
                                        _mm_cvtps_epi32(_mm_max_ps(_mm_min_ps(b, g_max), g_min)));
-        out[i  ] = _mm_extract_epi16(pcm8, 0);
-        out[i+1] = _mm_extract_epi16(pcm8, 1);
-        out[i+2] = _mm_extract_epi16(pcm8, 2);
-        out[i+3] = _mm_extract_epi16(pcm8, 3);
-        out[i+4] = _mm_extract_epi16(pcm8, 4);
-        out[i+5] = _mm_extract_epi16(pcm8, 5);
-        out[i+6] = _mm_extract_epi16(pcm8, 6);
-        out[i+7] = _mm_extract_epi16(pcm8, 7);
+        _mm_storeu_si128( (__m128i *)(&out[i]), pcm8 );
 #else /* HAVE_SSE */
         int16x4_t pcma, pcmb;
         a = VADD(a, VSET(0.5f));
