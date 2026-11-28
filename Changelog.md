@@ -12,6 +12,15 @@ Changelog:
   element's style, read again for the next element the rule matched and
   freed a second time, which crashed the renderer. The copy now takes its
   own keyword or URL text, and its own grid-area and animation names.
+* Audio: the vendored minimp3 decoder moves to upstream `48e3a08`
+  (2026-11-22). It clears the scratch buffers it used to read
+  uninitialised (the intensity-stereo positions and the full granule
+  buffer), stops treating trailing zero bytes or an ID3v1 tag as a broken
+  sync so short `.mp3` files with a tag at the end are found, and accepts
+  files with fewer frames than the sync window. NS keeps its own bound on
+  the short-block scalefactor loop instead of upstream's
+  `__builtin_unreachable()` hint, so a malformed frame cannot write past
+  the table.
 * JavaScript: the QuickJS engine moves to upstream master `2519774`
   (2026-11-23), nineteen commits of fixes. Array allocations and
   reallocations throughout the engine now check their size for overflow
