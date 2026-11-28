@@ -155,6 +155,29 @@ Serial runs, median of three, score (higher is faster):
 
 JetStream and the two page loads did not move outside run-to-run noise.
 
+A second pass the same day looked at runs of several iterations, which is
+what the official harness does, and at where a single iteration spends its
+time:
+
+- **The first iteration is the slow one.** Editor-TipTap scores 1.9 with
+  `iterationCount=1` and 12.6 with six: its first iteration lays out about
+  800 KB of French prose twice, 160 to 170 ms each, and every later layout
+  of the same text takes 4 to 7 ms from the shaping and measurement caches.
+  A page of 180,000 unique words lays out cold in 410 ms, about 2.3 µs a
+  word, so this is shaping throughput and not a stall.
+- **A style not seen before costs about a millisecond.** On a cold font
+  map each new font size or weight adds 1.1 to 1.3 ms to the first layout
+  and each new family about 3.2 ms.
+- **Retiring a frame's realm walked every wrapper.** With 40 iterations a
+  profile put 12% of the time in `ns_js_retire_realms`, most of it asking
+  each detached node wrapper which realm its prototype's constructor
+  belongs to. The walk now remembers the answer per prototype, so the
+  property lookup runs once per prototype instead of once per wrapper.
+  Six-iteration runs of four suites: geomean 4.125 to 4.200.
+- **Start-up.** A headless run of a one-paragraph page takes about 380 ms
+  of wall time, of which the page itself is 36 ms and `--version` alone is
+  125 ms. The rest is process and library start-up and was not broken down.
+
 What remains, largest first:
 
 - **Layout is rebuilt whole on every flush.** NewsSite-Next forces 163

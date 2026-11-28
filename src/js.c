@@ -75879,8 +75879,29 @@ ns_js_realm_drop_custom_elements(ns_js *js, JSContext *realm)
             g_hash_table_iter_remove(&it);
 }
 
+static JSContext *
+ns_js_proto_constructor_realm(ns_js *js, JSValueConst proto)
+{
+    JSPropertyDescriptor desc;
+    JSAtom atom = JS_NewAtom(js->ctx, "constructor");
+    int has = JS_GetOwnProperty(js->ctx, &desc, proto, atom);
+    JS_FreeAtom(js->ctx, atom);
+    if (has < 0) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+    if (has <= 0) return NULL;
+    JSContext *owner = NULL;
+    if (!(desc.flags & JS_PROP_GETSET) && JS_IsFunction(js->ctx, desc.value)) {
+        owner = JS_GetFunctionRealm(js->ctx, desc.value);
+        if (!owner) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+    }
+    JS_FreeValue(js->ctx, desc.value);
+    JS_FreeValue(js->ctx, desc.getter);
+    JS_FreeValue(js->ctx, desc.setter);
+    return owner;
+}
+
 static gboolean
-ns_js_wrapper_of_realm(ns_js *js, ns_node *node, JSContext *realm)
+ns_js_wrapper_of_realm(ns_js *js, ns_node *node, JSContext *realm,
+                       GHashTable *proto_realms)
 {
     JSValue wrapper = JS_MKPTR(JS_TAG_OBJECT, node->js_wrapper);
     JSValue proto = JS_GetPrototype(js->ctx, wrapper);
@@ -75888,34 +75909,32 @@ ns_js_wrapper_of_realm(ns_js *js, ns_node *node, JSContext *realm)
         JS_FreeValue(js->ctx, proto);
         return FALSE;
     }
-    JSPropertyDescriptor desc;
-    JSAtom atom = JS_NewAtom(js->ctx, "constructor");
-    int has = JS_GetOwnProperty(js->ctx, &desc, proto, atom);
-    JS_FreeAtom(js->ctx, atom);
+    gpointer key = JS_VALUE_GET_PTR(proto);
+    gpointer owner = NULL;
+    if (!g_hash_table_lookup_extended(proto_realms, key, NULL, &owner)) {
+        owner = ns_js_proto_constructor_realm(js, proto);
+        g_hash_table_insert(proto_realms, key, owner);
+    }
     JS_FreeValue(js->ctx, proto);
-    if (has < 0) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
-    if (has <= 0) return FALSE;
-    gboolean ours = !(desc.flags & JS_PROP_GETSET) &&
-                    ns_js_value_of_realm(js, desc.value, realm);
-    JS_FreeValue(js->ctx, desc.value);
-    JS_FreeValue(js->ctx, desc.getter);
-    JS_FreeValue(js->ctx, desc.setter);
-    return ours;
+    return owner == (gpointer)realm;
 }
 
 static void
 ns_js_realm_unpin_detached_wrappers(ns_js *js, JSContext *realm)
 {
     GPtrArray *ours = g_ptr_array_new();
+    GHashTable *proto_realms = g_hash_table_new(g_direct_hash, g_direct_equal);
+    ns_node *top = ns_js_top_document(js->current_doc);
     GHashTableIter it;
     gpointer key;
     g_hash_table_iter_init(&it, js->pinned_wrappers_set);
     while (g_hash_table_iter_next(&it, &key, NULL)) {
         ns_node *node = key;
-        if (node->js_wrapper && !ns_js_node_in_page(js, node) &&
-            ns_js_wrapper_of_realm(js, node, realm))
+        if (node->js_wrapper && !(top && ns_js_top_document(node) == top) &&
+            ns_js_wrapper_of_realm(js, node, realm, proto_realms))
             g_ptr_array_add(ours, node);
     }
+    g_hash_table_destroy(proto_realms);
     for (guint i = 0; i < ours->len; i++) {
         ns_node *node = g_ptr_array_index(ours, i);
         if (g_hash_table_remove(js->pinned_wrappers_set, node))
