@@ -319,7 +319,7 @@ ANGLE model). Shaders are validated before compilation, and vertex, index
 and uniform buffer ranges are checked at every draw (see above). Two
 findings of the 2026-11-21 source review in that draw-call validation are
 open (M3 and M4 in
-[security-review-report-2026-11-21.md](security-review-report-2026-11-21.md)).
+[security-review-report-2026-11-28.md](security-review-report-2026-11-28.md)).
 Resources are initialised eagerly,
 when they are allocated, rather than lazily on first use as ANGLE does.
 Users who do not want pages to reach the native GL stack can disable WebGL
